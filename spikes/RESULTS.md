@@ -92,3 +92,46 @@ flowchart LR
 Reproduce any of it: `node spikes/fanout.mjs`, `node spikes/cadence.mjs`,
 `node spikes/redistribute.mjs`, or `node spikes/run-browser-test.mjs`
 (macOS) against relays of your choosing with `--relay`.
+
+## Pending: real-uplink fan-out (`uplink-fanout.mjs`)
+
+The "2-4 served peers per home connection" figure elsewhere in these docs
+is an estimate from typical upload asymmetry, not a measurement - this
+spike is the harness that replaces it with a receipt. One seeder on a real
+home connection, N leechers on other networks, each leecher reporting its
+own transfer time against the 4s and 6s segment deadlines. Loopback smoke
+passed 2026-08-24 (1 seeder + 2 leechers, both SHA-256 verified,
+10-11MB/s over relay.trotters.cc); the cross-machine runs are pending.
+
+How to run it:
+
+```bash
+# Machine A (home connection) - start the seeder first, keep it running:
+node spikes/uplink-fanout.mjs --mode seeder --swarm uplink-1
+
+# Machine B (another network, e.g. tethered to a phone hotspot) - one
+# process per leecher; this is N=4, add or remove to taste:
+for i in 1 2 3 4; do
+  node spikes/uplink-fanout.mjs --mode leecher --swarm uplink-1 --label "b-$i" \
+    > "leecher-b-$i.json" 2>/dev/null &
+done; wait
+```
+
+- Each leecher writes one JSON receipt: `transferMs` (want-segment to
+  eof), `throughputMBps`, `deadlineHit` (4s) and `deadlineHit6s`, plus
+  `sha256Verified` (a pass without verification is a fail) and `pair` -
+  candidate TYPES only (e.g. `srflx/srflx`), proving the run crossed the
+  uplink rather than a LAN path without recording any address. Expect
+  `host/host` only on loopback; a real run showing `host` means the
+  leecher found a local path and the run says nothing about the uplink.
+- The seeder prints a JSON summary (peers connected, per-leecher serve
+  times) on Ctrl-C or `--duration <s>`.
+- Raise N across runs until `deadlineHit` starts going false; the last
+  all-true N is the per-connection serve count this estimate needs.
+- Defaults: 2MB segment, relay `wss://relay.trotters.cc` (spike policy;
+  `--relay` to change), 120s leecher timeout. `--deadline 6000` to test
+  the 6s budget as primary.
+- Honest caveat: N processes on one leecher machine share that machine's
+  own downlink, so runs where the leecher side is the bottleneck say so
+  (throughput collapses symmetrically); real audience diversity wants one
+  leecher per machine where possible.
