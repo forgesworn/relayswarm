@@ -132,6 +132,15 @@ per-phase timings and throughput. A real run, verbatim:
 }
 ```
 
+### A second implementation
+
+[RelaySwarmKit](https://github.com/forgesworn/relayswarm-kit) is a Swift
+package implementing the same rendezvous - Nostr presence plus
+NIP-44-encrypted SDP signalling (the PoC signs but does not encrypt) and a
+data-channel transport - validated against published nostr-tools test
+vectors. It exists so the protocol is specified by more than one codebase
+from the start, which is exactly what the planned NIP draft needs.
+
 ## Beyond two peers: feasibility spikes
 
 `spikes/` holds throwaway measurement code that pushes the same protocol
