@@ -39,7 +39,8 @@ said so.
 
 **Most viewers are on phones.** By design phones consume and rarely
 contribute (wifi and charging only); capacity comes from the
-well-connected minority, measured at 2-4 served peers per home connection.
+well-connected minority - an estimated 2-4 served peers per home
+connection from typical upload asymmetry (measurement spike pending).
 Playback is confirmed on iPhone Safari (ManagedMediaSource) and GrapheneOS
 Vanadium.
 
