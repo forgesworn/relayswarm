@@ -147,7 +147,13 @@ async function main() {
 
       pool.onEvent(async (ev) => {
         if (ev.pubkey === me.pubkey) return;
-        const p = JSON.parse(ev.content);
+        if (ev.kind !== KIND_PRESENCE && ev.kind !== KIND_SIGNAL) return;
+        let p;
+        try {
+          p = JSON.parse(ev.content);
+        } catch {
+          return; // a public swarm tag can carry malformed events; ignore them
+        }
         if (ev.kind === KIND_PRESENCE && p.role === "seeder" && !dialled) {
           dialled = true;
           const offer = await pc.createOffer();

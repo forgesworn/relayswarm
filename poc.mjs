@@ -35,8 +35,9 @@ const KIND_PRESENCE = 24170;
 const KIND_SIGNAL = 24171;
 const SWARM_TAG = "x";
 
-const RELAYS = flag("relay", "").length
-  ? [flag("relay", "")]
+const relayFlag = flag("relay", "");
+const RELAYS = relayFlag.length
+  ? [relayFlag]
   : ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"];
 const SEGMENT_SIZE = Number(flag("size", 600 * 1024));
 const CHUNK_SIZE = 16 * 1024;
@@ -256,7 +257,6 @@ async function main() {
 
   let meta = null;
   const received = [];
-  let receivedBytes = 0;
   channel.stateChanged.subscribe((state) => {
     if (state === "open") {
       mark("channelOpen");
@@ -284,14 +284,19 @@ async function main() {
       }
     } else {
       received.push(Buffer.from(message));
-      receivedBytes += message.length;
     }
   });
 
   let dialled = false;
   leecherPool.onEvent(async (event) => {
     if (event.pubkey === leecher.pubkey) return;
-    const payload = JSON.parse(event.content);
+    if (event.kind !== KIND_PRESENCE && event.kind !== KIND_SIGNAL) return;
+    let payload;
+    try {
+      payload = JSON.parse(event.content);
+    } catch {
+      return; // a public swarm tag can carry malformed events; ignore them
+    }
     if (event.kind === KIND_PRESENCE && payload.role === "seeder" && !dialled) {
       dialled = true;
       mark("seederDiscovered");

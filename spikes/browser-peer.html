@@ -174,7 +174,13 @@ if (ROLE === "leecher") {
 
   handlers.push(async (ev) => {
     if (ev.pubkey === pubkey) return;
-    const payload = JSON.parse(ev.content);
+    if (ev.kind !== KIND_PRESENCE && ev.kind !== KIND_SIGNAL) return;
+    let payload;
+    try {
+      payload = JSON.parse(ev.content);
+    } catch {
+      return; // a public swarm tag can carry malformed events; ignore them
+    }
     if (ev.kind === KIND_PRESENCE && payload.role === "seeder" && !dialled) {
       dialled = true;
       mark("seederDiscovered");

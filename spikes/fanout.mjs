@@ -189,7 +189,13 @@ async function main() {
     let dialled = false;
     pool.onEvent(async (event) => {
       if (event.pubkey === me.pubkey) return;
-      const payload = JSON.parse(event.content);
+      if (event.kind !== KIND_PRESENCE && event.kind !== KIND_SIGNAL) return;
+      let payload;
+      try {
+        payload = JSON.parse(event.content);
+      } catch {
+        return; // a public swarm tag can carry malformed events; ignore them
+      }
       if (event.kind === KIND_PRESENCE && payload.role === "seeder" && !dialled) {
         dialled = true;
         mark("seederDiscovered");
