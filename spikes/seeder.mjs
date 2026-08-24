@@ -68,7 +68,12 @@ let served = 0;
 handlers.push(async (ev) => {
   if (ev.pubkey === pubkey || ev.kind !== KIND_SIGNAL) return;
   if (!ev.tags.some(([n, v]) => n === "p" && v === pubkey)) return;
-  const payload = JSON.parse(ev.content);
+  let payload;
+  try {
+    payload = JSON.parse(ev.content);
+  } catch {
+    return; // a public swarm tag can carry malformed events; ignore them
+  }
   if (payload.type !== "offer" || pcs.has(ev.pubkey)) return;
   log(`offer from ${ev.pubkey.slice(0, 8)}, answering`);
   const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });

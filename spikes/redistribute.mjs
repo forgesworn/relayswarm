@@ -116,7 +116,12 @@ function serveOn(pool, me, segment, label) {
     if (event.kind !== KIND_SIGNAL) return;
     if (event.pubkey === me.pubkey) return;
     if (!event.tags.some(([n, v]) => n === "p" && v === me.pubkey)) return;
-    const payload = JSON.parse(event.content);
+    let payload;
+    try {
+      payload = JSON.parse(event.content);
+    } catch {
+      return;
+    }
     if (payload.type !== "offer" || pcs.has(event.pubkey)) return;
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     pcs.set(event.pubkey, pc);
@@ -172,7 +177,13 @@ async function leechFrom(pool, me, wantHash, label, t0) {
 
   pool.onEvent(async (event) => {
     if (event.pubkey === me.pubkey) return;
-    const payload = JSON.parse(event.content);
+    if (event.kind !== KIND_PRESENCE && event.kind !== KIND_SIGNAL) return;
+    let payload;
+    try {
+      payload = JSON.parse(event.content);
+    } catch {
+      return;
+    }
     if (event.kind === KIND_PRESENCE && payload.role === "seeder" && !dialed) {
       dialed = event.pubkey;
       mark("seederDiscovered");
