@@ -1,0 +1,78 @@
+{
+  "ok": true,
+  "swarmId": "live-b3426083602fb182",
+  "relay": "wss://relay.trotters.cc",
+  "config": {
+    "viewers": 5,
+    "segmentBytes": 524288,
+    "intervalMs": 4000,
+    "durationS": 60,
+    "staggerMs": 2500,
+    "peerWaitMs": 500
+  },
+  "totalSegments": 15,
+  "viewers": [
+    {
+      "index": 0,
+      "segmentsHeld": 15,
+      "servedByOrigin": 15,
+      "servedByPeer": 0,
+      "fallbacks": 0,
+      "misses": 0,
+      "deadlineHits": 15,
+      "reServed": 60
+    },
+    {
+      "index": 1,
+      "segmentsHeld": 15,
+      "servedByOrigin": 0,
+      "servedByPeer": 15,
+      "fallbacks": 0,
+      "misses": 0,
+      "deadlineHits": 15,
+      "reServed": 0
+    },
+    {
+      "index": 2,
+      "segmentsHeld": 15,
+      "servedByOrigin": 0,
+      "servedByPeer": 15,
+      "fallbacks": 0,
+      "misses": 0,
+      "deadlineHits": 15,
+      "reServed": 0
+    },
+    {
+      "index": 3,
+      "segmentsHeld": 15,
+      "servedByOrigin": 0,
+      "servedByPeer": 15,
+      "fallbacks": 0,
+      "misses": 0,
+      "deadlineHits": 15,
+      "reServed": 0
+    },
+    {
+      "index": 4,
+      "segmentsHeld": 15,
+      "servedByOrigin": 0,
+      "servedByPeer": 15,
+      "fallbacks": 0,
+      "misses": 0,
+      "deadlineHits": 15,
+      "reServed": 0
+    }
+  ],
+  "origin": {
+    "serves": 15,
+    "egressBytes": 7864320,
+    "servesPerSegment": 1
+  },
+  "aggregate": {
+    "fetches": 75,
+    "servedByOrigin": 15,
+    "servedByPeer": 60,
+    "deadlineHitRate": 1,
+    "allVerified": true
+  }
+}

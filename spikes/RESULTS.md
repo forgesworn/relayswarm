@@ -93,6 +93,31 @@ Reproduce any of it: `node spikes/fanout.mjs`, `node spikes/cadence.mjs`,
 `node spikes/redistribute.mjs`, or `node spikes/run-browser-test.mjs`
 (macOS) against relays of your choosing with `--relay`.
 
+## Local live emulation (`emulate-live.mjs`)
+
+One origin "hosts" a stream (512KB segment every 4s, 60s, 15 segments) and
+5 viewers join on a 2.5s stagger, all on one machine via relay.trotters.cc.
+Each viewer tries a peer holder first (verify-then-reseed ordering, jittered
+fallback window) and the origin otherwise. The receipt
+(`spikes/results/emulate-live-20260824T103614Z.json`):
+
+| Metric | Value |
+|---|---|
+| Fetches, all SHA-256 verified | 75/75 |
+| Deadline hit rate (4s per segment) | 100% |
+| **Origin serves per segment** | **1.0** (15 serves, 7.5MB egress) |
+| Peer-to-peer serves | 60/75 (80%) |
+| Misses / fallbacks / hash failures | 0 / 0 / 0 |
+
+That is the thesis in one command: the origin fed only the swarm's edge
+(viewer-0, which re-served 60 times), and the crowd carried the rest.
+Honest caveats: loopback transfers, so this proves the shape, not uplink
+capacity (that is `uplink-fanout.mjs`'s pending measurement); the first
+tier is deterministic here (viewer-0 always becomes the holder - spreading
+that load is scheduling, M2); and the hash authority is the origin's
+announce, which proves transport, not provenance, as documented for the
+PoC. Reproduce: `node spikes/emulate-live.mjs --viewers 5 --duration 60`.
+
 ## Pending: real-uplink fan-out (`uplink-fanout.mjs`)
 
 The "2-4 served peers per home connection" figure elsewhere in these docs
