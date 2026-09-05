@@ -1,17 +1,21 @@
 {
   "name": "relayswarm",
   "version": "0.1.0",
-  "description": "Peer-assisted HLS distribution with WebRTC signalling over Nostr relays - proof of concept",
+  "description": "Nostr-rendezvoused, hash-verified peer transfer over browser and native transports - proof of concept",
   "scripts": {
     "poc": "node poc.mjs",
+    "poc:native": "node native-poc.mjs",
     "test": "node test/e2e.mjs",
-    "check": "for f in poc.mjs test/e2e.mjs spikes/*.mjs; do node --check $f || exit 1; done && echo syntax OK"
+    "test:native": "node --test test/native-*.test.mjs",
+    "check": "node scripts/check-syntax.mjs",
+    "audit": "npm audit --audit-level=high"
   },
   "keywords": [
     "nostr",
     "webrtc",
-    "hls",
+    "hyperdht",
     "p2p",
+    "hls",
     "live-streaming",
     "peer-assisted"
   ],
@@ -22,7 +26,11 @@
     "node": ">=22"
   },
   "dependencies": {
+    "hyperdht": "6.33.2",
     "nostr-tools": "^2.24.1",
     "werift": "^0.24.3"
+  },
+  "devDependencies": {
+    "ws": "8.21.3"
   }
 }

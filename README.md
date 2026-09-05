@@ -1,7 +1,7 @@
 # RelaySwarm
 
-Peer-assisted HLS live-stream distribution where WebRTC peer discovery and
-signalling run over **Nostr relays** instead of a dedicated tracker.
+Nostr-rendezvoused, hash-verified peer transfer. Browsers use WebRTC; an
+experimental native path now uses HyperDHT and Noise without STUN or TURN.
 
 Browser peer-assist needs rendezvous infrastructure; peers cannot find each
 other from nothing. Widely deployed systems get it from WebTorrent-compatible
@@ -41,9 +41,9 @@ flowchart TB
         R1[("relay")]
         R2[("relay")]
     end
-    A -. "encrypted signalling" .-> R1
-    B -. "encrypted signalling" .-> R1
-    C -. "encrypted signalling" .-> R2
+    A -. "signed signalling" .-> R1
+    B -. "signed signalling" .-> R1
+    C -. "signed signalling" .-> R2
     O -->|"segments, once"| A
     A <-->|"segments, verified by hash"| B
     B <-->|"segments, verified by hash"| C
@@ -100,7 +100,7 @@ segment. Short-segment and mobile tuning remain engine work.
 </picture>
 
 ```bash
-npm install
+npm ci
 npm test                   # end-to-end: PoC + 3-leecher fan-out, hash-verified against live relays
 npm run poc                # just the two-peer PoC
 node poc.mjs --relay wss://your.relay --size 1048576
@@ -131,6 +131,32 @@ per-phase timings and throughput. A real run, verbatim:
   "throughputMBps": 11.49
 }
 ```
+
+### Native path: no WebRTC, STUN or TURN
+
+`native-poc.mjs` proves a separate path for installed Node applications:
+
+1. Nostr presence advertises a HyperDHT Noise public key and object digest.
+2. A signed, NIP-44-encrypted signal authorizes one leecher Noise key for one
+   request, digest and byte count.
+3. HyperDHT locates the peer and attempts a direct encrypted UDP path.
+4. The receiver independently enforces the expected size and SHA-256 digest.
+
+```bash
+npm run test:native        # deterministic local relay + local DHT bootstrap
+npm run poc:native         # public Nostr relays + HyperDHT's default DHT
+```
+
+This can replace WebRTC in installed Windows, Linux and macOS nodes. It cannot
+replace WebRTC in an ordinary browser page, and it does not make every NAT
+traversable. It still depends on selected Nostr relays and DHT bootstrap/routing
+nodes. It is a transfer spike, not durable decentralised storage: no persistence,
+pinning, replication or availability promise exists yet.
+
+The exact protocol, security boundary and honest gaps are in
+[`docs/NATIVE-TRANSPORT.md`](docs/NATIVE-TRANSPORT.md). CI is configured for all
+three desktop operating systems; the matrix is only evidence after those jobs
+actually run.
 
 ### A second implementation
 
@@ -163,8 +189,8 @@ mid-run - `spikes/browser-peer.html`):
 
 These are the project deliverables, not the PoC:
 
-- **NIP-44 encryption** of signalling payloads (the PoC signs but does not
-  encrypt; relays can read the SDP payload).
+- **NIP-44 encryption of the WebRTC path.** The original `poc.mjs` signs but
+  does not encrypt SDP; the native spike does encrypt its dial authorization.
 - **Authenticated segment digests.** The PoC verifies the transfer against a
   hash supplied by the sending peer - that detects corruption, not a
   malicious peer, since a bad seeder controls both bytes and hash. The
@@ -191,14 +217,15 @@ Stated plainly, because the design only claims what it can prove:
   stream and carried in its signed NIP-53 event. The PoC defaults to Google's
   STUN service for demo reliability - pass `--stun`, or self-host coturn in one line.
   No dedicated tracker, no project-operated signalling service, no TURN by
-  default.
+  default. The native spike has no STUN or TURN configuration; it uses the
+  independently selectable HyperDHT bootstrap/routing layer instead.
 - **Pseudonymous, not anonymous.** Swarm events carry no social npub and
   use independent per-session keys. Relays and network observers may still
   correlate swarm activity with a viewer's other Nostr use through shared
   connections, IP addresses and timing.
 - **What relays see:** event kinds, tags, timing and connecting IPs.
-  NIP-44 (a project deliverable, not yet in the PoC) hides the SDP body,
-  not the fact that signalling is happening
+  NIP-44 in the native spike hides the dial body, not the fact that signalling
+  is happening. The original WebRTC PoC still publishes plaintext SDP
   ([NIP-44 limitations](https://github.com/nostr-protocol/nips/blob/master/44.md#limitations)).
 - **What peers see:** each other's network addresses - inherent to all
   P2P. The engine's answer is risk-tiered participation: an origin-only
@@ -206,8 +233,8 @@ Stated plainly, because the design only claims what it can prove:
   RTCPeerConnection - such a viewer never appears in the swarm and exposes
   no address to peers, while the origin and website still see ordinary HLS
   requests, as they do today.
-- **What the STUN operator sees:** an IP, a timestamp and the usual STUN
-  protocol attributes. It receives no stream identifier and no media or
+- **What the WebRTC path's STUN operator sees:** an IP, a timestamp and the
+  usual STUN protocol attributes. It receives no stream identifier and no media or
   signalling traffic; where super-peers are reachable, STUN is often
   unnecessary at all.
 - **The floor is today's behaviour.** If WebRTC or every named relay is
