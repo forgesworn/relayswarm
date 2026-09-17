@@ -118,6 +118,73 @@ that load is scheduling, M2); and the hash authority is the origin's
 announce, which proves transport, not provenance, as documented for the
 PoC. Reproduce: `node spikes/emulate-live.mjs --viewers 5 --duration 60`.
 
+## Shadow mode in real Chrome (`test/hls-swarm-browser.mjs`)
+
+`src/browser/hls-swarm.mjs` attached to hls.js in headless Google Chrome,
+playing a live HLS stream: ffmpeg `testsrc2` at 640x360, 1.5 Mbps H.264 plus
+AAC, 2-second MPEG-TS segments, served over local HTTP. Signalling ran through
+a local relay (`test/support/local-relay.mjs`). The viewers were eight honest
+swarm viewers joining 3 s apart, one viewer serving deliberately corrupted
+bytes, and one baseline viewer with no swarm. The run lasted 90 s after the
+last join, with `originFallbackMs` at 1500. Receipt:
+`results/hls-swarm-shadow-20260917T170248Z.json`.
+
+| Measure (honest viewers) | Result |
+|---|---|
+| Fragments the player loaded from the origin | 505 |
+| Races resolved (at least one peer connected) | 453 |
+| Peer delivered, verified against the origin bytes, within 1.5 s | 441 (97.4%) |
+| Late (within 6 s) / missed / corrupt | 6 / 5 / 1 |
+| Per-viewer median peer latency from fragment load start | 41-269 ms (median of medians 58 ms) |
+| Offer-to-open signalling, per-viewer median | 46-99 ms (one viewer 737 ms) |
+| Bytes verified from peers / uploaded | 187.0 MB / 187.8 MB |
+| Player stalls / fatal errors, swarm viewers | 0 / 0 (baseline also 0 / 0) |
+| Swarm errors, uncaught page errors | 0, 0 |
+| `stop()` restored the fragment loader | 9 of 9 |
+| Relay events published, whole run, all viewers | 188 |
+
+The corrupted delivery was caught by hash against the origin bytes. That
+viewer banned the sender and closed the link, and the corrupt bytes were
+never counted as delivered. A four-viewer trial the same afternoon: 91.3% in
+time, 3 corrupt deliveries caught by 3 viewers.
+
+What this proves:
+
+- The hls.js integration works in a real browser without disturbing
+  playback. Bytes reach hls.js before any swarm work, including when
+  hls.js transfers the buffer to its transmux worker.
+- Peers find each other over a relay, open data channels, advertise held
+  segments on the channel and serve them under backpressure.
+- A tampered peer is detected and dropped.
+- `stop()` fully detaches.
+
+What it does not prove:
+
+- **Networks.** Every viewer shared one machine and every connection was
+  `host/host`. Latencies reflect loopback, not the internet. NAT traversal,
+  carrier and venue networks, and real uplink limits are untested by this run.
+- **Scale.** Eight viewers, not hundreds.
+- **Timing under load.** The machine was heavily loaded by unrelated work
+  (load average above 100 during the run). Timings are indicative only.
+- **Late joiners found every peer full.** The last honest viewer and the
+  corrupt viewer joined after the others had reached `maxPeers` (6): 42 offers
+  were refused and those two viewers raced with no peers (`noPeers` 48 and 45).
+  They played normally from the origin, as designed. There is no peer
+  rotation, so in a large audience newcomers depend on churn or spare
+  capacity. That is the next engine problem, and the metrics expose it
+  (`offersRefused`, `noPeers`).
+- **Test-only interface unlock.** Chrome only offers host candidates on the
+  default-route interface until a page holds a media permission. On the test
+  machine that interface was a VPN, so same-machine viewers could not reach
+  each other. The harness grants a fake microphone to unlock all interfaces.
+  Real viewers rely on STUN server-reflexive candidates instead, as the
+  cross-NAT rows above do.
+
+Run: `npm run test:browser -- --viewers 8 --duration 90` (needs ffmpeg with
+libx264 and Google Chrome; Chromium without proprietary codecs cannot play
+H.264). The guarantees a host page relies on are also unit-tested without a
+browser: `npm run test:swarm`.
+
 ## Pending: real-uplink fan-out (`uplink-fanout.mjs`)
 
 The "2-4 served peers per home connection" figure elsewhere in these docs

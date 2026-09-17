@@ -185,6 +185,28 @@ mid-run - `spikes/browser-peer.html`):
 
 ![A browser tab pulls a 2MB segment over Nostr-signalled WebRTC and verifies it by SHA-256](docs/browser-verified.png)
 
+## Shadow mode: peer assist inside hls.js
+
+`src/browser/hls-swarm.mjs` attaches the same rendezvous and transfer to an
+[hls.js](https://github.com/video-dev/hls.js) player. In shadow mode the
+player is untouched: every fragment still loads from the origin, and the
+swarm races peers for the same fragment alongside it, verifies what arrives
+against the origin's own bytes, and reports what peer delivery would have
+achieved. The worst case is today's behaviour, which is what makes it safe to
+run in front of a real audience while the numbers are collected.
+
+Measured in headless Chrome against a live ffmpeg HLS stream, eight viewers
+plus one tampering peer and one player with no swarm: 97.4% of races had a
+verified peer copy inside 1.5 s, the tampered delivery was detected and the
+peer dropped, and playback matched the baseline with no stalls. Everything ran
+on one machine, so the latencies are loopback rather than internet numbers -
+the full receipt and the honest limits are in
+[`spikes/RESULTS.md`](spikes/RESULTS.md).
+
+Host-page contract, options, metrics and the kill switch:
+[`INTEGRATION.md`](INTEGRATION.md). Peer-first delivery (peers in the playback
+path, with an authenticated digest source) is not implemented yet.
+
 ## Deliberately out of scope for the PoC
 
 These are the project deliverables, not the PoC:

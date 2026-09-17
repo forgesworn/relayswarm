@@ -9,7 +9,8 @@
     "test:native": "node --test test/native-*.test.mjs",
     "check": "node scripts/check-syntax.mjs",
     "audit": "npm audit --audit-level=high",
-    "test:browser": "node test/hls-swarm-browser.mjs"
+    "test:browser": "node test/hls-swarm-browser.mjs",
+    "test:swarm": "node --test test/hls-swarm.test.mjs"
   },
   "keywords": [
     "nostr",

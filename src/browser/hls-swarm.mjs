@@ -307,7 +307,7 @@ class HlsSwarm {
         maxUploadPeers: this.options.maxUploadPeers,
         maxUploadBytesPerSecond: this.options.maxUploadBytesPerSecond,
         shadowSampleRate: this.options.shadowSampleRate,
-        relays: [...this.options.relays],
+        relays: Array.isArray(this.options.relays) ? [...this.options.relays] : [],
       },
     };
   }
