@@ -4,11 +4,16 @@
 // swarm attached. One extra viewer plays without the swarm as a baseline, and
 // one serves deliberately corrupted bytes.
 //
+// Viewers arrive in waves, because an audience does: the swarm is full by the
+// time the later waves knock, and whether those viewers get served by peers or
+// fall back to the origin for ever is the thing this measures.
+//
 // Everything runs on one machine, so it proves the integration works and is
 // safe for the player; it does not measure real networks or NATs.
 //
-// Run: node test/hls-swarm-browser.mjs [--viewers 8] [--duration 90]
-//      [--stagger 3000] [--chrome /path/to/chrome]
+// Run: node test/hls-swarm-browser.mjs [--viewers 12] [--duration 90]
+//      [--stagger 3000] [--waves 3] [--waveGap 30000] [--chrome /path/to/chrome]
+// --duration is the measuring window after the last wave has joined.
 // Needs ffmpeg with libx264 and a Chrome that plays H.264 (Chromium builds
 // without proprietary codecs cannot).
 
@@ -30,9 +35,19 @@ const flag = (name, fallback) => {
   const index = args.indexOf(`--${name}`);
   return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
 };
-const VIEWERS = Number(flag("viewers", 8));
+const VIEWERS = Number(flag("viewers", 12));
 const DURATION_S = Number(flag("duration", 90));
 const STAGGER_MS = Number(flag("stagger", 3000));
+const WAVES = Math.max(1, Number(flag("waves", 3)));
+const WAVE_GAP_MS = Number(flag("waveGap", 30000));
+// Scaled down on purpose: an audience is always far larger than any one
+// viewer's peer limit, and that is the condition rotation exists for. Six
+// peers among nine viewers is not full; two is.
+const MAX_PEERS = Number(flag("maxPeers", 6));
+// The corrupt peer earns a ban, and every ban frees a slot on whoever banned
+// it. Useful for the integrity assertion, noise for the rotation one, so a
+// saturation run turns it off.
+const CORRUPT_PEER = flag("corruptPeer", "1") !== "0";
 const FALLBACK_MS = Number(flag("fallback", 1500));
 const CHROME = flag("chrome", process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -120,23 +135,40 @@ try {
   const swarmId = `harness-${randomBytes(8).toString("hex")}`;
   const pageErrors = [];
   const pages = [];
-  const roles = [
-    ...Array.from({ length: VIEWERS }, (_, i) => ({ viewer: `v${i}`, swarm: true, corrupt: false })),
-    { viewer: "corrupt", swarm: true, corrupt: true },
-    { viewer: "baseline", swarm: false, corrupt: false },
-  ];
-  for (const role of roles) {
+  // Wave 0 also carries the corrupt peer and the no-swarm baseline; the later
+  // waves are the ones knocking on a swarm that is already full.
+  const perWave = Math.ceil(VIEWERS / WAVES);
+  const roles = [];
+  for (let i = 0; i < VIEWERS; i++) roles.push({ viewer: `v${i}`, swarm: true, corrupt: false, wave: Math.floor(i / perWave) });
+  if (CORRUPT_PEER) roles.push({ viewer: "corrupt", swarm: true, corrupt: true, wave: 0 });
+  roles.push({ viewer: "baseline", swarm: false, corrupt: false, wave: 0 });
+
+  const joinViewer = async (role) => {
     const context = await browser.newContext();
     const tab = await context.newPage();
     tab.on("pageerror", (error) => pageErrors.push({ viewer: role.viewer, message: String(error.message || error) }));
     const query = new URLSearchParams({
       viewer: role.viewer, swarm: role.swarm ? "1" : "0", corrupt: role.corrupt ? "1" : "0",
       swarmId, relay: relay.url, src: `${base}/hls/index.m3u8`, fallbackMs: String(FALLBACK_MS), unlockInterfaces: "1",
+      rotation: process.env.RELAYSWARM_NO_ROTATION === "1" ? "0" : "1",
+      maxPeers: String(MAX_PEERS),
     });
     await tab.goto(`${base}/?${query}`);
     pages.push({ role, tab });
-    log(`joined ${role.viewer}`);
-    await sleep(STAGGER_MS);
+    log(`joined ${role.viewer} (wave ${role.wave})`);
+  };
+
+  for (let wave = 0; wave < WAVES; wave++) {
+    const cohort = roles.filter((role) => role.wave === wave);
+    if (!cohort.length) continue;
+    if (wave > 0) {
+      log(`wave ${wave} waits ${WAVE_GAP_MS / 1000}s so the swarm is already full`);
+      await sleep(WAVE_GAP_MS);
+    }
+    for (const role of cohort) {
+      await joinViewer(role);
+      await sleep(STAGGER_MS);
+    }
   }
 
   log(`running for ${DURATION_S}s`);
@@ -157,10 +189,45 @@ try {
   const resolved = sum("peerInTime") + sum("peerLate") + sum("peerMiss") + sum("peerCorrupt");
   const latencies = honest.map((r) => r.swarm.segments.peerLatencyMedianMs).filter((v) => v !== null);
   const baseline = reports.find((r) => r.viewer === "baseline");
+  // Per wave: the later ones are the question this harness exists to answer.
+  const waveRows = [];
+  for (let wave = 0; wave < WAVES; wave++) {
+    const cohort = honest.filter((r) => r.wave === wave);
+    if (!cohort.length) continue;
+    const field = (name) => cohort.reduce((total, r) => total + (r.swarm.segments[name] || 0), 0);
+    const peerField = (name) => cohort.reduce((total, r) => total + (r.swarm.peers[name] || 0), 0);
+    const settled = field("peerInTime") + field("peerLate") + field("peerMiss") + field("peerCorrupt");
+    waveRows.push({
+      wave,
+      viewers: cohort.length,
+      linksOpened: peerField("linksOpened"),
+      offersRefused: peerField("offersRefused"),
+      evicted: peerField("evicted"),
+      retriesScheduled: peerField("retriesScheduled"),
+      referralsFollowed: peerField("referralsFollowed"),
+      noPeers: field("noPeers"),
+      peerInTime: field("peerInTime"),
+      peerMiss: field("peerMiss"),
+      peerCorrupt: field("peerCorrupt"),
+      inTimeShare: settled ? Number((field("peerInTime") / settled).toFixed(3)) : 0,
+      viewersServedByAPeer: cohort.filter((r) => r.swarm.segments.peerInTime > 0).length,
+      // What joining late actually costs: seconds of playing from the origin
+      // before the swarm carried anything for this viewer.
+      secondsToFirstPeerSegment: cohort
+        .map((r) => (r.swarm.segments.firstPeerSegmentAtMs === null ? null : Math.round(r.swarm.segments.firstPeerSegmentAtMs / 100) / 10))
+        .sort((a, b) => (a === null ? 1 : b === null ? -1 : a - b)),
+      secondsToFirstLink: cohort
+        .map((r) => (r.swarm.peers.firstLinkAtMs === null ? null : Math.round(r.swarm.peers.firstLinkAtMs / 100) / 10))
+        .sort((a, b) => (a === null ? 1 : b === null ? -1 : a - b)),
+    });
+  }
+
   const summary = {
     ok: false,
     at: new Date().toISOString(),
-    shape: { viewers: VIEWERS, plusCorruptPeer: 1, plusBaselineWithoutSwarm: 1, durationS: DURATION_S, staggerMs: STAGGER_MS, segmentSeconds: 2, videoKbps: 1500, originFallbackMs: FALLBACK_MS },
+    rotation: process.env.RELAYSWARM_NO_ROTATION === "1" ? "off" : "on",
+    shape: { viewers: VIEWERS, waves: WAVES, waveGapMs: WAVE_GAP_MS, maxPeers: MAX_PEERS, corruptPeer: CORRUPT_PEER, plusCorruptPeer: CORRUPT_PEER ? 1 : 0, plusBaselineWithoutSwarm: 1, durationS: DURATION_S, staggerMs: STAGGER_MS, segmentSeconds: 2, videoKbps: 1500, originFallbackMs: FALLBACK_MS },
+    waves: waveRows,
     aggregate: {
       originLoaded: sum("originLoaded"),
       raced: sum("raced"),
@@ -190,7 +257,15 @@ try {
     viewers: reports,
   };
   const failures = [];
+  const lastWave = waveRows[waveRows.length - 1];
   if (summary.aggregate.peerInTime === 0) failures.push("no peer delivered a segment in time");
+  if (summary.rotation === "on") {
+    if (!lastWave || lastWave.peerInTime === 0) failures.push("the last wave was never served by a peer");
+    if (lastWave && lastWave.viewersServedByAPeer < lastWave.viewers) {
+      failures.push(`${lastWave.viewers - lastWave.viewersServedByAPeer} of ${lastWave.viewers} late viewers fell back to the origin throughout`);
+    }
+    if (lastWave && lastWave.inTimeShare < 0.5) failures.push(`late-wave in-time share ${lastWave.inTimeShare} below 0.5`);
+  }
   if (summary.aggregate.inTimeShare < 0.5) failures.push(`in-time share ${summary.aggregate.inTimeShare} below 0.5`);
   if (honest.some((r) => r.player.fatalErrors > 0 || r.player.currentTime < DURATION_S * 0.5)) failures.push("a swarm viewer did not keep playing");
   if (stopChecks.some((c) => !c.loaderRestored)) failures.push("stop() did not restore the fragment loader");
@@ -201,7 +276,8 @@ try {
 
   const resultsDir = join(here, "../spikes/results");
   await mkdir(resultsDir, { recursive: true });
-  const file = join(resultsDir, `hls-swarm-shadow-${summary.at.replace(/[-:]/g, "").replace(/\..+/, "")}Z.json`);
+  const stamp = summary.at.replace(/[-:]/g, "").replace(/\..+/, "");
+  const file = join(resultsDir, `hls-swarm-waves-rotation-${summary.rotation}-${stamp}Z.json`);
   await writeFile(file, `${JSON.stringify(summary, null, 2)}\n`);
   const { viewers: _omit, ...printable } = summary;
   console.log(JSON.stringify(printable, null, 2));

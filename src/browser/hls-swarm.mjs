@@ -263,6 +263,10 @@ class HlsSwarm {
       publishErrors: 0,
       errors: 0,
     };
+    // How long this viewer played before the swarm was any use to it: the
+    // number that says whether joining late is a disadvantage.
+    this.firstLinkAtMs = null;
+    this.firstPeerSegmentAtMs = null;
     this.pairTypes = {};
     this.signallingSamples = [];
     this.peerLatencySamples = [];
@@ -352,6 +356,7 @@ class HlsSwarm {
         linksOpened: c.linksOpened,
         linksClosed: c.linksClosed,
         banned: this.banned.size,
+        firstLinkAtMs: this.firstLinkAtMs,
         candidatePairs: { ...this.pairTypes },
       },
       signalling: {
@@ -372,6 +377,7 @@ class HlsSwarm {
         peerCorrupt: c.peerCorrupt,
         peerUnverified: c.peerUnverified,
         inTimeShare: resolved ? Number((c.peerInTime / resolved).toFixed(3)) : null,
+        firstPeerSegmentAtMs: this.firstPeerSegmentAtMs,
         peerLatencyMedianMs: percentile(this.peerLatencySamples, 0.5),
         peerLatencyP90Ms: percentile(this.peerLatencySamples, 0.9),
         originLatencyMedianMs: percentile(this.originLatencySamples, 0.5),
@@ -655,6 +661,7 @@ class HlsSwarm {
       return;
     }
     const latency = race.peerAt - race.t0;
+    if (this.firstPeerSegmentAtMs === null) this.firstPeerSegmentAtMs = Date.now() - this.startedAt;
     pushSample(this.peerLatencySamples, latency);
     c.bytesFromPeers += race.peerBytes.byteLength;
     if (latency <= this.options.originFallbackMs) c.peerInTime += 1;
@@ -783,12 +790,23 @@ class HlsSwarm {
     return rotationCandidate(this.links.values(), { ...this.options, banned: this.banned });
   }
 
-  /** Could this viewer take another peer, now or by rotating one out? */
+  /** Room now, or a rotation a caller with no peers at all could trigger. */
   #canTakeAnotherPeer() {
-    return this.#hasCapacity() || Boolean(this.#rotationCandidate());
+    return this.#hasCapacity() || (this.links.size >= 2 && Boolean(this.#rotationCandidate()));
   }
 
-  #evictForOffer() {
+  /**
+   * Rotate only for a caller with no peers at all, and only while we would
+   * still be left with a link of our own. Measured on a swarm whose viewers
+   * hold two links each, rotating for anyone who asked cost late joiners far
+   * more than it won: an evicted peer re-dials at once and displaces a third,
+   * and the cascade leaves everybody re-connecting instead of fetching. A
+   * viewer topping up from one peer to two can wait for a free slot; a viewer
+   * with none is the case this exists for.
+   */
+  #evictForOffer(askerPeers) {
+    if (askerPeers !== 0) return null;
+    if (this.links.size < 2) return null;
     if (Date.now() - this.lastEvictionAt < this.options.evictionCooldownMs) return null;
     const link = this.#rotationCandidate();
     if (!link) return null;
@@ -856,9 +874,11 @@ class HlsSwarm {
     if (!payload.transports.some((transport) => transport.type === TRANSPORT)) return;
     if (payload.open !== null) this.#rememberOpen(from, payload.open);
     if (this.links.has(from) || this.dials.has(from) || this.#coolingDown(from) || !this.#hasCapacity()) return;
-    // A peer that says it is full is not worth an offer - unless we have nobody
-    // at all, in which case it is worth asking it to rotate someone out for us.
-    if (payload.open === false && this.links.size > 0) return;
+    // The `open` hint is not a gate. Skipping peers that say they are full cost
+    // more than it saved: in a swarm where nearly every peer is full, a viewer
+    // holding one link stopped dialling altogether and stayed on one link,
+    // while a viewer that simply asks lands a slot the moment one frees up.
+    // The hint is used to choose referrals, and nothing else.
     // Everyone with room hears a newcomer at once; spread the dials out so
     // the newcomer is not handed more offers than it can take.
     this.#after(Math.random() * 1_500, () => {
@@ -887,7 +907,9 @@ class HlsSwarm {
       await gathered(pc);
       if (this.dials.get(pubkey) !== dial) return;
       dial.offerSentAt = now();
-      if (!this.#sendSignal(pubkey, "offer", requestId, { sdp: pc.localDescription.sdp })) this.#failDial(dial, "failed");
+      // The offer says how alone the caller is: a peer with none at all is the
+      // only one worth rotating somebody out for.
+      if (!this.#sendSignal(pubkey, "offer", requestId, { sdp: pc.localDescription.sdp, peers: this.links.size })) this.#failDial(dial, "failed");
     } catch (error) {
       this.#noteError("dial", error);
       this.#failDial(dial, "failed");
@@ -942,7 +964,7 @@ class HlsSwarm {
       if (existing.outgoing && this.session.pubkey < from) return;
       this.#failDial(existing, "superseded");
     }
-    if (!this.#hasCapacity() && !this.#evictForOffer()) {
+    if (!this.#hasCapacity() && !this.#evictForOffer(payload.payload?.peers)) {
       this.counters.offersRefused += 1;
       this.counters.evictionsUnavailable += 1;
       this.#sendSignal(from, "reject", payload.requestId, this.#refusalPayload(from));
@@ -999,6 +1021,7 @@ class HlsSwarm {
       },
     });
     this.links.set(dial.pubkey, link);
+    if (this.firstLinkAtMs === null) this.firstLinkAtMs = Date.now() - this.startedAt;
     if (this.#servingAllowed()) link.sendHave([...this.held.keys()]);
     const pair = await candidatePairTypes(dial.pc);
     this.pairTypes[pair] = (this.pairTypes[pair] || 0) + 1;

@@ -25,6 +25,11 @@ if (params.get("unlockInterfaces") === "1") {
   } catch {}
 }
 
+// ?rotation=0 is the before picture: peers refuse when full instead of
+// rotating, nobody retries, and nobody is referred anywhere.
+const rotation = params.get("rotation") !== "0";
+const withoutRotation = { idleEvictMs: 10 ** 9, maxRetriesPerPeer: 0, maxReferrals: 0, retryFloorMs: 30_000, retryCeilingMs: 30_000 };
+
 const swarm = useSwarm
   ? createHlsSwarm({
       swarmId: params.get("swarmId"),
@@ -32,7 +37,9 @@ const swarm = useSwarm
       iceServers: [],
       originFallbackMs: Number(params.get("fallbackMs") || 1500),
       metricsIntervalMs: 5000,
+      ...(params.get("maxPeers") ? { maxPeers: Number(params.get("maxPeers")), maxUploadPeers: Number(params.get("maxPeers")) } : {}),
       testHooks: { corruptUploads: params.get("corrupt") === "1" },
+      ...(rotation ? {} : withoutRotation),
     })
   : null;
 
