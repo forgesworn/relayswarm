@@ -227,3 +227,64 @@ done; wait
   own downlink, so runs where the leecher side is the bottleneck say so
   (throughput collapses symmetrically); real audience diversity wants one
   leecher per machine where possible.
+
+## Joining late, with and without rotation (`test/hls-swarm-browser.mjs --waves`)
+
+An audience arrives over an hour, so the harness now joins viewers in waves:
+twelve honest viewers in three waves of four, 30 s between waves, 3 s apart
+within one, then 60 s of measurement. Same stream and relay as the shadow run
+above. `RELAYSWARM_NO_ROTATION=1` turns rotation, retries and referrals off, so
+before and after differ by the policy alone. Three runs each.
+
+The peer limit is the whole experiment. At the default six, twelve viewers
+never saturate each other and late joiners are served within seconds either
+way (`...rotation-off-20260917T203212Z.json`,
+`...rotation-on-20260917T203613Z.json`). At two, the swarm is genuinely full
+and the question has teeth. The corrupt peer is off in these runs: its ban
+frees slots, which hides the starvation being measured.
+
+| Tight shape, `--maxPeers 2 --corruptPeer 0` | Rotation off | Rotation on |
+|---|---|---|
+| Worst wait for a first peer-served segment | 37.6 / 37.7 / 38.0 s | **16.4 / 18.7 / 18.5 s** |
+| Median wait across all viewers | 1.1 / 1.2 / 1.4 s | 1.5 / 2.0 / 4.4 s |
+| In-time share | 0.969 / 0.968 / 0.964 | 0.954 / 0.962 / 0.962 |
+| Viewers never served by a peer | 0 | 0 |
+| Links rotated out | 0 | 4 / 4 / 3 |
+| Swarm errors, corrupt bytes accepted | 0 | 0 |
+
+Receipts: `...rotation-off-{203943,205652,210238}Z.json` and
+`...rotation-on-{205334,205944,210536}Z.json`.
+
+What it says: the shut-out viewer is the fourth of the first wave, once the
+first three have filled each other. Without rotation it waits about 38 s -
+until the next wave arrives and shakes the topology - and that figure repeats
+to within half a second across three runs. With rotation it waits about 18 s.
+The cost is a slightly slower median and about one point of in-time share,
+from the extra dialling that retries and referrals generate.
+
+What it does not say: the later waves were never starved in either mode, so
+the failure this was built for - a late joiner meeting nothing but full peers
+and playing from the origin for ever - did not reproduce in this shape. Natural
+churn frees slots faster than rotation does. The 42 refusals in the earlier
+8-viewer run came from a different shape: every viewer joining inside 30 s and
+dialling every other, where refusals stack up cooldowns.
+
+Two policies were measured and rejected on the way, and their receipts are
+kept:
+
+- **Rotate for any caller** (`...rotation-on-20260917T204343Z.json`): worst
+  wait 31.5 s. An evicted peer re-dials immediately and displaces a third, so
+  the swarm spends its time re-connecting.
+- **Treat the `open` presence hint as a gate** (`...204917Z.json`): worst wait
+  35.4 s. In a swarm where nearly every peer is full, a viewer holding one link
+  stops dialling and stays on one link. The hint now only chooses referrals.
+
+Honest caveats: one machine, so every candidate pair is `host/host` and the
+latencies are loopback; load average was 14-25 throughout, and one rotation-on
+run recorded 4 player stalls on every viewer **including the no-swarm
+baseline**, which is the machine, not the swarm. Three runs per mode is enough
+for the worst-case figure, which is stable to within half a second, and not
+enough to separate a one-point difference in in-time share from noise.
+Reproduce with
+`node test/hls-swarm-browser.mjs --viewers 12 --waves 3 --duration 60 --maxPeers 2 --corruptPeer 0`.
+

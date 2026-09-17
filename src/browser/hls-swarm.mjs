@@ -803,6 +803,11 @@ class HlsSwarm {
    * and the cascade leaves everybody re-connecting instead of fetching. A
    * viewer topping up from one peer to two can wait for a free slot; a viewer
    * with none is the case this exists for.
+   *
+   * The count comes from the caller, who could of course claim to have none.
+   * What that buys is one rotation per evictionCooldownMs, of a link that was
+   * idle anyway - the same thing an honest newcomer gets, and bounded by the
+   * same budget.
    */
   #evictForOffer(askerPeers) {
     if (askerPeers !== 0) return null;
