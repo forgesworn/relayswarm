@@ -8,7 +8,8 @@
     "test": "node test/e2e.mjs",
     "test:native": "node --test test/native-*.test.mjs",
     "check": "node scripts/check-syntax.mjs",
-    "audit": "npm audit --audit-level=high"
+    "audit": "npm audit --audit-level=high",
+    "test:browser": "node test/hls-swarm-browser.mjs"
   },
   "keywords": [
     "nostr",
@@ -31,6 +32,15 @@
     "werift": "^0.24.3"
   },
   "devDependencies": {
+    "esbuild": "0.28.2",
+    "hls.js": "1.7.3",
+    "playwright-core": "1.63.0",
     "ws": "8.21.3"
+  },
+  "exports": {
+    ".": "./src/relay-session.mjs",
+    "./hls-swarm": "./src/browser/hls-swarm.mjs",
+    "./package.json": "./package.json",
+    "./*": "./*"
   }
 }
