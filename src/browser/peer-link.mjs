@@ -33,7 +33,13 @@ export class PeerLink {
     this.nextId = 1;
     this.serving = Promise.resolve();
     this.closed = false;
+    this.openedAt = Date.now();
     this.lastServedAt = 0;
+    // When this peer last gave us bytes we asked for. With lastServedAt it is
+    // what rotation reads: a link that has been useful in neither direction
+    // recently is the one to drop when somebody new needs a slot.
+    this.lastDeliveredAt = 0;
+    this.outboundInFlight = 0;
     this.bytesIn = 0;
     this.bytesOut = 0;
     channel.binaryType = "arraybuffer";
@@ -50,6 +56,16 @@ export class PeerLink {
 
   get busy() {
     return this.pending !== null;
+  }
+
+  /** Mid-transfer in either direction: never a candidate for rotation. */
+  get transferring() {
+    return this.pending !== null || this.outboundInFlight > 0;
+  }
+
+  /** When this link was last worth having, in either direction. */
+  get lastUsefulAt() {
+    return Math.max(this.lastDeliveredAt, this.lastServedAt, this.openedAt);
   }
 
   sendHave(keys) {
@@ -69,6 +85,7 @@ export class PeerLink {
         if (this.pending?.id !== id) return;
         clearTimeout(this.pending.timer);
         this.pending = null;
+        if (bytes) this.lastDeliveredAt = Date.now();
         resolve(bytes);
       };
       this.pending = { id, key, size: -1, parts: [], received: 0, finish, timer: setTimeout(() => finish(null), Math.max(1, timeoutMs)) };
@@ -159,7 +176,11 @@ export class PeerLink {
 
   #onWant(message) {
     if (!Number.isSafeInteger(message.id) || typeof message.k !== "string" || !HEX64.test(message.k)) return;
-    this.serving = this.serving.then(() => this.#serve(message.id, message.k)).catch(() => this.close());
+    this.outboundInFlight += 1;
+    this.serving = this.serving
+      .then(() => this.#serve(message.id, message.k))
+      .catch(() => this.close())
+      .finally(() => { this.outboundInFlight = Math.max(0, this.outboundInFlight - 1); });
   }
 
   async #serve(id, key) {
