@@ -60,6 +60,8 @@ connection and relay socket, drops held segments and emits one final
 | `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. |
 | `serveOnCellular` | `false` | With `false`, a viewer on a metered connection neither uploads nor races. |
 | `serve` | `true` | With `false`, the viewer is receive-only: it takes from peers but never uploads or advertises what it holds. Use it where the connection type cannot be read (Safari), so a phone on cellular is never asked to upload. |
+| `ticket` | none | An opaque string (up to 2 KB) this viewer presents in its presence and in every offer and answer, typically a short-lived credential the origin signed for this viewer's swarm key. |
+| `admit` | none | `(pubkey, ticket) => boolean \| Promise<boolean>`. With it set, a viewer never dials, answers or follows a referral to a peer it has not admitted, so its address (carried in the SDP) only reaches ticket holders. Verdicts are remembered for a minute per ticket. |
 | `shadowSampleRate` | `1` | Share of fragments raced. |
 | `swarmParts` | `false` | Include low-latency HLS parts. Parts are small; leave off. |
 | `maxHeldSegments` / `maxHeldBytes` | `12` / 64 MB | What a viewer keeps to serve others. |

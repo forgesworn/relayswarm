@@ -26,7 +26,7 @@
 // look useless exactly when an audience is growing.
 
 import { generateSecretKey } from "nostr-tools/pure";
-import { RelayPool, RelaySwarmSession } from "../relay-session.mjs";
+import { RelayPool, RelaySwarmSession, validTicket } from "../relay-session.mjs";
 import { PeerLink } from "./peer-link.mjs";
 
 export const HLS_SWARM_METRICS_VERSION = 1;
@@ -53,6 +53,13 @@ const DEFAULTS = Object.freeze({
   // and never tells anyone what it holds. For browsers where the connection
   // type cannot be read, so a phone on cellular cannot be told apart.
   serve: true,
+  // Admission. `ticket` is what this viewer presents (in its presence and in
+  // every offer and answer); `admit(pubkey, ticket)` is the host page's check
+  // on everyone else's. With `admit` set, a viewer never dials, answers or
+  // refers a peer it has not admitted, so its address (which the SDP carries)
+  // only ever reaches ticket holders. Both are opaque to the swarm.
+  ticket: undefined,
+  admit: undefined,
   // Rotation. A link is only ever dropped for a newcomer when it has been
   // useless in both directions for idleEvictMs, has lived at least
   // minLinkLifeMs (so a link that just opened, including one a newcomer was
@@ -225,6 +232,7 @@ class HlsSwarm {
     this.lastAnnouncedAt = 0;
     this.reannounceTimer = null;
     this.banned = new Set();
+    this.admitted = new Map();
     this.held = new Map();
     this.heldBytes = 0;
     this.races = new Set();
@@ -255,6 +263,7 @@ class HlsSwarm {
       dialsRejected: 0,
       offersAccepted: 0,
       offersRefused: 0,
+      admitRefused: 0,
       evicted: 0,
       evictionsUnavailable: 0,
       retriesScheduled: 0,
@@ -351,6 +360,7 @@ class HlsSwarm {
         dialsRejected: c.dialsRejected,
         offersAccepted: c.offersAccepted,
         offersRefused: c.offersRefused,
+        admitRefused: c.admitRefused,
         evicted: c.evicted,
         evictionsUnavailable: c.evictionsUnavailable,
         retriesScheduled: c.retriesScheduled,
@@ -410,6 +420,7 @@ class HlsSwarm {
         maxUploadPeers: this.options.maxUploadPeers,
         maxUploadBytesPerSecond: this.options.maxUploadBytesPerSecond,
         serve: this.options.serve !== false,
+        admit: typeof this.options.admit === "function",
         shadowSampleRate: this.options.shadowSampleRate,
         minLinkLifeMs: this.options.minLinkLifeMs,
         idleEvictMs: this.options.idleEvictMs,
@@ -751,6 +762,7 @@ class HlsSwarm {
         transports: [{ type: TRANSPORT, publicKey: this.session.pubkey }],
         have: this.#servingAllowed() ? [...this.held.keys()].slice(-8) : [],
         open: this.#canTakeAnotherPeer(),
+        ...(this.#ownTicket() ? { ticket: this.#ownTicket() } : {}),
       });
       this.counters.presenceSent += 1;
       this.lastAnnouncedAt = Date.now();
@@ -864,6 +876,8 @@ class HlsSwarm {
     }
     for (const referral of referrals) {
       if (referral === this.session?.pubkey) continue;
+      // A referral carries no ticket: only follow one already admitted.
+      if (this.#gated() && !this.admitted.has(referral)) continue;
       if (this.links.has(referral) || this.dials.has(referral) || this.#coolingDown(referral) || !this.#hasCapacity()) continue;
       if ([...this.dials.values()].filter((dial) => dial.outgoing).length >= this.options.maxDialsInFlight) break;
       this.counters.referralsFollowed += 1;
@@ -879,9 +893,38 @@ class HlsSwarm {
     return this.banned.has(pubkey) || (this.cooldowns.get(pubkey) || 0) > Date.now();
   }
 
-  #onPresence({ from, payload }) {
+  #gated() {
+    return typeof this.options.admit === "function";
+  }
+
+  #ownTicket() {
+    return validTicket(this.options.ticket) ? this.options.ticket : undefined;
+  }
+
+  /** The host page's verdict on a peer, remembered per ticket so a presence beacon is checked once. */
+  async #admits(pubkey, ticket) {
+    if (!this.#gated()) return true;
+    // Re-asked after a minute, so a ticket that has since expired stops working.
+    const remembered = this.admitted.get(pubkey);
+    if (ticket && remembered?.ticket === ticket && Date.now() - remembered.at < 60_000) return true;
+    let ok = false;
+    try {
+      ok = Boolean(ticket) && (await this.options.admit(pubkey, ticket)) === true;
+    } catch (error) {
+      this.#noteError("admit", error);
+    }
+    if (ok) this.admitted.set(pubkey, { ticket, at: Date.now() });
+    else {
+      this.admitted.delete(pubkey);
+      this.counters.admitRefused += 1;
+    }
+    return ok;
+  }
+
+  async #onPresence({ from, payload }) {
     if (this.stopped || payload.role !== "viewer") return;
     if (!payload.transports.some((transport) => transport.type === TRANSPORT)) return;
+    if (!(await this.#admits(from, payload.ticket))) return;
     if (payload.open !== null) this.#rememberOpen(from, payload.open);
     if (this.links.has(from) || this.dials.has(from) || this.#coolingDown(from) || !this.#hasCapacity()) return;
     // The `open` hint is not a gate. Skipping peers that say they are full cost
@@ -919,7 +962,8 @@ class HlsSwarm {
       dial.offerSentAt = now();
       // The offer says how alone the caller is: a peer with none at all is the
       // only one worth rotating somebody out for.
-      if (!this.#sendSignal(pubkey, "offer", requestId, { sdp: pc.localDescription.sdp, peers: this.links.size })) this.#failDial(dial, "failed");
+      const ticket = this.#ownTicket();
+      if (!this.#sendSignal(pubkey, "offer", requestId, { sdp: pc.localDescription.sdp, peers: this.links.size, ...(ticket ? { ticket } : {}) })) this.#failDial(dial, "failed");
     } catch (error) {
       this.#noteError("dial", error);
       this.#failDial(dial, "failed");
@@ -948,6 +992,10 @@ class HlsSwarm {
     if (payload.type === "answer") {
       const dial = this.dials.get(from);
       if (!dial?.outgoing || dial.requestId !== payload.requestId || !sdp) return;
+      if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) {
+        this.#failDial(dial, "failed");
+        return;
+      }
       dial.answerAt = now();
       try {
         await dial.pc.setRemoteDescription({ type: "answer", sdp });
@@ -968,6 +1016,9 @@ class HlsSwarm {
     }
     if (payload.type !== "offer" || !sdp) return;
     if (this.banned.has(from) || this.links.has(from)) return;
+    // Checked before anything is answered: the answer's SDP carries this
+    // viewer's address. An unadmitted offer is dropped without a reply.
+    if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) return;
     const existing = this.dials.get(from);
     if (existing) {
       // Both sides dialled at once: the lower public key keeps its offer.
@@ -994,7 +1045,8 @@ class HlsSwarm {
       await pc.setLocalDescription(await pc.createAnswer());
       await gathered(pc);
       if (this.dials.get(from) !== dial) return;
-      if (this.#sendSignal(from, "answer", payload.requestId, { sdp: pc.localDescription.sdp })) this.counters.offersAccepted += 1;
+      const ticket = this.#ownTicket();
+      if (this.#sendSignal(from, "answer", payload.requestId, { sdp: pc.localDescription.sdp, ...(ticket ? { ticket } : {}) })) this.counters.offersAccepted += 1;
       else this.#failDial(dial, "failed");
     } catch (error) {
       this.#noteError("offer", error);
