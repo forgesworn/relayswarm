@@ -222,3 +222,45 @@ test("a receive-only viewer never offers to serve", () => {
   serving.stop();
   receiveOnly.stop();
 });
+
+test("a gated viewer dials only peers whose ticket the host page admits", async () => {
+  const relay = await startLocalRelay();
+  const swarms = [];
+  const admitted = [];
+  const join = (options) => {
+    const swarm = createHlsSwarm({
+      swarmId: "swarm-abcdefgh",
+      relays: [relay.url],
+      RTCPeerConnectionImpl: FakePeerConnection,
+      presenceIntervalMs: 200,
+      ...options,
+    });
+    swarm.attach({ config: { loader: FakeLoader } });
+    swarms.push(swarm);
+    return swarm;
+  };
+  const settle = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  try {
+    const gated = join({
+      ticket: "good",
+      admit: async (pubkey, ticket) => {
+        admitted.push(ticket);
+        return ticket === "good";
+      },
+    });
+    join({ ticket: "forged" });
+    join({});
+    await settle(2_500);
+    assert.equal(gated.metrics().peers.dialsStarted, 0, "no dial to a peer with a bad or missing ticket");
+    assert.ok(gated.metrics().peers.admitRefused >= 2, "both were refused");
+    assert.equal(gated.metrics().config.admit, true);
+    assert.ok(!admitted.includes(undefined), "a missing ticket never reaches the host page's check");
+
+    join({ ticket: "good" });
+    await settle(2_500);
+    assert.ok(gated.metrics().peers.dialsStarted >= 1, "a ticket holder is dialled");
+  } finally {
+    for (const swarm of swarms) swarm.stop();
+    await relay.close();
+  }
+});

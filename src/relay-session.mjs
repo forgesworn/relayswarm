@@ -14,6 +14,7 @@ const MAX_RELAY_FRAME_BYTES = 1 * 1024 * 1024;
 const MAX_PRESENCE_BYTES = 16 * 1024;
 const MAX_SIGNAL_CIPHERTEXT_BYTES = 64 * 1024;
 const MAX_SIGNAL_PLAINTEXT_BYTES = 8 * 1024;
+const MAX_TICKET_BYTES = 2 * 1024;
 
 const utf8 = new TextEncoder();
 
@@ -261,7 +262,8 @@ export class RelaySwarmSession {
    * where everyone is full still works, it just costs the newcomer a refused
    * offer to find out.
    */
-  announcePresence({ role, transports = [], have = [], open } = {}) {
+  announcePresence({ role, transports = [], have = [], open, ticket } = {}) {
+    if (ticket !== undefined && !validTicket(ticket)) throw new Error("Invalid presence ticket.");
     if (!validToken(role)) throw new Error("Invalid presence role.");
     if (!Array.isArray(transports) || transports.length > 8) throw new Error("Invalid transport capability list.");
     if (!Array.isArray(have) || have.length > 32 || have.some((hash) => !HEX64.test(hash))) throw new Error("Invalid object hash list.");
@@ -277,6 +279,7 @@ export class RelaySwarmSession {
       transports: normalizedTransports,
       have: [...new Set(have)],
       ...(open === undefined ? {} : { open: Boolean(open) }),
+      ...(ticket === undefined ? {} : { ticket }),
     });
     if (byteLength(content) > MAX_PRESENCE_BYTES) throw new Error("Presence payload is too large.");
     const event = finalizeEvent({
@@ -365,7 +368,9 @@ export class RelaySwarmSession {
     });
     // `open` is advisory and optional; anything but a boolean reads as unknown.
     const open = typeof payload.open === "boolean" ? payload.open : null;
-    this.#dispatch(this.presenceHandlers, { from: event.pubkey, event, payload: { ...payload, transports, open } });
+    // `ticket` is opaque here: what it proves is the host page's business.
+    const ticket = validTicket(payload.ticket) ? payload.ticket : null;
+    this.#dispatch(this.presenceHandlers, { from: event.pubkey, event, payload: { ...payload, transports, open, ticket } });
   }
 
   #receiveSignal(event) {
@@ -393,4 +398,9 @@ export class RelaySwarmSession {
     this.signalHandlers.clear();
     this.errorHandlers.clear();
   }
+}
+
+/** A ticket is an opaque string the host page issues and checks; bounded so presence stays small. */
+export function validTicket(ticket) {
+  return typeof ticket === "string" && ticket.length > 0 && byteLength(ticket) <= MAX_TICKET_BYTES;
 }
