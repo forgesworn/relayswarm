@@ -1,4 +1,5 @@
-import { randomBytes } from "node:crypto";
+// Runs unchanged in Node 22+ and in browsers: WebSocket, TextEncoder and
+// crypto.getRandomValues are globals in both.
 import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from "nostr-tools/pure";
 import { v2 as nip44 } from "nostr-tools/nip44";
 
@@ -14,11 +15,17 @@ const MAX_PRESENCE_BYTES = 16 * 1024;
 const MAX_SIGNAL_CIPHERTEXT_BYTES = 64 * 1024;
 const MAX_SIGNAL_PLAINTEXT_BYTES = 8 * 1024;
 
+const utf8 = new TextEncoder();
+
 function byteLength(value) {
-  if (typeof value === "string") return Buffer.byteLength(value);
+  if (typeof value === "string") return utf8.encode(value).byteLength;
   if (value instanceof ArrayBuffer) return value.byteLength;
   if (ArrayBuffer.isView(value)) return value.byteLength;
-  return Buffer.byteLength(String(value));
+  return utf8.encode(String(value)).byteLength;
+}
+
+function randomHex(bytes) {
+  return Array.from(globalThis.crypto.getRandomValues(new Uint8Array(bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function eventTagValues(event, name) {
@@ -60,7 +67,7 @@ function validateRelayUrl(value) {
 }
 
 export class RelayPool {
-  constructor(urls, { label = "relay", WebSocketImpl = globalThis.WebSocket, connectTimeoutMs = 8_000 } = {}) {
+  constructor(urls, { label = "relay", WebSocketImpl = globalThis.WebSocket, connectTimeoutMs = 8_000, reconnect = false, reconnectMaxMs = 30_000 } = {}) {
     if (!Array.isArray(urls) || urls.length < 1 || urls.length > 8) throw new Error("RelayPool requires between one and eight relay URLs.");
     if (typeof WebSocketImpl !== "function") throw new Error("RelayPool requires a WebSocket implementation.");
     this.urls = [...new Set(urls.map(validateRelayUrl))];
@@ -71,11 +78,28 @@ export class RelayPool {
     this.handlers = new Set();
     this.seen = new Set();
     this.connected = false;
+    // A long-lived swarm outlives a relay restart: with `reconnect`, a dropped
+    // socket is re-dialled with jittered backoff and every live subscription is
+    // re-sent. Short tests and the PoC keep the old one-shot behaviour.
+    this.reconnect = reconnect;
+    this.reconnectMaxMs = reconnectMaxMs;
+    this.subscriptions = new Map();
+    this.retryTimers = new Set();
+    this.published = 0;
+    this.rejected = 0;
+    this.rejectHandlers = new Set();
   }
 
   async connect() {
     if (this.connected) return;
     const results = await Promise.allSettled(this.urls.map((url) => this.#connectOne(url)));
+    if (this.reconnect && this.sockets.length > 0) {
+      // Keep trying relays that were down at start, once the pool is usable.
+      this.connected = true;
+      results.forEach((result, index) => {
+        if (result.status === "rejected") this.#redial(this.urls[index], 1);
+      });
+    }
     if (this.sockets.length === 0) {
       const reasons = results.map((result) => result.status === "rejected" ? result.reason?.message : "").filter(Boolean);
       throw new Error(`No relay reachable${reasons.length ? `: ${reasons.join("; ")}` : "."}`);
@@ -100,14 +124,30 @@ export class RelayPool {
       }, this.connectTimeoutMs);
       socket.addEventListener("open", () => {
         this.sockets.push(socket);
+        for (const [subscriptionId, filter] of this.subscriptions) socket.send(JSON.stringify(["REQ", subscriptionId, filter]));
         finish();
       });
       socket.addEventListener("error", () => finish(new Error(`${url} failed to connect`)));
       socket.addEventListener("message", (message) => this.#onMessage(message.data));
       socket.addEventListener("close", () => {
+        const wasOpen = this.sockets.includes(socket);
         this.sockets = this.sockets.filter((candidate) => candidate !== socket);
+        finish(new Error(`${url} closed`));
+        if (this.reconnect && this.connected && wasOpen) this.#redial(url, 1);
       });
     });
+  }
+
+  #redial(url, attempt) {
+    const delay = Math.min(this.reconnectMaxMs, 1_000 * 2 ** Math.min(attempt, 5)) * (0.5 + Math.random() * 0.5);
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(timer);
+      if (!this.connected) return;
+      this.#connectOne(url).catch(() => {
+        if (this.connected && !this.sockets.some((socket) => socket.url === url)) this.#redial(url, attempt + 1);
+      });
+    }, delay);
+    this.retryTimers.add(timer);
   }
 
   #onMessage(data) {
@@ -116,6 +156,13 @@ export class RelayPool {
     try {
       frame = JSON.parse(String(data));
     } catch {
+      return;
+    }
+    if (Array.isArray(frame) && frame[0] === "OK" && frame[2] === false) {
+      this.rejected += 1;
+      for (const handler of this.rejectHandlers) {
+        try { handler({ id: frame[1], message: String(frame[3] || "") }); } catch {}
+      }
       return;
     }
     if (!Array.isArray(frame) || frame[0] !== "EVENT" || !frame[2] || typeof frame[2] !== "object") return;
@@ -128,10 +175,16 @@ export class RelayPool {
 
   subscribe(filter) {
     if (!this.connected || this.sockets.length === 0) throw new Error("RelayPool is not connected.");
-    const subscriptionId = randomBytes(8).toString("hex");
+    const subscriptionId = randomHex(8);
     const frame = JSON.stringify(["REQ", subscriptionId, filter]);
+    this.subscriptions.set(subscriptionId, filter);
     for (const socket of this.sockets) socket.send(frame);
     return subscriptionId;
+  }
+
+  onReject(handler) {
+    this.rejectHandlers.add(handler);
+    return () => this.rejectHandlers.delete(handler);
   }
 
   onEvent(handler) {
@@ -143,10 +196,15 @@ export class RelayPool {
     if (!this.connected || this.sockets.length === 0) throw new Error("RelayPool has no connected relay.");
     const frame = JSON.stringify(["EVENT", event]);
     for (const socket of this.sockets) socket.send(frame);
+    this.published += 1;
   }
 
   close() {
     this.connected = false;
+    for (const timer of this.retryTimers) clearTimeout(timer);
+    this.retryTimers.clear();
+    this.subscriptions.clear();
+    this.rejectHandlers.clear();
     for (const socket of this.sockets) {
       try { socket.close(); } catch {}
     }
@@ -208,7 +266,7 @@ export class RelaySwarmSession {
       return { type: transport.type, publicKey: transport.publicKey };
     });
     const content = JSON.stringify({ v: RELAYSWARM_VERSION, role, transports: normalizedTransports, have: [...new Set(have)] });
-    if (Buffer.byteLength(content) > MAX_PRESENCE_BYTES) throw new Error("Presence payload is too large.");
+    if (byteLength(content) > MAX_PRESENCE_BYTES) throw new Error("Presence payload is too large.");
     const event = finalizeEvent({
       kind: KIND_PRESENCE,
       created_at: Math.floor(Date.now() / 1000),
@@ -224,7 +282,7 @@ export class RelaySwarmSession {
     if (!validToken(type) || !validToken(transport) || !validRequestId(requestId)) throw new Error("Invalid signal envelope.");
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Invalid signal payload.");
     const plaintext = JSON.stringify({ v: RELAYSWARM_VERSION, type, transport, requestId, payload });
-    if (Buffer.byteLength(plaintext) > MAX_SIGNAL_PLAINTEXT_BYTES) throw new Error("Signal payload is too large.");
+    if (byteLength(plaintext) > MAX_SIGNAL_PLAINTEXT_BYTES) throw new Error("Signal payload is too large.");
     const conversationKey = nip44.utils.getConversationKey(this.secretKey, toPubkey);
     const content = nip44.encrypt(plaintext, conversationKey);
     const event = finalizeEvent({
@@ -282,7 +340,7 @@ export class RelaySwarmSession {
   }
 
   #receivePresence(event) {
-    if (Buffer.byteLength(event.content) > MAX_PRESENCE_BYTES || eventTagValues(event, "p").length !== 0) return;
+    if (byteLength(event.content) > MAX_PRESENCE_BYTES || eventTagValues(event, "p").length !== 0) return;
     const payload = parseObject(event.content);
     if (payload.v !== RELAYSWARM_VERSION || !validToken(payload.role)) return;
     if (!Array.isArray(payload.transports) || payload.transports.length > 8) return;
@@ -297,7 +355,7 @@ export class RelaySwarmSession {
   }
 
   #receiveSignal(event) {
-    if (Buffer.byteLength(event.content) > MAX_SIGNAL_CIPHERTEXT_BYTES || uniqueTag(event, "p") !== this.pubkey) return;
+    if (byteLength(event.content) > MAX_SIGNAL_CIPHERTEXT_BYTES || uniqueTag(event, "p") !== this.pubkey) return;
     const conversationKey = nip44.utils.getConversationKey(this.secretKey, event.pubkey);
     const payload = parseObject(nip44.decrypt(event.content, conversationKey));
     if (payload.v !== RELAYSWARM_VERSION || !validToken(payload.type) || !validToken(payload.transport) || !validRequestId(payload.requestId)) return;
