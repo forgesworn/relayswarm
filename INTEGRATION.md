@@ -125,9 +125,17 @@ decide its own mode.
   needs a trustworthy source of segment digests: a peer supplies both bytes
   and hash today, which detects corruption but not a malicious peer. Options
   are digests signed by the streamer or fetched from the origin.
-- **No peer rotation.** Once viewers reach `maxPeers` they refuse newcomers,
-  who then race with no peers and play from the origin. `offersRefused` and
-  `segments.noPeers` show when that is happening.
+- **Rotation is narrow on purpose.** A peer at `maxPeers` rotates a link out
+  only for a caller that has no peers at all, only when it would still keep one
+  of its own, at most one per `evictionCooldownMs`, and never a link that is
+  mid-transfer or younger than `minLinkLifeMs`. Rotating for anyone who asked
+  was measured to cost late joiners more than it won, because an evicted peer
+  re-dials at once and displaces a third. Other refusals carry a
+  `retryAfterMs` and up to two referrals instead. `peers.evicted`,
+  `peers.evictionsUnavailable`, `peers.retriesScheduled`,
+  `peers.referralsFollowed`, `offersRefused` and `segments.noPeers` show what
+  is happening, and `segments.firstPeerSegmentAtMs` says how long a viewer
+  waited before the swarm was any use to it.
 - **Hard NATs.** Symmetric NAT and some VPN egresses will not connect with
   STUN alone, and no TURN or super-peer path exists yet. Those viewers simply
   play from the origin.

@@ -1,0 +1,1544 @@
+{
+  "ok": true,
+  "at": "2026-09-17T21:05:36.316Z",
+  "rotation": "on",
+  "shape": {
+    "viewers": 12,
+    "waves": 3,
+    "waveGapMs": 30000,
+    "maxPeers": 2,
+    "corruptPeer": false,
+    "plusCorruptPeer": 0,
+    "plusBaselineWithoutSwarm": 1,
+    "durationS": 60,
+    "staggerMs": 3000,
+    "segmentSeconds": 2,
+    "videoKbps": 1500,
+    "originFallbackMs": 1500
+  },
+  "waves": [
+    {
+      "wave": 0,
+      "viewers": 4,
+      "linksOpened": 10,
+      "offersRefused": 12,
+      "evicted": 1,
+      "retriesScheduled": 3,
+      "referralsFollowed": 2,
+      "noPeers": 9,
+      "peerInTime": 318,
+      "peerMiss": 2,
+      "peerCorrupt": 0,
+      "inTimeShare": 0.975,
+      "viewersServedByAPeer": 4,
+      "secondsToFirstPeerSegment": [
+        1.2,
+        1.3,
+        4.4,
+        18.5
+      ],
+      "secondsToFirstLink": [
+        1.2,
+        1.3,
+        4.4,
+        18.5
+      ]
+    },
+    {
+      "wave": 1,
+      "viewers": 4,
+      "linksOpened": 10,
+      "offersRefused": 12,
+      "evicted": 1,
+      "retriesScheduled": 10,
+      "referralsFollowed": 6,
+      "noPeers": 9,
+      "peerInTime": 220,
+      "peerMiss": 4,
+      "peerCorrupt": 0,
+      "inTimeShare": 0.961,
+      "viewersServedByAPeer": 4,
+      "secondsToFirstPeerSegment": [
+        0.5,
+        1.5,
+        4.7,
+        17.7
+      ],
+      "secondsToFirstLink": [
+        0.4,
+        1.5,
+        4.7,
+        17.6
+      ]
+    },
+    {
+      "wave": 2,
+      "viewers": 4,
+      "linksOpened": 10,
+      "offersRefused": 3,
+      "evicted": 1,
+      "retriesScheduled": 14,
+      "referralsFollowed": 5,
+      "noPeers": 9,
+      "peerInTime": 128,
+      "peerMiss": 3,
+      "peerCorrupt": 0,
+      "inTimeShare": 0.934,
+      "viewersServedByAPeer": 4,
+      "secondsToFirstPeerSegment": [
+        0.7,
+        1.7,
+        5,
+        18.2
+      ],
+      "secondsToFirstLink": [
+        0.6,
+        1.7,
+        5,
+        18.1
+      ]
+    }
+  ],
+  "aggregate": {
+    "originLoaded": 721,
+    "raced": 692,
+    "noPeers": 27,
+    "peerInTime": 666,
+    "peerLate": 17,
+    "peerMiss": 9,
+    "peerCorrupt": 0,
+    "inTimeShare": 0.962,
+    "medianOfViewerPeerLatencyMs": 79,
+    "bytesFromPeers": 285041088,
+    "bytesUploaded": 285041088,
+    "candidatePairs": {
+      "host/host": 30
+    },
+    "swarmErrors": 0,
+    "relayEventsPublished": 166,
+    "corruptPeerBannedBy": 0
+  },
+  "player": {
+    "withSwarm": [
+      {
+        "viewer": "v0",
+        "stalls": 1,
+        "fatalErrors": 0,
+        "currentTime": 169.4
+      },
+      {
+        "viewer": "v1",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 169
+      },
+      {
+        "viewer": "v2",
+        "stalls": 1,
+        "fatalErrors": 0,
+        "currentTime": 169.5
+      },
+      {
+        "viewer": "v3",
+        "stalls": 1,
+        "fatalErrors": 0,
+        "currentTime": 167.4
+      },
+      {
+        "viewer": "v4",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 126.4
+      },
+      {
+        "viewer": "v5",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 123.2
+      },
+      {
+        "viewer": "v6",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 119.9
+      },
+      {
+        "viewer": "v7",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 116.7
+      },
+      {
+        "viewer": "v8",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 83.4
+      },
+      {
+        "viewer": "v9",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 80.2
+      },
+      {
+        "viewer": "v10",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 76.9
+      },
+      {
+        "viewer": "v11",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 73.2
+      }
+    ],
+    "baseline": {
+      "stalls": 0,
+      "fatalErrors": 0,
+      "currentTime": 165.4
+    }
+  },
+  "stopChecks": [
+    {
+      "viewer": "v0",
+      "loaderRestored": true
+    },
+    {
+      "viewer": "v1",
+      "loaderRestored": true
+    },
+    {
+      "viewer": "v2",
+      "loaderRestored": true
+    },
+    {
+      "viewer": "v3",
+      "loaderRestored": true
+    },
+    {
+      "viewer": "v4",
+      "loaderRestored": true
+    },
+    {
+      "viewer": "v5",
+      "loaderRestored": true
+    },
+    {
+      "viewer": "v6",
+      "loaderRestored": true
+    },
+    {
+      "viewer": "v7",
+      "loaderRestored": true
+    },
+    {
+      "viewer": "v8",
+      "loaderRestored": true
+    },
+    {
+      "viewer": "v9",
+      "loaderRestored": true
+    },
+    {
+      "viewer": "v10",
+      "loaderRestored": true
+    },
+    {
+      "viewer": "v11",
+      "loaderRestored": true
+    }
+  ],
+  "pageErrors": [],
+  "viewers": [
+    {
+      "viewer": "v0",
+      "swarm": {
+        "v": 1,
+        "swarmId": "harness-c2b2041c4782d1cc",
+        "mode": "shadow",
+        "disabledReason": null,
+        "stopped": false,
+        "pubkey": "0433421ea210002b5361a56fec5c04f5c7a54c8b4cafede1946c68e2dd551683",
+        "uptimeMs": 168360,
+        "serving": true,
+        "peers": {
+          "connected": 2,
+          "dialling": 0,
+          "dialsStarted": 2,
+          "dialsAccepted": 2,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 0,
+          "offersAccepted": 0,
+          "offersRefused": 4,
+          "evicted": 0,
+          "evictionsUnavailable": 4,
+          "retriesScheduled": 0,
+          "referralsSent": 8,
+          "referralsFollowed": 0,
+          "openPeersKnown": 4,
+          "linksOpened": 2,
+          "linksClosed": 0,
+          "banned": 0,
+          "firstLinkAtMs": 4408,
+          "candidatePairs": {
+            "host/host": 2
+          }
+        },
+        "signalling": {
+          "samples": 2,
+          "medianMs": 30,
+          "p90Ms": 30
+        },
+        "segments": {
+          "originLoaded": 86,
+          "raced": 86,
+          "noPeers": 0,
+          "sampledOut": 0,
+          "skipped": 0,
+          "aborted": 0,
+          "peerInTime": 82,
+          "peerLate": 2,
+          "peerMiss": 2,
+          "peerCorrupt": 0,
+          "peerUnverified": 0,
+          "inTimeShare": 0.953,
+          "firstPeerSegmentAtMs": 4435,
+          "peerLatencyMedianMs": 132,
+          "peerLatencyP90Ms": 439,
+          "originLatencyMedianMs": 15
+        },
+        "bytes": {
+          "fromOrigin": 35991096,
+          "fromPeers": 35123288,
+          "uploaded": 20680752,
+          "uploadsServed": 49,
+          "uploadsRefused": 0,
+          "held": 4998920
+        },
+        "relays": {
+          "connected": 1,
+          "presenceSent": 8,
+          "signalsSent": 6,
+          "published": 14,
+          "rejected": 0,
+          "publishErrors": 0
+        },
+        "errors": {
+          "total": 0,
+          "byStage": {}
+        },
+        "config": {
+          "originFallbackMs": 1500,
+          "lateWindowMs": 6000,
+          "maxPeers": 2,
+          "maxUploadPeers": 2,
+          "maxUploadBytesPerSecond": 1250000,
+          "shadowSampleRate": 1,
+          "minLinkLifeMs": 15000,
+          "idleEvictMs": 20000,
+          "evictionCooldownMs": 10000,
+          "relays": [
+            "ws://127.0.0.1:61652"
+          ]
+        }
+      },
+      "corrupt": false,
+      "wave": 0,
+      "useSwarm": true,
+      "player": {
+        "stalls": 1,
+        "errors": 1,
+        "fatalErrors": 0,
+        "playingAt": 426.7999999523163,
+        "lastTime": 169.314549,
+        "fragsLoaded": 86,
+        "currentTime": 169.366018
+      }
+    },
+    {
+      "viewer": "v1",
+      "swarm": {
+        "v": 1,
+        "swarmId": "harness-c2b2041c4782d1cc",
+        "mode": "shadow",
+        "disabledReason": null,
+        "stopped": false,
+        "pubkey": "41852f331f791ebbf360a190d1839c8b84daeb1ddd82b60d6b961e4c84cf3f4d",
+        "uptimeMs": 165212,
+        "serving": true,
+        "peers": {
+          "connected": 2,
+          "dialling": 0,
+          "dialsStarted": 1,
+          "dialsAccepted": 1,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 0,
+          "offersAccepted": 2,
+          "offersRefused": 3,
+          "evicted": 0,
+          "evictionsUnavailable": 3,
+          "retriesScheduled": 0,
+          "referralsSent": 5,
+          "referralsFollowed": 0,
+          "openPeersKnown": 4,
+          "linksOpened": 3,
+          "linksClosed": 1,
+          "banned": 0,
+          "firstLinkAtMs": 1199,
+          "candidatePairs": {
+            "host/host": 3
+          }
+        },
+        "signalling": {
+          "samples": 3,
+          "medianMs": 15,
+          "p90Ms": 20
+        },
+        "segments": {
+          "originLoaded": 85,
+          "raced": 85,
+          "noPeers": 0,
+          "sampledOut": 0,
+          "skipped": 0,
+          "aborted": 0,
+          "peerInTime": 83,
+          "peerLate": 2,
+          "peerMiss": 0,
+          "peerCorrupt": 0,
+          "peerUnverified": 0,
+          "inTimeShare": 0.976,
+          "firstPeerSegmentAtMs": 1227,
+          "peerLatencyMedianMs": 82,
+          "peerLatencyP90Ms": 188,
+          "originLatencyMedianMs": 17
+        },
+        "bytes": {
+          "fromOrigin": 35553244,
+          "fromPeers": 35553244,
+          "uploaded": 49577480,
+          "uploadsServed": 119,
+          "uploadsRefused": 0,
+          "held": 4998920
+        },
+        "relays": {
+          "connected": 1,
+          "presenceSent": 10,
+          "signalsSent": 6,
+          "published": 16,
+          "rejected": 0,
+          "publishErrors": 0
+        },
+        "errors": {
+          "total": 0,
+          "byStage": {}
+        },
+        "config": {
+          "originFallbackMs": 1500,
+          "lateWindowMs": 6000,
+          "maxPeers": 2,
+          "maxUploadPeers": 2,
+          "maxUploadBytesPerSecond": 1250000,
+          "shadowSampleRate": 1,
+          "minLinkLifeMs": 15000,
+          "idleEvictMs": 20000,
+          "evictionCooldownMs": 10000,
+          "relays": [
+            "ws://127.0.0.1:61652"
+          ]
+        }
+      },
+      "corrupt": false,
+      "wave": 0,
+      "useSwarm": true,
+      "player": {
+        "stalls": 0,
+        "errors": 0,
+        "fatalErrors": 0,
+        "playingAt": 251.89999997615814,
+        "lastTime": 168.730397,
+        "fragsLoaded": 85,
+        "currentTime": 168.993058
+      }
+    },
+    {
+      "viewer": "v2",
+      "swarm": {
+        "v": 1,
+        "swarmId": "harness-c2b2041c4782d1cc",
+        "mode": "shadow",
+        "disabledReason": null,
+        "stopped": false,
+        "pubkey": "5d91435c25fde21a9388bce7a0bf6536b139602a3d10c2651e82d26a25755de0",
+        "uptimeMs": 162031,
+        "serving": true,
+        "peers": {
+          "connected": 2,
+          "dialling": 0,
+          "dialsStarted": 0,
+          "dialsAccepted": 0,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 0,
+          "offersAccepted": 3,
+          "offersRefused": 3,
+          "evicted": 1,
+          "evictionsUnavailable": 3,
+          "retriesScheduled": 0,
+          "referralsSent": 3,
+          "referralsFollowed": 0,
+          "openPeersKnown": 4,
+          "linksOpened": 3,
+          "linksClosed": 1,
+          "banned": 0,
+          "firstLinkAtMs": 1283,
+          "candidatePairs": {
+            "host/host": 3
+          }
+        },
+        "signalling": {
+          "samples": 3,
+          "medianMs": 13,
+          "p90Ms": 14
+        },
+        "segments": {
+          "originLoaded": 83,
+          "raced": 83,
+          "noPeers": 0,
+          "sampledOut": 0,
+          "skipped": 0,
+          "aborted": 0,
+          "peerInTime": 83,
+          "peerLate": 0,
+          "peerMiss": 0,
+          "peerCorrupt": 0,
+          "peerUnverified": 0,
+          "inTimeShare": 1,
+          "firstPeerSegmentAtMs": 1299,
+          "peerLatencyMedianMs": 79,
+          "peerLatencyP90Ms": 192,
+          "originLatencyMedianMs": 16
+        },
+        "bytes": {
+          "fromOrigin": 34710816,
+          "fromPeers": 34710816,
+          "uploaded": 16027564,
+          "uploadsServed": 38,
+          "uploadsRefused": 0,
+          "held": 4998920
+        },
+        "relays": {
+          "connected": 1,
+          "presenceSent": 10,
+          "signalsSent": 6,
+          "published": 16,
+          "rejected": 0,
+          "publishErrors": 0
+        },
+        "errors": {
+          "total": 0,
+          "byStage": {}
+        },
+        "config": {
+          "originFallbackMs": 1500,
+          "lateWindowMs": 6000,
+          "maxPeers": 2,
+          "maxUploadPeers": 2,
+          "maxUploadBytesPerSecond": 1250000,
+          "shadowSampleRate": 1,
+          "minLinkLifeMs": 15000,
+          "idleEvictMs": 20000,
+          "evictionCooldownMs": 10000,
+          "relays": [
+            "ws://127.0.0.1:61652"
+          ]
+        }
+      },
+      "corrupt": false,
+      "wave": 0,
+      "useSwarm": true,
+      "player": {
+        "stalls": 1,
+        "errors": 1,
+        "fatalErrors": 0,
+        "playingAt": 232.60000002384186,
+        "lastTime": 169.399212,
+        "fragsLoaded": 83,
+        "currentTime": 169.452058
+      }
+    },
+    {
+      "viewer": "v3",
+      "swarm": {
+        "v": 1,
+        "swarmId": "harness-c2b2041c4782d1cc",
+        "mode": "shadow",
+        "disabledReason": null,
+        "stopped": false,
+        "pubkey": "614734fb78c8cefba0ce2358adfaad8d66d3699c68f4c65759c5fdd3495fc7d7",
+        "uptimeMs": 158635,
+        "serving": true,
+        "peers": {
+          "connected": 2,
+          "dialling": 0,
+          "dialsStarted": 5,
+          "dialsAccepted": 2,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 3,
+          "offersAccepted": 0,
+          "offersRefused": 2,
+          "evicted": 0,
+          "evictionsUnavailable": 2,
+          "retriesScheduled": 3,
+          "referralsSent": 4,
+          "referralsFollowed": 2,
+          "openPeersKnown": 4,
+          "linksOpened": 2,
+          "linksClosed": 0,
+          "banned": 0,
+          "firstLinkAtMs": 18529,
+          "candidatePairs": {
+            "host/host": 2
+          }
+        },
+        "signalling": {
+          "samples": 2,
+          "medianMs": 24,
+          "p90Ms": 24
+        },
+        "segments": {
+          "originLoaded": 81,
+          "raced": 72,
+          "noPeers": 9,
+          "sampledOut": 0,
+          "skipped": 0,
+          "aborted": 0,
+          "peerInTime": 70,
+          "peerLate": 2,
+          "peerMiss": 0,
+          "peerCorrupt": 0,
+          "peerUnverified": 0,
+          "inTimeShare": 0.972,
+          "firstPeerSegmentAtMs": 18544,
+          "peerLatencyMedianMs": 172,
+          "peerLatencyP90Ms": 444,
+          "originLatencyMedianMs": 12
+        },
+        "bytes": {
+          "fromOrigin": 33875344,
+          "fromPeers": 30061012,
+          "uploaded": 49162564,
+          "uploadsServed": 118,
+          "uploadsRefused": 0,
+          "held": 4998920
+        },
+        "relays": {
+          "connected": 1,
+          "presenceSent": 9,
+          "signalsSent": 7,
+          "published": 16,
+          "rejected": 0,
+          "publishErrors": 0
+        },
+        "errors": {
+          "total": 0,
+          "byStage": {}
+        },
+        "config": {
+          "originFallbackMs": 1500,
+          "lateWindowMs": 6000,
+          "maxPeers": 2,
+          "maxUploadPeers": 2,
+          "maxUploadBytesPerSecond": 1250000,
+          "shadowSampleRate": 1,
+          "minLinkLifeMs": 15000,
+          "idleEvictMs": 20000,
+          "evictionCooldownMs": 10000,
+          "relays": [
+            "ws://127.0.0.1:61652"
+          ]
+        }
+      },
+      "corrupt": false,
+      "wave": 0,
+      "useSwarm": true,
+      "player": {
+        "stalls": 1,
+        "errors": 1,
+        "fatalErrors": 0,
+        "playingAt": 235.60000002384186,
+        "lastTime": 167.250252,
+        "fragsLoaded": 81,
+        "currentTime": 167.432847
+      }
+    },
+    {
+      "viewer": "baseline",
+      "swarm": null,
+      "corrupt": false,
+      "wave": 0,
+      "useSwarm": false,
+      "player": {
+        "stalls": 0,
+        "errors": 0,
+        "fatalErrors": 0,
+        "playingAt": 205.10000002384186,
+        "lastTime": 164.866941,
+        "fragsLoaded": 80,
+        "currentTime": 165.358742
+      }
+    },
+    {
+      "viewer": "v4",
+      "swarm": {
+        "v": 1,
+        "swarmId": "harness-c2b2041c4782d1cc",
+        "mode": "shadow",
+        "disabledReason": null,
+        "stopped": false,
+        "pubkey": "5728209f71a312d541bb01662666f53d43a107ee99d9319fd9d9ad04a6a39894",
+        "uptimeMs": 116589,
+        "serving": true,
+        "peers": {
+          "connected": 2,
+          "dialling": 0,
+          "dialsStarted": 3,
+          "dialsAccepted": 2,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 1,
+          "offersAccepted": 0,
+          "offersRefused": 2,
+          "evicted": 0,
+          "evictionsUnavailable": 2,
+          "retriesScheduled": 1,
+          "referralsSent": 4,
+          "referralsFollowed": 1,
+          "openPeersKnown": 4,
+          "linksOpened": 2,
+          "linksClosed": 0,
+          "banned": 0,
+          "firstLinkAtMs": 4673,
+          "candidatePairs": {
+            "host/host": 2
+          }
+        },
+        "signalling": {
+          "samples": 2,
+          "medianMs": 26,
+          "p90Ms": 26
+        },
+        "segments": {
+          "originLoaded": 63,
+          "raced": 62,
+          "noPeers": 0,
+          "sampledOut": 0,
+          "skipped": 0,
+          "aborted": 0,
+          "peerInTime": 58,
+          "peerLate": 1,
+          "peerMiss": 3,
+          "peerCorrupt": 0,
+          "peerUnverified": 0,
+          "inTimeShare": 0.935,
+          "firstPeerSegmentAtMs": 4703,
+          "peerLatencyMedianMs": 613,
+          "peerLatencyP90Ms": 676,
+          "originLatencyMedianMs": 6
+        },
+        "bytes": {
+          "fromOrigin": 26262848,
+          "fromPeers": 24582504,
+          "uploaded": 41675652,
+          "uploadsServed": 100,
+          "uploadsRefused": 0,
+          "held": 5002304
+        },
+        "relays": {
+          "connected": 1,
+          "presenceSent": 7,
+          "signalsSent": 5,
+          "published": 12,
+          "rejected": 0,
+          "publishErrors": 0
+        },
+        "errors": {
+          "total": 0,
+          "byStage": {}
+        },
+        "config": {
+          "originFallbackMs": 1500,
+          "lateWindowMs": 6000,
+          "maxPeers": 2,
+          "maxUploadPeers": 2,
+          "maxUploadBytesPerSecond": 1250000,
+          "shadowSampleRate": 1,
+          "minLinkLifeMs": 15000,
+          "idleEvictMs": 20000,
+          "evictionCooldownMs": 10000,
+          "relays": [
+            "ws://127.0.0.1:61652"
+          ]
+        }
+      },
+      "corrupt": false,
+      "wave": 1,
+      "useSwarm": true,
+      "player": {
+        "stalls": 0,
+        "errors": 0,
+        "fatalErrors": 0,
+        "playingAt": 692,
+        "lastTime": 126.030916,
+        "fragsLoaded": 63,
+        "currentTime": 126.409746
+      }
+    },
+    {
+      "viewer": "v5",
+      "swarm": {
+        "v": 1,
+        "swarmId": "harness-c2b2041c4782d1cc",
+        "mode": "shadow",
+        "disabledReason": null,
+        "stopped": false,
+        "pubkey": "10853d1a0e865309b6759a15636927fc2443e7083d267263620d803c4038c36d",
+        "uptimeMs": 113444,
+        "serving": true,
+        "peers": {
+          "connected": 2,
+          "dialling": 0,
+          "dialsStarted": 2,
+          "dialsAccepted": 1,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 1,
+          "offersAccepted": 2,
+          "offersRefused": 5,
+          "evicted": 0,
+          "evictionsUnavailable": 5,
+          "retriesScheduled": 1,
+          "referralsSent": 4,
+          "referralsFollowed": 1,
+          "openPeersKnown": 3,
+          "linksOpened": 3,
+          "linksClosed": 1,
+          "banned": 0,
+          "firstLinkAtMs": 1490,
+          "candidatePairs": {
+            "host/host": 3
+          }
+        },
+        "signalling": {
+          "samples": 3,
+          "medianMs": 14,
+          "p90Ms": 21
+        },
+        "segments": {
+          "originLoaded": 60,
+          "raced": 60,
+          "noPeers": 0,
+          "sampledOut": 0,
+          "skipped": 0,
+          "aborted": 0,
+          "peerInTime": 58,
+          "peerLate": 2,
+          "peerMiss": 0,
+          "peerCorrupt": 0,
+          "peerUnverified": 0,
+          "inTimeShare": 0.967,
+          "firstPeerSegmentAtMs": 1520,
+          "peerLatencyMedianMs": 48,
+          "peerLatencyP90Ms": 842,
+          "originLatencyMedianMs": 8
+        },
+        "bytes": {
+          "fromOrigin": 25006256,
+          "fromPeers": 25006256,
+          "uploaded": 9178912,
+          "uploadsServed": 22,
+          "uploadsRefused": 0,
+          "held": 4998920
+        },
+        "relays": {
+          "connected": 1,
+          "presenceSent": 7,
+          "signalsSent": 9,
+          "published": 16,
+          "rejected": 0,
+          "publishErrors": 0
+        },
+        "errors": {
+          "total": 0,
+          "byStage": {}
+        },
+        "config": {
+          "originFallbackMs": 1500,
+          "lateWindowMs": 6000,
+          "maxPeers": 2,
+          "maxUploadPeers": 2,
+          "maxUploadBytesPerSecond": 1250000,
+          "shadowSampleRate": 1,
+          "minLinkLifeMs": 15000,
+          "idleEvictMs": 20000,
+          "evictionCooldownMs": 10000,
+          "relays": [
+            "ws://127.0.0.1:61652"
+          ]
+        }
+      },
+      "corrupt": false,
+      "wave": 1,
+      "useSwarm": true,
+      "player": {
+        "stalls": 0,
+        "errors": 0,
+        "fatalErrors": 0,
+        "playingAt": 218.70000004768372,
+        "lastTime": 122.78759,
+        "fragsLoaded": 60,
+        "currentTime": 123.245176
+      }
+    },
+    {
+      "viewer": "v6",
+      "swarm": {
+        "v": 1,
+        "swarmId": "harness-c2b2041c4782d1cc",
+        "mode": "shadow",
+        "disabledReason": null,
+        "stopped": false,
+        "pubkey": "85cd6c6dc2136a0e0bce1622d56ac926457847ea3402f4b015afa67d1b6f0504",
+        "uptimeMs": 110105,
+        "serving": true,
+        "peers": {
+          "connected": 2,
+          "dialling": 0,
+          "dialsStarted": 3,
+          "dialsAccepted": 0,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 2,
+          "offersAccepted": 3,
+          "offersRefused": 4,
+          "evicted": 1,
+          "evictionsUnavailable": 4,
+          "retriesScheduled": 2,
+          "referralsSent": 5,
+          "referralsFollowed": 2,
+          "openPeersKnown": 4,
+          "linksOpened": 3,
+          "linksClosed": 1,
+          "banned": 0,
+          "firstLinkAtMs": 446,
+          "candidatePairs": {
+            "host/host": 3
+          }
+        },
+        "signalling": {
+          "samples": 3,
+          "medianMs": 13,
+          "p90Ms": 23
+        },
+        "segments": {
+          "originLoaded": 59,
+          "raced": 59,
+          "noPeers": 0,
+          "sampledOut": 0,
+          "skipped": 0,
+          "aborted": 0,
+          "peerInTime": 59,
+          "peerLate": 0,
+          "peerMiss": 0,
+          "peerCorrupt": 0,
+          "peerUnverified": 0,
+          "inTimeShare": 1,
+          "firstPeerSegmentAtMs": 463,
+          "peerLatencyMedianMs": 30,
+          "peerLatencyP90Ms": 1310,
+          "originLatencyMedianMs": 9
+        },
+        "bytes": {
+          "fromOrigin": 24602620,
+          "fromPeers": 24602620,
+          "uploaded": 36264636,
+          "uploadsServed": 87,
+          "uploadsRefused": 0,
+          "held": 5002304
+        },
+        "relays": {
+          "connected": 1,
+          "presenceSent": 6,
+          "signalsSent": 10,
+          "published": 16,
+          "rejected": 0,
+          "publishErrors": 0
+        },
+        "errors": {
+          "total": 0,
+          "byStage": {}
+        },
+        "config": {
+          "originFallbackMs": 1500,
+          "lateWindowMs": 6000,
+          "maxPeers": 2,
+          "maxUploadPeers": 2,
+          "maxUploadBytesPerSecond": 1250000,
+          "shadowSampleRate": 1,
+          "minLinkLifeMs": 15000,
+          "idleEvictMs": 20000,
+          "evictionCooldownMs": 10000,
+          "relays": [
+            "ws://127.0.0.1:61652"
+          ]
+        }
+      },
+      "corrupt": false,
+      "wave": 1,
+      "useSwarm": true,
+      "player": {
+        "stalls": 0,
+        "errors": 0,
+        "fatalErrors": 0,
+        "playingAt": 274.39999997615814,
+        "lastTime": 119.779834,
+        "fragsLoaded": 59,
+        "currentTime": 119.899362
+      }
+    },
+    {
+      "viewer": "v7",
+      "swarm": {
+        "v": 1,
+        "swarmId": "harness-c2b2041c4782d1cc",
+        "mode": "shadow",
+        "disabledReason": null,
+        "stopped": false,
+        "pubkey": "12163b01c83d62659c6a46da12df58db1d68379b29a6c4644417f9f9f501d210",
+        "uptimeMs": 106932,
+        "serving": true,
+        "peers": {
+          "connected": 2,
+          "dialling": 0,
+          "dialsStarted": 8,
+          "dialsAccepted": 2,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 6,
+          "offersAccepted": 0,
+          "offersRefused": 1,
+          "evicted": 0,
+          "evictionsUnavailable": 1,
+          "retriesScheduled": 6,
+          "referralsSent": 1,
+          "referralsFollowed": 2,
+          "openPeersKnown": 3,
+          "linksOpened": 2,
+          "linksClosed": 0,
+          "banned": 0,
+          "firstLinkAtMs": 17627,
+          "candidatePairs": {
+            "host/host": 2
+          }
+        },
+        "signalling": {
+          "samples": 2,
+          "medianMs": 39,
+          "p90Ms": 39
+        },
+        "segments": {
+          "originLoaded": 57,
+          "raced": 48,
+          "noPeers": 9,
+          "sampledOut": 0,
+          "skipped": 0,
+          "aborted": 0,
+          "peerInTime": 45,
+          "peerLate": 2,
+          "peerMiss": 1,
+          "peerCorrupt": 0,
+          "peerUnverified": 0,
+          "inTimeShare": 0.938,
+          "firstPeerSegmentAtMs": 17655,
+          "peerLatencyMedianMs": 58,
+          "peerLatencyP90Ms": 99,
+          "originLatencyMedianMs": 15
+        },
+        "bytes": {
+          "fromOrigin": 23752108,
+          "fromPeers": 19579448,
+          "uploaded": 6651628,
+          "uploadsServed": 16,
+          "uploadsRefused": 0,
+          "held": 4998920
+        },
+        "relays": {
+          "connected": 1,
+          "presenceSent": 6,
+          "signalsSent": 9,
+          "published": 15,
+          "rejected": 0,
+          "publishErrors": 0
+        },
+        "errors": {
+          "total": 0,
+          "byStage": {}
+        },
+        "config": {
+          "originFallbackMs": 1500,
+          "lateWindowMs": 6000,
+          "maxPeers": 2,
+          "maxUploadPeers": 2,
+          "maxUploadBytesPerSecond": 1250000,
+          "shadowSampleRate": 1,
+          "minLinkLifeMs": 15000,
+          "idleEvictMs": 20000,
+          "evictionCooldownMs": 10000,
+          "relays": [
+            "ws://127.0.0.1:61652"
+          ]
+        }
+      },
+      "corrupt": false,
+      "wave": 1,
+      "useSwarm": true,
+      "player": {
+        "stalls": 0,
+        "errors": 0,
+        "fatalErrors": 0,
+        "playingAt": 220.20000004768372,
+        "lastTime": 116.289524,
+        "fragsLoaded": 57,
+        "currentTime": 116.733887
+      }
+    },
+    {
+      "viewer": "v8",
+      "swarm": {
+        "v": 1,
+        "swarmId": "harness-c2b2041c4782d1cc",
+        "mode": "shadow",
+        "disabledReason": null,
+        "stopped": false,
+        "pubkey": "2a3ae976d6beccbd5546efa273ede3b607d797f5776aba46664ee9e6ee17a5cb",
+        "uptimeMs": 73613,
+        "serving": true,
+        "peers": {
+          "connected": 2,
+          "dialling": 0,
+          "dialsStarted": 3,
+          "dialsAccepted": 1,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 2,
+          "offersAccepted": 2,
+          "offersRefused": 1,
+          "evicted": 0,
+          "evictionsUnavailable": 1,
+          "retriesScheduled": 2,
+          "referralsSent": 1,
+          "referralsFollowed": 0,
+          "openPeersKnown": 4,
+          "linksOpened": 3,
+          "linksClosed": 1,
+          "banned": 0,
+          "firstLinkAtMs": 4964,
+          "candidatePairs": {
+            "host/host": 3
+          }
+        },
+        "signalling": {
+          "samples": 3,
+          "medianMs": 44,
+          "p90Ms": 46
+        },
+        "segments": {
+          "originLoaded": 39,
+          "raced": 39,
+          "noPeers": 0,
+          "sampledOut": 0,
+          "skipped": 0,
+          "aborted": 0,
+          "peerInTime": 35,
+          "peerLate": 1,
+          "peerMiss": 3,
+          "peerCorrupt": 0,
+          "peerUnverified": 0,
+          "inTimeShare": 0.897,
+          "firstPeerSegmentAtMs": 4998,
+          "peerLatencyMedianMs": 35,
+          "peerLatencyP90Ms": 69,
+          "originLatencyMedianMs": 16
+        },
+        "bytes": {
+          "fromOrigin": 16254292,
+          "fromPeers": 15003904,
+          "uploaded": 24985012,
+          "uploadsServed": 60,
+          "uploadsRefused": 0,
+          "held": 4998920
+        },
+        "relays": {
+          "connected": 1,
+          "presenceSent": 5,
+          "signalsSent": 6,
+          "published": 11,
+          "rejected": 0,
+          "publishErrors": 0
+        },
+        "errors": {
+          "total": 0,
+          "byStage": {}
+        },
+        "config": {
+          "originFallbackMs": 1500,
+          "lateWindowMs": 6000,
+          "maxPeers": 2,
+          "maxUploadPeers": 2,
+          "maxUploadBytesPerSecond": 1250000,
+          "shadowSampleRate": 1,
+          "minLinkLifeMs": 15000,
+          "idleEvictMs": 20000,
+          "evictionCooldownMs": 10000,
+          "relays": [
+            "ws://127.0.0.1:61652"
+          ]
+        }
+      },
+      "corrupt": false,
+      "wave": 2,
+      "useSwarm": true,
+      "player": {
+        "stalls": 0,
+        "errors": 0,
+        "fatalErrors": 0,
+        "playingAt": 296.7999999523163,
+        "lastTime": 83.226234,
+        "fragsLoaded": 39,
+        "currentTime": 83.390841
+      }
+    },
+    {
+      "viewer": "v9",
+      "swarm": {
+        "v": 1,
+        "swarmId": "harness-c2b2041c4782d1cc",
+        "mode": "shadow",
+        "disabledReason": null,
+        "stopped": false,
+        "pubkey": "5671d0f36bdcaac40ff3316d7f970fca628b16664d00a9834375bdd22b1d0869",
+        "uptimeMs": 70371,
+        "serving": true,
+        "peers": {
+          "connected": 2,
+          "dialling": 0,
+          "dialsStarted": 3,
+          "dialsAccepted": 0,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 2,
+          "offersAccepted": 2,
+          "offersRefused": 1,
+          "evicted": 0,
+          "evictionsUnavailable": 1,
+          "retriesScheduled": 2,
+          "referralsSent": 1,
+          "referralsFollowed": 1,
+          "openPeersKnown": 4,
+          "linksOpened": 2,
+          "linksClosed": 0,
+          "banned": 0,
+          "firstLinkAtMs": 1694,
+          "candidatePairs": {
+            "host/host": 2
+          }
+        },
+        "signalling": {
+          "samples": 2,
+          "medianMs": 29,
+          "p90Ms": 29
+        },
+        "segments": {
+          "originLoaded": 38,
+          "raced": 37,
+          "noPeers": 0,
+          "sampledOut": 0,
+          "skipped": 0,
+          "aborted": 0,
+          "peerInTime": 34,
+          "peerLate": 3,
+          "peerMiss": 0,
+          "peerCorrupt": 0,
+          "peerUnverified": 0,
+          "inTimeShare": 0.919,
+          "firstPeerSegmentAtMs": 1728,
+          "peerLatencyMedianMs": 817,
+          "peerLatencyP90Ms": 936,
+          "originLatencyMedianMs": 7
+        },
+        "bytes": {
+          "fromOrigin": 15832796,
+          "fromPeers": 15407728,
+          "uploaded": 29603044,
+          "uploadsServed": 71,
+          "uploadsRefused": 0,
+          "held": 5002304
+        },
+        "relays": {
+          "connected": 1,
+          "presenceSent": 4,
+          "signalsSent": 5,
+          "published": 9,
+          "rejected": 0,
+          "publishErrors": 0
+        },
+        "errors": {
+          "total": 0,
+          "byStage": {}
+        },
+        "config": {
+          "originFallbackMs": 1500,
+          "lateWindowMs": 6000,
+          "maxPeers": 2,
+          "maxUploadPeers": 2,
+          "maxUploadBytesPerSecond": 1250000,
+          "shadowSampleRate": 1,
+          "minLinkLifeMs": 15000,
+          "idleEvictMs": 20000,
+          "evictionCooldownMs": 10000,
+          "relays": [
+            "ws://127.0.0.1:61652"
+          ]
+        }
+      },
+      "corrupt": false,
+      "wave": 2,
+      "useSwarm": true,
+      "player": {
+        "stalls": 0,
+        "errors": 0,
+        "fatalErrors": 0,
+        "playingAt": 266.6999999284744,
+        "lastTime": 79.819851,
+        "fragsLoaded": 38,
+        "currentTime": 80.20666
+      }
+    },
+    {
+      "viewer": "v10",
+      "swarm": {
+        "v": 1,
+        "swarmId": "harness-c2b2041c4782d1cc",
+        "mode": "shadow",
+        "disabledReason": null,
+        "stopped": false,
+        "pubkey": "369917f7f6d4a06e412c7c0cba56e1482653a951a2c68e40e508d1acce5effcd",
+        "uptimeMs": 67079,
+        "serving": true,
+        "peers": {
+          "connected": 2,
+          "dialling": 0,
+          "dialsStarted": 3,
+          "dialsAccepted": 2,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 1,
+          "offersAccepted": 1,
+          "offersRefused": 1,
+          "evicted": 1,
+          "evictionsUnavailable": 1,
+          "retriesScheduled": 1,
+          "referralsSent": 0,
+          "referralsFollowed": 2,
+          "openPeersKnown": 3,
+          "linksOpened": 3,
+          "linksClosed": 1,
+          "banned": 0,
+          "firstLinkAtMs": 612,
+          "candidatePairs": {
+            "host/host": 3
+          }
+        },
+        "signalling": {
+          "samples": 3,
+          "medianMs": 40,
+          "p90Ms": 58
+        },
+        "segments": {
+          "originLoaded": 36,
+          "raced": 36,
+          "noPeers": 0,
+          "sampledOut": 0,
+          "skipped": 0,
+          "aborted": 0,
+          "peerInTime": 36,
+          "peerLate": 0,
+          "peerMiss": 0,
+          "peerCorrupt": 0,
+          "peerUnverified": 0,
+          "inTimeShare": 1,
+          "firstPeerSegmentAtMs": 658,
+          "peerLatencyMedianMs": 36,
+          "peerLatencyP90Ms": 93,
+          "originLatencyMedianMs": 14
+        },
+        "bytes": {
+          "fromOrigin": 15003904,
+          "fromPeers": 15003904,
+          "uploaded": 1233844,
+          "uploadsServed": 3,
+          "uploadsRefused": 0,
+          "held": 4998920
+        },
+        "relays": {
+          "connected": 1,
+          "presenceSent": 5,
+          "signalsSent": 5,
+          "published": 10,
+          "rejected": 0,
+          "publishErrors": 0
+        },
+        "errors": {
+          "total": 0,
+          "byStage": {}
+        },
+        "config": {
+          "originFallbackMs": 1500,
+          "lateWindowMs": 6000,
+          "maxPeers": 2,
+          "maxUploadPeers": 2,
+          "maxUploadBytesPerSecond": 1250000,
+          "shadowSampleRate": 1,
+          "minLinkLifeMs": 15000,
+          "idleEvictMs": 20000,
+          "evictionCooldownMs": 10000,
+          "relays": [
+            "ws://127.0.0.1:61652"
+          ]
+        }
+      },
+      "corrupt": false,
+      "wave": 2,
+      "useSwarm": true,
+      "player": {
+        "stalls": 0,
+        "errors": 0,
+        "fatalErrors": 0,
+        "playingAt": 294.60000002384186,
+        "lastTime": 76.769988,
+        "fragsLoaded": 36,
+        "currentTime": 76.870304
+      }
+    },
+    {
+      "viewer": "v11",
+      "swarm": {
+        "v": 1,
+        "swarmId": "harness-c2b2041c4782d1cc",
+        "mode": "shadow",
+        "disabledReason": null,
+        "stopped": false,
+        "pubkey": "b83ef29a6ab34b337c78f8983982d2a128edf4de87114cbf4b393070da55efeb",
+        "uptimeMs": 63348,
+        "serving": true,
+        "peers": {
+          "connected": 2,
+          "dialling": 0,
+          "dialsStarted": 11,
+          "dialsAccepted": 2,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 9,
+          "offersAccepted": 0,
+          "offersRefused": 0,
+          "evicted": 0,
+          "evictionsUnavailable": 0,
+          "retriesScheduled": 9,
+          "referralsSent": 0,
+          "referralsFollowed": 2,
+          "openPeersKnown": 3,
+          "linksOpened": 2,
+          "linksClosed": 0,
+          "banned": 0,
+          "firstLinkAtMs": 18108,
+          "candidatePairs": {
+            "host/host": 2
+          }
+        },
+        "signalling": {
+          "samples": 2,
+          "medianMs": 78,
+          "p90Ms": 78
+        },
+        "segments": {
+          "originLoaded": 34,
+          "raced": 25,
+          "noPeers": 9,
+          "sampledOut": 0,
+          "skipped": 0,
+          "aborted": 0,
+          "peerInTime": 23,
+          "peerLate": 2,
+          "peerMiss": 0,
+          "peerCorrupt": 0,
+          "peerUnverified": 0,
+          "inTimeShare": 0.92,
+          "firstPeerSegmentAtMs": 18152,
+          "peerLatencyMedianMs": 41,
+          "peerLatencyP90Ms": 288,
+          "originLatencyMedianMs": 13
+        },
+        "bytes": {
+          "fromOrigin": 14177456,
+          "fromPeers": 10406364,
+          "uploaded": 0,
+          "uploadsServed": 0,
+          "uploadsRefused": 0,
+          "held": 4998920
+        },
+        "relays": {
+          "connected": 1,
+          "presenceSent": 4,
+          "signalsSent": 11,
+          "published": 15,
+          "rejected": 0,
+          "publishErrors": 0
+        },
+        "errors": {
+          "total": 0,
+          "byStage": {}
+        },
+        "config": {
+          "originFallbackMs": 1500,
+          "lateWindowMs": 6000,
+          "maxPeers": 2,
+          "maxUploadPeers": 2,
+          "maxUploadBytesPerSecond": 1250000,
+          "shadowSampleRate": 1,
+          "minLinkLifeMs": 15000,
+          "idleEvictMs": 20000,
+          "evictionCooldownMs": 10000,
+          "relays": [
+            "ws://127.0.0.1:61652"
+          ]
+        }
+      },
+      "corrupt": false,
+      "wave": 2,
+      "useSwarm": true,
+      "player": {
+        "stalls": 0,
+        "errors": 0,
+        "fatalErrors": 0,
+        "playingAt": 384.89999997615814,
+        "lastTime": 72.77972,
+        "fragsLoaded": 34,
+        "currentTime": 73.165955
+      }
+    }
+  ],
+  "failures": []
+}

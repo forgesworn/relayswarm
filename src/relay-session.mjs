@@ -255,7 +255,13 @@ export class RelaySwarmSession {
     return () => this.errorHandlers.delete(handler);
   }
 
-  announcePresence({ role, transports = [], have = [] } = {}) {
+  /**
+   * `open` says whether this peer can take another link: capacity now, or a
+   * link it would rotate out for a newcomer. Optional and advisory - a swarm
+   * where everyone is full still works, it just costs the newcomer a refused
+   * offer to find out.
+   */
+  announcePresence({ role, transports = [], have = [], open } = {}) {
     if (!validToken(role)) throw new Error("Invalid presence role.");
     if (!Array.isArray(transports) || transports.length > 8) throw new Error("Invalid transport capability list.");
     if (!Array.isArray(have) || have.length > 32 || have.some((hash) => !HEX64.test(hash))) throw new Error("Invalid object hash list.");
@@ -265,7 +271,13 @@ export class RelaySwarmSession {
       }
       return { type: transport.type, publicKey: transport.publicKey };
     });
-    const content = JSON.stringify({ v: RELAYSWARM_VERSION, role, transports: normalizedTransports, have: [...new Set(have)] });
+    const content = JSON.stringify({
+      v: RELAYSWARM_VERSION,
+      role,
+      transports: normalizedTransports,
+      have: [...new Set(have)],
+      ...(open === undefined ? {} : { open: Boolean(open) }),
+    });
     if (byteLength(content) > MAX_PRESENCE_BYTES) throw new Error("Presence payload is too large.");
     const event = finalizeEvent({
       kind: KIND_PRESENCE,
@@ -351,7 +363,9 @@ export class RelaySwarmSession {
       }
       return { type: transport.type, publicKey: transport.publicKey };
     });
-    this.#dispatch(this.presenceHandlers, { from: event.pubkey, event, payload: { ...payload, transports } });
+    // `open` is advisory and optional; anything but a boolean reads as unknown.
+    const open = typeof payload.open === "boolean" ? payload.open : null;
+    this.#dispatch(this.presenceHandlers, { from: event.pubkey, event, payload: { ...payload, transports, open } });
   }
 
   #receiveSignal(event) {

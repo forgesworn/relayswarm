@@ -156,3 +156,56 @@ test("have messages are validated and bounded", async () => {
   assert.deepEqual([...receiver.have], ["c".repeat(64)]);
   assert.deepEqual(seen, [KEY, "c".repeat(64)]);
 });
+
+// --- rotation -----------------------------------------------------------
+// The policy that lets a viewer joining an hour late find a peer at all,
+// without letting a busy swarm thrash its links.
+
+import { readRefusal, retryAfterFor, rotationCandidate } from "../src/browser/hls-swarm.mjs";
+
+const NOW = 1_000_000;
+const POLICY = { minLinkLifeMs: 15_000, idleEvictMs: 20_000, evictionCooldownMs: 10_000, retryFloorMs: 4_000, retryCeilingMs: 45_000, maxReferrals: 2 };
+const link = (pubkey, { age = 60_000, idle = 60_000, transferring = false } = {}) => ({
+  pubkey,
+  transferring,
+  openedAt: NOW - age,
+  lastUsefulAt: NOW - idle,
+});
+
+test("rotation drops the longest-idle link, and nothing it should not", () => {
+  const links = [link("busiest", { idle: 1_000 }), link("idle-30s", { idle: 30_000 }), link("idle-90s", { idle: 90_000 })];
+  assert.equal(rotationCandidate(links, POLICY, NOW).pubkey, "idle-90s", "the least useful goes first");
+
+  // Mid-transfer, too young, or banned: never.
+  assert.equal(rotationCandidate([link("sending", { transferring: true })], POLICY, NOW), null, "a link mid-transfer is never cut");
+  assert.equal(rotationCandidate([link("newcomer", { age: 3_000, idle: 3_000 })], POLICY, NOW), null, "a link that just opened is safe");
+  assert.equal(rotationCandidate([link("crook")], { ...POLICY, banned: new Set(["crook"]) }, NOW), null);
+
+  // A swarm where everyone is pulling its weight refuses rather than churns.
+  assert.equal(rotationCandidate([link("a", { idle: 2_000 }), link("b", { idle: 5_000 })], POLICY, NOW), null);
+  assert.equal(rotationCandidate([], POLICY, NOW), null);
+});
+
+test("a refused newcomer is told when coming back is worth it", () => {
+  // Nothing rotatable for another 12s, and nothing is more urgent than that.
+  const soon = retryAfterFor([link("young", { age: 3_000, idle: 3_000 })], POLICY, 0, NOW);
+  assert.equal(soon, 17_000, "wait until the youngest link is old enough and idle enough");
+
+  // A viewer that has just rotated somebody out waits out its churn budget.
+  const churning = retryAfterFor([link("idle", { idle: 90_000 })], POLICY, NOW - 2_000, NOW);
+  assert.equal(churning, 8_000);
+
+  // Clamped at both ends: never a spin, never parked for ever.
+  assert.equal(retryAfterFor([link("ready", { idle: 90_000 })], POLICY, 0, NOW), POLICY.retryFloorMs);
+  assert.equal(retryAfterFor([link("forever", { age: 1, idle: 1 })], { ...POLICY, minLinkLifeMs: 10 ** 7 }, 0, NOW), POLICY.retryCeilingMs);
+});
+
+test("a refusal from another peer is believed only within bounds", () => {
+  const key = "a".repeat(64);
+  assert.deepEqual(readRefusal({ retryAfterMs: 9_000, referrals: [key] }, POLICY), { retryAfterMs: 9_000, referrals: [key] });
+  assert.equal(readRefusal({ retryAfterMs: 5_000_000 }, POLICY).retryAfterMs, POLICY.retryCeilingMs, "a peer cannot park us");
+  assert.equal(readRefusal({ retryAfterMs: 1 }, POLICY).retryAfterMs, POLICY.retryFloorMs, "a peer cannot make us spin");
+  assert.equal(readRefusal({}, POLICY).retryAfterMs, POLICY.retryFloorMs);
+  assert.equal(readRefusal(null, POLICY).retryAfterMs, POLICY.retryFloorMs);
+  assert.deepEqual(readRefusal({ referrals: ["nope", 42, key, key, key] }, POLICY).referrals, [key, key], "junk out, and no more than the cap");
+});
