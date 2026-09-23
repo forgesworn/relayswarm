@@ -59,6 +59,7 @@ connection and relay socket, drops held segments and emits one final
 | `maxUploadPeers` | `4` | Distinct peers served in any 30 s. |
 | `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. |
 | `serveOnCellular` | `false` | With `false`, a viewer on a metered connection neither uploads nor races. |
+| `serve` | `true` | With `false`, the viewer is receive-only: it takes from peers but never uploads or advertises what it holds. Use it where the connection type cannot be read (Safari), so a phone on cellular is never asked to upload. |
 | `shadowSampleRate` | `1` | Share of fragments raced. |
 | `swarmParts` | `false` | Include low-latency HLS parts. Parts are small; leave off. |
 | `maxHeldSegments` / `maxHeldBytes` | `12` / 64 MB | What a viewer keeps to serve others. |

@@ -209,3 +209,16 @@ test("a refusal from another peer is believed only within bounds", () => {
   assert.equal(readRefusal(null, POLICY).retryAfterMs, POLICY.retryFloorMs);
   assert.deepEqual(readRefusal({ referrals: ["nope", 42, key, key, key] }, POLICY).referrals, [key, key], "junk out, and no more than the cap");
 });
+
+test("a receive-only viewer never offers to serve", () => {
+  const base = { swarmId: "swarm-abcdefgh", relays: ["wss://relay.example"], RTCPeerConnectionImpl: FakePeerConnection };
+  const serving = createHlsSwarm(base);
+  assert.equal(serving.metrics().serving, true);
+  assert.equal(serving.metrics().config.serve, true);
+  const receiveOnly = createHlsSwarm({ ...base, serve: false });
+  assert.equal(receiveOnly.metrics().serving, false);
+  assert.equal(receiveOnly.metrics().config.serve, false);
+  assert.equal(receiveOnly.metrics().mode, "shadow", "receive-only still races peers");
+  serving.stop();
+  receiveOnly.stop();
+});
