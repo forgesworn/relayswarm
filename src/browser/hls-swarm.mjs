@@ -49,6 +49,10 @@ const DEFAULTS = Object.freeze({
   shadowSampleRate: 1,
   swarmParts: false,
   serveOnCellular: false,
+  // Receive-only when false: the viewer takes from peers but never uploads,
+  // and never tells anyone what it holds. For browsers where the connection
+  // type cannot be read, so a phone on cellular cannot be told apart.
+  serve: true,
   // Rotation. A link is only ever dropped for a newcomer when it has been
   // useless in both directions for idleEvictMs, has lived at least
   // minLinkLifeMs (so a link that just opened, including one a newcomer was
@@ -405,6 +409,7 @@ class HlsSwarm {
         maxPeers: this.options.maxPeers,
         maxUploadPeers: this.options.maxUploadPeers,
         maxUploadBytesPerSecond: this.options.maxUploadBytesPerSecond,
+        serve: this.options.serve !== false,
         shadowSampleRate: this.options.shadowSampleRate,
         minLinkLifeMs: this.options.minLinkLifeMs,
         idleEvictMs: this.options.idleEvictMs,
@@ -686,7 +691,7 @@ class HlsSwarm {
   }
 
   #servingAllowed() {
-    return !this.stopped && !this.disabledReason && (this.options.serveOnCellular || !onCellular());
+    return !this.stopped && !this.disabledReason && this.options.serve !== false && (this.options.serveOnCellular || !onCellular());
   }
 
   #serveRequest(link, key) {
@@ -744,7 +749,7 @@ class HlsSwarm {
       this.session.announcePresence({
         role: "viewer",
         transports: [{ type: TRANSPORT, publicKey: this.session.pubkey }],
-        have: [...this.held.keys()].slice(-8),
+        have: this.#servingAllowed() ? [...this.held.keys()].slice(-8) : [],
         open: this.#canTakeAnotherPeer(),
       });
       this.counters.presenceSent += 1;
