@@ -1,0 +1,86 @@
+# RelaySwarm
+
+> Peer-assisted HLS video delivery needs rendezvous infrastructure, and the
+> usual answer is a dedicated, application-specific tracker. RelaySwarm is a
+> proof of concept that rendezvouses peers over the same Nostr relays a
+> live-stream event already lists (NIP-53), so peer discovery reuses
+> redundant, stream-selected infrastructure instead of a project-operated
+> service.
+
+RelaySwarm is for people building or evaluating peer-assisted delivery for
+Nostr live-streaming clients (zap.stream and similar). It proves the claim
+end to end over two paths: a browser path (WebRTC, signalled over Nostr
+relays) and a native path for installed Node applications (HyperDHT and
+Noise, no STUN or TURN). Both verify transferred data by SHA-256 before
+trusting it. This is a proof of concept: multi-peer swarm scheduling, an
+hls.js loader plugin and a NIP draft are deliberately out of scope for the
+code here (see the README's "Deliberately out of scope" section).
+
+## Getting Started
+
+There is no npm release yet; use a git dependency pinned at a commit, or run
+the proofs of concept directly from a checkout:
+
+```bash
+npm ci
+npm test                   # end-to-end: PoC + fan-out, against live Nostr relays
+npm run poc                # two-peer WebRTC PoC
+npm run poc:native         # two-peer native HyperDHT PoC
+```
+
+`npm test` needs Node 22+ and an internet connection: it signs, transfers and
+verifies against real public relays, and exits non-zero on a failed
+verification.
+
+## Key Concepts
+
+- **Presence and signal events.** A seeder announces presence as an
+  ephemeral, swarm-tagged Nostr event; peers exchange WebRTC SDP as
+  ephemeral, `p`-tagged signal events over the same relays.
+- **Hash-verified transfer.** Every received object is checked against a
+  SHA-256 digest before use; a bad seeder controls both bytes and hash in
+  the current PoC, so this detects corruption, not a malicious peer.
+- **Two independent transports.** The browser path uses WebRTC data
+  channels; the native path uses HyperDHT with NIP-44-encrypted dial
+  authorisation, for installed Node applications that cannot open a
+  browser's RTCPeerConnection.
+- **Shadow mode.** `hls-swarm.mjs` races the swarm against the origin
+  inside a real hls.js player without changing what the viewer sees, so
+  peer-delivery numbers can be collected safely.
+- **Risk-tiered participation.** A viewer can run origin-only, with no
+  swarm subscription or event publication, and never appear in the swarm.
+
+## API Surface
+
+From `relayswarm` (`src/relay-session.mjs`):
+- `RelaySwarmSession`, `RelayPool` - swarm membership, presence and
+  signalling over a set of Nostr relays.
+- `validTicket(ticket)` - validates an admission ticket.
+- `KIND_PRESENCE`, `KIND_SIGNAL`, `SWARM_TAG` - the Nostr event kinds and
+  tag name the protocol uses.
+
+From `relayswarm/hls-swarm` (`src/browser/hls-swarm.mjs`):
+- `createHlsSwarm(options)` - attaches shadow-mode peer assist to an
+  hls.js player; see [`INTEGRATION.md`](INTEGRATION.md) for the full
+  host-page contract, options and kill switch.
+- `rotationCandidate(links, options, at)`, `retryAfterFor(links, options,
+  lastEvictionAt, at)` - peer link rotation and backoff.
+
+Native path (not published as package exports; imported from source):
+- `src/native-dht-transport.mjs`'s `NativeDhtTransport` and
+  `src/native-journey.mjs`'s `runNativeJourney` drive the HyperDHT transfer;
+  see [`docs/NATIVE-TRANSPORT.md`](docs/NATIVE-TRANSPORT.md) for the
+  protocol and security boundary.
+- `src/object-transfer.mjs` frames, hashes and verifies transferred objects.
+
+## Optional
+
+- [`docs/NATIVE-TRANSPORT.md`](docs/NATIVE-TRANSPORT.md): native path
+  protocol, security boundary and honest gaps.
+- [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md): threat model the
+  deliverable engine will be tested against.
+- [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md): survey of neighbouring projects.
+- [`docs/FAQ.md`](docs/FAQ.md): frequently asked questions.
+- [`spikes/RESULTS.md`](spikes/RESULTS.md): full feasibility spike results.
+- [`INTEGRATION.md`](INTEGRATION.md): host-page integration contract for
+  `hls-swarm.mjs`.
