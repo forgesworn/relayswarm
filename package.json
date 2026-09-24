@@ -23,6 +23,11 @@
   ],
   "author": "TheCryptoDonkey",
   "license": "MIT",
+  "homepage": "https://github.com/forgesworn/RelaySwarm#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/forgesworn/RelaySwarm.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"
