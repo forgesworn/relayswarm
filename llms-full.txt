@@ -535,6 +535,8 @@ sustained-operation and external-platform acceptance remain open.
   numeric reporting; fixed cancelled HTTP media response cleanup.
 - Added a host-scoped trusted Nostr stream adapter and an isolated container
   pilot package, with real transport/browser checks and documented acceptance gaps.
+- Included the broadcaster/demo runtime dependencies in production installs and
+  excluded local IDE metadata and private state from the package.
 - Refreshed the documentation for the GitHub distribution and measured
   browser/native capabilities; separated planned work and historical observations.
 - Added a documentation index, getting-started guide, module API reference and

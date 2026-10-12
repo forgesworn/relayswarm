@@ -1,0 +1,13 @@
+node_modules/
+artifacts/
+.idea/
+deploy/.env
+operator-header
+.env
+.env.*
+state/
+**/*.key
+**/*.pem
+**/operator-token
+**/publisher.json
+**/youtube-url

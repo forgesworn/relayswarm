@@ -48,14 +48,14 @@
     "node": ">=22"
   },
   "dependencies": {
+    "esbuild": "0.28.2",
+    "hls.js": "1.7.3",
     "hyperdht": "6.33.2",
     "nostr-tools": "^2.24.1",
     "werift": "^0.24.3",
     "ws": "8.21.3"
   },
   "devDependencies": {
-    "esbuild": "0.28.2",
-    "hls.js": "1.7.3",
     "playwright-core": "1.63.0"
   },
   "exports": {
