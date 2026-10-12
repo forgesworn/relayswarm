@@ -5,6 +5,7 @@ deploy/.env
 operator-header
 .env
 .env.*
+!deploy/.env.example
 state/
 **/*.key
 **/*.pem
