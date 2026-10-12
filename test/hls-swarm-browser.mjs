@@ -206,7 +206,12 @@ try {
       // Give the first honest viewer only the tampering peer to ask. This
       // makes corruption detection an exercised requirement, not luck in a
       // larger swarm's peer selection.
-      if (CORRUPT_PEER && role.viewer === "v0") await sleep(8000);
+      if (CORRUPT_PEER && role.viewer === "v0") {
+        // Wait for an observed challenge, rather than assuming that eight
+        // seconds of two-player playback caused a request to the bad seeder.
+        // The final assertion still fails if it was never exercised.
+        await pages.find((page) => page.role.viewer === "v0").tab.waitForFunction(() => window.__viewer.report().swarm.peers.banned > 0, null, { timeout: 25000 }).catch(() => {});
+      }
     }
   }
 
@@ -269,7 +274,7 @@ try {
     at: new Date().toISOString(),
     mode: MODE,
     rotation: process.env.RELAYSWARM_NO_ROTATION === "1" ? "off" : "on",
-    shape: { liveSyncDurationCount: MODE === "peer-first" ? 4 : 3, viewers: VIEWERS, waves: WAVES, waveGapMs: WAVE_GAP_MS, maxPeers: MAX_PEERS, corruptPeer: CORRUPT_PEER, plusCorruptPeer: CORRUPT_PEER ? 1 : 0, plusBaselineWithoutSwarm: 1, durationS: DURATION_S, staggerMs: STAGGER_MS, segmentSeconds: 2, videoKbps: 1500, originFallbackMs: FALLBACK_MS },
+    shape: { liveSyncDurationCount: MODE === "peer-first" ? 4 : 3, ...(MODE === "peer-first" ? { maxBufferLength: 4, maxMaxBufferLength: 6 } : {}), viewers: VIEWERS, waves: WAVES, waveGapMs: WAVE_GAP_MS, maxPeers: MAX_PEERS, corruptPeer: CORRUPT_PEER, plusCorruptPeer: CORRUPT_PEER ? 1 : 0, plusBaselineWithoutSwarm: 1, durationS: DURATION_S, staggerMs: STAGGER_MS, segmentSeconds: 2, videoKbps: 1500, originFallbackMs: FALLBACK_MS },
     waves: waveRows,
     aggregate: {
       originLoaded: sum("originLoaded"),

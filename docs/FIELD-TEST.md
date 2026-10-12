@@ -158,6 +158,11 @@ GitHub CI runs this regression alongside both live harness modes. A manual
 workflow dispatch with `soak=true` adds a twelve-viewer peer-first run with
 three arrival waves, a 180 s final measurement window and sampled resource
 bounds. This remains a short loopback soak, not evidence of hours of operation.
+The live peer-first fixture caps forward buffering at 4 s (maximum 6 s), keeps
+its tampering seeder ahead in availability, and waits for an observed ban
+before adding other peers. Its origin-only baseline uses the same buffer
+settings. A playhead lead alone does not guarantee that a live-prefetching
+viewer will ask the tampering seeder for bytes.
 Presence remains swarm-wide; encrypted signals are subscribed to by recipient.
 Clients also check the subscription's filter before verifying and dispatching
 relay frames, so a relay cannot widen it into an all-audience signal feed.

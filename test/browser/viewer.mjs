@@ -69,7 +69,12 @@ const swarm = useSwarm
 // The tampering seeder keeps one segment's lead in peer-first tests so
 // integrity is exercised against an object already advertised by a peer.
 const liveSyncDurationCount = mode === "peer-first" ? 4 : 3;
-const hls = new Hls({ liveSyncDurationCount, enableWorker: true });
+// A playback lead alone does not imply an availability lead: unconstrained
+// live prefetch reaches the same edge in every tab. Keep peer-first viewers'
+// forward buffer behind the full-prefetch seeder, including the baseline.
+const hls = new Hls({ liveSyncDurationCount, enableWorker: true,
+  ...(mode === "peer-first" ? { maxBufferLength: 4, maxMaxBufferLength: 6 } : {}),
+});
 hls.on(Hls.Events.FRAG_LOADED, () => { player.fragsLoaded += 1; });
 hls.on(Hls.Events.ERROR, (_event, data) => {
   player.errors += 1;
