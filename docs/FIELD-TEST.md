@@ -128,6 +128,10 @@ Nothing is submitted automatically.
 an origin fragment request. It excludes commitment traffic, signalling and
 peer protocol overhead, so it is **not net connection data saved**. Shadow
 results measure extra sampled transfers and cannot be labelled origin savings.
+The upload allowance counter (`bytes.uploaded`) counts full media payloads
+accepted for serving, including any transfer later interrupted. It measures
+the engine's quota consumption, not acknowledged bytes or total network data.
+Use device/network measurements for actual data cost.
 Resource timings count same-origin media requests, including init segments
 and cache hits. Native-HLS browsers use origin-only playback and report origin
 resource measurements as unavailable rather than zero.

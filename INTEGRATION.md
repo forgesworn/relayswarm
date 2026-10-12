@@ -127,6 +127,11 @@ actually delivered to hls.js instead of starting an origin fragment request;
 `originFallbacks` counts loads delegated to the original loader. Shadow
 coverage fields are null in peer-first mode.
 
+`bytes.uploaded` counts media payloads accepted against the upload token bucket.
+An interrupted transfer can send less than this amount; signalling and protocol
+overhead are excluded. Treat it as quota consumption, not a measurement of total
+connection data or acknowledged delivery.
+
 ## Authenticated peer-first loading
 
 The runnable publisher/player example and the Node-only
