@@ -41,11 +41,11 @@ const swarm = useSwarm
       streamEvent,
       getCommitment: async (context, { signal }) => {
         commitmentRequests++;
-        if (params.get("commitmentFaults") === "1" && commitmentRequests % 7 === 0) {
+        if (params.get("commitmentFaults") === "1" && (commitmentRequests === 2 || commitmentRequests % 7 === 0)) {
           return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("fixture cancelled")), { once: true }));
         }
         const query = new URLSearchParams({ path: new URL(context.url).pathname, level: String(context.frag.level), sequence: String(context.frag.sn), cc: String(context.frag.cc ?? 0) });
-        if (params.get("commitmentFaults") === "1" && commitmentRequests % 5 === 0) query.set("bad", "1");
+        if (params.get("commitmentFaults") === "1" && (commitmentRequests === 1 || commitmentRequests % 5 === 0)) query.set("bad", "1");
         return fetch(`/commitment?${query}`, { signal }).then((response) => response.json());
       },
       serve: true, // Test fixtures explicitly contribute and race every segment.
