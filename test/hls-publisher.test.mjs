@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm, symlink } from "node:fs/promises";
+import { mkdtemp, writeFile, rename, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -177,4 +177,75 @@ test("publisher rejects bytes mutated during a successful full-length read", asy
   assert.equal(publisher.getMetrics().commitmentsSigned, 0);
   assert.equal(publisher.getMetrics().hashCacheEntries, 0);
   assert.equal(publisher.getMetrics().inFlight, 0);
+});
+
+test("atomic playlist races retry fresh verified data once, evict old contexts and bound repeated mutation", async (t) => {
+  const { open } = await import("node:fs/promises");
+  const directory = await fixture(t), path = join(directory, "index.m3u8");
+  const publisher = await createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8" });
+  const retired = await publisher.commitment(firstRange);
+  await writeFile(join(directory, "fresh.ts"), "ijklmnop");
+  const replacement = media.replace("SEQUENCE:20", "SEQUENCE:22").replaceAll("shared.ts", "fresh.ts");
+  const freshRange = { ...firstRange, path: "/media/fresh.ts", sequence: 22 };
+  const probe = await open(path, "r"), prototype = Object.getPrototypeOf(probe), originalRead = prototype.read;
+  await probe.close();
+  let mode = "once", reads = 0, mutations = 0, replacementBody = replacement;
+  t.mock.method(prototype, "read", async function (...args) {
+    const result = await originalRead.apply(this, args);
+    if (args[0].length === 256 * 1024 + 1 && result.bytesRead) {
+      reads++;
+      if (mode !== "idle") {
+        mutations++;
+        if (mode === "once") mode = "idle";
+        // Rename after the old bytes were read and before their stat checks.
+        const temporary = join(directory, "replacement.tmp");
+        await writeFile(temporary, `${replacementBody}\n# replacement ${mutations}\n`);
+        await rename(temporary, path);
+      }
+    }
+    return result;
+  });
+
+  const results = await Promise.allSettled([publisher.media("/media/fresh.ts"), publisher.commitment(freshRange), publisher.commitment(firstRange)]);
+  assert.equal(results[0].status, "fulfilled");
+  assert.equal(results[1].status, "fulfilled");
+  assert.equal(results[2].status, "rejected");
+  assert.equal(results[2].reason.status, 404); // Never return the cached retired commitment.
+  const event = results[1].value;
+  const verified = verifySegmentCommitment(event, { streamEvent: publisher.streamEvent, swarmId: publisher.swarmId,
+    key: digest(`${publisher.swarmId}\n/media/fresh.ts#0-4`), context: { frag: { level: 0, sn: 22, cc: 2 } }, maxSegmentBytes: 16 });
+  assert.equal(verified.sha256, digest("ijkl"));
+  assert.equal(verified.size, 4);
+  assert.equal(event.pubkey, retired.pubkey);
+  assert.notEqual(event.id, retired.id);
+  assert.equal(mutations, 1);
+  assert.equal(publisher.getMetrics().playlistRetries, 1);
+  assert.equal(publisher.getMetrics().changedReads, 1);
+  assert.equal(publisher.getMetrics().commitmentCacheEntries, 1);
+  assert.equal(publisher.getMetrics().hashCacheEntries, 1);
+
+  mode = "repeat";
+  const before = publisher.getMetrics(), readsBefore = reads;
+  const rejected = await Promise.allSettled([publisher.media("/media/fresh.ts"), publisher.commitment(freshRange)]);
+  assert.ok(rejected.every((result) => result.status === "rejected" && result.reason.status === 503 && /changed during reading/u.test(result.reason.message)));
+  assert.equal(reads - readsBefore, 2); // Concurrent callers share the same two attempts.
+  assert.equal(publisher.getMetrics().playlistRetries - before.playlistRetries, 1);
+  assert.equal(publisher.getMetrics().changedReads - before.changedReads, 2);
+  assert.equal(publisher.getMetrics().cacheHits, before.cacheHits);
+  assert.equal(publisher.getMetrics().hashReads, before.hashReads);
+  assert.equal(publisher.getMetrics().commitmentsSigned, before.commitmentsSigned);
+  assert.equal(publisher.getMetrics().inFlight, 0);
+  mode = "idle";
+  assert.equal((await publisher.commitment(freshRange)).id, event.id); // Fresh successful validation releases the failed refresh.
+
+  mode = "once";
+  replacementBody = "#EXTM3U\n#EXTINF:2,\nhttps://untrusted.example/private.ts\n";
+  const invalidReadsBefore = reads, retriesBefore = publisher.getMetrics().playlistRetries;
+  await assert.rejects(publisher.commitment(freshRange), { status: 400, message: "Only local media URIs are supported." });
+  assert.equal(reads - invalidReadsBefore, 2);
+  assert.equal(publisher.getMetrics().playlistRetries - retriesBefore, 1);
+  const ordinaryReadsBefore = reads;
+  await assert.rejects(publisher.media("/media/fresh.ts"), { status: 400 });
+  assert.equal(reads - ordinaryReadsBefore, 1); // Stable invalid data is never retried or served from cache.
+  assert.equal(publisher.getMetrics().playlistRetries - retriesBefore, 1);
 });

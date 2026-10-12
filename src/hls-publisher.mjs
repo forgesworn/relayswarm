@@ -116,14 +116,20 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
     if (!Number.isSafeInteger(value) || value < 1 || value > maximum) throw new PublisherError("Invalid publisher resource limit.");
   }
   const hashes = new Map(), commitments = new Map(), pendingHashes = new Map();
+  const changedPlaylists = new WeakSet();
   const metrics = { requests: 0, cacheHits: 0, hashCacheHits: 0, hashReads: 0, hashesComputed: 0, commitmentsSigned: 0,
-    renewals: 0, cacheEvictions: 0, changedReads: 0, busyRejected: 0, inFlight: 0, peakInFlight: 0 };
+    renewals: 0, cacheEvictions: 0, changedReads: 0, playlistRetries: 0, busyRejected: 0, inFlight: 0, peakInFlight: 0 };
   let snapshot, pendingRefresh;
   function retain(map, key, value) {
     map.delete(key); map.set(key, value);
     while (map.size > maxCacheEntries) { map.delete(map.keys().next().value); metrics.cacheEvictions++; }
   }
-  function changed() { metrics.changedReads++; return new PublisherError("Media changed during reading.", 503); }
+  function changed(isPlaylist = false) {
+    metrics.changedReads++;
+    const error = new PublisherError("Media changed during reading.", 503);
+    if (isPlaylist) changedPlaylists.add(error);
+    return error;
+  }
   async function localFile(path) {
     if (!path.startsWith(PREFIX)) throw new PublisherError("Unknown media.", 404);
     const file = await realpath(resolve(root, path.slice(PREFIX.length)));
@@ -131,10 +137,10 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
     if (!rel || isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`)) throw new PublisherError("Media leaves the published directory.", 403);
     return file;
   }
-  async function unchanged(handle, file, before) {
+  async function unchanged(handle, file, before, isPlaylist = false) {
     const after = await handle.stat({ bigint: true });
     const current = await fileStat(file, { bigint: true });
-    if (stamp(before) !== stamp(after) || stamp(after) !== stamp(current)) throw changed();
+    if (stamp(before) !== stamp(after) || stamp(after) !== stamp(current)) throw changed(isPlaylist);
   }
   async function playlist(path) {
     const file = await localFile(path), handle = await open(file, "r");
@@ -149,30 +155,44 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
         size += bytesRead;
       }
       if (size > MAX_PLAYLIST) throw new PublisherError("Excessive playlist.");
-      await unchanged(handle, file, before);
-      if (BigInt(size) !== before.size) throw changed();
+      await unchanged(handle, file, before, true);
+      if (BigInt(size) !== before.size) throw changed(true);
       return bytes.subarray(0, size).toString("utf8");
     } finally { await handle.close(); }
+  }
+  async function catalogue() {
+    const text = await playlist(manifestPath);
+    const levels = variants(text, manifestPath);
+    const entries = levels.length ? levels : [{ path: manifestPath }];
+    const records = [], assets = new Set([manifestPath]);
+    for (const [level, entry] of entries.entries()) {
+      assets.add(entry.path);
+      const media = fragments(levels.length ? await playlist(entry.path) : text, entry.path, level);
+      records.push(...media.records);
+      for (const asset of media.assets) assets.add(asset);
+    }
+    const contexts = new Map(records.map((record) => [contextKey(record), record]));
+    const authorisedAssets = new Set(records.map(assetKey));
+    return { records, assets, contexts, authorisedAssets };
   }
   async function refresh() {
     if (pendingRefresh) return pendingRefresh;
     pendingRefresh = (async () => {
-      const text = await playlist(manifestPath);
-      const levels = variants(text, manifestPath);
-      const entries = levels.length ? levels : [{ path: manifestPath }];
-      const records = [], assets = new Set([manifestPath]);
-      for (const [level, entry] of entries.entries()) {
-        assets.add(entry.path);
-        const media = fragments(levels.length ? await playlist(entry.path) : text, entry.path, level);
-        records.push(...media.records);
-        for (const asset of media.assets) assets.add(asset);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        let next;
+        try { next = await catalogue(); }
+        catch (error) {
+          if (attempt !== 0 || !changedPlaylists.has(error)) throw error;
+          // An atomic playlist replacement may race its stat checks. Re-read
+          // the whole catalogue once; no previous snapshot authorises fallback.
+          metrics.playlistRetries++;
+          continue;
+        }
+        for (const key of commitments.keys()) if (!next.contexts.has(key)) { commitments.delete(key); metrics.cacheEvictions++; }
+        for (const key of hashes.keys()) if (!next.authorisedAssets.has(key)) { hashes.delete(key); metrics.cacheEvictions++; }
+        snapshot = next;
+        return snapshot;
       }
-      const contexts = new Map(records.map((record) => [contextKey(record), record]));
-      const authorisedAssets = new Set(records.map(assetKey));
-      for (const key of commitments.keys()) if (!contexts.has(key)) { commitments.delete(key); metrics.cacheEvictions++; }
-      for (const key of hashes.keys()) if (!authorisedAssets.has(key)) { hashes.delete(key); metrics.cacheEvictions++; }
-      snapshot = { records, assets, contexts, authorisedAssets };
-      return snapshot;
     })().finally(() => { pendingRefresh = null; });
     return pendingRefresh;
   }

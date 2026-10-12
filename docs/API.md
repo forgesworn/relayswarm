@@ -80,8 +80,11 @@ The returned object contains:
   real local filename. It does not serve HTTP itself.
 - `await commitment(context)`: signs a kind-24172 commitment derived from a
   matching playlist record and the exact bytes on disk.
-- `getMetrics()`: request, cache, streamed hashing, signing, renewal, eviction
-  and concurrency counters. These do not measure network delivery.
+- `getMetrics()`: request, cache, streamed hashing, signing, renewal, eviction,
+  changed-read, bounded playlist-retry and concurrency counters. A playlist
+  rejected by the byte/stat change guard gets one fresh full-catalogue retry;
+  invalid data and changed segment bytes still reject. These counters do not
+  measure network delivery.
 
 Commitment input is `{ path, level, sequence, discontinuity, rangeStart?,
 rangeEnd?, part? }`. The path is the published `/media/...` path; level is the

@@ -176,7 +176,8 @@
     "Separate peer networks and hard NAT/TURN behaviour",
     "Hours of operation, audience capacity, adversarial admission and cost",
     "Real authorised external-platform ingest and playback",
-    "Earlier concurrent local MSE fixture failure remains unresolved"
+    "Earlier concurrent local MSE fixture failure remains unresolved",
+    "Later exact-image hosted concurrent MSE fatal failure remains unresolved"
   ],
   "measurementLimits": [
     "Four desktop Chrome contexts on one Mac hit a real external HTTPS origin; peers used same-host candidates.",
@@ -184,5 +185,93 @@
     "Origin counts are raw totals with staggered viewer starts; they are not matched-interval bandwidth savings.",
     "Peer payload excludes signalling, commitments, protocol overhead and aggregate origin/peer costs.",
     "Browser playback during a server restart was not tested in this hosted run."
-  ]
+  ],
+  "finalImageJourney": {
+    "at": "2026-10-12T13:37:04.717Z",
+    "sourceRevision": "30ffd2c0eccb95c620e4833bc3a30d36bac616df",
+    "ok": false,
+    "elapsedMs": 92984,
+    "watchdogExpired": true,
+    "scope": "Four desktop Chrome contexts on one Mac against the real HTTPS deployment, after app restarts with the ongoing synthetic source. No physical-device or separate-network evidence.",
+    "viewersAtLastReadableCheckpoint": [
+      {
+        "name": "contributor-low",
+        "fatalErrors": 1,
+        "stalls": 0,
+        "playerErrors": {
+          "bufferAppendError": 3,
+          "bufferAppendNoProgress": 1,
+          "bufferStalledError": 1
+        }
+      },
+      {
+        "name": "contributor-high",
+        "fatalErrors": 1,
+        "stalls": 0,
+        "playerErrors": {
+          "bufferAppendError": 2,
+          "bufferStalledError": 1
+        }
+      },
+      {
+        "name": "origin-baseline",
+        "fatalErrors": 1,
+        "stalls": 0,
+        "playerErrors": {
+          "bufferAppendError": 2,
+          "bufferStalledError": 1
+        }
+      },
+      {
+        "name": "receive-only",
+        "fatalErrors": 0,
+        "stalls": 2,
+        "playerErrors": {
+          "bufferStalledError": 2,
+          "bufferAppendNoProgress": 1,
+          "bufferNudgeOnStall": 1
+        }
+      }
+    ],
+    "failure": "Fatal MSE append errors on both contributors and the origin-only baseline; receiving viewer stalled. The watchdog then closed Chrome. Exact failed media had expired before detailed native MSE diagnostics.",
+    "resolved": false
+  },
+  "diagnosticProbes": [
+    {
+      "at": "2026-10-12T13:52:27.946Z",
+      "scope": "Single instrumented origin-only desktop Chrome context for25seconds; both qualities through original ABR.",
+      "fatalErrors": 0,
+      "stalls": 0,
+      "originFragments": 13,
+      "nativeAppendExceptions": 0,
+      "mediaElementErrors": 0,
+      "recoveredErrors": [
+        "Nonfatal overlapping fragment append/no-progress event",
+        "High rendition SN1142 HTTP503, same URL then200after1.184seconds while listed in both adjacent playlists"
+      ],
+      "interpretation": "Saved media is decodable; atomic playlist catalogue-refresh race identified. This does not establish the cause of the earlier fatal MSE errors."
+    },
+    {
+      "at": "2026-10-12T13:56:47.734Z",
+      "scope": "Four instrumented desktop Chrome contexts, original modes/qualities and no added playlist delay;40secondactivecap.",
+      "lastReadableSampleMs": 28800,
+      "fatalErrorsAtLastReadableSample": 0,
+      "stallsAtLastReadableSample": 0,
+      "finalInterval": "All four browser evaluation polls timed out during the final roughly ten seconds.",
+      "interpretation": "No fatal signal captured, but the final interval is unobservable. Earlier fatal MSE failure remains unresolved.",
+      "savedMediaBytes": 9298760,
+      "activeLimitMs": 40000,
+      "elapsedMs": 41887
+    }
+  ],
+  "catalogueRaceFix": {
+    "scope": "Local publisher source and deterministic mutation/signature regression. Not yet hosted media acceptance.",
+    "behaviour": "Coalesce concurrent refresh callers over at most two full catalogue reads; retry only a marked playlist byte/stat mutation once. Parse errors and segment mutation reject. Never authorise stale fallback.",
+    "tests": {
+      "publisherAndOperatorPassed": 39,
+      "platformSkipped": 1,
+      "failed": 0
+    },
+    "resolvesFatalMSE": false
+  }
 }

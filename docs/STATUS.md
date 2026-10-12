@@ -73,11 +73,18 @@ media. An earlier concurrent fixture attempt reported MSE append failures
 including on the origin-only baseline; its cause remains unresolved. The
 later isolated success does not close that load/decoder gate.
 
-Current checks include 53 swarm/discovery tests, 38 passing publisher/operator
+Current checks include 53 swarm/discovery tests, 39 passing publisher/operator
 tests with one Windows-only test skipped on macOS, 20 broadcast guard/transport
 tests, six native tests, Chrome operator/
 playback/broadcast receipts and public-relay transfers. These are local checks;
 the existing release CI links above cover the earlier release checkpoint.
+Current branch checks are available on
+[broadcaster pilot PR 8](https://github.com/forgesworn/relayswarm/pull/8).
+The initial branch CI found a TLS test that incorrectly required GnuTLS to
+reject a certificate before completing negotiation. The corrected test
+measures zero RTMP application bytes plus prompt certificate failure; it
+passes on actual macOS/OpenSSL and Linux/GnuTLS. A separate peer-first job
+was cancelled during package installation before its browser test started.
 
 An external pilot is available at
 [relayswarm.forgesworn.dev](https://relayswarm.forgesworn.dev) on the existing
@@ -88,7 +95,17 @@ records four Mac Chrome contexts, both video qualities, actual HTTPS HLS/WSS
 signalling, three verified peer loads (1,563,784 bytes), zero consumer uploads
 and zero stalls/fatal errors. No playlist delay was needed for that success.
 A preceding run lacked low-rendition peer payload within its deadline; peer
-coverage remains variable. Raw origin request totals have staggered viewer
+coverage remains variable. A later four-context run against source image
+`30ffd2c` failed: both contributors and the origin-only baseline recorded
+fatal MSE append errors, the receiving viewer stalled, and the 90 s watchdog
+ended the journey. Those failures remain open. A subsequent instrumented
+25 s origin-only probe recovered from a catalogue-refresh HTTP 503 without
+a fatal error; a four-context probe had healthy readable samples before
+all browser evaluation polls timed out during its final ten seconds.
+Neither diagnostic probe closes the earlier failure. The observed atomic
+playlist replacement race now has one bounded fresh-catalogue retry, with
+deterministic mutation/signature regressions; that fix does not establish
+the cause of the MSE failure. Raw origin request totals have staggered viewer
 starts and do not establish matched-interval or net bandwidth savings.
 
 A separate orderly app-container restart restored the same publisher,

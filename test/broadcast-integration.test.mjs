@@ -129,8 +129,15 @@ test("live ingest recovers, forwarding is isolated, and publisher identity survi
   const cert = join(directory, "untrusted.crt"), key = join(directory, "untrusted.key");
   execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", "/CN=localhost"], { stdio: "ignore" });
   const tls = tlsServer({ key: await readFile(key), cert: await readFile(cert) });
-  let accepted = 0;
-  tls.on("secureConnection", (socket) => { accepted++; socket.destroy(); });
+  let secureConnections = 0, applicationBytes = 0;
+  const tlsSockets = new Set();
+  tls.on("connection", (socket) => { tlsSockets.add(socket); socket.once("close", () => tlsSockets.delete(socket)); });
+  tls.on("secureConnection", (socket) => {
+    secureConnections++;
+    tlsSockets.add(socket); socket.once("close", () => tlsSockets.delete(socket));
+    socket.on("error", () => {});
+    socket.on("data", (bytes) => { applicationBytes += bytes.length; });
+  });
   tls.on("tlsClientError", () => {});
   await new Promise((done) => tls.listen(0, "127.0.0.1", done));
   try {
@@ -141,8 +148,14 @@ test("live ingest recovers, forwarding is isolated, and publisher identity survi
     try { result = await rejectForward.ended; } finally { clearTimeout(force); }
     assert.ok(result.code !== 0 && result.signal === null, "RTMPS did not fail promptly on an untrusted certificate");
     assert.match(rejectForward.output(), /certificate|verification|verify failed/iu);
-    assert.equal(accepted, 0);
-  } finally { await new Promise((done) => tls.close(done)); }
+    // GnuTLS can complete TLS negotiation before verifying the peer. The
+    // security boundary is that no RTMP application bytes reach this server.
+    t.diagnostic(`Untrusted TLS endpoint: ${secureConnections} completed TLS connections, ${applicationBytes} application bytes.`);
+    assert.equal(applicationBytes, 0, "Untrusted RTMPS endpoint received application bytes");
+  } finally {
+    for (const socket of tlsSockets) socket.destroy();
+    await new Promise((done) => tls.close(done));
+  }
 
   await demo.close(); demo = null;
   await pipeline.close();
