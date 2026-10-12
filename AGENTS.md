@@ -4,8 +4,9 @@ Nostr-rendezvoused, hash-verified peer transfer for HLS video: browsers use
 WebRTC signalled over Nostr relays instead of a dedicated tracker, and a
 separate native path uses HyperDHT and Noise for installed Node applications.
 This is a proof of concept, not a production engine; several features
-described in the README (multi-peer scheduling, an hls.js loader plugin, a
-NIP draft) are explicitly out of scope for the code in this repository.
+described in the README (advanced multi-peer/ABR scheduling and a NIP draft)
+remain out of scope. The browser loader supports shadow measurement and a
+bounded peer-first mode using author-signed segment commitments.
 
 ## Build & Test
 
@@ -18,7 +19,7 @@ NIP draft) are explicitly out of scope for the code in this repository.
 | `npm run poc:native` | Two-peer native HyperDHT PoC (`native-poc.mjs`) |
 | `npm run test:native` | Native path tests, local relay + local DHT bootstrap |
 | `npm run test:swarm` | `src/browser/hls-swarm.mjs` unit tests |
-| `npm run test:browser` | hls.js shadow-mode browser test |
+| `npm run test:browser` | hls.js browser test (`--mode shadow` or `--mode peer-first`) |
 | `npm run audit` | `npm audit --audit-level=high` |
 
 Node 22+ is required (the global `WebSocket`); CI runs on Node 24. `npm test`
@@ -30,7 +31,8 @@ The native tests do not need the network; they bootstrap a local DHT.
 
 ```
 src/relay-session.mjs          RelayPool, RelaySwarmSession, ticket validation (main export)
-src/browser/hls-swarm.mjs      hls.js shadow-mode integration (./hls-swarm export)
+src/browser/hls-swarm.mjs      hls.js shadow and peer-first integration (./hls-swarm export)
+src/browser/segment-commitment.mjs  experimental signed media commitment contract
 src/browser/peer-link.mjs      browser WebRTC peer link
 src/native-journey.mjs         native HyperDHT transfer orchestration
 src/native-dht-transport.mjs   NativeDhtTransport, HyperDHT wiring
@@ -48,9 +50,9 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 - Plain, factual claims only: state what is measured or proved, not what is
   planned; the README's "Deliberately out of scope" section lists what the
   PoC does not do.
-- The original WebRTC PoC signs but does not encrypt SDP; only the native
-  spike's dial authorisation is NIP-44 encrypted. Do not describe the WebRTC
-  path as encrypted.
+- The original WebRTC PoC signs but does not encrypt SDP. The separate browser
+  loader uses pairwise NIP-44 signalling, and the native path uses NIP-44 dial
+  authorisation. Preserve this distinction in claims about encryption.
 
 ## Key Files
 
@@ -67,7 +69,6 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 
 - `npm test` hits live public relays; a red run can mean relay weather, not
   a code fault. Re-run before concluding anything.
-- There is no npm release yet: `INTEGRATION.md`'s example pins a git
-  dependency at a commit rather than an npm version.
-- Do not present the WebRTC signalling path as encrypted; only the native
-  dial authorisation is.
+- There is no npm release yet: pin a git dependency at a commit, as described
+  in `INTEGRATION.md`, rather than relying on an npm version.
+- Do not present the original WebRTC PoC's signalling as encrypted.

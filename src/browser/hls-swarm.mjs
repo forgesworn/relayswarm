@@ -1,4 +1,5 @@
-// Peer-assisted live HLS for hls.js, shadow mode.
+// Peer-assisted live HLS for hls.js: shadow measurement and authenticated
+// peer-first loading with a bounded wait before the original HTTP loader.
 //
 // In shadow mode the player is never touched: every fragment still loads
 // from the origin exactly as it would without this module. Alongside each
@@ -14,8 +15,8 @@
 // offer/answer pair per connection.
 //
 // Guarantees the host page can rely on:
-//   - attach() only wraps the fragment loader; bytes reach hls.js before any
-//     swarm work runs, and no swarm error can reach the player.
+//   - shadow mode keeps the original loader in the playback path.
+//   - peer-first bytes reach the player only after signature and hash checks.
 //   - upload is capped in peers and bytes per second, and off on cellular
 //     connections by default.
 //   - stop() restores the original loader and closes every socket and peer.
@@ -28,13 +29,16 @@
 import { generateSecretKey } from "nostr-tools/pure";
 import { RelayPool, RelaySwarmSession, validTicket } from "../relay-session.mjs";
 import { PeerLink } from "./peer-link.mjs";
+import { boundedOperation } from "./bounded-operation.mjs";
+import { validStreamAuthorisation, verifySegmentCommitment } from "./segment-commitment.mjs";
 
-export const HLS_SWARM_METRICS_VERSION = 1;
+export const HLS_SWARM_METRICS_VERSION = 2;
 
 const TRANSPORT = "webrtc";
 const DEFAULTS = Object.freeze({
   mode: "shadow",
   originFallbackMs: 1_500,
+  originReserveMs: 2_000,
   lateWindowMs: 6_000,
   maxPeers: 6,
   maxUploadPeers: 4,
@@ -46,13 +50,14 @@ const DEFAULTS = Object.freeze({
   maxHeldSegments: 12,
   maxHeldBytes: 64 * 1024 * 1024,
   maxSegmentBytes: 16 * 1024 * 1024,
-  shadowSampleRate: 1,
+  shadowSampleRate: 0.25,
+  maxConcurrentRaces: 24,
+  admissionTimeoutMs: 3_000,
   swarmParts: false,
   serveOnCellular: false,
-  // Receive-only when false: the viewer takes from peers but never uploads,
-  // and never tells anyone what it holds. For browsers where the connection
-  // type cannot be read, so a phone on cellular cannot be told apart.
-  serve: true,
+  // Contribution requires explicit host opt-in. Connection type detection is
+  // advisory and unavailable in some browsers, including Safari.
+  serve: false,
   // Admission. `ticket` is what this viewer presents (in its presence and in
   // every offer and answer); `admit(pubkey, ticket)` is the host page's check
   // on everyone else's. With `admit` set, a viewer never dials, answers or
@@ -110,16 +115,19 @@ function onCellular() {
   return Boolean(connection && (connection.type === "cellular" || connection.saveData));
 }
 
-function gathered(pc, capMs = 1_200) {
+function gathered(pc, capMs = 1_200, signal) {
   return new Promise((resolve) => {
-    if (pc.iceGatheringState === "complete") return resolve();
-    const cap = setTimeout(resolve, capMs);
-    pc.addEventListener("icegatheringstatechange", () => {
-      if (pc.iceGatheringState === "complete") {
-        clearTimeout(cap);
-        resolve();
-      }
-    });
+    if (pc.iceGatheringState === "complete" || signal?.aborted) return resolve();
+    const finish = () => {
+      clearTimeout(cap);
+      pc.removeEventListener("icegatheringstatechange", changed);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    };
+    const changed = () => { if (pc.iceGatheringState === "complete") finish(); };
+    const cap = setTimeout(finish, capMs);
+    pc.addEventListener("icegatheringstatechange", changed);
+    signal?.addEventListener("abort", finish, { once: true });
   });
 }
 
@@ -218,6 +226,9 @@ class HlsSwarm {
     this.startedAt = Date.now();
     this.disabledReason = this.#validate();
     this.stopped = false;
+    this.lifecycle = new AbortController();
+    this.admissionChecks = new Map();
+    this.dialChecks = new Set();
     this.hls = null;
     this.originalFragmentLoader = undefined;
     this.pool = null;
@@ -241,6 +252,14 @@ class HlsSwarm {
     this.uploadRefilledAt = now();
     this.counters = {
       originLoaded: 0,
+      sampledOriginBytes: 0,
+      peerInTimeBytes: 0,
+      peerFirstLoaded: 0,
+      peerFirstBytes: 0,
+      originFallbacks: 0,
+      commitmentRequests: 0,
+      commitmentRejected: 0,
+      commitmentUnavailable: 0,
       raced: 0,
       noPeers: 0,
       sampledOut: 0,
@@ -291,9 +310,23 @@ class HlsSwarm {
     const { swarmId, relays, mode } = this.options;
     if (typeof swarmId !== "string" || swarmId.length < 8 || swarmId.length > 128) return "invalid-swarm-id";
     if (!Array.isArray(relays) || relays.length < 1 || relays.length > 8) return "invalid-relays";
+    try {
+      for (const value of relays) {
+        const url = new URL(value);
+        if (url.protocol !== "wss:" && !(url.protocol === "ws:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) return "invalid-relays";
+      }
+    } catch { return "invalid-relays"; }
     if (mode === "off") return "mode-off";
-    if (mode === "peer-first") return "peer-first-not-available";
-    if (mode !== "shadow") return "invalid-mode";
+    if (mode !== "shadow" && mode !== "peer-first") return "invalid-mode";
+    if (mode === "peer-first" && !validStreamAuthorisation(this.options.streamEvent)) return "invalid-stream-authorisation";
+    if (mode === "peer-first" && typeof this.options.getCommitment !== "function") return "missing-commitment-provider";
+    if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
+    if (typeof this.options.serve !== "boolean" || typeof this.options.serveOnCellular !== "boolean") return "invalid-serve-option";
+    if (this.options.ticket !== undefined && !validTicket(this.options.ticket)) return "invalid-ticket";
+    for (const key of ["originFallbackMs", "originReserveMs", "lateWindowMs", "maxPeers", "maxUploadPeers", "maxUploadBytesPerSecond", "maxDialsInFlight", "dialTimeoutMs", "presenceIntervalMs", "metricsIntervalMs", "maxHeldSegments", "maxHeldBytes", "maxSegmentBytes", "maxConcurrentRaces", "admissionTimeoutMs"]) {
+      if (!Number.isSafeInteger(this.options[key]) || this.options[key] < 1) return "invalid-limits";
+    }
+    if (!Number.isFinite(this.options.shadowSampleRate) || this.options.shadowSampleRate < 0 || this.options.shadowSampleRate > 1) return "invalid-sample-rate";
     if (!globalThis.crypto?.subtle) return "no-webcrypto";
     if (typeof (this.options.RTCPeerConnectionImpl || globalThis.RTCPeerConnection) !== "function") return "no-webrtc";
     if (typeof (this.options.WebSocketImpl || globalThis.WebSocket) !== "function") return "no-websocket";
@@ -305,7 +338,8 @@ class HlsSwarm {
     try {
       this.hls = hls;
       this.originalFragmentLoader = hls.config.fLoader;
-      hls.config.fLoader = this.#shadowLoader(hls.config.fLoader || hls.config.loader);
+      const BaseLoader = hls.config.fLoader || hls.config.loader;
+      hls.config.fLoader = this.options.mode === "peer-first" ? this.#peerFirstLoader(BaseLoader) : this.#shadowLoader(BaseLoader);
       this.#guard("start", () => this.#start());
       if (typeof this.options.onMetrics === "function") {
         this.#every(this.options.metricsIntervalMs, 0, () => this.options.onMetrics(this.metrics()));
@@ -318,6 +352,12 @@ class HlsSwarm {
   stop() {
     if (this.stopped) return;
     this.stopped = true;
+    this.lifecycle.abort();
+    this.admissionChecks.clear();
+    this.admitted.clear();
+    this.dialChecks.clear();
+    for (const race of this.races) { race.settled = true; race.controller.abort(); }
+    this.races.clear();
     try {
       if (this.hls && this.hls.config.fLoader?.relayswarmShadow) this.hls.config.fLoader = this.originalFragmentLoader;
     } catch {}
@@ -340,7 +380,10 @@ class HlsSwarm {
 
   metrics() {
     const c = this.counters;
-    const resolved = c.peerInTime + c.peerLate + c.peerMiss + c.peerCorrupt;
+    const shadow = this.options.mode === "shadow";
+    const resolved = shadow ? c.peerInTime + c.peerLate + c.peerMiss + c.peerCorrupt : 0;
+    const sampled = resolved + c.noPeers;
+    const share = (part, total) => total ? Number((part / total).toFixed(3)) : null;
     return {
       v: HLS_SWARM_METRICS_VERSION,
       swarmId: this.options.swarmId,
@@ -390,7 +433,18 @@ class HlsSwarm {
         peerMiss: c.peerMiss,
         peerCorrupt: c.peerCorrupt,
         peerUnverified: c.peerUnverified,
-        inTimeShare: resolved ? Number((c.peerInTime / resolved).toFixed(3)) : null,
+        inTimeShare: share(c.peerInTime, resolved),
+        sampledInTimeShare: share(c.peerInTime, sampled),
+        observedInTimeShare: shadow ? share(c.peerInTime, c.originLoaded) : null,
+        sampledInTimeByteShare: share(c.peerInTimeBytes, c.sampledOriginBytes),
+        observedInTimeByteShare: shadow ? share(c.peerInTimeBytes, c.bytesFromOrigin) : null,
+        peerFirstShare: shadow ? null : share(c.peerFirstLoaded, c.peerFirstLoaded + c.originLoaded),
+        peerFirstByteShare: shadow ? null : share(c.peerFirstBytes, c.peerFirstBytes + c.bytesFromOrigin),
+        peerFirstLoaded: c.peerFirstLoaded,
+        originFallbacks: c.originFallbacks,
+        commitmentRequests: c.commitmentRequests,
+        commitmentRejected: c.commitmentRejected,
+        commitmentUnavailable: c.commitmentUnavailable,
         firstPeerSegmentAtMs: this.firstPeerSegmentAtMs,
         peerLatencyMedianMs: percentile(this.peerLatencySamples, 0.5),
         peerLatencyP90Ms: percentile(this.peerLatencySamples, 0.9),
@@ -399,6 +453,7 @@ class HlsSwarm {
       bytes: {
         fromOrigin: c.bytesFromOrigin,
         fromPeers: c.bytesFromPeers,
+        peerFirst: c.peerFirstBytes,
         uploaded: c.bytesUploaded,
         uploadsServed: c.uploadsServed,
         uploadsRefused: c.uploadsRefused,
@@ -415,11 +470,12 @@ class HlsSwarm {
       errors: { total: c.errors, byStage: { ...this.errorsByStage } },
       config: {
         originFallbackMs: this.options.originFallbackMs,
+        originReserveMs: this.options.originReserveMs,
         lateWindowMs: this.options.lateWindowMs,
         maxPeers: this.options.maxPeers,
         maxUploadPeers: this.options.maxUploadPeers,
         maxUploadBytesPerSecond: this.options.maxUploadBytesPerSecond,
-        serve: this.options.serve !== false,
+        serve: this.options.serve === true,
         admit: typeof this.options.admit === "function",
         shadowSampleRate: this.options.shadowSampleRate,
         minLinkLifeMs: this.options.minLinkLifeMs,
@@ -433,6 +489,7 @@ class HlsSwarm {
   // --- guards and timers ----------------------------------------------------
 
   #noteError(stage, _error) {
+    if (this.stopped) return;
     this.counters.errors += 1;
     this.errorsByStage[stage] = (this.errorsByStage[stage] || 0) + 1;
   }
@@ -460,14 +517,168 @@ class HlsSwarm {
     const schedule = () => {
       const jitter = intervalMs * jitterFraction * (Math.random() * 2 - 1);
       this.#after(intervalMs + jitter, () => {
-        fn();
-        schedule();
+        try { fn(); } finally { schedule(); }
       });
     };
     schedule();
   }
 
   // --- the player side ------------------------------------------------------
+
+  #peerFirstLoader(BaseLoader) {
+    const swarm = this;
+    return class RelaySwarmPeerFirstLoader {
+      static relayswarmShadow = true;
+      constructor(config) {
+        this.inner = new BaseLoader(config);
+        this.active = null;
+        this.peerStats = null;
+        this.peerContext = null;
+      }
+      get stats() { return this.peerStats || this.inner.stats; }
+      get context() { return this.peerContext || this.inner.context; }
+      load(context, config, callbacks) {
+        this.cancel?.();
+        this.peerStats = null;
+        this.peerContext = context;
+        const budgetMs = swarm.#peerBudget();
+        if (swarm.stopped || !context.frag || context.frag.sn === "initSegment" || (context.part && !swarm.options.swarmParts)
+          || (!swarm.options.serveOnCellular && onCellular())) return this.inner.load(context, config, callbacks);
+        const controller = new AbortController();
+        const token = {};
+        this.active = token;
+        const t0 = now();
+        let timer;
+        const cleanup = () => {
+          clearTimeout(timer);
+          swarm.lifecycle.signal.removeEventListener("abort", fallback);
+        };
+        this.cancel = () => {
+          this.active = null;
+          cleanup();
+          controller.abort();
+        };
+        const fallback = () => {
+          if (this.active !== token) return;
+          this.active = null;
+          cleanup();
+          controller.abort();
+          swarm.counters.originFallbacks += 1;
+          // Fallback delegates errors, retries and progressive loading to the
+          // host's original loader. Only one path can call the player back.
+          this.inner.load(context, config, {
+            ...callbacks,
+            onSuccess: (response, stats, ctx, details) => {
+              let copy = null;
+              try { if (response.data?.byteLength) copy = response.data.slice(0); } catch {}
+              callbacks.onSuccess(response, stats, ctx, details);
+              if (copy && !swarm.stopped) swarm.#guard("peer-first-origin", async () => {
+                swarm.counters.originLoaded += 1;
+                swarm.counters.bytesFromOrigin += copy.byteLength;
+                const key = await swarm.#segmentKey(context);
+                if (!swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
+              });
+            },
+          });
+        };
+        if (budgetMs === 0) return fallback();
+        timer = setTimeout(fallback, budgetMs);
+        swarm.lifecycle.signal.addEventListener("abort", fallback, { once: true });
+        swarm.#peerFirst(context, controller.signal, t0 + budgetMs).then((result) => {
+          if (this.active !== token || controller.signal.aborted || swarm.stopped) return;
+          if (!result || now() >= t0 + budgetMs) return fallback();
+          this.active = null;
+          cleanup();
+          const end = now();
+          const size = result.bytes.byteLength;
+          this.peerStats = {
+            aborted: false, loaded: size, retry: 0, total: size, chunkCount: 1,
+            bwEstimate: size * 8_000 / Math.max(1, end - t0),
+            loading: { start: t0, first: end, end },
+            parsing: { start: 0, end: 0 }, buffering: { start: 0, first: 0, end: 0 },
+          };
+          swarm.counters.peerFirstLoaded += 1;
+          swarm.counters.peerFirstBytes += size;
+          swarm.counters.bytesFromPeers += size;
+          if (swarm.firstPeerSegmentAtMs === null) swarm.firstPeerSegmentAtMs = Date.now() - swarm.startedAt;
+          pushSample(swarm.peerLatencySamples, end - t0);
+          swarm.#hold(result.key, result.bytes.slice());
+          callbacks.onSuccess({ url: context.url, data: result.bytes.buffer, code: 200 }, this.peerStats, context, null);
+        }).catch((error) => {
+          if (this.active === token) {
+            swarm.#noteError("peer-first", error);
+            fallback();
+          }
+        });
+      }
+      abort() { this.cancel?.(); if (this.peerStats) this.peerStats.aborted = true; this.inner.abort(); }
+      destroy() { this.cancel?.(); this.inner.destroy(); }
+      getCacheAge() { return this.peerStats ? null : this.inner.getCacheAge?.() ?? null; }
+      getResponseHeader(name) { return this.peerStats ? null : this.inner.getResponseHeader?.(name) ?? null; }
+    };
+  }
+
+  #peerBudget() {
+    const media = this.hls?.media;
+    if (!media) return this.options.originFallbackMs;
+    try {
+      for (let i = 0; i < media.buffered.length; i++) {
+        if (media.buffered.start(i) <= media.currentTime && media.buffered.end(i) > media.currentTime) {
+          return Math.min(this.options.originFallbackMs, Math.max(0, (media.buffered.end(i) - media.currentTime) * 1000 - this.options.originReserveMs));
+        }
+      }
+    } catch {}
+    return 0;
+  }
+
+  async #segmentKey(context) {
+    const raw = (this.options.segmentKey || defaultSegmentKey)(context.url || context.frag.url, context);
+    if (typeof raw !== "string" || !raw) throw new Error("Invalid segment key.");
+    const range = context.rangeEnd ? `#${context.rangeStart || 0}-${context.rangeEnd}` : "";
+    return sha256Hex(utf8.encode(`${this.options.swarmId}\n${raw}${range}`));
+  }
+
+  async #peerFirst(context, signal, deadline) {
+    const key = await this.#segmentKey(context);
+    if (signal.aborted || this.stopped) return null;
+    // Somebody must fetch a fresh live segment first. Waiting for an object
+    // nobody advertises delays the origin seeder and every viewer behind it.
+    if (![...this.links.values()].some((peer) => peer.have.has(key))) return null;
+    let commitment;
+    try {
+      this.counters.commitmentRequests += 1;
+      const event = await boundedOperation(() => this.options.getCommitment(context, { signal }), signal, Math.max(1, deadline - now()));
+      commitment = verifySegmentCommitment(event, {
+        streamEvent: this.options.streamEvent, swarmId: this.options.swarmId, key, context,
+        maxSegmentBytes: this.options.maxSegmentBytes,
+      });
+    } catch { if (!this.stopped) this.counters.commitmentUnavailable += 1; return null; }
+    if (!commitment) { this.counters.commitmentRejected += 1; return null; }
+    if (signal.aborted || this.stopped) return null;
+    const tried = new Set();
+    while (!signal.aborted && !this.stopped && now() < deadline) {
+      const link = [...this.links.values()].find((peer) => !peer.busy && !tried.has(peer.pubkey) && peer.have.has(key));
+      if (!link) {
+        if (![...this.links.values()].some((peer) => !tried.has(peer.pubkey) && peer.have.has(key))) return null;
+        await this.#waitForHave(key, Math.min(100, deadline - now()), signal);
+        continue;
+      }
+      tried.add(link.pubkey);
+      const bytes = await link.request(key, Math.max(1, deadline - now()), { signal, expectedSize: commitment.size });
+      if (!bytes || signal.aborted || this.stopped) continue;
+      const digest = await sha256Hex(bytes);
+      if (signal.aborted || this.stopped) return null;
+      if (bytes.byteLength !== commitment.size || digest !== commitment.sha256) {
+        this.counters.peerCorrupt += 1;
+        this.banned.add(link.pubkey);
+        link.close();
+        continue;
+      }
+      if (commitment.expiresAt <= Math.floor(Date.now() / 1000)) return null;
+      return { key, bytes };
+    }
+    return null;
+  }
 
   #shadowLoader(BaseLoader) {
     const swarm = this;
@@ -483,6 +694,7 @@ class HlsSwarm {
 
       load(context, config, callbacks) {
         const race = swarm.#beginRace(context);
+        this.race = race;
         if (!race) return this.inner.load(context, config, callbacks);
         const progress = [];
         const tapped = {
@@ -501,6 +713,7 @@ class HlsSwarm {
               if (data?.byteLength) copy = data.slice(0);
               else if (progress.length) copy = RelaySwarmShadowLoader.join(progress);
             } catch {}
+            race.originSucceeded = true;
             callbacks.onSuccess(response, stats, ctx, details);
             if (copy) swarm.#guard("origin-loaded", () => swarm.#originLoaded(race, copy));
             else swarm.#guard("origin-empty", () => swarm.#originFailed(race));
@@ -523,8 +736,8 @@ class HlsSwarm {
         return this.inner.load(context, config, tapped);
       }
 
-      abort() { return this.inner.abort(); }
-      destroy() { return this.inner.destroy(); }
+      abort() { if (this.race) swarm.#originFailed(this.race); return this.inner.abort(); }
+      destroy() { if (this.race && !this.race.originSucceeded && !this.race.originDone) swarm.#originFailed(this.race); return this.inner.destroy(); }
       getCacheAge() { return this.inner.getCacheAge?.() ?? null; }
       getResponseHeader(name) { return this.inner.getResponseHeader?.(name) ?? null; }
 
@@ -545,7 +758,7 @@ class HlsSwarm {
   // Called synchronously from the loader, so it must stay cheap and never throw.
   #beginRace(context) {
     try {
-      if (this.stopped) return null;
+      if (this.stopped || this.races.size >= this.options.maxConcurrentRaces) return null;
       const frag = context?.frag;
       if (!frag || frag.sn === "initSegment" || (context.part && !this.options.swarmParts)) {
         this.counters.skipped += 1;
@@ -559,6 +772,7 @@ class HlsSwarm {
       }
       const range = context.rangeEnd ? `#${context.rangeStart || 0}-${context.rangeEnd}` : "";
       const race = {
+        controller: new AbortController(),
         t0: now(),
         keyText: `${this.options.swarmId}\n${rawKey}${range}`,
         key: null,
@@ -583,9 +797,10 @@ class HlsSwarm {
   }
 
   async #runRace(race) {
-    race.key = await sha256Hex(utf8.encode(race.keyText));
+    race.keyPromise = sha256Hex(utf8.encode(race.keyText));
+    race.key = await race.keyPromise;
     if (this.stopped) return;
-    if (!race.sampled || onCellular()) {
+    if (!race.sampled || (!this.options.serveOnCellular && onCellular())) {
       race.peerDone = true;
       race.skipPeers = true;
       return this.#guard("settle", () => this.#settle(race));
@@ -593,15 +808,15 @@ class HlsSwarm {
     const deadline = race.t0 + this.options.lateWindowMs;
     const tried = new Set();
     let sawPeer = race.peersAtStart > 0;
-    while (!this.stopped && !race.settled && now() < deadline) {
+    while (!this.stopped && !race.settled && !race.originFailed && now() < deadline) {
       if (this.links.size) sawPeer = true;
       const link = [...this.links.values()].find((candidate) => !candidate.busy && !tried.has(candidate.pubkey) && candidate.have.has(race.key));
       if (!link) {
-        await this.#waitForHave(race.key, deadline - now());
+        await this.#waitForHave(race.key, deadline - now(), race.controller.signal);
         continue;
       }
       tried.add(link.pubkey);
-      const bytes = await link.request(race.key, deadline - now());
+      const bytes = await link.request(race.key, deadline - now(), { signal: race.controller.signal });
       if (bytes && !this.stopped) {
         race.peerBytes = bytes;
         race.peerAt = now();
@@ -614,35 +829,43 @@ class HlsSwarm {
     this.#guard("settle", () => this.#settle(race));
   }
 
-  #waitForHave(key, timeoutMs) {
+  #waitForHave(key, timeoutMs, signal) {
     return new Promise((resolve) => {
       let timer = null;
       const waiter = (added) => {
         if (added && !added.includes(key)) return;
         clearTimeout(timer);
+        signal?.removeEventListener("abort", cancel);
         this.haveWaiters.delete(waiter);
         resolve();
       };
+      const cancel = () => waiter();
+      if (signal?.aborted) return resolve();
+      signal?.addEventListener("abort", cancel, { once: true });
       timer = setTimeout(waiter, Math.max(0, Math.min(timeoutMs, 1_000)));
       this.haveWaiters.add(waiter);
     });
   }
 
   async #originLoaded(race, buffer) {
+    if (this.stopped || race.originFailed) return;
     const bytes = new Uint8Array(buffer);
     const t1 = now();
     this.counters.originLoaded += 1;
     this.counters.bytesFromOrigin += bytes.byteLength;
+    race.originBytes = bytes.byteLength;
     pushSample(this.originLatencySamples, t1 - race.t0);
     race.originDigest = await sha256Hex(bytes);
     race.originDone = true;
-    while (!race.key && !this.stopped) await new Promise((resolve) => setTimeout(resolve, 5));
+    await race.keyPromise;
     if (this.stopped) return;
     this.#hold(race.key, bytes);
     this.#guard("settle", () => this.#settle(race));
   }
 
   #originFailed(race) {
+    if (race.settled || race.originDone) return;
+    race.controller.abort();
     race.originDone = true;
     race.originFailed = true;
     this.#guard("settle", () => this.#settle(race));
@@ -659,6 +882,7 @@ class HlsSwarm {
       else c.aborted += 1;
       return;
     }
+    c.sampledOriginBytes += race.originBytes || 0;
     if (!race.peerBytes) {
       if (race.sawPeer) {
         c.raced += 1;
@@ -680,14 +904,14 @@ class HlsSwarm {
     if (this.firstPeerSegmentAtMs === null) this.firstPeerSegmentAtMs = Date.now() - this.startedAt;
     pushSample(this.peerLatencySamples, latency);
     c.bytesFromPeers += race.peerBytes.byteLength;
-    if (latency <= this.options.originFallbackMs) c.peerInTime += 1;
+    if (latency <= this.options.originFallbackMs) { c.peerInTime += 1; c.peerInTimeBytes += race.peerBytes.byteLength; }
     else c.peerLate += 1;
   }
 
   // --- held segments and upload --------------------------------------------
 
   #hold(key, bytes) {
-    if (this.held.has(key) || bytes.byteLength > this.options.maxSegmentBytes) return;
+    if (!this.#servingAllowed() || this.held.has(key) || bytes.byteLength > this.options.maxSegmentBytes) return;
     this.held.set(key, bytes);
     this.heldBytes += bytes.byteLength;
     const evicted = [];
@@ -702,7 +926,7 @@ class HlsSwarm {
   }
 
   #servingAllowed() {
-    return !this.stopped && !this.disabledReason && this.options.serve !== false && (this.options.serveOnCellular || !onCellular());
+    return !this.stopped && !this.disabledReason && this.options.serve === true && (this.options.serveOnCellular || !onCellular());
   }
 
   #serveRequest(link, key) {
@@ -711,7 +935,7 @@ class HlsSwarm {
       this.counters.uploadsRefused += 1;
       return null;
     }
-    const recentUploaders = [...this.links.values()].filter((candidate) => candidate !== link && Date.now() - candidate.lastServedAt < 30_000).length;
+    const recentUploaders = [...this.links.values()].filter((candidate) => candidate !== link && (candidate.outboundInFlight > 0 || Date.now() - candidate.lastServedAt < 30_000)).length;
     if (Date.now() - link.lastServedAt >= 30_000 && recentUploaders >= this.options.maxUploadPeers) {
       this.counters.uploadsRefused += 1;
       return null;
@@ -848,6 +1072,7 @@ class HlsSwarm {
 
   #sendSignal(to, type, requestId, payload = {}) {
     try {
+      if (this.stopped) return false;
       this.session.sendSignal(to, { type, transport: TRANSPORT, requestId, payload });
       this.counters.signalsSent += 1;
       return true;
@@ -901,30 +1126,41 @@ class HlsSwarm {
     return validTicket(this.options.ticket) ? this.options.ticket : undefined;
   }
 
-  /** The host page's verdict on a peer, remembered per ticket so a presence beacon is checked once. */
+  // Remember credentials for retries, but ask the host again before any SDP
+  // is disclosed. An opaque ticket's expiry cannot be inferred by this module.
   async #admits(pubkey, ticket) {
+    if (this.stopped) return false;
     if (!this.#gated()) return true;
-    // Re-asked after a minute, so a ticket that has since expired stops working.
-    const remembered = this.admitted.get(pubkey);
-    if (ticket && remembered?.ticket === ticket && Date.now() - remembered.at < 60_000) return true;
-    let ok = false;
-    try {
-      ok = Boolean(ticket) && (await this.options.admit(pubkey, ticket)) === true;
-    } catch (error) {
-      this.#noteError("admit", error);
-    }
-    if (ok) this.admitted.set(pubkey, { ticket, at: Date.now() });
-    else {
-      this.admitted.delete(pubkey);
-      this.counters.admitRefused += 1;
-    }
-    return ok;
+    if (!validTicket(ticket)) { this.counters.admitRefused += 1; return false; }
+    const pending = this.admissionChecks.get(pubkey);
+    if (pending) return pending.ticket === ticket ? pending.promise : false;
+    if (this.admissionChecks.size >= 16) return false;
+    const check = { ticket, promise: null };
+    check.promise = (async () => {
+      let ok = false;
+      try {
+        ok = await boundedOperation(() => this.options.admit(pubkey, ticket, { signal: this.lifecycle.signal }), this.lifecycle.signal, this.options.admissionTimeoutMs) === true;
+      } catch (error) { this.#noteError("admit", error); }
+      if (this.stopped) return false;
+      if (ok) {
+        this.admitted.set(pubkey, { ticket });
+        if (this.admitted.size > 256) this.admitted.delete(this.admitted.keys().next().value);
+      } else {
+        this.admitted.delete(pubkey);
+        this.counters.admitRefused += 1;
+      }
+      return ok;
+    })().finally(() => {
+      if (this.admissionChecks.get(pubkey) === check) this.admissionChecks.delete(pubkey);
+    });
+    this.admissionChecks.set(pubkey, check);
+    return check.promise;
   }
 
   async #onPresence({ from, payload }) {
     if (this.stopped || payload.role !== "viewer") return;
     if (!payload.transports.some((transport) => transport.type === TRANSPORT)) return;
-    if (!(await this.#admits(from, payload.ticket))) return;
+    if (!(await this.#admits(from, payload.ticket)) || this.stopped) return;
     if (payload.open !== null) this.#rememberOpen(from, payload.open);
     if (this.links.has(from) || this.dials.has(from) || this.#coolingDown(from) || !this.#hasCapacity()) return;
     // The `open` hint is not a gate. Skipping peers that say they are full cost
@@ -947,6 +1183,13 @@ class HlsSwarm {
   }
 
   async #dial(pubkey) {
+    if (this.stopped || this.dialChecks.has(pubkey) || this.#coolingDown(pubkey)) return;
+    this.dialChecks.add(pubkey);
+    try {
+      if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.ticket))) return;
+    } finally { this.dialChecks.delete(pubkey); }
+    if (this.stopped || this.links.has(pubkey) || this.dials.has(pubkey) || !this.#hasCapacity()
+      || [...this.dials.values()].filter((dial) => dial.outgoing).length >= this.options.maxDialsInFlight) return;
     const pc = this.#newPeerConnection();
     const requestId = randomRequestId();
     const dial = { pubkey, pc, requestId, outgoing: true, startedAt: now(), offerSentAt: 0 };
@@ -957,8 +1200,10 @@ class HlsSwarm {
     channel.addEventListener("open", () => this.#guard("link-open", () => this.#linkOpened(dial, channel)));
     try {
       await pc.setLocalDescription(await pc.createOffer());
-      await gathered(pc);
-      if (this.dials.get(pubkey) !== dial) return;
+      await gathered(pc, 1_200, this.lifecycle.signal);
+      if (this.stopped || this.dials.get(pubkey) !== dial) return;
+      if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.ticket))) return this.#failDial(dial, "failed");
+      if (this.stopped || this.dials.get(pubkey) !== dial) return;
       dial.offerSentAt = now();
       // The offer says how alone the caller is: a peer with none at all is the
       // only one worth rotating somebody out for.
@@ -996,6 +1241,7 @@ class HlsSwarm {
         this.#failDial(dial, "failed");
         return;
       }
+      if (this.stopped || this.dials.get(from) !== dial) return;
       dial.answerAt = now();
       try {
         await dial.pc.setRemoteDescription({ type: "answer", sdp });
@@ -1018,7 +1264,7 @@ class HlsSwarm {
     if (this.banned.has(from) || this.links.has(from)) return;
     // Checked before anything is answered: the answer's SDP carries this
     // viewer's address. An unadmitted offer is dropped without a reply.
-    if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) return;
+    if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null)) || this.stopped || this.links.has(from)) return;
     const existing = this.dials.get(from);
     if (existing) {
       // Both sides dialled at once: the lower public key keeps its offer.
@@ -1042,9 +1288,12 @@ class HlsSwarm {
     });
     try {
       await pc.setRemoteDescription({ type: "offer", sdp });
+      if (this.stopped || this.dials.get(from) !== dial) return;
       await pc.setLocalDescription(await pc.createAnswer());
-      await gathered(pc);
-      if (this.dials.get(from) !== dial) return;
+      await gathered(pc, 1_200, this.lifecycle.signal);
+      if (this.stopped || this.dials.get(from) !== dial) return;
+      if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) return this.#failDial(dial, "failed");
+      if (this.stopped || this.dials.get(from) !== dial) return;
       const ticket = this.#ownTicket();
       if (this.#sendSignal(from, "answer", payload.requestId, { sdp: pc.localDescription.sdp, ...(ticket ? { ticket } : {}) })) this.counters.offersAccepted += 1;
       else this.#failDial(dial, "failed");

@@ -79,6 +79,10 @@ export class RelayPool {
     this.handlers = new Set();
     this.seen = new Set();
     this.connected = false;
+    this.closed = false;
+    this.connecting = null;
+    this.pendingSockets = new Map();
+    this.readyWaiters = new Set();
     // A long-lived swarm outlives a relay restart: with `reconnect`, a dropped
     // socket is re-dialled with jittered backoff and every live subscription is
     // re-sent. Short tests and the PoC keep the old one-shot behaviour.
@@ -92,14 +96,23 @@ export class RelayPool {
   }
 
   async connect() {
-    if (this.connected) return;
+    if (this.closed) throw new Error("RelayPool is closed.");
+    if (this.connected && this.sockets.length) return;
+    if (this.connecting) return this.connecting;
+    this.connecting = this.#connect().finally(() => { this.connecting = null; });
+    return this.connecting;
+  }
+
+  async #connect() {
+    this.connected = true;
     const results = await Promise.allSettled(this.urls.map((url) => this.#connectOne(url)));
-    if (this.reconnect && this.sockets.length > 0) {
-      // Keep trying relays that were down at start, once the pool is usable.
-      this.connected = true;
+    if (this.closed) throw new Error("RelayPool is closed.");
+    if (this.reconnect) {
       results.forEach((result, index) => {
         if (result.status === "rejected") this.#redial(this.urls[index], 1);
       });
+      if (!this.sockets.length) await new Promise((resolve, reject) => this.readyWaiters.add({ resolve, reject }));
+      return;
     }
     if (this.sockets.length === 0) {
       const reasons = results.map((result) => result.status === "rejected" ? result.reason?.message : "").filter(Boolean);
@@ -116,17 +129,27 @@ export class RelayPool {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        if (error) reject(error);
+        this.pendingSockets.delete(socket);
+        if (error) {
+          try { socket.close(); } catch {}
+          reject(error);
+        }
         else resolve(socket);
       };
       const timer = setTimeout(() => {
-        try { socket.close(); } catch {}
         finish(new Error(`${url} timed out`));
       }, this.connectTimeoutMs);
+      this.pendingSockets.set(socket, () => finish(new Error("RelayPool is closed.")));
       socket.addEventListener("open", () => {
+        if (settled || this.closed) {
+          try { socket.close(); } catch {}
+          return;
+        }
         this.sockets.push(socket);
         for (const [subscriptionId, filter] of this.subscriptions) socket.send(JSON.stringify(["REQ", subscriptionId, filter]));
         finish();
+        for (const waiter of this.readyWaiters) waiter.resolve();
+        this.readyWaiters.clear();
       });
       socket.addEventListener("error", () => finish(new Error(`${url} failed to connect`)));
       socket.addEventListener("message", (message) => this.#onMessage(message.data));
@@ -140,6 +163,7 @@ export class RelayPool {
   }
 
   #redial(url, attempt) {
+    if (this.closed) return;
     const delay = Math.min(this.reconnectMaxMs, 1_000 * 2 ** Math.min(attempt, 5)) * (0.5 + Math.random() * 0.5);
     const timer = setTimeout(() => {
       this.retryTimers.delete(timer);
@@ -152,6 +176,7 @@ export class RelayPool {
   }
 
   #onMessage(data) {
+    if (this.closed) return;
     if (byteLength(data) > MAX_RELAY_FRAME_BYTES) return;
     let frame;
     try {
@@ -176,11 +201,19 @@ export class RelayPool {
 
   subscribe(filter) {
     if (!this.connected || this.sockets.length === 0) throw new Error("RelayPool is not connected.");
+    if (this.subscriptions.size >= 32) throw new Error("Relay subscription capacity reached.");
     const subscriptionId = randomHex(8);
     const frame = JSON.stringify(["REQ", subscriptionId, filter]);
     this.subscriptions.set(subscriptionId, filter);
     for (const socket of this.sockets) socket.send(frame);
     return subscriptionId;
+  }
+
+  unsubscribe(subscriptionId) {
+    if (!this.subscriptions.delete(subscriptionId)) return;
+    for (const socket of this.sockets) {
+      try { socket.send(JSON.stringify(["CLOSE", subscriptionId])); } catch {}
+    }
   }
 
   onReject(handler) {
@@ -201,16 +234,22 @@ export class RelayPool {
   }
 
   close() {
+    this.closed = true;
     this.connected = false;
     for (const timer of this.retryTimers) clearTimeout(timer);
     this.retryTimers.clear();
     this.subscriptions.clear();
     this.rejectHandlers.clear();
+    for (const cancel of [...this.pendingSockets.values()]) cancel();
+    this.pendingSockets.clear();
+    for (const waiter of this.readyWaiters) waiter.reject(new Error("RelayPool is closed."));
+    this.readyWaiters.clear();
     for (const socket of this.sockets) {
       try { socket.close(); } catch {}
     }
     this.sockets = [];
     this.handlers.clear();
+    this.seen.clear();
   }
 }
 
@@ -234,7 +273,7 @@ export class RelaySwarmSession {
     if (this.started) return;
     this.started = true;
     this.unsubscribe = this.pool.onEvent((event) => this.#receive(event));
-    this.pool.subscribe({
+    this.subscriptionId = this.pool.subscribe({
       kinds: [KIND_PRESENCE, KIND_SIGNAL],
       [`#${SWARM_TAG}`]: [this.swarmId],
       since: Math.floor(Date.now() / 1000) - 2,
@@ -376,7 +415,9 @@ export class RelaySwarmSession {
   #receiveSignal(event) {
     if (byteLength(event.content) > MAX_SIGNAL_CIPHERTEXT_BYTES || uniqueTag(event, "p") !== this.pubkey) return;
     const conversationKey = nip44.utils.getConversationKey(this.secretKey, event.pubkey);
-    const payload = parseObject(nip44.decrypt(event.content, conversationKey));
+    const plaintext = nip44.decrypt(event.content, conversationKey);
+    if (byteLength(plaintext) > MAX_SIGNAL_PLAINTEXT_BYTES) return;
+    const payload = parseObject(plaintext);
     if (payload.v !== RELAYSWARM_VERSION || !validToken(payload.type) || !validToken(payload.transport) || !validRequestId(payload.requestId)) return;
     if (!payload.payload || typeof payload.payload !== "object" || Array.isArray(payload.payload)) return;
     this.#dispatch(this.signalHandlers, { from: event.pubkey, event, payload });
@@ -392,6 +433,7 @@ export class RelaySwarmSession {
 
   close() {
     this.unsubscribe?.();
+    this.pool.unsubscribe?.(this.subscriptionId);
     this.unsubscribe = null;
     this.started = false;
     this.presenceHandlers.clear();

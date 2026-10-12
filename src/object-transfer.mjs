@@ -58,6 +58,7 @@ function readFirstFrame(stream) {
       stream.off("data", onData);
       stream.off("error", onError);
       stream.off("end", onEnd);
+      stream.off("close", onEnd);
     };
     const fail = (error) => {
       cleanup();
@@ -82,6 +83,7 @@ function readFirstFrame(stream) {
     stream.on("data", onData);
     stream.once("error", onError);
     stream.once("end", onEnd);
+    stream.once("close", onEnd);
   });
 }
 
@@ -201,6 +203,7 @@ function receiveObject(stream, expected, maxObjectBytes) {
           }
           if (type === FRAME.CHUNK) {
             if (!metadataSeen) throw new Error("Object bytes arrived before metadata.");
+            if (!payload.length || chunks.length >= Math.max(1, Math.ceil(expected.size / MAX_FRAME_BYTES) * 4)) throw new Error("Native peer exceeded the object chunk budget.");
             receivedBytes += payload.length;
             if (receivedBytes > expected.size || receivedBytes > maxObjectBytes) throw new Error("Native peer exceeded the expected object size.");
             chunks.push(Buffer.from(payload));

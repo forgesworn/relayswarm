@@ -18,7 +18,7 @@ import { createHlsSwarm } from "relayswarm/hls-swarm";
 const swarm = createHlsSwarm({
   swarmId: `stage-${eventId}`,        // same string for every viewer of one stream
   relays: ["wss://relay.example"],     // 1-8; the deployment's own relay first
-  mode: "shadow",                      // "shadow" | "off"
+  mode: "shadow",                      // "shadow" | "peer-first" | "off"
   originFallbackMs: 1500,              // "in time" means within this of the load starting
   shadowSampleRate: 0.25,              // race this share of fragments (see Cost)
   onMetrics: (metrics) => post(metrics),
@@ -36,7 +36,7 @@ swarm.stop();
 `createHlsSwarm` never throws. An unusable option or browser yields a swarm
 whose `metrics().mode` is `"off"` and whose `metrics().disabledReason` says
 why (`invalid-swarm-id`, `invalid-relays`, `invalid-mode`, `mode-off`,
-`peer-first-not-available`, `no-webcrypto`, `no-webrtc`, `no-websocket`). A
+`invalid-stream-authorisation`, `missing-commitment-provider`, `invalid-limits`, `no-webcrypto`, `no-webrtc`, `no-websocket`). A
 disabled swarm leaves the player untouched, so the host page can attach
 unconditionally.
 
@@ -51,18 +51,22 @@ connection and relay socket, drops held segments and emits one final
 |---|---|---|
 | `swarmId` | required | Groups viewers of one stream. 8-128 characters. |
 | `relays` | required | 1-8 relay URLs (`wss://`, or `ws://` on loopback). |
-| `mode` | `"shadow"` | `"off"` disables; `"peer-first"` is not implemented yet and disables. |
+| `mode` | `"shadow"` | `"off"` disables; `"peer-first"` requires a signed stream authorisation and commitment provider. |
 | `secretKey` | fresh per viewer | Ephemeral signing key for presence and signalling. Never the viewer's own identity. |
 | `originFallbackMs` | `1500` | The in-time budget a peer delivery is measured against. |
+| `originReserveMs` | `2000` | Peer-first reserves this much buffered playback for the origin; an empty buffer goes directly to origin. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
 | `maxPeers` | `6` | Connections in and out. |
 | `maxUploadPeers` | `4` | Distinct peers served in any 30 s. |
 | `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. |
 | `serveOnCellular` | `false` | With `false`, a viewer on a metered connection neither uploads nor races. |
-| `serve` | `true` | With `false`, the viewer is receive-only: it takes from peers but never uploads or advertises what it holds. Use it where the connection type cannot be read (Safari), so a phone on cellular is never asked to upload. |
+| `serve` | `false` | Set `true` only after the viewer opts into uploading. With `false`, the viewer is receive-only: it takes from peers but never uploads or advertises what it holds. Use it where the connection type cannot be read (Safari), so a phone on cellular is never asked to upload. |
 | `ticket` | none | An opaque string (up to 2 KB) this viewer presents in its presence and in every offer and answer, typically a short-lived credential the origin signed for this viewer's swarm key. |
-| `admit` | none | `(pubkey, ticket) => boolean \| Promise<boolean>`. With it set, a viewer never dials, answers or follows a referral to a peer it has not admitted, so its address (carried in the SDP) only reaches ticket holders. Verdicts are remembered for a minute per ticket. |
-| `shadowSampleRate` | `1` | Share of fragments raced. |
+| `admit` | none | `(pubkey, ticket) => boolean \| Promise<boolean>`. With it set, a viewer never dials, answers or follows a referral to a peer it has not admitted, so its address (carried in the SDP) only reaches ticket holders. The host is called again before each dial and SDP publication, including retries and referrals; it must check expiry. A third argument provides an abort `signal`. At most 16 checks run concurrently and each has a 3 s deadline. |
+| `shadowSampleRate` | `0.25` | Share of fragments raced. |
+| `streamEvent` / `getCommitment` | required for peer-first | Signed kind-30311 stream event and `(context, { signal }) => signedCommitment`. See below. |
+| `maxConcurrentRaces` | `24` | Maximum retained shadow races. |
+| `admissionTimeoutMs` | `3000` | Deadline for a host admission check. |
 | `swarmParts` | `false` | Include low-latency HLS parts. Parts are small; leave off. |
 | `maxHeldSegments` / `maxHeldBytes` | `12` / 64 MB | What a viewer keeps to serve others. |
 | `presenceIntervalMs` | `20000` | Presence heartbeat, jittered 30%. |
@@ -77,12 +81,15 @@ Shadow mode downloads a raced fragment **twice**: once from the origin for the
 player, once from a peer to measure. That is the price of measuring with no
 playback risk. Keep `shadowSampleRate` low enough that the extra data is
 acceptable (0.25 gives a useful sample), and leave `serveOnCellular` false.
-A viewer who is helping is uploading, so say so in the interface and offer a
-way to switch it off, which is `stop()`.
+Contribution is off by default. Say plainly that `serve: true` redistributes
+media, and obtain the viewer's opt-in before enabling it. Cellular detection
+is advisory: browsers can omit connection information, so it cannot replace
+consent. Receive-only still discovers peers and exposes its address to them;
+`mode: "off"` or `stop()` provides origin-only playback.
 
 ## Metrics
 
-`onMetrics(metrics)` and `metrics()` return the same snapshot: `v`, `swarmId`,
+`onMetrics(metrics)` and `metrics()` return a version-2 snapshot: `v`, `swarmId`,
 `mode`, `disabledReason`, `stopped`, `pubkey` (the ephemeral swarm key,
 not an identity), `uptimeMs`, `serving`, plus:
 
@@ -94,28 +101,96 @@ not an identity), `uptimeMs`, `serving`, plus:
 - `signalling`: `samples`, `medianMs`, `p90Ms` from offer sent to channel open.
 - `segments`: `originLoaded`, `raced`, `noPeers`, `sampledOut`, `skipped`,
   `aborted`, `peerInTime`, `peerLate`, `peerMiss`, `peerCorrupt`,
-  `peerUnverified`, `inTimeShare`, `peerLatencyMedianMs`,
+  `peerUnverified`, `inTimeShare`, `sampledInTimeShare`, `observedInTimeShare`,
+  `sampledInTimeByteShare`, `observedInTimeByteShare`, `peerFirstLoaded`,
+  `originFallbacks`, `commitmentRequests`, `commitmentRejected`,
+  `commitmentUnavailable`, `peerFirstShare`, `peerFirstByteShare`, `peerLatencyMedianMs`,
   `peerLatencyP90Ms`, `originLatencyMedianMs`.
-- `bytes`: `fromOrigin`, `fromPeers`, `uploaded`, `uploadsServed`,
+- `bytes`: `fromOrigin`, `fromPeers`, `peerFirst`, `uploaded`, `uploadsServed`,
   `uploadsRefused`, `held`.
 - `relays`: `connected`, `presenceSent`, `signalsSent`, `published`,
   `rejected`, `publishErrors`.
 - `errors`: `total` and `byStage`.
 - `config`: the effective settings, so a receipt says what produced it.
 
-Nothing in a snapshot identifies the viewer: no IP addresses, no user agent,
-no long-term key. Post it to the host's own endpoint on an interval and once
+Snapshots contain no IP addresses, user agent or long-term key, but the
+ephemeral public key can correlate a receipt with public swarm activity. Post it to the host's own endpoint on an interval and once
 more on `stop()`, and keep the payload small enough for `sendBeacon`.
 
-The two numbers that decide whether peer-first is worth turning on are
-`segments.inTimeShare` and `peers.candidatePairs`: the first is how much of
-the stream peers could have carried, the second how many viewers can reach
-each other at all.
+`inTimeShare` remains conditional on having peers. `sampledInTimeShare`
+includes sampled fragments with no peers; its byte equivalent weights by
+fragment size. The `observed` shares divide verified in-time samples by all
+origin-loaded fragments/bytes and are lower bounds when sampling is below 1.
+Use sampled coverage alongside `noPeers` and `candidatePairs` when assessing
+reachability. In peer-first mode, `bytes.peerFirst` counts verified bytes
+actually delivered to hls.js instead of starting an origin fragment request;
+`originFallbacks` counts loads delegated to the original loader. Shadow
+coverage fields are null in peer-first mode.
+
+## Authenticated peer-first loading
+
+```js
+const swarm = createHlsSwarm({
+  swarmId,
+  relays,
+  mode: "peer-first",
+  streamEvent: signedLiveEvent,
+  getCommitment: (context, { signal }) =>
+    fetch(commitmentUrl(context), { signal }).then((response) => response.json()),
+  serve: viewerHasOptedIntoUploading,
+  originFallbackMs: 1500,
+});
+```
+
+The host obtains a kind-30311 event from its trusted stream discovery flow.
+The event must have a valid signature and the experimental tag
+`["relayswarm", "redistribute", "1"]`. This opts the publisher into peer
+redistribution. These assignments are a RelaySwarm contract, not an accepted
+NIP or an interoperability claim.
+
+The commitment is a Nostr event of experimental kind 24172, signed by the
+same author, tagged `x` with the swarm id and `e` with the exact stream event
+id. Its content is the exact output of `commitmentContent(fields)` exported
+by `relayswarm/segment-commitment`. Fixed field order and the
+`relayswarm-segment-v1` domain bind the signature to this use:
+
+```js
+commitmentContent({
+  streamEventId: signedLiveEvent.id,
+  swarmId,
+  key,                 // SHA-256 of swarmId + "\n" + segmentKey + byte range
+  rendition: "0",      // String(context.frag.level)
+  sequence: 123,       // context.frag.sn
+  discontinuity: 0,    // context.frag.cc, default 0
+  part: null,          // context.part.index, otherwise null
+  sha256,              // digest of the exact media bytes
+  size,                // exact byte count, within maxSegmentBytes
+  expiresAt,           // Unix seconds, future and at most five minutes away
+});
+```
+
+The default segment key is the URL pathname; a byte-range request adds
+`#start-end`, matching the loader context. Publisher and viewer must agree
+on this mapping. A commitment older than two minutes, a different stream,
+rendition, discontinuity, sequence or part, an expired commitment, or a
+signature from another key is rejected. Delegated commitment keys are not
+implemented.
+
+Signature validation, peer discovery, transfer and SHA-256 verification must
+all finish within `originFallbackMs`. With a thin playback buffer the wait is
+shortened to reserve `originReserveMs` for origin loading; startup, an
+empty buffer or a fragment no peer advertises goes directly to origin.
+Otherwise the original loader starts
+and owns its usual HTTP retries and errors. Invalid peer bytes are discarded
+and the peer is banned. Init segments and, by default, low-latency parts use
+the original loader directly. `abort()`, `destroy()` and `stop()` cancel
+pending peer work; stopping also immediately releases a waiting load to its
+original loader. No late peer completion can invoke a second success callback.
 
 ## The kill switch
 
 The host page owns the mode. Read it from your own stage status or config
-(`off` / `shadow`), create the swarm accordingly, and when a live change
+(`off` / `shadow` / `peer-first`), create the swarm accordingly, and when a live change
 flips it to `off`, call `stop()`. After `stop()` the player is exactly as it
 would have been without the module, and a new swarm can be created later if
 the switch flips back. Nothing in the module reaches back to the host to
@@ -123,11 +198,16 @@ decide its own mode.
 
 ## Known limits
 
-- **No peer-first delivery yet.** Peers are never in the playback path, so
-  there is no bandwidth saving yet, only measurement. Peer-first additionally
-  needs a trustworthy source of segment digests: a peer supplies both bytes
-  and hash today, which detects corruption but not a malicious peer. Options
-  are digests signed by the streamer or fetched from the origin.
+- **Limited peer-first scheduling.** Each load asks one available peer at a
+  time within a fixed deadline. Origin seeders can contribute substantially
+  without receiving any peer-first segments themselves; per-viewer benefits
+  are uneven. Advanced ABR-aware scheduling, delegated
+  signing, independent-client interop and real mobile/NAT measurements remain
+  outstanding. There is no production-readiness claim.
+- **Bounded peer resources.** A link queues at most four uploads, rejects
+  empty or excessive chunks and has a 3 s backpressure deadline. These bounds
+  limit particular attacks; they do not prove resistance to every Sybil or
+  resource-exhaustion attack.
 - **Rotation is narrow on purpose.** A peer at `maxPeers` rotates a link out
   only for a caller that has no peers at all, only when it would still keep one
   of its own, at most one per `evictionCooldownMs`, and never a link that is

@@ -20,7 +20,7 @@ const LOW_WATER_BYTES = 256 * 1024;
 const MAX_HAVE_KEYS = 256;
 
 export class PeerLink {
-  constructor({ pubkey, pc, channel, maxSegmentBytes, onRequest, onHaveChange, onClose }) {
+  constructor({ pubkey, pc, channel, maxSegmentBytes, onRequest, onHaveChange, onClose, maxQueuedRequests = 4, drainTimeoutMs = 3_000 }) {
     this.pubkey = pubkey;
     this.pc = pc;
     this.channel = channel;
@@ -28,6 +28,9 @@ export class PeerLink {
     this.onRequest = onRequest;
     this.onHaveChange = onHaveChange;
     this.onClose = onClose;
+    this.maxQueuedRequests = maxQueuedRequests;
+    this.drainTimeoutMs = drainTimeoutMs;
+    this.maxChunks = Math.max(1, Math.ceil(maxSegmentBytes / CHUNK_BYTES) * 4);
     this.have = new Set();
     this.pending = null;
     this.nextId = 1;
@@ -77,18 +80,23 @@ export class PeerLink {
   }
 
   // Resolves with the bytes, or null when the peer does not serve them in time.
-  request(key, timeoutMs) {
-    if (this.closed || this.pending) return Promise.resolve(null);
+  request(key, timeoutMs, { signal, expectedSize } = {}) {
+    if (this.closed || this.pending || signal?.aborted) return Promise.resolve(null);
     return new Promise((resolve) => {
       const id = this.nextId++;
       const finish = (bytes) => {
         if (this.pending?.id !== id) return;
         clearTimeout(this.pending.timer);
+        signal?.removeEventListener("abort", cancel);
         this.pending = null;
         if (bytes) this.lastDeliveredAt = Date.now();
         resolve(bytes);
       };
-      this.pending = { id, key, size: -1, parts: [], received: 0, finish, timer: setTimeout(() => finish(null), Math.max(1, timeoutMs)) };
+      // Binary chunks carry no request id. Close on cancellation or timeout so
+      // late chunks cannot be mistaken for a subsequent response.
+      const cancel = () => { finish(null); this.close(); };
+      this.pending = { id, key, expectedSize, size: -1, parts: [], received: 0, finish, timer: setTimeout(cancel, Math.max(1, timeoutMs)) };
+      signal?.addEventListener("abort", cancel, { once: true });
       if (!this.#sendText({ t: "want", id, k: key })) finish(null);
     });
   }
@@ -114,17 +122,19 @@ export class PeerLink {
   }
 
   #onMessage(data) {
+    if (this.closed) return;
     if (typeof data !== "string") {
       const pending = this.pending;
       if (!pending || pending.size < 0) return;
       const chunk = new Uint8Array(data);
+      if (!chunk.byteLength || chunk.byteLength > CHUNK_BYTES || pending.parts.length >= this.maxChunks) return this.close();
       pending.received += chunk.byteLength;
       this.bytesIn += chunk.byteLength;
       if (pending.received > pending.size) return pending.finish(null);
       pending.parts.push(chunk);
       return;
     }
-    if (data.length > 64 * 1024) return;
+    if (data.length > 64 * 1024) return this.close();
     const message = JSON.parse(data);
     if (!message || typeof message !== "object") return;
     switch (message.t) {
@@ -133,6 +143,8 @@ export class PeerLink {
       case "meta": {
         const pending = this.pending;
         if (!pending || message.id !== pending.id) return;
+        if (pending.size !== -1) return this.close();
+        if (pending.expectedSize !== undefined && message.size !== pending.expectedSize) return this.close();
         if (!Number.isSafeInteger(message.size) || message.size < 1 || message.size > this.maxSegmentBytes) return pending.finish(null);
         pending.size = message.size;
         return;
@@ -176,6 +188,7 @@ export class PeerLink {
 
   #onWant(message) {
     if (!Number.isSafeInteger(message.id) || typeof message.k !== "string" || !HEX64.test(message.k)) return;
+    if (this.outboundInFlight >= this.maxQueuedRequests) return this.close();
     this.outboundInFlight += 1;
     this.serving = this.serving
       .then(() => this.#serve(message.id, message.k))
@@ -199,10 +212,18 @@ export class PeerLink {
   }
 
   #drained() {
-    return new Promise((resolve) => {
-      const done = () => {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("Peer upload stalled."));
+      }, this.drainTimeoutMs);
+      const cleanup = () => {
+        clearTimeout(timer);
         this.channel.removeEventListener("bufferedamountlow", done);
         this.channel.removeEventListener("close", done);
+      };
+      const done = () => {
+        cleanup();
         resolve();
       };
       this.channel.addEventListener("bufferedamountlow", done);

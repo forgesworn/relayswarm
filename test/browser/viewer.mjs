@@ -9,8 +9,8 @@ const viewer = params.get("viewer") || "0";
 const useSwarm = params.get("swarm") !== "0";
 const video = document.querySelector("video");
 
-const player = { stalls: 0, errors: 0, fatalErrors: 0, playingAt: 0, lastTime: 0, fragsLoaded: 0 };
-video.addEventListener("waiting", () => { if (player.playingAt) player.stalls += 1; });
+const player = { stalls: 0, errors: 0, fatalErrors: 0, playingAt: 0, lastTime: 0, fragsLoaded: 0, errorDetails: {}, stallTimes: [] };
+video.addEventListener("waiting", () => { if (player.playingAt) { player.stalls += 1; player.stallTimes.push({ atMs: Math.round(performance.now()), currentTime: video.currentTime }); } });
 video.addEventListener("playing", () => { if (!player.playingAt) player.playingAt = performance.now(); });
 setInterval(() => { player.lastTime = video.currentTime; }, 500);
 
@@ -30,8 +30,25 @@ if (params.get("unlockInterfaces") === "1") {
 const rotation = params.get("rotation") !== "0";
 const withoutRotation = { idleEvictMs: 10 ** 9, maxRetriesPerPeer: 0, maxReferrals: 0, retryFloorMs: 30_000, retryCeilingMs: 30_000 };
 
+const mode = params.get("mode") || "shadow";
+const streamEvent = mode === "peer-first" ? await fetch("/authorisation.json").then((response) => response.json()) : undefined;
+let commitmentRequests = 0;
+
 const swarm = useSwarm
   ? createHlsSwarm({
+      mode,
+      streamEvent,
+      getCommitment: async (context, { signal }) => {
+        commitmentRequests++;
+        if (params.get("commitmentFaults") === "1" && commitmentRequests % 7 === 0) {
+          return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("fixture cancelled")), { once: true }));
+        }
+        const query = new URLSearchParams({ path: new URL(context.url).pathname, level: String(context.frag.level), sequence: String(context.frag.sn), cc: String(context.frag.cc ?? 0) });
+        if (params.get("commitmentFaults") === "1" && commitmentRequests % 5 === 0) query.set("bad", "1");
+        return fetch(`/commitment?${query}`, { signal }).then((response) => response.json());
+      },
+      serve: true, // Test fixtures explicitly contribute and race every segment.
+      shadowSampleRate: 1,
       swarmId: params.get("swarmId"),
       relays: [params.get("relay")],
       iceServers: [],
@@ -43,10 +60,14 @@ const swarm = useSwarm
     })
   : null;
 
-const hls = new Hls({ liveSyncDurationCount: 3, enableWorker: true });
+// The tampering seeder keeps one segment's lead in peer-first tests so
+// integrity is exercised against an object already advertised by a peer.
+const liveSyncDurationCount = mode === "peer-first" ? 4 : 3;
+const hls = new Hls({ liveSyncDurationCount, enableWorker: true });
 hls.on(Hls.Events.FRAG_LOADED, () => { player.fragsLoaded += 1; });
 hls.on(Hls.Events.ERROR, (_event, data) => {
   player.errors += 1;
+  player.errorDetails[data.details] = (player.errorDetails[data.details] || 0) + 1;
   if (data.fatal) player.fatalErrors += 1;
 });
 swarm?.attach(hls);
@@ -61,4 +82,5 @@ window.__viewer = {
   report: () => ({ viewer, useSwarm, player: { ...player, currentTime: video.currentTime }, swarm: swarm?.metrics() ?? null }),
   stop: () => swarm?.stop(),
   loaderRestored: () => !hls.config.fLoader,
+  stoppedMetrics: () => swarm?.metrics(),
 };

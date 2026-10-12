@@ -4,7 +4,7 @@ import test from "node:test";
 import { WebSocket } from "ws";
 import { runNativeJourney } from "../src/native-journey.mjs";
 import { NativeDhtTransport } from "../src/native-dht-transport.mjs";
-import { decodeFrames, encodeFrame, FRAME, requestObject, sha256Hex } from "../src/object-transfer.mjs";
+import { decodeFrames, encodeFrame, FRAME, requestObject, serveAuthorizedObject, sha256Hex } from "../src/object-transfer.mjs";
 import { KIND_SIGNAL } from "../src/relay-session.mjs";
 import { startLocalDht } from "./support/local-dht.mjs";
 import { startLocalRelay } from "./support/local-relay.mjs";
@@ -101,4 +101,33 @@ test("the receiver rejects bytes that do not match the independently expected di
   });
   await assert.rejects(requestObject(peer, expected), /wrong SHA-256 digest/iu);
   peer.destroy();
+});
+
+test("native authorisations are capped, expired entries are reclaimed and closed nodes reject new grants", async () => {
+  const transport = new NativeDhtTransport({ bootstrap: [], maxAuthorizations: 1 });
+  const grant = { transportPublicKey: "a".repeat(64), nostrPubkey: "b".repeat(64), requestId: "bounded-request", sha256: "c".repeat(64), size: 1 };
+  try {
+    transport.authorize(grant);
+    assert.throws(() => transport.authorize({ ...grant, transportPublicKey: "d".repeat(64) }), /capacity/);
+    transport.authorizations.get(grant.transportPublicKey).expiresAt = 0;
+    transport.authorize({ ...grant, transportPublicKey: "d".repeat(64) });
+    assert.equal(transport.authorizations.size, 1);
+    assert.throws(() => transport.authorize({ ...grant, size: 256 * 1024 * 1024 + 1 }), /size/);
+  } finally { await transport.close(); }
+  assert.throws(() => transport.authorize(grant), /closed/);
+});
+
+test("an authorised native peer that never requests bytes is closed at the transfer deadline", { timeout: 15_000 }, async () => {
+  const dht = await startLocalDht();
+  const server = new NativeDhtTransport({ bootstrap: dht.bootstrap, transferTimeoutMs: 500 });
+  const client = new NativeDhtTransport({ bootstrap: dht.bootstrap });
+  const bytes = Buffer.from("object");
+  try {
+    await Promise.all([server.ready(), client.ready()]);
+    await server.listen((socket, grant) => serveAuthorizedObject(socket, grant, () => bytes));
+    server.authorize({ transportPublicKey: client.publicKey, nostrPubkey: "a".repeat(64), requestId: "slow-peer-request", sha256: sha256Hex(bytes), size: bytes.length });
+    const socket = await client.connect(server.publicKey);
+    await new Promise((resolve) => socket.once("close", resolve));
+    assert.equal(server.connections.size, 0);
+  } finally { await Promise.allSettled([server.close(), client.close(), dht.close()]); }
 });

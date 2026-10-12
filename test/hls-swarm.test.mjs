@@ -35,7 +35,7 @@ test("a bad configuration yields a disabled swarm, never an exception", () => {
     swarm.stop();
   }
   const peerFirst = createHlsSwarm({ swarmId: "swarm-abcdefgh", relays: ["wss://relay.example"], mode: "peer-first", RTCPeerConnectionImpl: FakePeerConnection });
-  assert.equal(peerFirst.metrics().disabledReason, "peer-first-not-available");
+  assert.equal(peerFirst.metrics().disabledReason, "invalid-stream-authorisation");
   const hls = { config: { loader: FakeLoader } };
   peerFirst.attach(hls);
   assert.equal(hls.config.fLoader, undefined, "a disabled swarm leaves the player alone");
@@ -47,6 +47,8 @@ test("shadow mode hands the player its bytes untouched and restores the loader o
     const swarm = createHlsSwarm({
       swarmId: "swarm-abcdefgh",
       relays: [relay.url],
+      serve: true,
+      shadowSampleRate: 1,
       RTCPeerConnectionImpl: FakePeerConnection,
       segmentKey: (url) => {
         if (url.includes("boom")) throw new Error("host page bug");
@@ -212,7 +214,7 @@ test("a refusal from another peer is believed only within bounds", () => {
 
 test("a receive-only viewer never offers to serve", () => {
   const base = { swarmId: "swarm-abcdefgh", relays: ["wss://relay.example"], RTCPeerConnectionImpl: FakePeerConnection };
-  const serving = createHlsSwarm(base);
+  const serving = createHlsSwarm({ ...base, serve: true });
   assert.equal(serving.metrics().serving, true);
   assert.equal(serving.metrics().config.serve, true);
   const receiveOnly = createHlsSwarm({ ...base, serve: false });
@@ -231,6 +233,8 @@ test("a gated viewer dials only peers whose ticket the host page admits", async 
     const swarm = createHlsSwarm({
       swarmId: "swarm-abcdefgh",
       relays: [relay.url],
+      serve: true,
+      shadowSampleRate: 1,
       RTCPeerConnectionImpl: FakePeerConnection,
       presenceIntervalMs: 200,
       ...options,

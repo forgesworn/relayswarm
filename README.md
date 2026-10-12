@@ -155,8 +155,9 @@ pinning, replication or availability promise exists yet.
 
 The exact protocol, security boundary and honest gaps are in
 [`docs/NATIVE-TRANSPORT.md`](docs/NATIVE-TRANSPORT.md). CI is configured for all
-three desktop operating systems; the matrix is only evidence after those jobs
-actually run.
+three desktop operating systems. Current-main native tests passed on Windows,
+Linux and macOS (run 36015298994); this is test evidence, not packaging or
+real NAT reachability.
 
 ### A second implementation
 
@@ -185,15 +186,15 @@ mid-run - `spikes/browser-peer.html`):
 
 ![A browser tab pulls a 2MB segment over Nostr-signalled WebRTC and verifies it by SHA-256](docs/browser-verified.png)
 
-## Shadow mode: peer assist inside hls.js
+## Peer assist inside hls.js
 
 `src/browser/hls-swarm.mjs` attaches the same rendezvous and transfer to an
 [hls.js](https://github.com/video-dev/hls.js) player. In shadow mode the
 player is untouched: every fragment still loads from the origin, and the
 swarm races peers for the same fragment alongside it, verifies what arrives
 against the origin's own bytes, and reports what peer delivery would have
-achieved. The worst case is today's behaviour, which is what makes it safe to
-run in front of a real audience while the numbers are collected.
+achieved. It adds data traffic and local work; contributions are now off by
+default and the default sampling rate is 0.25.
 
 Measured in headless Chrome against a live ffmpeg HLS stream, eight viewers
 plus one tampering peer and one player with no swarm: 97.4% of races had a
@@ -205,7 +206,12 @@ the full receipt and the honest limits are in
 
 Host-page contract, options, metrics and the kill switch:
 [`INTEGRATION.md`](INTEGRATION.md). Peer-first delivery (peers in the playback
-path, with an authenticated digest source) is not implemented yet.
+path) now requires a segment commitment signed by the author of a verified
+kind-30311 stream event, bound to the exact stream, rendition, sequence,
+discontinuity, part, key, size and expiry. Verification must finish inside the
+peer budget or the original loader starts. This is a bounded experimental
+loader, not a production engine; the integration contract documents the
+experimental authorisation tag and commitment kind.
 
 ## Deliberately out of scope for the PoC
 
@@ -216,13 +222,13 @@ These are the project deliverables, not the PoC:
 - **Authenticated segment digests.** The PoC verifies the transfer against a
   hash supplied by the sending peer - that detects corruption, not a
   malicious peer, since a bad seeder controls both bytes and hash. The
-  production engine accepts a peer-delivered segment only against a digest
-  signed by the streamer or fetched from the HTTPS origin.
-- **Multi-peer swarm scheduling** - which peer serves which segment, origin
-  fallback budgets, churn handling.
-- **hls.js integration** - a loader plugin so any web player (zap.stream and
-  other Nostr clients included) can join the swarm transparently, falling
-  back to plain HLS when WebRTC is unavailable.
+  browser peer-first loader now verifies a streamer-signed commitment. The
+  original CLI PoC retains its same-peer digest.
+- **Advanced multi-peer/ABR scheduling** - the browser loader selects one
+  peer at a time with an origin deadline; broader scheduling remains future work.
+- **Broader hls.js engine integration** - the bounded loader now exists;
+  advanced ABR scheduling, independent-client interop and field validation
+  remain outstanding.
 - **A NIP draft** specifying the presence/signal kinds and tags so
   independent implementations interoperate.
 - NAT traversal hardening (the super-peer strategy for symmetric NATs,

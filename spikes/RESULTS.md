@@ -288,3 +288,71 @@ enough to separate a one-point difference in in-time share from noise.
 Reproduce with
 `node test/hls-swarm-browser.mjs --viewers 12 --waves 3 --duration 60 --maxPeers 2 --corruptPeer 0`.
 
+## Authenticated peer-first loading and hardening (2026-10-12)
+
+The browser loader now has an experimental peer-first path. A commitment
+signed by the author of the selected kind-30311 stream event binds the exact
+stream, rendition, sequence, discontinuity, part, segment key, digest, size
+and expiry. The author must also opt into redistribution. The original CLI
+PoC continues to use a digest supplied by the serving peer.
+
+Two local Chrome runs used six honest viewers in two waves, four links per
+viewer, a tampering peer and an origin-only baseline. The source was a live
+ffmpeg stream with 2 s H.264 segments at 1.5 Mbps. The harness joined viewers
+1 s apart, gave the tampering peer an initial lead to exercise verification,
+waited 15 s between waves and measured another 30 s after the last join.
+Every fixture explicitly enabled contribution and full shadow sampling.
+
+| Measurement | Shadow | Peer-first |
+|---|---|---|
+| Honest media fragments loaded | 147 | 155 |
+| Actual origin segment requests | 147 | 66 |
+| Verified peer-first loads replacing origin requests | 0 | 89 (57.4%) |
+| Verified bytes delivered instead of origin loads | 0 | 37,282,280 (37.3 MB) |
+| Shadow in-time coverage, including no-peer samples | 91.8% | Not applicable |
+| Tampering deliveries rejected / viewers banning the peer | 3 / 3 | 3 / 3 |
+| Honest viewer stalls / baseline stalls | 0 / 0 | 0 / 0 |
+| Fatal playback errors / swarm errors / page errors | 0 / 0 / 0 | 0 / 0 / 0 |
+
+The peer-first fault fixture also rejected five correctly signed commitments
+for the wrong rendition and fell back after three stalled commitment requests.
+Playback continued. All late-cohort viewers received authenticated peer-first
+segments in this run. Benefits vary by viewer: one early viewer originated
+fresh segments and uploaded them to consumers while receiving all its own
+segments over HTTP. The engine immediately uses origin for a segment no peer
+advertises; it does not delay that necessary seeder waiting for availability.
+It also shortens the peer wait when buffered playback would leave less than
+the 2 s origin reserve, and uses origin immediately with an empty buffer.
+
+Both runs restored the original fragment loader and reported zero connected
+peers, pending dials, relay sockets and held bytes after `stop()`.
+Receipts:
+[`shadow`](results/hls-swarm-shadow-rotation-on-20261012T080737Z.json),
+[`peer-first`](results/hls-swarm-peer-first-rotation-on-20261012T080912Z.json).
+
+These are loopback measurements: every candidate pair was `host/host`, and
+the harness used fake microphone permission to unlock local interfaces.
+Peer-first honest viewers and their baseline used a four-segment live target;
+the tampering seeder used three to stay ahead. This proves the bounded loader
+and these failure cases in real hls.js playback. It does not prove internet
+throughput, hard-NAT reachability, mobile battery/data costs, broad ABR
+behaviour or independent-client interoperability. The commitment assignments
+are experimental, not an accepted NIP.
+
+Reproduce either mode with:
+
+```bash
+npm run test:browser -- --mode shadow --viewers 6 --duration 30 --stagger 1000 --waves 2 --waveGap 15000 --maxPeers 4
+npm run test:browser -- --mode peer-first --viewers 6 --duration 30 --stagger 1000 --waves 2 --waveGap 15000 --maxPeers 4
+```
+
+The hardening suite passed 22 swarm/browser unit tests and six native tests
+locally. It covers request and chunk floods, upload backpressure deadlines,
+fresh admission on retries, delayed admission during shutdown, startup relay
+recovery, cancelled reconnects, commitment substitution and fallback.
+The two existing live-relay transfer tests also passed, dependency audit
+reported zero vulnerabilities, and an installed package with development
+dependencies omitted successfully imported the native journey. GitHub CI now
+includes both real Chrome modes alongside the native OS matrix and live-relay
+tests; each browser job uploads its own receipt.
+
