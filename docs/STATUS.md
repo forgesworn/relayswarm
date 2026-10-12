@@ -101,8 +101,13 @@ real in-place mutation when Windows denied rename with `EPERM`. Its sole
 failure was the broadcast browser's low-rendition peer deadline: the consumer
 requested fresh segments before either contributor held them. The fixed
 600 ms playlist delay did not establish availability; the bounded HAVE
-barrier above replaces that timing assumption. Linux CI must verify the
-revised fixture.
+barrier above replaces that timing assumption.
+[Branch CI run 38264629670](https://github.com/forgesworn/relayswarm/actions/runs/38264629670)
+passed all eight required jobs for source `0d8ebd2`; the optional soak was
+skipped. Its Linux broadcast receipt verifies both qualities and producer
+reconnect, with zero consumer upload/fatal errors/stalls. Contributor stalls
+during the source outage remain recorded in the
+[final pilot summary](../spikes/results/broadcaster-pilot-final-summary-20261012T144924Z.json).
 
 An external pilot is available at
 [relayswarm.forgesworn.dev](https://relayswarm.forgesworn.dev) on the existing
@@ -126,14 +131,25 @@ deterministic mutation/signature regressions; that fix does not establish
 the cause of the MSE failure. Raw origin request totals have staggered viewer
 starts and do not establish matched-interval or net bandwidth savings.
 
+The [final-image external check](../spikes/results/broadcaster-pilot-final-summary-20261012T144924Z.json)
+ran once against deployed image `pilot-0d8ebd2` for 51.6 s including setup and
+cleanup. Four independent contexts on one Mac Chrome host recorded both-quality
+origin and verified peer playback, five peer loads (2,955,548 bytes), zero
+consumer upload and zero stalls/fatal/native media errors. No playlist delay
+or availability barrier was applied. Actual HTTPS/WSS and stable public
+identity passed; the publisher matched the earlier pilot. This passing sample
+does not explain or close the earlier hosted MSE failure.
+
 A separate orderly app-container restart restored the same publisher,
 authorisation, swarm and manifest in 5.4 s. No browser was connected during
 that restart. Five encoding-only samples over 32 s recorded 30.15–30.29 fps,
 1.01x speed, 74.46–90.78% of one CPU core and 122.4–123.6 MiB app memory.
 These short measurements do not close sustained audience capacity, physical
 devices, peer NAT diversity or external platform acceptance. The pilot displays
-a waiting page until a source publishes; the synthetic acceptance source is
-temporary.
+a waiting page until a source publishes. The synthetic acceptance source and
+its SSH tunnel are stopped; the final image was restarted orderly to its
+verified HTTPS waiting page. Its healthcheck remains unready until fresh media
+arrives.
 
 | Gate | Evidence needed |
 |---|---|
