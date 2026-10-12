@@ -20,7 +20,6 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -138,8 +137,19 @@ try {
   cleanups.push(() => new Promise((resolve) => server.close(resolve)));
   const base = `http://localhost:${server.address().port}`;
 
-  for (let i = 0; i < 40 && !existsSync(join(hlsDir, "index.m3u8")); i++) await sleep(250);
-  await sleep(4500); // a few segments in the playlist before anyone joins
+  // Both live targets must fit before the first viewer joins. A short initial
+  // playlist collapses the corrupt seeder's one-segment lead: nobody asks it
+  // for advertised bytes, so the integrity assertion is never exercised.
+  const initialSegments = MODE === "peer-first" && CORRUPT_PEER ? 8 : 3;
+  const streamDeadline = Date.now() + 40000;
+  while (true) {
+    try {
+      const text = await readFile(join(hlsDir, "index.m3u8"), "utf8");
+      if ((text.match(/^#EXTINF:/gmu) || []).length >= initialSegments) break;
+    } catch {}
+    if (Date.now() >= streamDeadline) throw new Error(`Live fixture did not publish ${initialSegments} segments within 40 s.`);
+    await sleep(250);
+  }
   log(`stream up, relay ${relay.url}, pages at ${base}`);
 
   // --- the viewers ----------------------------------------------------------
