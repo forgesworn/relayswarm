@@ -1,14 +1,16 @@
 # Feasibility spike results
 
-Measurements taken 10 August 2026 with the code in this directory. These
-spikes are deliberately throwaway: push-to-all, no
-scheduling, no hls.js. Star topology everywhere except the chain
-redistribution run (`redistribute.mjs`). They exist to answer "will this actually work"
-before the real engine is built, and each one either passed or taught a
-design decision. All transfers are SHA-256 verified end to end - a
-transport check against the hash the sending peer supplied, which catches
-corruption but not a malicious seeder (who controls both bytes and hash);
-origin-authenticated digests are engine work, stated in the README.
+[Documentation](../docs/README.md) · [Release evidence](../docs/STATUS.md)
+
+The first rows record measurements from 10 August 2026; subsequent dated
+sections record later CLI, browser-loader and publisher/player runs. These
+are historical measurements with different fixtures and trust assumptions,
+not one benchmark of the current release. The early throwaway spikes used
+push-to-all without scheduling/hls.js, mostly star topology except the chain
+redistribution run. Their sending-peer hashes prove transport corruption
+detection, not malicious-seeder provenance. October peer-first fixtures use
+stream-author-signed commitments. Do not apply that stronger integrity claim
+to earlier runs retroactively.
 
 **Relay provenance.** The two-peer PoC measurements and the 10-leecher
 fan-out receipt ran over public relays (relay.damus.io, nos.lol,
@@ -404,3 +406,31 @@ overhead. Real mobile devices, separate-network throughput, broad adaptive
 bitrate behaviour, fMP4 playback and independent implementations remain field
 gates, listed in [`docs/FIELD-TEST.md`](../docs/FIELD-TEST.md).
 
+
+## Release twelve-viewer soak (12 October 2026)
+
+The [hosted final-fixture run](https://github.com/forgesworn/relayswarm/actions/runs/38231951028/attempts/2)
+used twelve honest viewers, one tampering seeder and an origin-only baseline,
+three arrival waves and a 180 s final measurement window. Peer-first consumers
+and the baseline capped forward buffering at 4 s (maximum 6 s). The tampering
+fixture stayed ahead in available segments and exercised an observed ban before
+other arrivals; its two initial commitment faults exercised substitution and
+timeout rather than depending on a random number of peer requests.
+
+The run passed with 923 of 1,343 fragment loads supplied by verified peers
+(68.7%), 385,107,472 peer-first media bytes, zero stalls/fatal errors for all
+twelve viewers and the baseline, and seven viewers banning the tampering peer.
+Two honest viewers used origin throughout. All 571 resource samples respected
+limits (maximum four links/dials, 5,091,228 held bytes and one relay); shutdown
+released resources and restored loaders.
+
+A [committed summary](results/hls-soak-summary-20261012T100026Z.json) retains the
+receipt provenance, shape, aggregates, cohorts, playback results and resource
+maxima; individual samples remain in the CI artifact. This was a short loopback
+run, not physical-phone, internet-NAT or sustained-operation evidence. Media
+bytes avoided exclude signalling, commitments and peer protocol overhead.
+
+The v0.1.0 release-main [CI run](https://github.com/forgesworn/relayswarm/actions/runs/38233694634)
+passed all seven standard jobs. Its GitHub package/bundle downloads were verified
+against the published SHA-256 manifest. Distribution and current remaining
+gates are recorded in [STATUS.md](../docs/STATUS.md).

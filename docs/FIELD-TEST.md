@@ -1,11 +1,17 @@
 # Publisher/player field test
 
+[Documentation](README.md) · [Installation](GETTING-STARTED.md) ·
+[Publisher API](API.md#node-hls-publisher) · [Release evidence](STATUS.md)
+
 The demo is a runnable publisher and an hls.js player with origin-only,
 shadow and authenticated peer-first modes. Uploading starts **off**. Receipts
 are downloaded locally; there is no receipt submission or analytics endpoint.
 The publisher's signing key stays in the Node process.
 
 ## Run locally
+
+From the [v0.1.0 source checkout](GETTING-STARTED.md#run-the-source-demo) or a
+current main checkout:
 
 ```bash
 npm ci
@@ -162,6 +168,9 @@ GitHub CI runs this regression alongside both live harness modes. A manual
 workflow dispatch with `soak=true` adds a twelve-viewer peer-first run with
 three arrival waves, a 180 s final measurement window and sampled resource
 bounds. This remains a short loopback soak, not evidence of hours of operation.
+The release's [completed soak](STATUS.md#release-verification) recorded zero
+stalls/fatal errors and 68.7% peer-first fragment loads, with uneven per-viewer
+benefits. Its recorded receipt does not establish separate-network performance.
 The live peer-first fixture caps forward buffering at 4 s (maximum 6 s), keeps
 its tampering seeder ahead in availability, and waits for an observed ban
 before adding other peers. Its origin-only baseline uses the same buffer

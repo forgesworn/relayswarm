@@ -1,10 +1,12 @@
-# Threat model - outline
+# RelaySwarm threat model
 
-The PoC is deliberately not production-secure; it proves feasibility, not
-robustness. This outline states what the deliverable engine must defend and
-how it will be tested, ahead of implementation, so the adversarial suite is
-a commitment rather than an afterthought. The full written threat model
-ships with the engine.
+[Documentation](README.md) · [Release evidence](STATUS.md) ·
+[Integration](../INTEGRATION.md)
+
+This describes the implemented experimental boundaries and the remaining
+adversarial work at v0.1.0. Passing named regression cases does not establish
+production security or completion of the threat model. The original CLI,
+browser loader and native path have different trust assumptions.
 
 ## Implemented boundaries
 
@@ -45,37 +47,30 @@ protocol interoperability remain outstanding.
   observers may still correlate swarm activity with a viewer's other Nostr
   use through shared connections, IP addresses and timing, and a client
   that reuses one relay connection for both makes that correlation trivial.
-  Connection separation is an engine design question, not a solved one.
+  The browser loader creates its own swarm relay pool, but shared IPs/timing
+  still permit correlation; applications using the lower-level session API
+  must also consider which connections they share.
 - **Origin capacity** - the resource the swarm exists to protect.
 
 ## The core defence: authenticated segment commitments
 
-The PoC verifies a transfer against a SHA-256 hash supplied by the sending
-peer. That proves transport, not provenance - a malicious seeder controls
-both the bytes and the hash. The engine therefore accepts a peer-delivered
-segment only against a digest **signed by an authorised signer or fetched
-from the HTTPS origin**, bound to the stream, the rendition, the media
-sequence number and an expiry. Wrong bytes fail the check and the segment
-is refetched from origin; poisoning costs the attacker bandwidth and consumes
-part of the viewer's bounded peer-retry budget before origin fallback.
+The original PoC verifies a SHA-256 hash supplied by the sending peer. That
+proves transport, not provenance: a malicious seeder controls bytes and hash.
+Shadow mode instead compares with origin bytes, while the browser peer-first
+loader requires a commitment signed by the **same author as the selected
+kind-30311 stream event**. It binds stream/event identity, swarm, rendition,
+sequence, discontinuity, part, segment key, digest, size and expiry. Wrong
+bytes fail verification, the peer is banned, and the normal origin loader is
+the fallback. Receiving a digest over HTTPS alone does not satisfy the
+current peer-first signature contract.
 
-"Authorised signer" needs defining precisely, or the design is only
-conceptually right. Exactly one of:
-
-1. the **author of the NIP-53 stream event** (kind 30311) the swarm is
-   bound to; or
-2. a **short-lived commitment key explicitly delegated by that author** in
-   a signed, expiring authorisation the viewer can verify against the
-   stream event.
-
-Nothing else counts, and a commitment whose signer chain does not resolve
-to the stream author is treated as hostile. Two further requirements the
-spec must carry, since an interoperable security protocol cannot leave
-them to implementers: a **canonical encoding** of the commitment (a fixed
-field order and serialisation, so two implementations hash identical bytes)
-and **domain separation** (a scheme-specific prefix in the signed message,
-so a commitment signature can never be replayed as any other Nostr
-signature and vice versa).
+The verifier requires fixed field order and exact canonical JSON with the
+`relayswarm-segment-v1` domain and schema version 1. It rejects altered fields,
+other signers, expired/stale events and substituted media contexts. The precise
+contract is in [INTEGRATION.md](../INTEGRATION.md#authenticated-peer-first-loading).
+Delegated commitment keys are a possible future design, not implemented here.
+The host still establishes which publisher it trusts. A malicious authorised
+publisher can sign harmful bytes; cryptographic integrity is not moderation.
 
 Streams also carry an explicit **peer-redistribution authorised** flag;
 absent it, clients do not form a swarm. Peer assistance is something a
@@ -84,7 +79,8 @@ on for any HLS URL.
 
 ## Adversarial suite
 
-Each of these is a test the engine must pass, not a paragraph:
+These are areas for the full adversarial suite. Some individual cases are
+already regressed above; broader combinations remain outstanding:
 
 - Wrong bytes under every digest arrangement (peer-supplied, stale,
   cross-rendition, cross-stream).
@@ -99,11 +95,12 @@ Each of these is a test the engine must pass, not a paragraph:
 
 Event spam is not only the relays' rate-limiting problem; a client must
 defend itself. The engine bounds its subscriptions, enforces event-size
-limits, budgets concurrent dials, caps queues, and validates cheaply
-(signature, tags, size) before allocating any WebRTC resource. Fake
-presence announcements cost the attacker signatures and cost the client at
-most a capped dial budget; the scheduler scores peers and prefers proven
-ones.
+limits, budgets concurrent dials and caps queues. Relay frames must match a
+live subscription id/filter before signature validation and dispatch; signals
+are subscribed to by recipient, while presence remains swarm-wide. The loader
+bounds admission checks and transfers and uses availability, rotation/referrals
+and deadlines. This is not an implemented reputation or Sybil-resistance system:
+validly signed fake presence can still consume bounded client work.
 
 ## Out of scope, stated plainly
 
@@ -114,6 +111,5 @@ ones.
 - **WebRTC protocol fingerprinting.** A state that filters DTLS takes the
   swarm down to plain-HLS fallback; resistance is future work, not quietly
   claimed here.
-- **A hidden origin.** The swarm distributes egress, not ingest; onion
-  service support gives at-risk viewers a fetch path, it does not conceal
-  where the stream is made.
+- **A hidden origin.** The swarm distributes egress, not ingest. No dedicated
+  onion-service support or origin-concealment feature is implemented.
