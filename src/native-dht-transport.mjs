@@ -1,4 +1,5 @@
 import DHT from "hyperdht";
+import { DEFAULT_MAX_OBJECT_BYTES } from "./object-transfer.mjs";
 
 export const NATIVE_TRANSPORT = "hyperdht-v1";
 
@@ -20,11 +21,15 @@ function withTimeout(promise, timeoutMs, message) {
 }
 
 export class NativeDhtTransport {
-  constructor({ bootstrap, keyPair = DHT.keyPair(), connectionTimeoutMs = 15_000 } = {}) {
+  constructor({ bootstrap, keyPair = DHT.keyPair(), connectionTimeoutMs = 15_000, maxAuthorizations = 256, maxConnections = 16, transferTimeoutMs = 30_000 } = {}) {
     this.keyPair = keyPair;
     this.publicKey = hex(keyPair.publicKey);
     this.connectionTimeoutMs = connectionTimeoutMs;
     this.authorizations = new Map();
+    this.connections = new Set();
+    this.maxAuthorizations = maxAuthorizations;
+    this.maxConnections = maxConnections;
+    this.transferTimeoutMs = transferTimeoutMs;
     this.server = null;
     this.connectionHandler = null;
     this.closed = false;
@@ -58,10 +63,13 @@ export class NativeDhtTransport {
   }
 
   authorize({ transportPublicKey, nostrPubkey, requestId, sha256, size, lifetimeMs = 30_000 } = {}) {
+    if (this.closed) throw new Error("Native transport is closed.");
     if (!HEX64.test(transportPublicKey) || !HEX64.test(nostrPubkey) || !HEX64.test(sha256)) throw new Error("Invalid native transport authorization.");
     if (typeof requestId !== "string" || requestId.length < 8 || requestId.length > 64) throw new Error("Invalid native transport request identifier.");
-    if (!Number.isSafeInteger(size) || size < 0) throw new Error("Invalid native transport object size.");
+    if (!Number.isSafeInteger(size) || size < 0 || size > DEFAULT_MAX_OBJECT_BYTES) throw new Error("Invalid native transport object size.");
     if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs < 1_000 || lifetimeMs > MAX_AUTHORIZATION_MS) throw new Error("Invalid native transport authorization lifetime.");
+    for (const [key, value] of this.authorizations) if (value.expiresAt <= Date.now()) this.authorizations.delete(key);
+    if (!this.authorizations.has(transportPublicKey) && this.authorizations.size >= this.maxAuthorizations) throw new Error("Native authorization capacity reached.");
     this.authorizations.set(transportPublicKey, {
       transportPublicKey,
       nostrPubkey,
@@ -77,10 +85,14 @@ export class NativeDhtTransport {
     const remotePublicKey = hex(socket.remotePublicKey);
     const authorization = this.authorizations.get(remotePublicKey);
     this.authorizations.delete(remotePublicKey);
-    if (!authorization || authorization.expiresAt <= Date.now()) {
+    if (this.closed || !authorization || authorization.expiresAt <= Date.now() || this.connections.size >= this.maxConnections) {
       socket.destroy(new Error("Native transport connection was not authorized."));
       return;
     }
+    this.connections.add(socket);
+    const timer = setTimeout(() => socket.destroy(new Error("Native transfer timed out.")), this.transferTimeoutMs);
+    const cleanup = () => { clearTimeout(timer); this.connections.delete(socket); };
+    socket.once("close", cleanup);
     try {
       await this.connectionHandler(socket, authorization);
     } catch (error) {
@@ -111,6 +123,8 @@ export class NativeDhtTransport {
     if (this.closed) return;
     this.closed = true;
     this.authorizations.clear();
+    for (const socket of this.connections) socket.destroy();
+    this.connections.clear();
     if (this.server) {
       await this.server.close().catch(() => {});
       this.server = null;

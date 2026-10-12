@@ -12,9 +12,10 @@ Nostr live-streaming clients (zap.stream and similar). It proves the claim
 end to end over two paths: a browser path (WebRTC, signalled over Nostr
 relays) and a native path for installed Node applications (HyperDHT and
 Noise, no STUN or TURN). Both verify transferred data by SHA-256 before
-trusting it. This is a proof of concept: multi-peer swarm scheduling, an
-hls.js loader plugin and a NIP draft are deliberately out of scope for the
-code here (see the README's "Deliberately out of scope" section).
+trusting it. The browser loader supports shadow measurement and bounded peer-first
+loading against stream-author-signed commitments. This remains experimental:
+advanced ABR scheduling, broad field validation and a NIP draft are out of
+scope (see the README's "Deliberately out of scope" section).
 
 ## Getting Started
 
@@ -39,7 +40,8 @@ verification.
   ephemeral, `p`-tagged signal events over the same relays.
 - **Hash-verified transfer.** Every received object is checked against a
   SHA-256 digest before use; a bad seeder controls both bytes and hash in
-  the current PoC, so this detects corruption, not a malicious peer.
+  original CLI PoC, so that detects corruption, not a malicious peer. The
+  browser peer-first loader instead verifies an expiring author-signed digest.
 - **Two independent transports.** The browser path uses WebRTC data
   channels; the native path uses HyperDHT with NIP-44-encrypted dial
   authorisation, for installed Node applications that cannot open a
@@ -55,12 +57,13 @@ verification.
 From `relayswarm` (`src/relay-session.mjs`):
 - `RelaySwarmSession`, `RelayPool` - swarm membership, presence and
   signalling over a set of Nostr relays.
-- `validTicket(ticket)` - validates an admission ticket.
+- `validTicket(ticket)` - validates the shape and size of an opaque ticket;
+  the host callback decides whether it authorises admission.
 - `KIND_PRESENCE`, `KIND_SIGNAL`, `SWARM_TAG` - the Nostr event kinds and
   tag name the protocol uses.
 
 From `relayswarm/hls-swarm` (`src/browser/hls-swarm.mjs`):
-- `createHlsSwarm(options)` - attaches shadow-mode peer assist to an
+- `createHlsSwarm(options)` - attaches shadow or authenticated peer-first loading to an
   hls.js player; see [`INTEGRATION.md`](INTEGRATION.md) for the full
   host-page contract, options and kill switch.
 - `rotationCandidate(links, options, at)`, `retryAfterFor(links, options,

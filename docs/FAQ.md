@@ -76,14 +76,14 @@ which stream (or that a stream) is involved. The decentralised answer is
 stream-named STUN, a deployment guide that ships coturn, and super-peers that
 make STUN unnecessary where they are reachable.
 
-**Can a hostile peer poison or flood the swarm?** Wrong bytes fail the
-origin-authenticated digest and are refetched from origin, so poisoning
-costs the attacker bandwidth and consumes part of the viewer's bounded
-peer-retry budget before origin fallback; the PoC's same-peer hash only proves
-transport, and the docs say so. Spam is defended on both sides; relays
-rate-limit, and the client bounds subscriptions, enforces event-size limits,
-budgets dials, caps queues and validates cheaply before allocating any WebRTC
-resource. See [THREAT-MODEL](THREAT-MODEL.md).
+**Can a hostile peer poison or flood the swarm?** The browser peer-first
+loader verifies bytes against an expiring commitment signed by the stream
+author. Wrong bytes are discarded and the peer is banned; the original loader
+starts when the deadline expires. Shadow mode compares with origin bytes;
+the original CLI PoC's same-peer hash still only proves transport. Upload
+queues, chunk counts, transfers and admission checks now have bounds, and
+shutdown and expired-admission regressions are tested. A full Sybil and
+adversarial network suite remains future work. See [THREAT-MODEL](THREAT-MODEL.md).
 
 **Doesn't presence reveal who is watching?** Swarm events contain no social
 npub and use independent per-session keys - but this is pseudonymity, not
@@ -110,7 +110,8 @@ viewing happens today; native adoption is evidence-led future work.
 contractual risk varies by jurisdiction and by content, and a contributing
 viewer is redistributing media, not merely receiving it. RelaySwarm is
 intended for streams whose publisher authorises peer redistribution - the
-protocol carries an explicit publisher flag for exactly that - and
-contribution stays opt-in behind an interface that says plainly the viewer
-is redistributing. Phones contribute nothing by default, and at-risk
-viewers use origin-only mode.
+peer-first contract checks an experimental publisher authorisation tag.
+Contribution defaults to off for every viewer; the host must obtain explicit
+opt-in before setting `serve: true`. Connection detection is advisory and
+cannot reliably identify every phone on cellular. Receive-only still exposes
+an address to peers; at-risk viewers use origin-only mode.

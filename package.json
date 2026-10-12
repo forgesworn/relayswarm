@@ -10,7 +10,7 @@
     "check": "node scripts/check-syntax.mjs",
     "audit": "npm audit --audit-level=high",
     "test:browser": "node test/hls-swarm-browser.mjs",
-    "test:swarm": "node --test test/hls-swarm.test.mjs"
+    "test:swarm": "node --test test/hls-swarm.test.mjs test/browser-hardening.test.mjs"
   },
   "keywords": [
     "nostr",
@@ -35,18 +35,19 @@
   "dependencies": {
     "hyperdht": "6.33.2",
     "nostr-tools": "^2.24.1",
-    "werift": "^0.24.3"
+    "werift": "^0.24.3",
+    "ws": "8.21.3"
   },
   "devDependencies": {
     "esbuild": "0.28.2",
     "hls.js": "1.7.3",
-    "playwright-core": "1.63.0",
-    "ws": "8.21.3"
+    "playwright-core": "1.63.0"
   },
   "exports": {
     ".": "./src/relay-session.mjs",
     "./hls-swarm": "./src/browser/hls-swarm.mjs",
     "./package.json": "./package.json",
-    "./*": "./*"
+    "./*": "./*",
+    "./segment-commitment": "./src/browser/segment-commitment.mjs"
   }
 }

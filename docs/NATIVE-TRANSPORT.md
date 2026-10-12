@@ -82,7 +82,9 @@ The spike fails closed on the following boundaries:
   authorization, and consumes authorization on first connection;
 - request id, digest and size must match across the encrypted Nostr signal,
   firewall authorization and transfer request;
-- individual frames are capped at 64 KiB and objects at 256 MiB;
+- individual frames are capped at 64 KiB and objects at 256 MiB; empty and
+  excessive object chunks are rejected; pending authorisations are capped at
+  256 and active incoming transfers at 16, with a 30 s transfer deadline;
 - the receiver's expected digest is authoritative. Metadata supplied by the
   serving peer cannot change it.
 
@@ -111,8 +113,9 @@ npm run poc:native -- --bootstrap bootstrap.example:49737
 The deterministic tests start a loopback Nostr relay and a loopback HyperDHT
 bootstrap node. They prove the complete authorization and transfer path without
 using external infrastructure. CI is configured to run them on current GitHub
-Windows, Linux and macOS runners. Until those jobs have run, only the local
-macOS result is evidence, not three-platform proof.
+Windows, Linux and macOS runners. The baseline transfer suite passed on all three
+platforms ([run 36015298994](https://github.com/forgesworn/relayswarm/actions/runs/36015298994)); that proves those tests rather than packaging,
+firewall prompts or real home-network reachability.
 
 Still required before choosing this for production:
 

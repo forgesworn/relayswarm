@@ -6,6 +6,24 @@ how it will be tested, ahead of implementation, so the adversarial suite is
 a commitment rather than an afterthought. The full written threat model
 ships with the engine.
 
+## Implemented boundaries
+
+The browser peer-first loader verifies an author-signed, canonical and
+expiring segment commitment, including stream/rendition/sequence/discontinuity/
+part and object identity. It checks the experimental publisher redistribution
+tag; delegated signers are not supported. The original CLI PoC is unchanged.
+
+Regression tests cover request floods, empty/excessive chunks, upload stalls,
+expired admission on retries, delayed admission during shutdown, relay startup
+recovery, late reconnects, commitment substitution and origin fallback. Real
+Chrome tests require tampering detection, compare playback stalls with a
+baseline, check shutdown resources and prove peer-first avoids origin requests.
+Native nodes bound pending authorisations and active transfers.
+
+These are specific tested boundaries, not completion of the adversarial suite
+below. Sybil resistance, broad NAT/mobile coverage and independent-client
+protocol interoperability remain outstanding.
+
 ## Assets
 
 - **Segment integrity** - a viewer must never play bytes the streamer did
