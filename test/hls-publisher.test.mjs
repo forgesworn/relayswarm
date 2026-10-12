@@ -97,3 +97,84 @@ test("publisher bounds concurrent signing and refuses oversized playlists and ra
   await writeFile(join(directory, "index.m3u8"), media.replace("4@0", "16777217@0"));
   await assert.rejects(createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8" }), /Excessive byte range/u);
 });
+
+const firstRange = { path: "/media/shared.ts", level: 0, sequence: 20, discontinuity: 2, rangeStart: 0, rangeEnd: 4 };
+
+test("publisher caches immutable events, deduplicates hashes and renews expired commitments", async (t) => {
+  let at = Date.now();
+  const publisher = await createHlsPublisher({ mediaDir: await fixture(t), manifest: "index.m3u8", now: () => at });
+  const concurrent = await Promise.all(Array.from({ length: 8 }, () => publisher.commitment(firstRange)));
+  assert.ok(concurrent.every((event) => event.id === concurrent[0].id));
+  assert.equal(publisher.getMetrics().hashReads, 1);
+  assert.equal(publisher.getMetrics().commitmentsSigned, 1);
+  const original = concurrent[0].id;
+  concurrent[0].content = "caller mutation";
+  publisher.streamEvent.id = "caller mutation";
+  assert.equal((await publisher.commitment(firstRange)).id, original);
+  at += 61000;
+  const renewed = await publisher.commitment(firstRange);
+  assert.notEqual(renewed.id, original);
+  assert.equal(JSON.parse(renewed.content).expiresAt, Math.floor(at / 1000) + 60);
+  assert.equal(publisher.getMetrics().hashReads, 1);
+  assert.equal(publisher.getMetrics().hashCacheHits, 1);
+  assert.equal(publisher.getMetrics().renewals, 1);
+  assert.equal(publisher.getMetrics().inFlight, 0);
+});
+
+test("publisher invalidates same-path changes immediately and keeps ranges distinct", async (t) => {
+  const directory = await fixture(t);
+  const publisher = await createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8" });
+  const initial = await publisher.commitment(firstRange);
+  const second = { ...firstRange, sequence: 21, discontinuity: 3, rangeStart: 4, rangeEnd: 8 };
+  assert.equal(JSON.parse((await publisher.commitment(second)).content).sha256, digest("efgh"));
+  await writeFile(join(directory, "shared.ts"), "12345678");
+  const changed = await publisher.commitment(firstRange);
+  assert.equal(JSON.parse(changed.content).sha256, digest("1234"));
+  assert.notEqual(changed.id, initial.id);
+  await writeFile(join(directory, "index.m3u8"), media.replace("SEQUENCE:20", "SEQUENCE:22"));
+  await assert.rejects(publisher.commitment(firstRange), { status: 404 });
+  assert.equal(publisher.getMetrics().commitmentCacheEntries, 0);
+  assert.equal(publisher.getMetrics().hashCacheEntries, 2);
+  await writeFile(join(directory, "index.m3u8"), "#EXTM3U\n#EXTINF:2,\nother.ts\n#EXT-X-ENDLIST\n");
+  await writeFile(join(directory, "other.ts"), "other");
+  await publisher.media("/media/other.ts");
+  assert.equal(publisher.getMetrics().hashCacheEntries, 0);
+});
+
+test("publisher bounds cache entries and concurrent work without retaining rejected slots", async (t) => {
+  const publisher = await createHlsPublisher({ mediaDir: await fixture(t), manifest: "index.m3u8", maxCacheEntries: 1, maxConcurrent: 2 });
+  const pending = [publisher.commitment(firstRange), publisher.commitment(firstRange)];
+  await assert.rejects(publisher.commitment(firstRange), { status: 503 });
+  await Promise.all(pending);
+  await publisher.commitment({ ...firstRange, sequence: 21, discontinuity: 3, rangeStart: 4, rangeEnd: 8 });
+  assert.equal(publisher.getMetrics().hashCacheEntries, 1);
+  assert.equal(publisher.getMetrics().commitmentCacheEntries, 1);
+  assert.equal(publisher.getMetrics().peakInFlight, 2);
+  assert.equal(publisher.getMetrics().busyRejected, 1);
+  assert.ok(publisher.getMetrics().cacheEvictions >= 2);
+  assert.equal(publisher.getMetrics().inFlight, 0);
+});
+
+test("publisher rejects bytes mutated during a successful full-length read", async (t) => {
+  const { open } = await import("node:fs/promises");
+  const directory = await fixture(t);
+  const file = join(directory, "shared.ts");
+  const probe = await open(file, "r");
+  const prototype = Object.getPrototypeOf(probe), originalRead = prototype.read;
+  await probe.close();
+  let mutated = false;
+  t.mock.method(prototype, "read", async function (...args) {
+    const result = await originalRead.apply(this, args);
+    if (!mutated && args[0].length === 4) {
+      mutated = true;
+      await writeFile(file, "12345678");
+    }
+    return result;
+  });
+  const publisher = await createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8" });
+  await assert.rejects(publisher.commitment(firstRange), /changed during reading/u);
+  assert.equal(publisher.getMetrics().changedReads, 1);
+  assert.equal(publisher.getMetrics().commitmentsSigned, 0);
+  assert.equal(publisher.getMetrics().hashCacheEntries, 0);
+  assert.equal(publisher.getMetrics().inFlight, 0);
+});

@@ -29,6 +29,7 @@
 import { generateSecretKey } from "nostr-tools/pure";
 import { RelayPool, RelaySwarmSession, validTicket } from "../relay-session.mjs";
 import { PeerLink } from "./peer-link.mjs";
+import { PeerSelection } from "./peer-selection.mjs";
 import { boundedOperation } from "./bounded-operation.mjs";
 import { validStreamAuthorisation, verifySegmentCommitment } from "./segment-commitment.mjs";
 
@@ -43,6 +44,7 @@ const DEFAULTS = Object.freeze({
   maxPeers: 6,
   maxUploadPeers: 4,
   maxUploadBytesPerSecond: 1_250_000,
+  maxUploadBytesPerSession: undefined,
   maxDialsInFlight: 2,
   dialTimeoutMs: 12_000,
   presenceIntervalMs: 20_000,
@@ -235,6 +237,7 @@ class HlsSwarm {
     this.session = null;
     this.timers = new Set();
     this.links = new Map();
+    this.peerSelection = new PeerSelection();
     this.dials = new Map();
     this.cooldowns = new Map();
     this.retries = new Map();
@@ -323,6 +326,7 @@ class HlsSwarm {
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (typeof this.options.serve !== "boolean" || typeof this.options.serveOnCellular !== "boolean") return "invalid-serve-option";
     if (this.options.ticket !== undefined && !validTicket(this.options.ticket)) return "invalid-ticket";
+    if (this.options.maxUploadBytesPerSession !== undefined && (!Number.isSafeInteger(this.options.maxUploadBytesPerSession) || this.options.maxUploadBytesPerSession < 0)) return "invalid-upload-session-limit";
     for (const key of ["originFallbackMs", "originReserveMs", "lateWindowMs", "maxPeers", "maxUploadPeers", "maxUploadBytesPerSecond", "maxDialsInFlight", "dialTimeoutMs", "presenceIntervalMs", "metricsIntervalMs", "maxHeldSegments", "maxHeldBytes", "maxSegmentBytes", "maxConcurrentRaces", "admissionTimeoutMs"]) {
       if (!Number.isSafeInteger(this.options[key]) || this.options[key] < 1) return "invalid-limits";
     }
@@ -415,6 +419,7 @@ class HlsSwarm {
         banned: this.banned.size,
         firstLinkAtMs: this.firstLinkAtMs,
         candidatePairs: { ...this.pairTypes },
+        deliveryMeasurements: [...this.links.values()].map((link) => ({ pubkey: link.pubkey, ...this.peerSelection.summary(link) })),
       },
       signalling: {
         samples: this.signallingSamples.length,
@@ -457,6 +462,8 @@ class HlsSwarm {
         uploaded: c.bytesUploaded,
         uploadsServed: c.uploadsServed,
         uploadsRefused: c.uploadsRefused,
+        uploadRemaining: this.#uploadRemaining(),
+        uploadExhausted: this.#uploadRemaining() === 0,
         held: this.heldBytes,
       },
       relays: {
@@ -475,6 +482,7 @@ class HlsSwarm {
         maxPeers: this.options.maxPeers,
         maxUploadPeers: this.options.maxUploadPeers,
         maxUploadBytesPerSecond: this.options.maxUploadBytesPerSecond,
+        maxUploadBytesPerSession: Number.isSafeInteger(this.options.maxUploadBytesPerSession) && this.options.maxUploadBytesPerSession >= 0 ? this.options.maxUploadBytesPerSession : null,
         serve: this.options.serve === true,
         admit: typeof this.options.admit === "function",
         shadowSampleRate: this.options.shadowSampleRate,
@@ -679,25 +687,37 @@ class HlsSwarm {
     if (!commitment) { this.counters.commitmentRejected += 1; return null; }
     if (signal.aborted || this.stopped) return null;
     const tried = new Set();
-    while (!signal.aborted && !this.stopped && now() < deadline) {
-      const link = [...this.links.values()].find((peer) => !peer.busy && !tried.has(peer.pubkey) && peer.have.has(key));
+    while (!signal.aborted && !this.stopped && now() < deadline && tried.size < this.options.maxPeers) {
+      const link = this.peerSelection.select(this.links.values(), key, tried, commitment.size);
       if (!link) {
         if (![...this.links.values()].some((peer) => !tried.has(peer.pubkey) && peer.have.has(key))) return null;
         await this.#waitForHave(key, Math.min(100, deadline - now()), signal);
         continue;
       }
       tried.add(link.pubkey);
-      const bytes = await link.request(key, Math.max(1, deadline - now()), { signal, expectedSize: commitment.size });
-      if (!bytes || signal.aborted || this.stopped) continue;
+      const requestedAt = now();
+      const alternatives = [...this.links.values()].filter((peer) => !peer.closed && !peer.busy && !tried.has(peer.pubkey) && peer.have.has(key)).length;
+      const remainingMs = deadline - now();
+      const estimateMs = this.peerSelection.estimate(link, commitment.size);
+      // A measured delivery that fits the original origin deadline must not
+      // be cut short by an equal share intended for unmeasured alternatives.
+      const attemptMs = Math.min(remainingMs, Math.max(25, remainingMs / Math.min(3, alternatives + 1), estimateMs === null ? 0 : estimateMs * 1.25 + 25));
+      const bytes = await link.request(key, Math.max(1, attemptMs), { signal, expectedSize: commitment.size });
+      if (!bytes || signal.aborted || this.stopped) {
+        if (!signal.aborted && !this.stopped) this.peerSelection.record(link, now() - requestedAt);
+        continue;
+      }
       const digest = await sha256Hex(bytes);
       if (signal.aborted || this.stopped) return null;
       if (bytes.byteLength !== commitment.size || digest !== commitment.sha256) {
+        this.peerSelection.record(link, now() - requestedAt);
         this.counters.peerCorrupt += 1;
         this.banned.add(link.pubkey);
         link.close();
         continue;
       }
       if (commitment.expiresAt <= Math.floor(Date.now() / 1000)) return null;
+      this.peerSelection.record(link, now() - requestedAt, bytes.byteLength);
       return { key, bytes };
     }
     return null;
@@ -833,19 +853,22 @@ class HlsSwarm {
     let sawPeer = race.peersAtStart > 0;
     while (!this.stopped && !race.settled && !race.originFailed && now() < deadline) {
       if (this.links.size) sawPeer = true;
-      const link = [...this.links.values()].find((candidate) => !candidate.busy && !tried.has(candidate.pubkey) && candidate.have.has(race.key));
+      const link = this.peerSelection.select(this.links.values(), race.key, tried);
       if (!link) {
         await this.#waitForHave(race.key, deadline - now(), race.controller.signal);
         continue;
       }
       tried.add(link.pubkey);
+      const requestedAt = now();
       const bytes = await link.request(race.key, deadline - now(), { signal: race.controller.signal });
       if (bytes && !this.stopped) {
+        race.requestMs = now() - requestedAt;
         race.peerBytes = bytes;
         race.peerAt = now();
         race.peerLink = link;
         break;
       }
+      if (!race.controller.signal.aborted && !this.stopped) this.peerSelection.record(link, now() - requestedAt);
     }
     race.peerDone = true;
     race.sawPeer = sawPeer || this.links.size > 0;
@@ -918,12 +941,14 @@ class HlsSwarm {
     c.raced += 1;
     const peerDigest = await sha256Hex(race.peerBytes);
     if (peerDigest !== race.originDigest) {
+      this.peerSelection.record(race.peerLink, race.requestMs);
       c.peerCorrupt += 1;
       this.banned.add(race.peerLink.pubkey);
       race.peerLink.close();
       return;
     }
     const latency = race.peerAt - race.t0;
+    this.peerSelection.record(race.peerLink, race.requestMs, race.peerBytes.byteLength);
     if (this.firstPeerSegmentAtMs === null) this.firstPeerSegmentAtMs = Date.now() - this.startedAt;
     pushSample(this.peerLatencySamples, latency);
     c.bytesFromPeers += race.peerBytes.byteLength;
@@ -949,12 +974,29 @@ class HlsSwarm {
   }
 
   #servingAllowed() {
-    return !this.stopped && !this.disabledReason && this.options.serve === true && (this.options.serveOnCellular || !onCellular());
+    return !this.stopped && !this.disabledReason && this.options.serve === true && this.#uploadRemaining() !== 0 && (this.options.serveOnCellular || !onCellular());
+  }
+
+  #uploadRemaining() {
+    const limit = this.options.maxUploadBytesPerSession;
+    return !Number.isSafeInteger(limit) || limit < 0 ? null : Math.max(0, limit - this.counters.bytesUploaded);
+  }
+
+  #withdrawContribution() {
+    this.held.clear();
+    this.heldBytes = 0;
+    for (const link of this.links.values()) link.sendHave([]);
+    this.#announce();
   }
 
   #serveRequest(link, key) {
     const bytes = this.held.get(key);
     if (!bytes || !this.#servingAllowed() || this.banned.has(link.pubkey)) {
+      this.counters.uploadsRefused += 1;
+      return null;
+    }
+    const remaining = this.#uploadRemaining();
+    if (remaining !== null && bytes.byteLength > remaining) {
       this.counters.uploadsRefused += 1;
       return null;
     }
@@ -973,6 +1015,9 @@ class HlsSwarm {
     this.uploadTokens -= bytes.byteLength;
     this.counters.uploadsServed += 1;
     this.counters.bytesUploaded += bytes.byteLength;
+    // Reserve the full accepted payload before PeerLink can yield. Interrupted
+    // uploads keep their reservation, so concurrent requests cannot overspend.
+    if (this.#uploadRemaining() === 0) this.#withdrawContribution();
     if (this.options.testHooks?.corruptUploads) {
       const tampered = bytes.slice();
       tampered[tampered.length >> 1] ^= 0xff;

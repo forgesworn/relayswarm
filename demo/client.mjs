@@ -10,6 +10,7 @@ const bytes = (amount) => amount < 1000 ? `${amount} B` : amount < 1e6 ? `${(amo
 const player = { engine: "pending", firstPlayingAtMs: null, startupMs: null, stalls: 0, stallMs: 0, seeks: 0, seekRecoveryMs: [], fatalErrors: 0, errors: {}, fragmentsLoaded: 0, fragments: [], levelChanges: [] };
 const network = { originMediaRequests: 0, encodedOriginMediaBytes: 0, transferOriginMediaBytes: 0 };
 const sessions = [], snapshots = [];
+let deliveryPolicy = { mode: null, revision: 0, telemetry: false }, policyUnavailable = false, policyInFlight = false;
 const archivedTotals = { peerFirstBytes: 0, uploaded: 0, peerFirstLoads: 0, sessions: 0 };
 let session, hls, swarm, initialLoader, startRequestedAt = null, stallAt = null, seekAt = null, native = false, activeConfig;
 const status = (message) => { byId("status").textContent = message; };
@@ -55,8 +56,10 @@ function stopSwarm() {
 }
 function configure() {
   stopSwarm();
-  const mode = native ? "off" : byId("mode").value;
-  activeConfig = { mode, upload: byId("upload").checked, uploadLimit: Number(byId("limit").value), cellular: byId("cellular").checked, startedAtMs: elapsed() };
+  const chosenMode = byId("mode").value;
+  const mode = native || policyUnavailable || chosenMode === "off" ? "off" : deliveryPolicy.mode ?? chosenMode;
+  const allowance = Number(byId("allowance").value), remaining = Math.max(0, allowance - totals().uploaded);
+  activeConfig = { mode, upload: byId("upload").checked && mode !== "off", uploadAllowance: allowance, uploadLimit: Number(byId("limit").value), cellular: byId("cellular").checked, startedAtMs: elapsed() };
   swarm = createHlsSwarm({ mode, swarmId: session.swarmId, relays: session.relays, streamEvent: session.streamEvent,
     getCommitment: async (context, { signal }) => {
       const query = new URLSearchParams({ path: new URL(context.url).pathname, level: String(context.frag.level), sequence: String(context.frag.sn), cc: String(context.frag.cc ?? 0) });
@@ -66,7 +69,7 @@ function configure() {
       if (!response.ok) throw new Error("Publisher commitment unavailable.");
       return response.json();
     },
-    serve: activeConfig.upload, maxUploadBytesPerSecond: activeConfig.uploadLimit, serveOnCellular: activeConfig.cellular,
+    serve: activeConfig.upload, maxUploadBytesPerSession: remaining, maxUploadBytesPerSecond: activeConfig.uploadLimit, serveOnCellular: activeConfig.cellular,
     ...(session.iceServers ? { iceServers: session.iceServers } : {}),
   });
   if (hls) swarm.attach(hls);
@@ -80,6 +83,9 @@ function render() {
   byId("saved").textContent = bytes(total.peerFirstBytes);
   byId("origin").textContent = native || !observer ? "Unavailable" : String(network.originMediaRequests);
   byId("uploaded").textContent = bytes(total.uploaded);
+  const allowance = activeConfig?.uploadAllowance ?? Number(byId("allowance").value);
+  byId("allowance-meter").max = allowance; byId("allowance-meter").value = Math.min(total.uploaded, allowance);
+  byId("allowance-used").textContent = `${bytes(total.uploaded)} of ${bytes(allowance)} used on this page${total.uploaded >= allowance ? " · allowance exhausted; uploading stopped" : ""}`;
   byId("peers").textContent = String(metrics?.peers.connected || 0);
   byId("detail").textContent = `${total.peerFirstLoads} verified peer-first loads · ${player.stalls} playback stalls · ${player.fragmentsLoaded} media fragments loaded`;
 }
@@ -90,7 +96,7 @@ function report() {
     player: { ...player, currentTime: video.currentTime, paused: video.paused, bufferedSeconds: hls?.mainForwardBufferInfo?.len ?? null, activeStallMs: stallAt === null ? 0 : elapsed() - stallAt },
     network: { ...network, ...(native ? { originMediaRequests: null, encodedOriginMediaBytes: null, transferOriginMediaBytes: null } : {}), supported: Boolean(observer) && !native,
       scope: "same-origin media resource timings; includes init segments and cache hits; encoded bytes exclude protocol overhead; native HLS requests are not measured" },
-    totals: totals(), current: swarm ? { ...activeConfig, metrics: swarm.metrics() } : null, sessions: [...sessions], snapshots: [...snapshots],
+    totals: totals(), deliveryPolicy: { ...deliveryPolicy, unavailable: policyUnavailable }, current: swarm ? { ...activeConfig, metrics: swarm.metrics() } : null, sessions: [...sessions], snapshots: [...snapshots],
     retention: { fragments: "latest 256", snapshots: "latest 60, every five seconds", sessions: "latest 64", archivedSessions: archivedTotals.sessions, totals: "whole page session" },
     loaderRestored: !hls || hls.config.fLoader === initialLoader, limits: ["Network and device labels are supplied by the viewer.", "No peer IP addresses or private signing keys are recorded.", "A receipt is evidence for this session only; it is not a production-readiness claim."],
   };
@@ -138,10 +144,48 @@ byId("download").addEventListener("click", () => {
 window.addEventListener("pagehide", stopSwarm);
 window.addEventListener("pageshow", () => { if (startRequestedAt !== null && !swarm) { byId("kill").disabled = true; status("Peer delivery stopped while this page was inactive. Playback uses origin; apply settings to rejoin."); } });
 window.relaySwarmDemo = { report, stop: () => { stopSwarm(); render(); }, ready: () => Boolean(session), media: video };
+async function refreshPolicy() {
+  if (policyInFlight || !session) return;
+  policyInFlight = true;
+  try {
+    const response = await fetch(session?.deliveryPolicyEndpoint || "/delivery-policy.json", { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error("Policy unavailable.");
+    const next = await response.json();
+    if (!next || ![null, "off", "shadow", "peer-first"].includes(next.mode)) throw new Error("Invalid policy.");
+    const currentResponse = await fetch("/session.json", { signal: AbortSignal.timeout(5000) });
+    if (!currentResponse.ok) throw new Error("Session unavailable.");
+    const current = await currentResponse.json();
+    if (current.v !== 1 || typeof current.swarmId !== "string" || !current.streamEvent || !Array.isArray(current.relays) || current.manifest !== session.manifest) throw new Error("Publisher session changed incompatibly.");
+    const identityChanged = current.swarmId !== session.swarmId || current.streamEvent.id !== session.streamEvent.id;
+    const changed = policyUnavailable || next.mode !== deliveryPolicy.mode || identityChanged;
+    if (identityChanged) { stopSwarm(); session = current; }
+    deliveryPolicy = next; policyUnavailable = false;
+    if (next.mode === "off") byId("upload").checked = false;
+    byId("telemetry").disabled = !next.telemetry;
+    if (!next.telemetry) byId("telemetry").checked = false;
+    if (changed && (swarm || identityChanged && startRequestedAt !== null)) configure();
+    byId("policy-status").textContent = next.mode === null ? "Viewer chooses delivery mode." : `Operator delivery policy: ${next.mode === "off" ? "origin only" : next.mode}.`;
+  } catch {
+    policyUnavailable = true;
+    byId("upload").checked = false;
+    byId("telemetry").disabled = true;
+    byId("telemetry").checked = false;
+    if (swarm && activeConfig.mode !== "off") configure();
+    byId("policy-status").textContent = "Delivery policy unavailable · using origin until it returns.";
+  } finally { policyInFlight = false; }
+}
+async function sendReport() {
+  if (!byId("telemetry").checked || !deliveryPolicy.telemetry || startRequestedAt === null) return;
+  const total = totals();
+  const values = { durationMs: elapsed(), peerBytes: total.peerFirstBytes, uploadedBytes: total.uploaded, originMediaRequests: network.originMediaRequests, originMediaBytes: network.encodedOriginMediaBytes, stalls: player.stalls, stallMs: Math.round(player.stallMs), fatalErrors: player.fatalErrors };
+  try { await fetch("/reports", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(values) }); } catch { /* Playback does not depend on reporting. */ }
+}
+setInterval(refreshPolicy, 2000);
+setInterval(sendReport, 15000);
 setInterval(render, 1000);
 setInterval(() => { if (swarm) push(snapshots, { atMs: elapsed(), metrics: swarm.metrics() }, 60); }, 5000);
 try {
   const response = await fetch("/session.json"); if (!response.ok) throw new Error("Session unavailable.");
-  session = await response.json(); byId("start").disabled = false;
+  session = await response.json(); await refreshPolicy(); byId("start").disabled = false;
   status(isSecureContext ? "Ready · choose a delivery mode and start playback." : "This address needs HTTPS for peer delivery. Origin playback is available.");
 } catch { status("The publisher is unavailable. Reload after it has started."); }

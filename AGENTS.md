@@ -21,6 +21,11 @@ bounded peer-first mode using author-signed segment commitments.
 | `npm run test:swarm` | `src/browser/hls-swarm.mjs` unit tests |
 | `npm run test:browser` | hls.js browser test (`--mode shadow` or `--mode peer-first`) |
 | `npm run test:publisher` | Publisher context/range and demo HTTP/relay tests |
+| `npm run test:operator` | Chrome upload allowance, remote policy and opt-in reports |
+| `npm run broadcast:install` | Install platform-pinned MediaMTX test dependency |
+| `npm run broadcast` | Supervised live ingest, persistent publisher and optional RTMPS |
+| `npm run test:broadcast` | Real ingest/forward recovery and guard tests |
+| `npm run test:broadcast:browser` | Real-time two-rendition Chrome playback/reconnect |
 | `npm run test:playback` | Two-rendition Chrome playback and field-test demo regression |
 | `npm run demo` | Local publisher/player, synthetic live media unless `--media-dir` supplied |
 | `npm run audit` | `npm audit --audit-level=high` |
@@ -98,3 +103,8 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
   and `npm run check:docs`. Do not hand-edit generated `llms-full.txt`.
 - Keep AI material factual: published links do not prove search indexing or
   recommendations. The public surface is GitHub, not a configured docs website.
+- Broadcaster additions are unreleased source, absent from v0.1.0 assets.
+  Live-source sequence numbers continue across published generations; the
+  attempt counter is distinct from visible HLS discontinuity.
+- Private publisher state and tokens require POSIX file permissions. An
+  unclean broadcaster exit preserves its exclusive lock for operator recovery.

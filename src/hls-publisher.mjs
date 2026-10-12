@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { open, realpath } from "node:fs/promises";
+import { open, realpath, stat as fileStat } from "node:fs/promises";
 import { resolve, relative, sep, isAbsolute } from "node:path";
 import { finalizeEvent, generateSecretKey } from "nostr-tools/pure";
 import { commitmentContent, KIND_SEGMENT_COMMITMENT } from "./browser/segment-commitment.mjs";
+import { publisherManifestPath, publisherSwarmId, publisherStreamEvent, validatePublisherStreamEvent } from "./publisher-state.mjs";
 
 const PREFIX = "/media/";
 const MAX_PLAYLIST = 256 * 1024;
@@ -100,14 +101,29 @@ function fragments(text, path, level) {
 /** Node-only publisher for local, full-segment HLS. Keeps the signing key on
  * the server and derives the signed context from its playlists, never from an
  * arbitrary path/digest submitted by a viewer. See docs/FIELD-TEST.md. */
-export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", secretKey = generateSecretKey(), swarmId, now = Date.now } = {}) {
-  const root = await realpath(resolve(mediaDir));
-  const manifestPath = mediaPath(manifest, PREFIX);
-  const streamEvent = finalizeEvent({ kind: 30311, created_at: Math.floor(now() / 1000), tags: [["d", digest(manifestPath).slice(0, 24)], ["relayswarm", "redistribute", "1"]], content: "RelaySwarm experimental publisher" }, secretKey);
-  swarmId ||= `publisher-${streamEvent.id.slice(0, 32)}`;
-  if (typeof swarmId !== "string" || swarmId.length < 8 || swarmId.length > 128) throw new PublisherError("Invalid swarm id.");
-  let snapshot, refreshedAt = -Infinity, pendingRefresh, signing = 0;
+const stamp = (stat) => [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(":");
+const contextKey = (record) => JSON.stringify([record.path, record.level, record.sequence, record.discontinuity, record.rangeStart, record.rangeEnd]);
+const assetKey = (record) => JSON.stringify([record.path, record.rangeStart, record.rangeEnd]);
 
+export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", secretKey = generateSecretKey(), swarmId, streamEvent: restoredStreamEvent,
+  now = Date.now, maxCacheEntries = 512, maxConcurrent = 8 } = {}) {
+  secretKey = Uint8Array.from(secretKey);
+  const root = await realpath(resolve(mediaDir));
+  const manifestPath = publisherManifestPath(manifest);
+  const streamEvent = restoredStreamEvent ? validatePublisherStreamEvent(restoredStreamEvent, secretKey, manifestPath) : publisherStreamEvent(secretKey, manifestPath, now);
+  swarmId = publisherSwarmId(swarmId ?? `publisher-${streamEvent.id.slice(0, 32)}`);
+  for (const [value, maximum] of [[maxCacheEntries, MAX_FRAGMENTS], [maxConcurrent, 64]]) {
+    if (!Number.isSafeInteger(value) || value < 1 || value > maximum) throw new PublisherError("Invalid publisher resource limit.");
+  }
+  const hashes = new Map(), commitments = new Map(), pendingHashes = new Map();
+  const metrics = { requests: 0, cacheHits: 0, hashCacheHits: 0, hashReads: 0, hashesComputed: 0, commitmentsSigned: 0,
+    renewals: 0, cacheEvictions: 0, changedReads: 0, busyRejected: 0, inFlight: 0, peakInFlight: 0 };
+  let snapshot, pendingRefresh;
+  function retain(map, key, value) {
+    map.delete(key); map.set(key, value);
+    while (map.size > maxCacheEntries) { map.delete(map.keys().next().value); metrics.cacheEvictions++; }
+  }
+  function changed() { metrics.changedReads++; return new PublisherError("Media changed during reading.", 503); }
   async function localFile(path) {
     if (!path.startsWith(PREFIX)) throw new PublisherError("Unknown media.", 404);
     const file = await realpath(resolve(root, path.slice(PREFIX.length)));
@@ -115,11 +131,16 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
     if (!rel || isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`)) throw new PublisherError("Media leaves the published directory.", 403);
     return file;
   }
+  async function unchanged(handle, file, before) {
+    const after = await handle.stat({ bigint: true });
+    const current = await fileStat(file, { bigint: true });
+    if (stamp(before) !== stamp(after) || stamp(after) !== stamp(current)) throw changed();
+  }
   async function playlist(path) {
-    const handle = await open(await localFile(path), "r");
+    const file = await localFile(path), handle = await open(file, "r");
     try {
-      const stat = await handle.stat();
-      if (!stat.isFile() || stat.size > MAX_PLAYLIST) throw new PublisherError("Excessive playlist.");
+      const before = await handle.stat({ bigint: true });
+      if (!before.isFile() || before.size > BigInt(MAX_PLAYLIST)) throw new PublisherError("Excessive playlist.");
       const bytes = Buffer.alloc(MAX_PLAYLIST + 1);
       let size = 0;
       while (size < bytes.length) {
@@ -128,11 +149,12 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
         size += bytesRead;
       }
       if (size > MAX_PLAYLIST) throw new PublisherError("Excessive playlist.");
+      await unchanged(handle, file, before);
+      if (BigInt(size) !== before.size) throw changed();
       return bytes.subarray(0, size).toString("utf8");
     } finally { await handle.close(); }
   }
   async function refresh() {
-    if (snapshot && now() - refreshedAt < 200) return snapshot;
     if (pendingRefresh) return pendingRefresh;
     pendingRefresh = (async () => {
       const text = await playlist(manifestPath);
@@ -145,51 +167,91 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
         records.push(...media.records);
         for (const asset of media.assets) assets.add(asset);
       }
-      snapshot = { records, assets };
-      refreshedAt = now();
+      const contexts = new Map(records.map((record) => [contextKey(record), record]));
+      const authorisedAssets = new Set(records.map(assetKey));
+      for (const key of commitments.keys()) if (!contexts.has(key)) { commitments.delete(key); metrics.cacheEvictions++; }
+      for (const key of hashes.keys()) if (!authorisedAssets.has(key)) { hashes.delete(key); metrics.cacheEvictions++; }
+      snapshot = { records, assets, contexts, authorisedAssets };
       return snapshot;
     })().finally(() => { pendingRefresh = null; });
     return pendingRefresh;
   }
+  async function hashRecord(record, file, handle, before) {
+    const key = assetKey(record), version = stamp(before);
+    const cached = hashes.get(key);
+    if (cached?.version === version) { metrics.hashCacheHits++; retain(hashes, key, cached); return cached; }
+    const pendingKey = `${key}\n${version}`;
+    if (pendingHashes.has(pendingKey)) return pendingHashes.get(pendingKey);
+    const task = (async () => {
+      const start = record.rangeStart ?? 0, end = record.rangeEnd ?? Number(before.size), size = end - start;
+      if (!before.isFile() || size < 1 || size > MAX_SEGMENT || BigInt(end) > before.size) throw new PublisherError("Media size is outside bounds.");
+      const hash = createHash("sha256"), bytes = Buffer.alloc(Math.min(size, 64 * 1024));
+      metrics.hashReads++;
+      let offset = 0;
+      while (offset < size) {
+        const { bytesRead } = await handle.read(bytes, 0, Math.min(bytes.length, size - offset), start + offset);
+        if (!bytesRead) throw changed();
+        hash.update(bytes.subarray(0, bytesRead)); offset += bytesRead;
+      }
+      await unchanged(handle, file, before);
+      metrics.hashesComputed++;
+      return { version, sha256: hash.digest("hex"), size };
+    })();
+    pendingHashes.set(pendingKey, task);
+    try { return await task; } finally { pendingHashes.delete(pendingKey); }
+  }
 
   await refresh();
   return {
-    swarmId, streamEvent, manifestPath,
+    swarmId, streamEvent: structuredClone(streamEvent), manifestPath,
+    getMetrics() { return { ...metrics, hashCacheEntries: hashes.size, commitmentCacheEntries: commitments.size,
+      maxConcurrent, maxCacheEntries }; },
     async media(path) {
       if (!(await refresh()).assets.has(path)) throw new PublisherError("Unknown media.", 404);
       return localFile(path);
     },
     async commitment(input) {
-      if (signing >= 8) throw new PublisherError("Publisher busy.", 503);
-      signing++;
+      metrics.requests++;
+      if (metrics.inFlight >= maxConcurrent) { metrics.busyRejected++; throw new PublisherError("Publisher busy.", 503); }
+      metrics.inFlight++; metrics.peakInFlight = Math.max(metrics.peakInFlight, metrics.inFlight);
       try {
         const level = integer(input.level), sequence = integer(input.sequence), discontinuity = integer(input.discontinuity);
         const rangeStart = input.rangeStart === undefined || input.rangeStart === null ? null : integer(input.rangeStart);
         const rangeEnd = input.rangeEnd === undefined || input.rangeEnd === null ? null : integer(input.rangeEnd);
         if (input.part !== undefined && input.part !== null) throw new PublisherError("Parts are not supported.");
-        const record = (await refresh()).records.find((entry) => entry.path === input.path && entry.level === level && entry.sequence === sequence
-          && entry.discontinuity === discontinuity && entry.rangeStart === rangeStart && entry.rangeEnd === rangeEnd);
+        const key = contextKey({ path: input.path, level, sequence, discontinuity, rangeStart, rangeEnd });
+        const record = (await refresh()).contexts.get(key);
         if (!record) throw new PublisherError("Context is absent from the published playlists.", 404);
-        const handle = await open(await localFile(record.path), "r");
-        let bytes;
+        const file = await localFile(record.path), handle = await open(file, "r");
         try {
-          const stat = await handle.stat();
-          const start = record.rangeStart ?? 0, end = record.rangeEnd ?? stat.size, size = end - start;
-          if (!stat.isFile() || size < 1 || size > MAX_SEGMENT || end > stat.size) throw new PublisherError("Media size is outside bounds.");
-          bytes = Buffer.alloc(size);
-          let offset = 0;
-          while (offset < size) {
-            const { bytesRead } = await handle.read(bytes, offset, size - offset, start + offset);
-            if (!bytesRead) throw new PublisherError("Media changed during reading.", 503);
-            offset += bytesRead;
+          const before = await handle.stat({ bigint: true }), version = stamp(before);
+          const seconds = Math.floor(now() / 1000), cached = commitments.get(key);
+          if (cached?.version === version && cached.expiresAt > seconds + 5 && cached.event.created_at <= seconds + 30 && cached.event.created_at >= seconds - 120) {
+            if (!(await refresh()).contexts.has(key)) throw new PublisherError("Context is absent from the published playlists.", 404);
+            await unchanged(handle, file, before);
+            metrics.cacheHits++; retain(commitments, key, cached);
+            return structuredClone(cached.event);
           }
+          const hash = await hashRecord(record, file, handle, before);
+          await unchanged(handle, file, before);
+          if (!(await refresh()).contexts.has(key)) throw new PublisherError("Context is absent from the published playlists.", 404);
+          await unchanged(handle, file, before);
+          retain(hashes, assetKey(record), hash);
+          // Another caller may have signed this same digest while we awaited IO.
+          const signedAt = Math.floor(now() / 1000), ready = commitments.get(key);
+          if (ready?.version === version && ready.expiresAt > signedAt + 5 && ready.event.created_at <= signedAt + 30 && ready.event.created_at >= signedAt - 120) {
+            metrics.cacheHits++; return structuredClone(ready.event);
+          }
+          const range = record.rangeEnd === null ? "" : `#${record.rangeStart}-${record.rangeEnd}`;
+          const fields = { streamEventId: streamEvent.id, swarmId, key: digest(`${swarmId}\n${record.path}${range}`), rendition: String(level), sequence, discontinuity, part: null,
+            sha256: hash.sha256, size: hash.size, expiresAt: signedAt + 60 };
+          const event = finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: signedAt, tags: [["x", swarmId], ["e", streamEvent.id]], content: commitmentContent(fields) }, secretKey);
+          if (cached?.version === version) metrics.renewals++;
+          metrics.commitmentsSigned++;
+          retain(commitments, key, { version, expiresAt: fields.expiresAt, event });
+          return structuredClone(event);
         } finally { await handle.close(); }
-        const seconds = Math.floor(now() / 1000);
-        const range = record.rangeEnd === null ? "" : `#${record.rangeStart}-${record.rangeEnd}`;
-        const fields = { streamEventId: streamEvent.id, swarmId, key: digest(`${swarmId}\n${record.path}${range}`), rendition: String(level), sequence, discontinuity, part: null,
-          sha256: digest(bytes), size: bytes.length, expiresAt: seconds + 60 };
-        return finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds, tags: [["x", swarmId], ["e", streamEvent.id]], content: commitmentContent(fields) }, secretKey);
-      } finally { signing--; }
+      } finally { metrics.inFlight--; }
     },
   };
 }

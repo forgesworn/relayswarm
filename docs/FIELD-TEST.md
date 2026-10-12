@@ -5,8 +5,10 @@
 
 The demo is a runnable publisher and an hls.js player with origin-only,
 shadow and authenticated peer-first modes. Uploading starts **off**. Receipts
-are downloaded locally; there is no receipt submission or analytics endpoint.
-The publisher's signing key stays in the Node process.
+are downloaded locally. Reporting is disabled by default; the unreleased
+source can offer explicitly opted-in numeric reports and authenticated
+operator controls. See [operations](OPERATIONS.md). The publisher's signing
+key stays on the server. v0.1.0 release assets retain their original behaviour.
 
 ## Run locally
 
@@ -79,10 +81,16 @@ frame-rate families are rejected. It is a deliberately limited example, not
 a general HLS ingest service. Init maps are served over HTTP; fMP4 playback
 has not yet been exercised by the new regression fixture.
 
-Keys are ephemeral in the CLI. Restarting it creates a new authorisation and
-swarm; reload every viewer. A real publisher integration should supply its
-author key through its own server-side key management. This demo does not
-perform Nostr stream discovery or establish trust in an external publisher.
+Keys are ephemeral by default and in v0.1.0's CLI. Current source optionally
+accepts `--publisher-state /private/path/publisher.json`; preserve this 0600
+file in an owner-controlled directory for a stable identity across restarts.
+Without it, restarting creates a new authorisation and swarm. Current viewers
+poll session identity and rejoin while retaining the page allowance. The demo
+does not establish trust in external publishers.
+
+For live OBS ingest and optional independent RTMPS forwarding, use the
+unreleased [broadcast launcher](BROADCASTING.md), which manages persistent
+publisher state automatically. Existing media remains usable without ingest.
 
 ## Use separate devices and networks
 

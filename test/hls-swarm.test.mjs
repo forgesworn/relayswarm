@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 import { PeerLink } from "../src/browser/peer-link.mjs";
 import { startLocalRelay } from "./support/local-relay.mjs";
+import { PeerSelection } from "../src/browser/peer-selection.mjs";
 
 class FakePeerConnection {
   constructor() { this.listeners = new Map(); }
@@ -226,6 +227,70 @@ test("a receive-only viewer never offers to serve", () => {
   assert.equal(receiveOnly.metrics().mode, "shadow", "receive-only still races peers");
   serving.stop();
   receiveOnly.stop();
+});
+
+test("session upload allowances validate safe integers and retain receive-only defaults", () => {
+  const base = { swarmId: "swarm-abcdefgh", relays: ["wss://relay.example"], RTCPeerConnectionImpl: FakePeerConnection };
+  for (const limit of [-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, "32", null, 1n, Symbol("allowance"), { valueOf() { throw new Error("must not coerce host input"); } }]) {
+    const swarm = createHlsSwarm({ ...base, maxUploadBytesPerSession: limit });
+    assert.equal(swarm.metrics().disabledReason, "invalid-upload-session-limit");
+    assert.doesNotThrow(() => JSON.stringify(swarm.metrics()), "invalid allowance types leave serialisable disabled metrics");
+    swarm.stop();
+  }
+  for (const limit of [undefined, 0, 32, Number.MAX_SAFE_INTEGER]) {
+    const swarm = createHlsSwarm({ ...base, serve: true, maxUploadBytesPerSession: limit });
+    assert.equal(swarm.metrics().disabledReason, null);
+    assert.equal(swarm.metrics().config.maxUploadBytesPerSession, limit ?? null);
+    assert.equal(swarm.metrics().bytes.uploadRemaining, limit ?? null);
+    assert.equal(swarm.metrics().bytes.uploadExhausted, limit === 0);
+    assert.equal(swarm.metrics().serving, limit !== 0);
+    swarm.stop();
+  }
+  const receiveOnly = createHlsSwarm({ ...base, maxUploadBytesPerSession: 32 });
+  assert.equal(receiveOnly.metrics().serving, false);
+  assert.equal(receiveOnly.metrics().bytes.uploadRemaining, 32);
+  receiveOnly.stop();
+});
+
+test("peer selection ranks measured completion and payload rate, penalises failures, and filters eligibility", () => {
+  const policy = new PeerSelection();
+  const candidate = (pubkey) => ({ pubkey, have: new Set([KEY]), busy: false, closed: false });
+  const slow = candidate("slow"), fast = candidate("fast"), failing = candidate("failing");
+  policy.record(slow, 300, 1000);
+  policy.record(fast, 40, 1000);
+  for (let i = 0; i < 16; i++) policy.record(failing, 1);
+  assert.equal(policy.select([slow, failing, fast], KEY, new Set(), 1000), fast);
+  assert.equal(policy.select([slow, fast], KEY, new Set(["fast"]), 1000), slow);
+  fast.busy = true;
+  assert.equal(policy.select([fast], KEY, new Set(), 1000), null);
+  fast.busy = false; fast.closed = true;
+  assert.equal(policy.select([fast], KEY, new Set(), 1000), null);
+  // Equal small-object completion times can conceal very different rates.
+  const highRate = candidate("high-rate"), lowRate = candidate("low-rate");
+  policy.record(highRate, 40, 100_000); policy.record(lowRate, 40, 1000);
+  assert.equal(policy.select([lowRate, highRate], KEY, new Set(), 100_000), highRate);
+  for (let i = 0; i < 1000; i++) policy.record(fast, 20, 1000);
+  assert.equal(policy.summary(fast).attempts, 32, "measurements retain bounded scalar state");
+});
+
+test("instant failures cannot make a previously quick peer outrank a healthy measured peer", () => {
+  const policy = new PeerSelection();
+  const failed = { pubkey: "failed", have: new Set([KEY]) }, healthy = { pubkey: "healthy", have: new Set([KEY]) };
+  policy.record(failed, 1, 1000); policy.record(healthy, 20, 1000);
+  policy.record(failed, 1);
+  for (let i = 0; i < 8; i++) assert.equal(policy.select([failed, healthy], KEY, new Set(), 1000), healthy);
+  healthy.busy = true;
+  assert.equal(policy.select([failed, healthy], KEY, new Set(), 1000), failed, "the failed peer remains retryable when no healthy link is free");
+  policy.record(failed, 2, 1000); healthy.busy = false;
+  assert.equal(policy.select([failed, healthy], KEY, new Set(), 1000), failed, "verified recovery restores normal ranking");
+});
+
+test("cold eligible links get fair exploration without displacing measured peers on every choice", () => {
+  const policy = new PeerSelection();
+  const candidates = ["known", "cold-a", "cold-b"].map((pubkey) => ({ pubkey, have: new Set([KEY]) }));
+  policy.record(candidates[0], 20, 1000);
+  const choices = Array.from({ length: 8 }, () => policy.select(candidates, KEY, new Set(), 1000).pubkey);
+  assert.deepEqual(choices, ["cold-a", "known", "known", "known", "cold-b", "known", "known", "known"]);
 });
 
 test("a gated viewer dials only peers whose ticket the host page admits", async () => {

@@ -41,6 +41,14 @@ See [the field-test guide](docs/FIELD-TEST.md) for the supported HLS subset,
 HTTPS access from separate devices and receipt interpretation. Synthetic
 media requires ffmpeg; serving an existing directory does not.
 
+Current source also includes an **unreleased broadcaster pilot**: live
+RTMP-to-HLS ingest, persistent publisher identity, cumulative viewer upload
+allowances, measured peer choice and authenticated operator controls.
+Optional RTMPS forwarding can send the source to an external platform
+independently of RelaySwarm delivery. These features are absent from the
+immutable v0.1.0 downloads. See [broadcasting](docs/BROADCASTING.md),
+[operations](docs/OPERATIONS.md) and [container setup](deploy/README.md).
+
 ## Install the library
 
 The release supplies an installable tarball, a standalone browser ESM bundle
@@ -93,7 +101,7 @@ signals, then sends media over the direct peer connection.
 
 [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) kind-30311
 events can list relays. A host can reuse that selection, but this library does
-not discover stream events or automatically read relay/STUN policy from them:
+does not automatically read relay/STUN policy from them:
 the host passes `streamEvent`, `swarmId`, `relays` and `iceServers` explicitly.
 The HTTP origin remains responsible for initial media availability and fallback.
 
@@ -149,6 +157,11 @@ on physical phones or a broad range of internet networks.
 | `npm run docs:generate` | Regenerate `llms-full.txt` from maintained Markdown |
 | `npm run test:swarm` | Browser-loader and hardening unit tests |
 | `npm run test:publisher` | Publisher context/range and demo HTTP/relay tests |
+| `npm run broadcast:install` | Fetch the platform-pinned MediaMTX test router |
+| `npm run broadcast` | Unreleased live ingest launcher; FFmpeg, H.264/AAC input |
+| `npm run test:broadcast` | Real ingest/reconnect/forwarding plus control guards; FFmpeg/OpenSSL |
+| `npm run test:broadcast:browser` | Real-time two-quality Chrome playback; installed router and FFmpeg |
+| `npm run test:operator` | Actual Chrome allowance, remote policy and reporting controls |
 | `npm run test:native` | Local relay and local HyperDHT bootstrap; no external network |
 | `npm run test:playback` | Two-rendition real Chrome regression; Chrome and ffmpeg |
 | `npm run test:browser -- --mode shadow` | Live HLS Chrome harness; Chrome and ffmpeg |

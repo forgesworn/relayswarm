@@ -53,6 +53,14 @@ See [the field-test guide](https://raw.githubusercontent.com/forgesworn/relayswa
 HTTPS access from separate devices and receipt interpretation. Synthetic
 media requires ffmpeg; serving an existing directory does not.
 
+Current source also includes an **unreleased broadcaster pilot**: live
+RTMP-to-HLS ingest, persistent publisher identity, cumulative viewer upload
+allowances, measured peer choice and authenticated operator controls.
+Optional RTMPS forwarding can send the source to an external platform
+independently of RelaySwarm delivery. These features are absent from the
+immutable v0.1.0 downloads. See [broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md),
+[operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md) and [container setup](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md).
+
 ## Install the library
 
 The release supplies an installable tarball, a standalone browser ESM bundle
@@ -105,7 +113,7 @@ signals, then sends media over the direct peer connection.
 
 [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) kind-30311
 events can list relays. A host can reuse that selection, but this library does
-not discover stream events or automatically read relay/STUN policy from them:
+does not automatically read relay/STUN policy from them:
 the host passes `streamEvent`, `swarmId`, `relays` and `iceServers` explicitly.
 The HTTP origin remains responsible for initial media availability and fallback.
 
@@ -161,6 +169,11 @@ on physical phones or a broad range of internet networks.
 | `npm run docs:generate` | Regenerate `llms-full.txt` from maintained Markdown |
 | `npm run test:swarm` | Browser-loader and hardening unit tests |
 | `npm run test:publisher` | Publisher context/range and demo HTTP/relay tests |
+| `npm run broadcast:install` | Fetch the platform-pinned MediaMTX test router |
+| `npm run broadcast` | Unreleased live ingest launcher; FFmpeg, H.264/AAC input |
+| `npm run test:broadcast` | Real ingest/reconnect/forwarding plus control guards; FFmpeg/OpenSSL |
+| `npm run test:broadcast:browser` | Real-time two-quality Chrome playback; installed router and FFmpeg |
+| `npm run test:operator` | Actual Chrome allowance, remote policy and reporting controls |
 | `npm run test:native` | Local relay and local HyperDHT bootstrap; no external network |
 | `npm run test:playback` | Two-rendition real Chrome regression; Chrome and ffmpeg |
 | `npm run test:browser -- --mode shadow` | Live HLS Chrome harness; Chrome and ffmpeg |
@@ -289,6 +302,7 @@ connection and relay socket, drops held segments and emits one final
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
 | `maxUploadPeers` | `4` | Distinct peers served in any 30 s. |
 | `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. |
+| `maxUploadBytesPerSession` | unlimited | Optional non-negative safe integer, including zero. Reserves full accepted media payloads; interrupted transfers do not refund the allowance. |
 | `serveOnCellular` | `false` | With `false`, detected cellular or `saveData` connections neither upload nor fetch peer media. Detection is advisory and does not identify every metered connection. |
 | `serve` | `false` | Set `true` only after the viewer opts into uploading. With `false`, the viewer is receive-only: it takes from peers but never uploads or advertises what it holds. Use it where the connection type cannot be read (Safari), so a phone on cellular is never asked to upload. |
 | `ticket` | none | An opaque string (up to 2 KB) this viewer presents in its presence and in every offer and answer, typically a short-lived credential the origin signed for this viewer's swarm key. |
@@ -342,15 +356,20 @@ not an identity), `uptimeMs`, `serving`, plus:
   `commitmentUnavailable`, `peerFirstShare`, `peerFirstByteShare`, `peerLatencyMedianMs`,
   `peerLatencyP90Ms`, `originLatencyMedianMs`.
 - `bytes`: `fromOrigin`, `fromPeers`, `peerFirst`, `uploaded`, `uploadsServed`,
-  `uploadsRefused`, `held`.
+  `uploadsRefused`, `held`, `uploadRemaining` (null when unlimited),
+  `uploadExhausted`.
+- `peers.deliveryMeasurements`: bounded measurements for active links,
+  including completion time, payload rate and failures.
 - `relays`: `connected`, `presenceSent`, `signalsSent`, `published`,
   `rejected`, `publishErrors`.
 - `errors`: `total` and `byStage`.
 - `config`: the effective settings, so a receipt says what produced it.
 
 Snapshots contain no IP addresses, user agent or long-term key, but the
-ephemeral public key can correlate a receipt with public swarm activity. Post it to the host's own endpoint on an interval and once
-more on `stop()`, and keep the payload small enough for `sendBeacon`.
+ephemeral public key can correlate a receipt with public swarm activity.
+Keep receipts local unless the viewer explicitly agrees to reporting. The
+current demo's optional reporting endpoint accepts a numeric summary rather
+than this full snapshot; see [operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md).
 
 `inTimeShare` remains conditional on having peers. `sampledInTimeShare`
 includes sampled fragments with no peers; its byte equivalent weights by
@@ -366,6 +385,20 @@ coverage fields are null in peer-first mode.
 An interrupted transfer can send less than this amount; signalling and protocol
 overhead are excluded. Treat it as quota consumption, not a measurement of total
 connection data or acknowledged delivery.
+
+The session allowance is additive within metrics version 2. Exhaustion
+withdraws media availability and stops serving while receiving remains
+available. The library counts one swarm instance; a host recreating instances
+must pass the remaining page allowance and retain accepted totals. The demo
+does this across Apply, origin-only, rejoin and publisher refresh. Reloading
+the whole page starts a new allowance.
+
+Peer-first ranks eligible advertised media by measured completion time,
+payload rate and failure history. Healthy measured peers take priority over
+fast refusals; cold peers receive bounded exploration. A known delivery gets
+headroom within the original peer deadline, rather than an equal share of it.
+Attempts remain serial, with at most three peers and normal origin fallback.
+This is a bounded scheduler, not proof of optimal ABR or internet savings.
 
 ## Authenticated peer-first loading
 
@@ -486,6 +519,14 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 ## Unreleased
 
+- Added a supervised H.264/AAC broadcast bridge with two HLS renditions,
+  continuous sequence numbers, source recovery and independent RTMPS forwarding.
+- Added private persistent publisher identity, bounded hash/signature caches,
+  cumulative viewer media upload allowances and measured peer selection.
+- Added authenticated operator status/policy and explicitly opted-in bounded
+  numeric reporting; fixed cancelled HTTP media response cleanup.
+- Added a host-scoped trusted Nostr stream adapter and an isolated container
+  pilot package, with real transport/browser checks and documented acceptance gaps.
 - Refreshed the documentation for the v0.1.0 GitHub distribution and measured
   browser/native capabilities; separated planned work and historical observations.
 - Added a documentation index, getting-started guide, module API reference and
@@ -520,7 +561,8 @@ Source: [docs/README.md](https://raw.githubusercontent.com/forgesworn/relayswarm
 
 RelaySwarm is an experimental peer-assisted HLS library and transfer proof of
 concept. The released code is [v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0);
-this documentation on `main` includes subsequent corrections. The repository
+this source documentation includes subsequent corrections and an unreleased
+broadcaster pilot. The repository
 and GitHub release are the public distribution surfaces; there is no hosted
 RelaySwarm service or npm-registry publication.
 
@@ -531,6 +573,9 @@ RelaySwarm service or npm-registry publication.
 | Attach the loader, configure consent/admission, read metrics | [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md) |
 | Find module exports and publisher/session methods | [API reference](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) |
 | Run a trial on separate devices and interpret receipts | [Publisher/player field test](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md) |
+| Ingest a live broadcast or add optional RTMPS forwarding | [Broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md) |
+| Operate private state, remote policy and opt-in reports | [Operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md) |
+| Deploy beside existing services with private ingest | [Container pilot](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md) |
 | Understand HyperDHT/Noise and native authorisation | [Native transport](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NATIVE-TRANSPORT.md) |
 | Review integrity, privacy and resource boundaries | [Threat model](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/THREAT-MODEL.md) |
 | Separate tested, released and outstanding capabilities | [Evidence and remaining work](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md) |
@@ -666,7 +711,9 @@ Source: [docs/API.md](https://raw.githubusercontent.com/forgesworn/relayswarm/ma
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Installation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) ·
 [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md)
 
-This describes the experimental v0.1.0 implementation. Package version `0.1.0`,
+This describes the current experimental source, including the unreleased
+broadcaster pilot. The immutable v0.1.0 assets do not include the new publisher
+state, discovery or broadcast entry points. Package version `0.1.0`,
 session wire version `3`, segment-commitment schema `1` and metrics snapshot
 version `2` are different version numbers. Source exports and protocol fields
 are not a stable interoperability promise.
@@ -679,6 +726,9 @@ are not a stable interoperability promise.
 | `relayswarm/hls-swarm` | Browser with hls.js | `createHlsSwarm`, `HLS_SWARM_METRICS_VERSION`, `rotationCandidate`, `retryAfterFor`, `readRefusal` |
 | `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `validStreamAuthorisation`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT` |
 | `relayswarm/hls-publisher` | Node only | `createHlsPublisher`, `PublisherError` |
+| `relayswarm/publisher-state` | Node only, unreleased | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent` |
+| `relayswarm/stream-discovery` | Browser or Node, unreleased | `resolveTrustedStream`, `discoverTrustedStreams`, `StreamDiscoveryError` |
+| `relayswarm/broadcast-pipeline` | Node with FFmpeg, unreleased | `startBroadcastPipeline`, `broadcastEncoderArgs`, `broadcastForwardArgs` |
 | `relayswarm/package.json` | Package metadata | Name, version and declared dependencies |
 
 The wildcard export also permits source subpaths such as
@@ -696,7 +746,9 @@ again. Uploading defaults to off; `mode` defaults to `shadow`.
 
 The complete options, callback contract, metrics and peer-first validation are
 in [INTEGRATION.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md). The host must honour upload consent and
-pass a trusted signed stream event; the library does not perform discovery.
+pass a trusted signed stream event. The optional discovery adapter below
+resolves events under an explicit host policy; the loader itself opens no
+discovery query.
 The peer loader updates hls.js's retained statistics object and sends one
 `onAbort` callback for an aborted pending peer load. `destroy` cancels without
 reporting a completed load.
@@ -720,8 +772,11 @@ const publisher = await createHlsPublisher({
 | `mediaDir` | required | Real local directory containing the supported playlists/media |
 | `manifest` | `master.m3u8` | Entry playlist, relative to that directory |
 | `secretKey` | fresh ephemeral key | Publisher's 32-byte Nostr signing key; keep server-side |
+| `streamEvent` | fresh signed event | Restore a valid authorisation signed by this key and bound to this manifest |
 | `swarmId` | derived from signed stream event id | Shared id, 8–128 characters |
 | `now` | `Date.now` | Clock returning milliseconds; useful for deterministic tests |
+| `maxConcurrent` | `8` | Simultaneous signing work, configurable from 1 to 64 |
+| `maxCacheEntries` | `512` | Entries in each bounded hash/commitment cache, configurable from 1 to 4,096 |
 
 The returned object contains:
 
@@ -733,6 +788,8 @@ The returned object contains:
   real local filename. It does not serve HTTP itself.
 - `await commitment(context)`: signs a kind-24172 commitment derived from a
   matching playlist record and the exact bytes on disk.
+- `getMetrics()`: request, cache, streamed hashing, signing, renewal, eviction
+  and concurrency counters. These do not measure network delivery.
 
 Commitment input is `{ path, level, sequence, discontinuity, rangeStart?,
 rangeEnd?, part? }`. The path is the published `/media/...` path; level is the
@@ -746,6 +803,93 @@ playlist are rejected. The signed expiry is 60 seconds after the publisher clock
 errors. Filesystem failures can also occur; a public server should mask internal
 paths as the demo does. Catalogue/signing bounds and the exact supported HLS
 subset are in [FIELD-TEST.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#publish-your-own-media).
+
+## Private publisher state
+
+`await loadPublisherState(path, { manifest = 'master.m3u8', swarmId?, now? })`
+returns `{ secretKey, streamEvent, swarmId }` to spread into `createHlsPublisher`.
+The parent must be an existing owner-controlled directory; the state must be
+a private regular 0600 file with one link. Creation publishes one complete
+identity atomically, including concurrent callers. Invalid state, identity,
+manifest or explicit swarm mismatches fail without overwriting it.
+
+This helper requires POSIX file permissions; Windows ACL storage is not
+implemented and fails before file access. This file contains the signing
+secret. Keep it on the server and preserve it
+across orderly restarts. Without this opt-in, the publisher remains ephemeral.
+The other exports are validation/construction helpers; they do not manage
+backups or key rotation. See [operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md).
+
+## Trusted stream adapter
+
+`resolveTrustedStream(event, policy)` returns a descriptor or `null`.
+`policy` requires `trustedAuthors` (at most 64 hex public keys),
+`allowedMediaOrigins` (at most 32 exact HTTPS origins), `swarmId`, and 1–8
+host-selected `relays`. `iceServers` defaults to an empty list, avoiding
+event-selected network services; `allowLoopback: true` permits local HTTP/WS
+fixtures. Invalid host configuration throws `TypeError`.
+
+The adapter verifies the signed kind-30311 event, bounded size, one address
+identifier, live status, streaming URL, time bounds and experimental
+redistribution authorisation. Event-advertised relays never replace the host's
+policy. A descriptor contains `{ manifestUrl, streamEvent, swarmId, relays,
+iceServers, config }`. `config` starts with `serve: false`; the host supplies
+mode, commitment provider and consent separately.
+
+`await discoverTrustedStreams({ ...policy, query, signal?, timeoutMs?,
+maxEvents?, maxResults?, maxTotalBytes? })` calls the host's
+`query({ filters, relays, signal })`, accepting an array or asynchronous iterable.
+Defaults are 5 s, 256 events, 32 results and 2 MiB total; per-event size is capped
+at 16 KiB. The latest signed address update is selected before live filtering,
+so an ended update suppresses an older live event. Equal timestamps select
+the lowest event id. Floods, cancellation and timeout throw
+`StreamDiscoveryError`, including `EVENT_LIMIT`, `ABORTED` and `TIMEOUT`.
+
+This helper owns no sockets or fetches. The host query must close its resources
+on cancellation. The host must still enforce allowed origins on redirects and
+playlist assets, distinguish swarms for different streams, and establish
+publisher trust. The demo's minimal authorisation event does not advertise a
+complete discoverable NIP-53 broadcast.
+
+## Broadcast pipeline
+
+`await startBroadcastPipeline({ input, mediaDir, ffmpeg?, forwardUrl?,
+allowInsecureLoopbackForward?, retryFloorMs?, retryCeilingMs?,
+publicationIntervalMs?, retainGenerations?, generationGraceMs? })` returns
+`{ mediaDir, manifest, metrics(), ready({ timeoutMs? }), close() }`.
+Default input is the local RTSP live path; `mediaDir` is required and must be a
+dedicated owner-controlled directory. The pipeline holds an exclusive lock
+until close. Unclean process termination needs operator lock recovery.
+Supported inputs are RTSP, RTMP, RTMPS and SRT. Use plaintext inputs on a private
+network or secure their transport separately. RTSPS is rejected because TLS
+verification through that demuxer differs between supported FFmpeg versions.
+
+FFmpeg creates 360p/700 kbps and 720p/2,500 kbps H.264 video with AAC audio,
+30 fps, 2 s full MPEG-TS segments and a 12-segment live window. Both source
+tracks are required. Independent input readers supervise HLS and optional
+forwarding; retries default to 1–15 s, bounded to at most 60 s. Forwarding
+requires RTMPS with explicit certificate/hostname verification and a 15 s
+output I/O timeout. Plaintext loopback forwarding is an explicit test option.
+RTMPS requires a DNS hostname and a verified TLS implementation: the supervisor
+accepts FFmpeg 5 or newer with GnuTLS, or FFmpeg 8 or newer with OpenSSL, after a
+bounded capability check. Earlier OpenSSL implementations do not check hostnames.
+
+Stable playlist URLs retain continuous media sequence numbers and advance
+discontinuity after a complete published generation. New generation URLs
+prevent media aliasing; pruning protects media referenced by stable playlists.
+`ready` defaults to a 120 s deadline; zero waits until source or shutdown.
+`close` is idempotent. Metrics describe processes/publications and never include
+upstream credentials; a running forward process is not platform acceptance.
+The HLS worker also exposes a bounded numeric progress snapshot (frames, fps,
+encoding speed, output time and sample timestamp) for actual host measurements.
+
+`broadcastEncoderArgs(input, runDirectory, { startNumber = 0 })` and
+`broadcastForwardArgs(input, output, options?)` construct argument arrays
+without a shell. They do not create directories or launch processes. The
+caller must enforce the same FFmpeg TLS prerequisites when launching these
+arrays directly. The supervisor derives the next encoder start number from
+published playlists.
+See [broadcast setup](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md) and [container deployment](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md).
 
 ## Segment commitments
 
@@ -888,6 +1032,56 @@ retain their own dates, topology, code and integrity assumptions.
 
 ## Outstanding gates
 
+The current source also includes an **unreleased broadcaster pilot**. These
+changes are absent from v0.1.0's immutable release assets and do not establish
+production readiness.
+
+| Addition | Current local evidence | Remaining boundary |
+|---|---|---|
+| Live ingest and forwarding | Synthetic H.264/AAC over actual local RTMP/RTSP, two HLS encodes, separate forward loss/recovery, untrusted RTMPS certificate rejection | Actual OBS workstation and external platform acceptance |
+| Publisher persistence/cache | Private POSIX state, stable authorisation/swarm after orderly restart, deduplicated streamed hashes and bounded signatures | Windows ACL support; automatic recovery after unclean process termination |
+| Viewer allowance/scheduler | Concurrent/interrupted payload reservations, cumulative page allowance, healthy-peer preference and measured deadline budget | Full page reload resets allowance; real-network cost and live-edge peer coverage |
+| Operator controls/reports | Actual Chrome default report silence, explicit numeric reporting, remote off/on, viewer-off priority and policy outage recovery | Admission/Sybil resistance, persistent aggregated operations data |
+| Trusted stream adapter | Signed latest-update selection, author/origin allowlists, host relay/ICE policy, query flood/timeout/abort bounds | Host query/resource lifecycle, redirects/assets, publisher trust and complete NIP-53 advertisements |
+| Broadcast browser journey | Actual Chrome, both qualities, source reconnect, continuous visible sequence/CC and stable publisher identity | Synthetic loopback producer with a deliberate 600 ms receiving-viewer playlist delay |
+| Container package | Non-root image build, pinned router/proxy manifests, private ingest, resource/log bounds, Compose configuration | Sustained host capacity, disaster recovery and independent audience acceptance |
+
+The successful local broadcast Chrome run recorded five verified peer loads,
+3,053,872 media payload bytes and zero consumer upload. All four players had
+zero stalls/fatal errors; its receiving viewer made three media HTTP requests
+versus ten for the baseline. Those counts exclude signalling, commitments and
+wire overhead. A separate run at a synchronised live edge received no peer
+media. An earlier concurrent fixture attempt reported MSE append failures
+including on the origin-only baseline; its cause remains unresolved. The
+later isolated success does not close that load/decoder gate.
+
+Current checks include 53 swarm/discovery tests, 38 passing publisher/operator
+tests with one Windows-only test skipped on macOS, 20 broadcast guard/transport
+tests, six native tests, Chrome operator/
+playback/broadcast receipts and public-relay transfers. These are local checks;
+the existing release CI links above cover the earlier release checkpoint.
+
+An external pilot is available at
+[relayswarm.forgesworn.dev](https://relayswarm.forgesworn.dev) on the existing
+Hetzner host Till. HTTPS uses a verified certificate; RTMP remains host-loopback
+only and the test source arrived through SSH. The
+[hosted summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/hosted-pilot-summary-20261012T131905Z.json)
+records four Mac Chrome contexts, both video qualities, actual HTTPS HLS/WSS
+signalling, three verified peer loads (1,563,784 bytes), zero consumer uploads
+and zero stalls/fatal errors. No playlist delay was needed for that success.
+A preceding run lacked low-rendition peer payload within its deadline; peer
+coverage remains variable. Raw origin request totals have staggered viewer
+starts and do not establish matched-interval or net bandwidth savings.
+
+A separate orderly app-container restart restored the same publisher,
+authorisation, swarm and manifest in 5.4 s. No browser was connected during
+that restart. Five encoding-only samples over 32 s recorded 30.15–30.29 fps,
+1.01x speed, 74.46–90.78% of one CPU core and 122.4–123.6 MiB app memory.
+These short measurements do not close sustained audience capacity, physical
+devices, peer NAT diversity or external platform acceptance. The pilot displays
+a waiting page until a source publishes; the synthetic acceptance source is
+temporary.
+
 | Gate | Evidence needed |
 |---|---|
 | Physical Android/iPhone | Actual playback engine, consent, background/resume, battery and metered-data receipts |
@@ -913,8 +1107,10 @@ Source: [docs/FIELD-TEST.md](https://raw.githubusercontent.com/forgesworn/relays
 
 The demo is a runnable publisher and an hls.js player with origin-only,
 shadow and authenticated peer-first modes. Uploading starts **off**. Receipts
-are downloaded locally; there is no receipt submission or analytics endpoint.
-The publisher's signing key stays in the Node process.
+are downloaded locally. Reporting is disabled by default; the unreleased
+source can offer explicitly opted-in numeric reports and authenticated
+operator controls. See [operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md). The publisher's signing
+key stays on the server. v0.1.0 release assets retain their original behaviour.
 
 ## Run locally
 
@@ -987,10 +1183,16 @@ frame-rate families are rejected. It is a deliberately limited example, not
 a general HLS ingest service. Init maps are served over HTTP; fMP4 playback
 has not yet been exercised by the new regression fixture.
 
-Keys are ephemeral in the CLI. Restarting it creates a new authorisation and
-swarm; reload every viewer. A real publisher integration should supply its
-author key through its own server-side key management. This demo does not
-perform Nostr stream discovery or establish trust in an external publisher.
+Keys are ephemeral by default and in v0.1.0's CLI. Current source optionally
+accepts `--publisher-state /private/path/publisher.json`; preserve this 0600
+file in an owner-controlled directory for a stable identity across restarts.
+Without it, restarting creates a new authorisation and swarm. Current viewers
+poll session identity and rejoin while retaining the page allowance. The demo
+does not establish trust in external publishers.
+
+For live OBS ingest and optional independent RTMPS forwarding, use the
+unreleased [broadcast launcher](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md), which manages persistent
+publisher state automatically. Existing media remains usable without ingest.
 
 ## Use separate devices and networks
 
@@ -1268,11 +1470,14 @@ Native nodes bound pending authorisations and active transfers.
 The example Node publisher signs only a full-segment context present in its
 local playlists, including the exact byte range and discontinuity. It serves
 listed media rather than arbitrary directory files and rejects symlink escapes.
-Its ephemeral private key stays in the process. This is an example publisher,
+Its key stays on the server; current source can persist a private identity
+in an owner-controlled 0600 file. This is an example publisher,
 not a trusted-stream discovery service: a real host must still establish which
 stream author it trusts. The demo's in-memory relay and HTTP signing endpoint
 have resource bounds, but no participant admission or Sybil defence. Receipts
-stay in the browser until downloaded.
+stay in the browser until downloaded; optional reporting requires viewer
+opt-in and accepts only bounded numeric summaries, without a swarm public key.
+These unreleased controls do not establish participant admission or net cost.
 
 These are specific tested boundaries, not completion of the adversarial suite
 below. Sybil resistance, broad NAT/mobile coverage and independent-client
@@ -1371,8 +1576,9 @@ Source: [docs/FAQ.md](https://raw.githubusercontent.com/forgesworn/relayswarm/ma
 [v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0) is an
 experimental GitHub prerelease with an installable tarball, a standalone browser
 ESM bundle and checksums. It includes the browser loader, local publisher/player
-and native transfer PoC. There is no npm-registry publication or hosted RelaySwarm
-service. See [Getting started](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md).
+and native transfer PoC. The npm registry remains unpublished; the release does
+not provision hosting. Later broadcaster work is unreleased source. See
+[Getting started](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) and [the broadcaster guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md).
 
 ## Why use Nostr instead of a tracker?
 
@@ -1399,10 +1605,20 @@ It does not remove ingest, origin hosting or operator costs.
 
 ## Does NIP-53 automatically configure the swarm?
 
-No. The host selects the trusted kind-30311 stream event, swarm id, relays and
-ICE servers. The library does not discover a stream, read its relay/STUN policy
-or establish trust in an arbitrary publisher. NIP-53 can carry relay information;
-the redistribution tag and commitment kind are RelaySwarm's experimental contract.
+No. The host selects trusted authors, allowed media origins, the swarm id, relays
+and ICE servers. The released loader accepts the selected event. An optional
+adapter in unreleased source filters a host-supplied query using those explicit
+allowlists; it does not choose infrastructure or establish trust in arbitrary
+publishers. NIP-53 can carry relay information; the redistribution tag and
+commitment kind are RelaySwarm's experimental contract.
+
+## Can it send a broadcast to YouTube?
+
+The unreleased broadcaster can send the same H.264/AAC source to a separately
+configured RTMPS endpoint while producing HLS for RelaySwarm viewers. That
+forwarder has its own process and retries. A valid platform stream key, account
+configuration and an actual platform playback test are still needed. YouTube
+does not participate in the viewer peer swarm. See [broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md).
 
 ## Is signalling encrypted?
 
@@ -1625,3 +1841,147 @@ If a public documentation site is added, publish its Markdown, an applicable
 deployment. Verify its actual public responses before claiming discovery or
 deployment. Do not add fictional domains, indexing guarantees or unsupported
 production/security claims to this repository's metadata.
+
+---
+
+Source: [docs/BROADCASTING.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md)
+
+# Broadcaster source workflow
+
+[Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md) · [Container deployment](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md) · [Evidence](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md)
+
+This guide describes the current, unreleased source branch. The immutable v0.1.0 release tarball and standalone browser bundle do **not** include this broadcaster workflow, persistent publisher state or operator/reporting controls. Use a checkout containing these files and scripts; the package version remains 0.1.0. Publication of a guide does not establish deployed playback or platform acceptance.
+
+## Local source and dependencies
+
+Use Node 24 and ffmpeg with libx264 and AAC. RTMPS input/forwarding additionally requires a DNS hostname and FFmpeg major version 5 or later built with GnuTLS, or major version 8 or later built with OpenSSL. Install the source dependencies and the pinned MediaMTX router:
+
+```sh
+npm ci
+npm run broadcast:install
+```
+
+The installer downloads MediaMTX 1.21.2 for macOS/Linux x64 or arm64, checks the archive against a platform-specific pinned SHA-256 before extraction, and prints the executable path. Its owner-controlled cache is `artifacts/tools/mediamtx-v1.21.2`; a private receipt records the extracted binary digest. A cached receipt is trusted local state, not independent upstream attestation. On another platform supply your own compatible router executable.
+
+Start the bundled local router and broadcaster from the repository root:
+
+```sh
+npm run broadcast -- \
+  --mediamtx artifacts/tools/mediamtx-v1.21.2/mediamtx \
+  --state-dir artifacts/broadcast
+```
+
+Configure OBS Custom streaming with server `rtmp://127.0.0.1:1935/live` and an empty stream key. Supply **both H.264 video and AAC audio**. The bundled router listens only on loopback, refuses a second publisher for `live`, and exposes its RTSP read path at `rtsp://127.0.0.1:8554/live`. The launcher reads that path over TCP. Without `--mediamtx`, run the router separately or provide `--input` for an existing supported network source. Supported input schemes are RTSP, RTMP, RTMPS and SRT. RTSPS is rejected because verified TLS behaviour is not portable across supported FFmpeg versions; scheme acceptance does not prove compatibility with every source.
+
+The launcher first binds a waiting listener and prints its address, normally `http://localhost:8787`. The root page returns HTTP 200 and checks again every three seconds. Before both HLS renditions publish, other endpoints return bounded HTTP 503 responses with `Retry-After: 3`; there is no session, relay or operator API on the waiting listener. Once output is ready, the launcher replaces that listener with the player on the same port. A waiting page proves HTTP availability, not media playback. Stop with Ctrl-C for orderly listener, worker and router shutdown.
+
+An external OBS workstation can use an authorised SSH tunnel rather than a public plaintext RTMP listener:
+
+```sh
+ssh -N -L 1935:127.0.0.1:1935 deploy@your-host
+```
+
+OBS then targets its own loopback address. The container router uses an internal app/router network plus a separate normal bridge needed for its loopback RTMP port publication; RTSP has no published host port. Container ingest mappings and the existing/new HTTPS proxy choices are in the [deployment guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md). Remote browsers require configured TLS or an explicit `--public-url https://your-hostname` behind an HTTPS proxy. The public origin must match browser Origin headers. Configure repeated `--relay wss://...` options if using external relays; otherwise the server supplies its own bounded relay at `/relay`. `--stun` accepts a STUN URL; this launcher does not provide TURN credentials or a TURN deployment.
+
+## Output and recovery
+
+The encoder produces two fixed H.264/AAC renditions:
+
+| Rendition | Frame shape/rate | Target video rate | Audio |
+|---|---|---|---|
+| low | 640 × 360, 30 fps | 700 kbps | AAC, 128 kbps, 48 kHz stereo |
+| high | 1280 × 720, 30 fps | 2,500 kbps | AAC, 128 kbps, 48 kHz stereo |
+
+Scaling preserves aspect ratio and pads to the fixed frame shape. Each rendition uses a two-second segment target and a twelve-segment live playlist: approximately **24 seconds of listed media**, not a 120-second playlist. ffmpeg retains an additional deletion tail; prior process generations have a separate two-minute pruning grace by default. These durations are storage/publication policy, not a measured end-to-end latency guarantee. Both renditions belong to one supported codec/frame-rate family; this is a fixed ladder, not a general encoding service.
+
+The HLS worker and optional forwarding worker retry independently, with bounded exponential delay. Each HLS process generation uses a distinct segment directory and a persisted discontinuity sequence. Variant/master publication uses atomic file replacement. Source loss leaves the last published playlists available while workers reconnect; old HTTP availability does not establish fresh media or successful decoder recovery. Inspect publication age in operator status.
+
+Use a dedicated canonical state directory owned by the launching user, preferably mode **0700**, with no symlink components or group/world writes. New directories use 0700. The launcher keeps `publisher.json` and `operator-token` as owner-only **0600**, regular, single-link files. The publisher file contains a private signing key and its signed redistribution authorisation; neither secret is delivered in browser sessions or operator status. Existing malformed/mismatched publisher state is rejected rather than replaced. Restarting with the same state retains publisher identity, swarm ID and authorisation; starting with another state directory creates another identity.
+
+Only one pipeline may use a media directory. `/state/media/.broadcast-lock` in the container, or `STATE_DIR/media/.broadcast-lock` natively, is acquired exclusively. Orderly close removes it. An unclean exit may leave it and the next start fails closed. Stop all possible users of that volume/directory and establish exclusive ownership before manual stale-lock removal; never infer safety from a PID in a different namespace or delete locks automatically. See [operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md#restart-and-recovery).
+
+## Optional RTMPS forwarding
+
+Create a private, owner-controlled directory outside the checkout. In it, use a private editor to write one line containing the complete RTMPS ingest URL to a regular, single-link file owned by the launching user, mode **0600**. Keep the parent mode **0700** and use its canonical path. Start with:
+
+```sh
+npm run broadcast -- \
+  --mediamtx artifacts/tools/mediamtx-v1.21.2/mediamtx \
+  --state-dir artifacts/broadcast \
+  --youtube-url-file /absolute/private/directory/youtube-url
+```
+
+The file supplies the URL without putting the stream key in environment variables or launcher arguments. For RTMPS input or forwarding, the pipeline first checks the selected executable’s version/build configuration with a five-second, 32 KiB output budget, before creating media state or workers. Direct callers of the argument builders must perform equivalent capability validation themselves. Forwarding has its own ffmpeg process and source reader, copies the H.264/AAC tracks into FLV, requires RTMPS, explicitly enables TLS certificate/hostname verification and sets a 15-second output I/O timeout. It does not transcode for a platform's separate compatibility rules. A forwarding outage cannot block the HLS process, although both still depend on the same source and host resources.
+
+Trusted host/container administrators can inspect ffmpeg's process arguments, which contain the full ingest URL. The implementation consumes upstream stderr without publishing credentials in logs, metrics or browser sessions. Protect the host, secret file and process-inspection permissions accordingly. Restart the broadcaster to read a changed URL. A process marked running/connecting or repeated restarts is **not** evidence that YouTube accepted the stream or that viewers can play it; confirm that separately in an authorised platform test.
+
+## Verification boundary
+
+The branch includes native process/publication tests and browser fixtures. Real-broadcast decoder/MSE playback remains an acceptance gate while that journey is being debugged; no successful physical-device, NAT, public-host or YouTube journey is claimed here. Check the dated [status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md) for evidence as it becomes available. Deployment preparation and an authorised hostname do not prove a live service.
+
+---
+
+Source: [docs/OPERATIONS.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md)
+
+# Pilot operator controls
+
+[Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Broadcaster](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md) · [Container deployment](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md) · [API](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) · [Evidence](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md)
+
+These controls describe the **unreleased source branch**, not the immutable v0.1.0 release assets. They support a bounded pilot; they do not establish production readiness, a hosted admission service or a verified public playback URL.
+
+Before the first broadcast is ready, the root returns an HTTP 200 waiting page with a three-second refresh. Other endpoints return HTTP 503 with `Retry-After: 3`, including the authenticated status route; the waiting listener exposes no session, relay or operator API. The launcher replaces it with the player on the same port when both renditions publish. Waiting-page reachability does not establish fresh media, successful decoding or a verified public deployment.
+
+## Credentials and HTTP routes
+
+The broadcaster creates its private `operator-token` in `--state-dir`. The demo can instead take `--operator-token-file FILE`, the `RELAYSWARM_OPERATOR_TOKEN` environment variable, or the `startDemoServer` JavaScript option `operatorToken`. Prefer a private file; supplying both JavaScript token sources is rejected. Tokens must contain 32–256 non-whitespace characters. Token files require an owner-controlled canonical parent, a 0600 regular single-link file and matching ownership; symlinks and unsafe permissions are rejected.
+
+The token is never in the player page, `/session.json`, public policy or operator status. Keep it separate from publisher signing secrets and forwarding credentials. The [deployment guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md#operator-access-and-private-identity) shows private header-file extraction and curl commands without printing the token or placing it in arguments.
+
+| Route | Method/authentication | Result |
+|---|---|---|
+| `/operator/status` | GET, `Authorization: Bearer TOKEN` | Policy, origin HTTP counters, publisher work/cache metrics, report aggregate and optional redacted broadcast worker/publication status |
+| `/operator/policy` | POST, bearer token, `application/json` | Accepts only `{"mode":null}`, `{"mode":"off"}`, `{"mode":"shadow"}` or `{"mode":"peer-first"}`; returns incremented policy revision |
+| `/delivery-policy.json` | GET, public | Mode, revision and reporting availability; no token or publisher secret |
+| `/reports` | POST, explicit server enablement and same-origin browser request | Accepts only bounded numeric measurement fields |
+
+Unconfigured operator controls return 503; absent/incorrect credentials return 401. Cross-site Origin/Fetch-Metadata requests are rejected. Operator bodies are capped at 2,048 bytes and reject unknown fields/invalid modes; wrong methods and content types are rejected. Authentication is not a replacement for HTTPS, host protection or restricting administrative exposure at the reverse proxy. The bearer token grants policy/status access, not media-source credentials or shell access.
+
+## Policy and viewer consent
+
+`mode: null` leaves mode choice to the viewer. `off` requests origin-only playback. `shadow` or `peer-first` selects behaviour **only after the viewer has chosen a peer mode**: viewer origin-only selection and `Use origin only` always win. A policy can never opt the viewer into uploading. Valid publisher-signed redistribution authorisation is also required by the browser engine; operator policy is not an authorisation bypass.
+
+The page polls policy and the publisher session every two seconds, with a single in-flight poll and five-second fetch budgets. Disablement is cooperative browser behaviour, not an immediate revocation of already delivered media or a claim that every client honours policy. On operator off or policy/session failure, it restores origin loading and clears the upload checkbox. Later enablement leaves uploading off until the viewer opts in again. Playback's video instance remains running; origin availability still determines whether playback can continue. Session identity changes on the same manifest trigger swarm rejoining without resetting page counters or reloading the playback instance. A changed manifest requires an appropriate host-page transition; this page fails to origin rather than guessing.
+
+## Upload and measurement limits
+
+The page offers 10 MB, 100 MB (default) or 1 GB of cumulative **media payload** allowance, plus a separate upload rate choice. Applying settings, using the kill switch or rejoining retains the page's consumed allowance. Each new swarm receives only the remaining budget. Accepted sends reserve their complete payload before transport; interrupted sends are not refunded. An oversized next segment is refused without consuming the smaller remaining allowance. Exact exhaustion stops serving and withdraws held availability, while receiving/playback can continue. Reloading the page starts a new page allowance; this is not an account-wide or device-wide cap. A viewer can deliberately raise the selected allowance.
+
+The library option is `maxUploadBytesPerSession`; omission means unlimited and zero means no media uploads. Its metrics expose configured cap, remaining allowance and exhaustion. Host applications that recreate a swarm must carry their own cumulative allowance forward, as the page does. Rate limits use a token bucket with up to a two-second burst. Signalling, transport overhead, commitment fetches and shadow downloads are additional traffic; an upload media cap is not a wire-traffic limit.
+
+Server `origin` counters separate `/media/` requests/body bytes from commitment requests/body bytes. Media counts include playlists, init segments, ranges and error responses; HEAD contributes no response body. Body bytes are bytes handed to HTTP responses, not confirmed physical-wire totals or network overhead. Browser resource timings have their own scope and exclude native-HLS requests. Verified peer payload records media accepted from peers; shadow mode adds peer traffic alongside origin loading. None of these counters alone establish net traffic/cost savings.
+
+Publisher metrics include signing/hashing/cache activity, concurrent work and rejections. Broadcast metrics include worker states/restarts, rendition shape, generation and last publication time; they contain no input/output URLs or stream keys. A running process does not prove a fresh source, successful decoding or platform acceptance.
+
+## Optional numeric reporting
+
+Reporting is **off by default**. Enable it server-side using `--telemetry` or `startDemoServer({telemetry:true})`; each viewer must then check the separate reporting opt-in. The page sends cumulative numeric snapshots every fifteen seconds after playback starts. Downloadable field receipts remain separate and are not submitted.
+
+Reports contain exactly `durationMs`, `peerBytes`, `uploadedBytes`, `originMediaRequests`, `originMediaBytes`, `stalls`, `stallMs` and `fatalErrors`, each a non-negative safe integer no greater than 10¹². Browser version, device/network labels, identities and peer IP addresses are not accepted. There is no third-party report endpoint. HTTP transport/proxy infrastructure necessarily sees request addresses; the report collector does not retain them as sample fields. Review any independent reverse-proxy access-log policy separately.
+
+The collector permits 240 requests per ten seconds, caps each body at 2,048 bytes, requires the configured same-origin Origin and rejects cross-site Fetch Metadata. Default memory retention is at most 256 snapshots for five minutes. JavaScript options `reportCapacity` (1–4,096) and `reportTtlMs` (1,000–3,600,000) adjust those bounds. Expired entries are removed on collection/status; process restart clears memory. Reports are untrusted viewer-supplied observations. Repeated cumulative snapshots are **not deduplicated** and aggregate sums are not unique-viewer totals, additive bandwidth savings or billing evidence.
+
+## Resources and admission boundary
+
+The HTTP example caps active media responses at 32, connections at 128, header size at 8 KiB and request/header timeouts at ten seconds. Commitment requests have a separate 240-per-ten-second budget. Publisher defaults permit eight concurrent commitment operations and 512 entries in each hash/commitment cache; playlist/catalogue/segment bounds are documented in the [API](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md). Cancellation releases media file handles and response slots even while lookup/opening is pending.
+
+The [container package](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md) sets CPU, memory, process and log limits, loopback ingest/player mappings and private network boundaries. Its healthcheck requires a recent publication and publishing worker state; it becomes unhealthy without input or during a prolonged source outage. Compose restart policies recover container exits, not unhealthy status alone. Measure actual host capacity before broadening a pilot.
+
+Browser peer caps and optional admission callbacks do not themselves provide a deployed ticket issuer or Sybil resistance. The demo has no integrated admission service. Fake signed presence floods and real-network participation remain separate acceptance gates; signatures establish key possession, not a unique human or trusted subscriber.
+
+## Restart and recovery
+
+Preserve the dedicated state directory/volume to retain publisher identity and operator credentials. Shut down normally so workers, file handles and the exclusive `.broadcast-lock` are released. Do not run two pipelines against one media directory, mount the state into unrelated services, or delete private state during an upgrade.
+
+After an unclean exit, a retained lock deliberately prevents a new writer. Stop this stack, inspect every possible process/container/mount using its volume, establish that no broadcaster still uses it, keep a private consistent backup, then remove only the stale lock. A namespace-local PID is insufficient evidence. If exclusive ownership cannot be established, leave the lock in place. The [deployment guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md#exclusive-volume-ownership-and-crash-recovery) gives the container recovery boundary and rollback procedure.
+
+Publisher state contains the signing secret; a whole-volume backup can also contain generated media. Use access-controlled encrypted backups. Forwarding credentials live in a separate private file and are read at launch; trusted process administrators can inspect ffmpeg's full URL arguments. Never put these secrets in a browser receipt, repository, public status response or issue attachment.

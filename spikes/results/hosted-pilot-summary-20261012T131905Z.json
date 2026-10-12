@@ -1,0 +1,188 @@
+{
+  "v": 1,
+  "kind": "relayswarm-hosted-pilot-summary",
+  "at": "2026-10-12T13:19:05.086Z",
+  "target": "https://relayswarm.forgesworn.dev/",
+  "server": {
+    "alias": "Till",
+    "provider": "Hetzner",
+    "cpus": 2,
+    "totalMemoryMiB": 3814,
+    "application": "unreleased broadcaster source",
+    "ffmpeg": "5.1.9 Debian GnuTLS"
+  },
+  "successfulJourney": {
+    "ok": true,
+    "elapsedMs": 40870,
+    "scope": {
+      "browser": "desktop Chrome",
+      "hostPlatform": "darwin",
+      "browserContexts": "four contexts on one host",
+      "origin": "real external HTTPS deployment",
+      "source": "operator-provided synthetic source",
+      "physicalDevices": false,
+      "NATDiversity": false,
+      "OBS": false,
+      "YouTube": false,
+      "numericReporting": false,
+      "maxJourneyMs": 90000,
+      "cleanupBudgetMs": 8000,
+      "sameEdge": true,
+      "delayedConsumerPlaylistMs": 0,
+      "restart": "observation only; operator must trigger any app restart separately",
+      "browserVersion": "154.0.8037.98"
+    },
+    "viewers": [
+      {
+        "name": "contributor-low",
+        "originMediaRequests": 18,
+        "mediaFailures": 0,
+        "verifiedPeerLoads": 0,
+        "verifiedPeerMediaBytes": 0,
+        "uploadedMediaBytes": 219960,
+        "stalls": 0,
+        "fatalErrors": 0,
+        "peerLevels": []
+      },
+      {
+        "name": "contributor-high",
+        "originMediaRequests": 16,
+        "mediaFailures": 0,
+        "verifiedPeerLoads": 0,
+        "verifiedPeerMediaBytes": 0,
+        "uploadedMediaBytes": 1343824,
+        "stalls": 0,
+        "fatalErrors": 0,
+        "peerLevels": []
+      },
+      {
+        "name": "origin-baseline",
+        "originMediaRequests": 16,
+        "mediaFailures": 0,
+        "verifiedPeerLoads": 0,
+        "verifiedPeerMediaBytes": 0,
+        "uploadedMediaBytes": 0,
+        "stalls": 0,
+        "fatalErrors": 0,
+        "peerLevels": []
+      },
+      {
+        "name": "receive-only",
+        "originMediaRequests": 11,
+        "mediaFailures": 0,
+        "verifiedPeerLoads": 3,
+        "verifiedPeerMediaBytes": 1563784,
+        "uploadedMediaBytes": 0,
+        "stalls": 0,
+        "fatalErrors": 0,
+        "peerLevels": [
+          0,
+          1
+        ]
+      }
+    ],
+    "insecureRequests": 0,
+    "numericReportSubmissions": 0,
+    "pageErrors": 0,
+    "wssSignallingObserved": true
+  },
+  "priorJourney": {
+    "at": "2026-10-12T13:16:22.174Z",
+    "ok": false,
+    "elapsedMs": 62075,
+    "failure": "Low-rendition verified peer delivery was absent within the bounded observation; high-rendition peers and all four playback journeys worked.",
+    "consumerPlaylistDelayMs": 600,
+    "viewers": [
+      {
+        "name": "contributor-low",
+        "originMediaRequests": 26,
+        "mediaFailures": 0,
+        "verifiedPeerLoads": 0,
+        "verifiedPeerMediaBytes": 0,
+        "uploadedMediaBytes": 0,
+        "stalls": 0,
+        "fatalErrors": 0,
+        "peerLevels": []
+      },
+      {
+        "name": "contributor-high",
+        "originMediaRequests": 23,
+        "mediaFailures": 0,
+        "verifiedPeerLoads": 0,
+        "verifiedPeerMediaBytes": 0,
+        "uploadedMediaBytes": 1368640,
+        "stalls": 0,
+        "fatalErrors": 0,
+        "peerLevels": []
+      },
+      {
+        "name": "origin-baseline",
+        "originMediaRequests": 26,
+        "mediaFailures": 0,
+        "verifiedPeerLoads": 0,
+        "verifiedPeerMediaBytes": 0,
+        "uploadedMediaBytes": 0,
+        "stalls": 0,
+        "fatalErrors": 0,
+        "peerLevels": []
+      },
+      {
+        "name": "receive-only",
+        "originMediaRequests": 20,
+        "mediaFailures": 0,
+        "verifiedPeerLoads": 2,
+        "verifiedPeerMediaBytes": 1368640,
+        "uploadedMediaBytes": 0,
+        "stalls": 0,
+        "fatalErrors": 0,
+        "peerLevels": [
+          1
+        ]
+      }
+    ]
+  },
+  "orderlyRestart": {
+    "ok": true,
+    "scope": "Orderly remote app-container restart with ongoing synthetic SSH-tunnel source. No browser connected during restart.",
+    "recoveryMs": 5359,
+    "identityUnchanged": true,
+    "containerStartedAtBefore": "2026-10-12T13:13:34.251788291Z",
+    "containerStartedAtAfter": "2026-10-12T13:21:45.433174411Z"
+  },
+  "shortHostSamples": {
+    "scope": "Five short samples of the two-rendition synthetic source on Till; encoding only, no connected Chrome audience during sampling. CPU 100 percent equals one core. Not a sustained audience-capacity test.",
+    "count": 5,
+    "firstAt": "2026-10-12T13:24:15Z",
+    "lastAt": "2026-10-12T13:24:47Z",
+    "cpuPercentRange": [
+      74.46,
+      90.78
+    ],
+    "memoryMiBRange": [
+      122.4,
+      123.6
+    ],
+    "fpsRange": [
+      30.15,
+      30.29
+    ],
+    "encodingSpeedRange": [
+      1.01,
+      1.01
+    ]
+  },
+  "remainingGates": [
+    "Actual OBS input and physical mobile/browser acceptance",
+    "Separate peer networks and hard NAT/TURN behaviour",
+    "Hours of operation, audience capacity, adversarial admission and cost",
+    "Real authorised external-platform ingest and playback",
+    "Earlier concurrent local MSE fixture failure remains unresolved"
+  ],
+  "measurementLimits": [
+    "Four desktop Chrome contexts on one Mac hit a real external HTTPS origin; peers used same-host candidates.",
+    "Successful journey needed no artificial playlist delay, but peer coverage varied across runs.",
+    "Origin counts are raw totals with staggered viewer starts; they are not matched-interval bandwidth savings.",
+    "Peer payload excludes signalling, commitments, protocol overhead and aggregate origin/peer costs.",
+    "Browser playback during a server restart was not tested in this hosted run."
+  ]
+}

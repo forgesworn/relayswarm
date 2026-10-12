@@ -74,6 +74,7 @@ connection and relay socket, drops held segments and emits one final
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
 | `maxUploadPeers` | `4` | Distinct peers served in any 30 s. |
 | `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. |
+| `maxUploadBytesPerSession` | unlimited | Optional non-negative safe integer, including zero. Reserves full accepted media payloads; interrupted transfers do not refund the allowance. |
 | `serveOnCellular` | `false` | With `false`, detected cellular or `saveData` connections neither upload nor fetch peer media. Detection is advisory and does not identify every metered connection. |
 | `serve` | `false` | Set `true` only after the viewer opts into uploading. With `false`, the viewer is receive-only: it takes from peers but never uploads or advertises what it holds. Use it where the connection type cannot be read (Safari), so a phone on cellular is never asked to upload. |
 | `ticket` | none | An opaque string (up to 2 KB) this viewer presents in its presence and in every offer and answer, typically a short-lived credential the origin signed for this viewer's swarm key. |
@@ -127,15 +128,20 @@ not an identity), `uptimeMs`, `serving`, plus:
   `commitmentUnavailable`, `peerFirstShare`, `peerFirstByteShare`, `peerLatencyMedianMs`,
   `peerLatencyP90Ms`, `originLatencyMedianMs`.
 - `bytes`: `fromOrigin`, `fromPeers`, `peerFirst`, `uploaded`, `uploadsServed`,
-  `uploadsRefused`, `held`.
+  `uploadsRefused`, `held`, `uploadRemaining` (null when unlimited),
+  `uploadExhausted`.
+- `peers.deliveryMeasurements`: bounded measurements for active links,
+  including completion time, payload rate and failures.
 - `relays`: `connected`, `presenceSent`, `signalsSent`, `published`,
   `rejected`, `publishErrors`.
 - `errors`: `total` and `byStage`.
 - `config`: the effective settings, so a receipt says what produced it.
 
 Snapshots contain no IP addresses, user agent or long-term key, but the
-ephemeral public key can correlate a receipt with public swarm activity. Post it to the host's own endpoint on an interval and once
-more on `stop()`, and keep the payload small enough for `sendBeacon`.
+ephemeral public key can correlate a receipt with public swarm activity.
+Keep receipts local unless the viewer explicitly agrees to reporting. The
+current demo's optional reporting endpoint accepts a numeric summary rather
+than this full snapshot; see [operations](docs/OPERATIONS.md).
 
 `inTimeShare` remains conditional on having peers. `sampledInTimeShare`
 includes sampled fragments with no peers; its byte equivalent weights by
@@ -151,6 +157,20 @@ coverage fields are null in peer-first mode.
 An interrupted transfer can send less than this amount; signalling and protocol
 overhead are excluded. Treat it as quota consumption, not a measurement of total
 connection data or acknowledged delivery.
+
+The session allowance is additive within metrics version 2. Exhaustion
+withdraws media availability and stops serving while receiving remains
+available. The library counts one swarm instance; a host recreating instances
+must pass the remaining page allowance and retain accepted totals. The demo
+does this across Apply, origin-only, rejoin and publisher refresh. Reloading
+the whole page starts a new allowance.
+
+Peer-first ranks eligible advertised media by measured completion time,
+payload rate and failure history. Healthy measured peers take priority over
+fast refusals; cold peers receive bounded exploration. A known delivery gets
+headroom within the original peer deadline, rather than an equal share of it.
+Attempts remain serial, with at most three peers and normal origin fallback.
+This is a bounded scheduler, not proof of optimal ABR or internet savings.
 
 ## Authenticated peer-first loading
 

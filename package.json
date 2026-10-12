@@ -10,12 +10,17 @@
     "check": "node scripts/check-syntax.mjs",
     "audit": "npm audit --audit-level=high",
     "test:browser": "node test/hls-swarm-browser.mjs",
-    "test:swarm": "node --test test/hls-swarm.test.mjs test/browser-hardening.test.mjs",
-    "test:publisher": "node --test test/hls-publisher.test.mjs test/demo-server.test.mjs",
+    "test:swarm": "node --test test/hls-swarm.test.mjs test/browser-hardening.test.mjs test/stream-discovery.test.mjs",
+    "test:publisher": "node --test test/hls-publisher.test.mjs test/publisher-state.test.mjs test/demo-server.test.mjs test/demo-operator.test.mjs test/demo-client.test.mjs test/broadcast-waiting.test.mjs",
     "test:playback": "node test/hls-playback-browser.mjs",
     "demo": "node demo/server.mjs",
     "docs:generate": "node scripts/build-ai-context.mjs",
-    "check:docs": "node scripts/check-docs.mjs"
+    "check:docs": "node scripts/check-docs.mjs",
+    "test:operator": "node test/operator-browser.mjs",
+    "test:broadcast": "node scripts/install-test-mediamtx.mjs && node --test test/broadcast-guards.test.mjs test/broadcast-integration.test.mjs",
+    "test:broadcast:browser": "node test/broadcast-browser.mjs",
+    "broadcast": "node scripts/broadcast.mjs",
+    "broadcast:install": "node scripts/install-test-mediamtx.mjs"
   },
   "keywords": [
     "nostr",
@@ -59,7 +64,10 @@
     "./package.json": "./package.json",
     "./*": "./*",
     "./segment-commitment": "./src/browser/segment-commitment.mjs",
-    "./hls-publisher": "./src/hls-publisher.mjs"
+    "./hls-publisher": "./src/hls-publisher.mjs",
+    "./publisher-state": "./src/publisher-state.mjs",
+    "./stream-discovery": "./src/browser/stream-discovery.mjs",
+    "./broadcast-pipeline": "./src/broadcast-pipeline.mjs"
   },
   "bugs": {
     "url": "https://github.com/forgesworn/relayswarm/issues"

@@ -3,7 +3,9 @@
 [Documentation](README.md) · [Installation](GETTING-STARTED.md) ·
 [hls.js integration](../INTEGRATION.md)
 
-This describes the experimental v0.1.0 implementation. Package version `0.1.0`,
+This describes the current experimental source, including the unreleased
+broadcaster pilot. The immutable v0.1.0 assets do not include the new publisher
+state, discovery or broadcast entry points. Package version `0.1.0`,
 session wire version `3`, segment-commitment schema `1` and metrics snapshot
 version `2` are different version numbers. Source exports and protocol fields
 are not a stable interoperability promise.
@@ -16,6 +18,9 @@ are not a stable interoperability promise.
 | `relayswarm/hls-swarm` | Browser with hls.js | `createHlsSwarm`, `HLS_SWARM_METRICS_VERSION`, `rotationCandidate`, `retryAfterFor`, `readRefusal` |
 | `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `validStreamAuthorisation`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT` |
 | `relayswarm/hls-publisher` | Node only | `createHlsPublisher`, `PublisherError` |
+| `relayswarm/publisher-state` | Node only, unreleased | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent` |
+| `relayswarm/stream-discovery` | Browser or Node, unreleased | `resolveTrustedStream`, `discoverTrustedStreams`, `StreamDiscoveryError` |
+| `relayswarm/broadcast-pipeline` | Node with FFmpeg, unreleased | `startBroadcastPipeline`, `broadcastEncoderArgs`, `broadcastForwardArgs` |
 | `relayswarm/package.json` | Package metadata | Name, version and declared dependencies |
 
 The wildcard export also permits source subpaths such as
@@ -33,7 +38,9 @@ again. Uploading defaults to off; `mode` defaults to `shadow`.
 
 The complete options, callback contract, metrics and peer-first validation are
 in [INTEGRATION.md](../INTEGRATION.md). The host must honour upload consent and
-pass a trusted signed stream event; the library does not perform discovery.
+pass a trusted signed stream event. The optional discovery adapter below
+resolves events under an explicit host policy; the loader itself opens no
+discovery query.
 The peer loader updates hls.js's retained statistics object and sends one
 `onAbort` callback for an aborted pending peer load. `destroy` cancels without
 reporting a completed load.
@@ -57,8 +64,11 @@ const publisher = await createHlsPublisher({
 | `mediaDir` | required | Real local directory containing the supported playlists/media |
 | `manifest` | `master.m3u8` | Entry playlist, relative to that directory |
 | `secretKey` | fresh ephemeral key | Publisher's 32-byte Nostr signing key; keep server-side |
+| `streamEvent` | fresh signed event | Restore a valid authorisation signed by this key and bound to this manifest |
 | `swarmId` | derived from signed stream event id | Shared id, 8–128 characters |
 | `now` | `Date.now` | Clock returning milliseconds; useful for deterministic tests |
+| `maxConcurrent` | `8` | Simultaneous signing work, configurable from 1 to 64 |
+| `maxCacheEntries` | `512` | Entries in each bounded hash/commitment cache, configurable from 1 to 4,096 |
 
 The returned object contains:
 
@@ -70,6 +80,8 @@ The returned object contains:
   real local filename. It does not serve HTTP itself.
 - `await commitment(context)`: signs a kind-24172 commitment derived from a
   matching playlist record and the exact bytes on disk.
+- `getMetrics()`: request, cache, streamed hashing, signing, renewal, eviction
+  and concurrency counters. These do not measure network delivery.
 
 Commitment input is `{ path, level, sequence, discontinuity, rangeStart?,
 rangeEnd?, part? }`. The path is the published `/media/...` path; level is the
@@ -83,6 +95,93 @@ playlist are rejected. The signed expiry is 60 seconds after the publisher clock
 errors. Filesystem failures can also occur; a public server should mask internal
 paths as the demo does. Catalogue/signing bounds and the exact supported HLS
 subset are in [FIELD-TEST.md](FIELD-TEST.md#publish-your-own-media).
+
+## Private publisher state
+
+`await loadPublisherState(path, { manifest = 'master.m3u8', swarmId?, now? })`
+returns `{ secretKey, streamEvent, swarmId }` to spread into `createHlsPublisher`.
+The parent must be an existing owner-controlled directory; the state must be
+a private regular 0600 file with one link. Creation publishes one complete
+identity atomically, including concurrent callers. Invalid state, identity,
+manifest or explicit swarm mismatches fail without overwriting it.
+
+This helper requires POSIX file permissions; Windows ACL storage is not
+implemented and fails before file access. This file contains the signing
+secret. Keep it on the server and preserve it
+across orderly restarts. Without this opt-in, the publisher remains ephemeral.
+The other exports are validation/construction helpers; they do not manage
+backups or key rotation. See [operations](OPERATIONS.md).
+
+## Trusted stream adapter
+
+`resolveTrustedStream(event, policy)` returns a descriptor or `null`.
+`policy` requires `trustedAuthors` (at most 64 hex public keys),
+`allowedMediaOrigins` (at most 32 exact HTTPS origins), `swarmId`, and 1–8
+host-selected `relays`. `iceServers` defaults to an empty list, avoiding
+event-selected network services; `allowLoopback: true` permits local HTTP/WS
+fixtures. Invalid host configuration throws `TypeError`.
+
+The adapter verifies the signed kind-30311 event, bounded size, one address
+identifier, live status, streaming URL, time bounds and experimental
+redistribution authorisation. Event-advertised relays never replace the host's
+policy. A descriptor contains `{ manifestUrl, streamEvent, swarmId, relays,
+iceServers, config }`. `config` starts with `serve: false`; the host supplies
+mode, commitment provider and consent separately.
+
+`await discoverTrustedStreams({ ...policy, query, signal?, timeoutMs?,
+maxEvents?, maxResults?, maxTotalBytes? })` calls the host's
+`query({ filters, relays, signal })`, accepting an array or asynchronous iterable.
+Defaults are 5 s, 256 events, 32 results and 2 MiB total; per-event size is capped
+at 16 KiB. The latest signed address update is selected before live filtering,
+so an ended update suppresses an older live event. Equal timestamps select
+the lowest event id. Floods, cancellation and timeout throw
+`StreamDiscoveryError`, including `EVENT_LIMIT`, `ABORTED` and `TIMEOUT`.
+
+This helper owns no sockets or fetches. The host query must close its resources
+on cancellation. The host must still enforce allowed origins on redirects and
+playlist assets, distinguish swarms for different streams, and establish
+publisher trust. The demo's minimal authorisation event does not advertise a
+complete discoverable NIP-53 broadcast.
+
+## Broadcast pipeline
+
+`await startBroadcastPipeline({ input, mediaDir, ffmpeg?, forwardUrl?,
+allowInsecureLoopbackForward?, retryFloorMs?, retryCeilingMs?,
+publicationIntervalMs?, retainGenerations?, generationGraceMs? })` returns
+`{ mediaDir, manifest, metrics(), ready({ timeoutMs? }), close() }`.
+Default input is the local RTSP live path; `mediaDir` is required and must be a
+dedicated owner-controlled directory. The pipeline holds an exclusive lock
+until close. Unclean process termination needs operator lock recovery.
+Supported inputs are RTSP, RTMP, RTMPS and SRT. Use plaintext inputs on a private
+network or secure their transport separately. RTSPS is rejected because TLS
+verification through that demuxer differs between supported FFmpeg versions.
+
+FFmpeg creates 360p/700 kbps and 720p/2,500 kbps H.264 video with AAC audio,
+30 fps, 2 s full MPEG-TS segments and a 12-segment live window. Both source
+tracks are required. Independent input readers supervise HLS and optional
+forwarding; retries default to 1–15 s, bounded to at most 60 s. Forwarding
+requires RTMPS with explicit certificate/hostname verification and a 15 s
+output I/O timeout. Plaintext loopback forwarding is an explicit test option.
+RTMPS requires a DNS hostname and a verified TLS implementation: the supervisor
+accepts FFmpeg 5 or newer with GnuTLS, or FFmpeg 8 or newer with OpenSSL, after a
+bounded capability check. Earlier OpenSSL implementations do not check hostnames.
+
+Stable playlist URLs retain continuous media sequence numbers and advance
+discontinuity after a complete published generation. New generation URLs
+prevent media aliasing; pruning protects media referenced by stable playlists.
+`ready` defaults to a 120 s deadline; zero waits until source or shutdown.
+`close` is idempotent. Metrics describe processes/publications and never include
+upstream credentials; a running forward process is not platform acceptance.
+The HLS worker also exposes a bounded numeric progress snapshot (frames, fps,
+encoding speed, output time and sample timestamp) for actual host measurements.
+
+`broadcastEncoderArgs(input, runDirectory, { startNumber = 0 })` and
+`broadcastForwardArgs(input, output, options?)` construct argument arrays
+without a shell. They do not create directories or launch processes. The
+caller must enforce the same FFmpeg TLS prerequisites when launching these
+arrays directly. The supervisor derives the next encoder start number from
+published playlists.
+See [broadcast setup](BROADCASTING.md) and [container deployment](../deploy/README.md).
 
 ## Segment commitments
 

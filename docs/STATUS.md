@@ -50,6 +50,56 @@ retain their own dates, topology, code and integrity assumptions.
 
 ## Outstanding gates
 
+The current source also includes an **unreleased broadcaster pilot**. These
+changes are absent from v0.1.0's immutable release assets and do not establish
+production readiness.
+
+| Addition | Current local evidence | Remaining boundary |
+|---|---|---|
+| Live ingest and forwarding | Synthetic H.264/AAC over actual local RTMP/RTSP, two HLS encodes, separate forward loss/recovery, untrusted RTMPS certificate rejection | Actual OBS workstation and external platform acceptance |
+| Publisher persistence/cache | Private POSIX state, stable authorisation/swarm after orderly restart, deduplicated streamed hashes and bounded signatures | Windows ACL support; automatic recovery after unclean process termination |
+| Viewer allowance/scheduler | Concurrent/interrupted payload reservations, cumulative page allowance, healthy-peer preference and measured deadline budget | Full page reload resets allowance; real-network cost and live-edge peer coverage |
+| Operator controls/reports | Actual Chrome default report silence, explicit numeric reporting, remote off/on, viewer-off priority and policy outage recovery | Admission/Sybil resistance, persistent aggregated operations data |
+| Trusted stream adapter | Signed latest-update selection, author/origin allowlists, host relay/ICE policy, query flood/timeout/abort bounds | Host query/resource lifecycle, redirects/assets, publisher trust and complete NIP-53 advertisements |
+| Broadcast browser journey | Actual Chrome, both qualities, source reconnect, continuous visible sequence/CC and stable publisher identity | Synthetic loopback producer with a deliberate 600 ms receiving-viewer playlist delay |
+| Container package | Non-root image build, pinned router/proxy manifests, private ingest, resource/log bounds, Compose configuration | Sustained host capacity, disaster recovery and independent audience acceptance |
+
+The successful local broadcast Chrome run recorded five verified peer loads,
+3,053,872 media payload bytes and zero consumer upload. All four players had
+zero stalls/fatal errors; its receiving viewer made three media HTTP requests
+versus ten for the baseline. Those counts exclude signalling, commitments and
+wire overhead. A separate run at a synchronised live edge received no peer
+media. An earlier concurrent fixture attempt reported MSE append failures
+including on the origin-only baseline; its cause remains unresolved. The
+later isolated success does not close that load/decoder gate.
+
+Current checks include 53 swarm/discovery tests, 38 passing publisher/operator
+tests with one Windows-only test skipped on macOS, 20 broadcast guard/transport
+tests, six native tests, Chrome operator/
+playback/broadcast receipts and public-relay transfers. These are local checks;
+the existing release CI links above cover the earlier release checkpoint.
+
+An external pilot is available at
+[relayswarm.forgesworn.dev](https://relayswarm.forgesworn.dev) on the existing
+Hetzner host Till. HTTPS uses a verified certificate; RTMP remains host-loopback
+only and the test source arrived through SSH. The
+[hosted summary](../spikes/results/hosted-pilot-summary-20261012T131905Z.json)
+records four Mac Chrome contexts, both video qualities, actual HTTPS HLS/WSS
+signalling, three verified peer loads (1,563,784 bytes), zero consumer uploads
+and zero stalls/fatal errors. No playlist delay was needed for that success.
+A preceding run lacked low-rendition peer payload within its deadline; peer
+coverage remains variable. Raw origin request totals have staggered viewer
+starts and do not establish matched-interval or net bandwidth savings.
+
+A separate orderly app-container restart restored the same publisher,
+authorisation, swarm and manifest in 5.4 s. No browser was connected during
+that restart. Five encoding-only samples over 32 s recorded 30.15–30.29 fps,
+1.01x speed, 74.46–90.78% of one CPU core and 122.4–123.6 MiB app memory.
+These short measurements do not close sustained audience capacity, physical
+devices, peer NAT diversity or external platform acceptance. The pilot displays
+a waiting page until a source publishes; the synthetic acceptance source is
+temporary.
+
 | Gate | Evidence needed |
 |---|---|
 | Physical Android/iPhone | Actual playback engine, consent, background/resume, battery and metered-data receipts |

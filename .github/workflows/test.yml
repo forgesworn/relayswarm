@@ -40,11 +40,16 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npx playwright-core install --with-deps chrome
       - run: npm run test:playback -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
+      - run: npm run test:operator -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
+      - run: npm run test:broadcast
+      - run: npm run test:broadcast:browser -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: hls-playback-receipts
-          path: playback-receipts/*.json
+          path: |
+            playback-receipts/*.json
+            artifacts/broadcast/integration.json
 
   hls-soak:
     name: hls.js optional twelve-viewer soak

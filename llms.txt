@@ -22,15 +22,23 @@ peer traffic) and peer-first (verified peer bytes within a deadline, then normal
 HTTP fallback). Uploading defaults to off and requires viewer opt-in. Peer-first
 also requires a trusted signed kind-30311 event with the experimental
 redistribution tag and a commitment signed by that same author. The host selects
-the stream, relays and ICE policy; automatic stream discovery is not implemented.
+the stream, relays and ICE policy. The unreleased trusted-event adapter queries
+through a bounded host callback with explicit author/origin/relay allowlists;
+it does not adopt event-selected services or establish publisher trust.
 Native HyperDHT cannot run in an ordinary browser page.
 
 The publisher keeps its key in Node and signs only matching local full-segment
 playlist contexts, including exact byte ranges and discontinuities. The player
 has upload limits, an origin-only kill switch and locally downloaded receipts.
-Keys are ephemeral; participation is pseudonymous, and peers can learn network
+Viewer keys are ephemeral; participation is pseudonymous, and peers can learn network
 addresses. Origin-only avoids swarm participation. No TURN/super-peer strategy,
-accepted RelaySwarm NIP, delegated signing or durable storage is implemented.
+accepted RelaySwarm NIP, delegated signing or durable media storage is implemented.
+Current source optionally persists a private publisher identity, caches verified
+file hashes/signatures, limits cumulative media upload, measures peer choice and
+provides authenticated operator policy plus explicitly opted-in numeric reports.
+An unreleased supervised broadcast bridge creates two live HLS renditions and
+can forward H.264/AAC separately to RTMPS with explicit TLS verification.
+These additions are absent from the immutable v0.1.0 downloads.
 
 Desktop Chrome regressions and a short twelve-viewer loopback soak are recorded;
 they do not establish physical-phone, varied-NAT or sustained operation readiness.
@@ -46,6 +54,9 @@ Documentation on main includes corrections after the immutable v0.1.0 release.
 - [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md): Options, callbacks, consent, admission, metrics, commitments and stop semantics.
 - [API reference](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md): Module exports; browser, publisher, relay/session and native primitives.
 - [Publisher/player field test](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md): Supported HLS subset, HTTPS trials, local receipts and device/network gates.
+- [Broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md): Unreleased OBS/RTMP bridge, two-rendition HLS, persistent identity and separate optional RTMPS forwarding.
+- [Operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md): Private state, authenticated policy/status, upload consent, numeric reporting and recovery.
+- [Container pilot](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md): Isolated existing-server deployment, SSH ingest, HTTPS, health checks and rollback.
 - [Native transport](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NATIVE-TRANSPORT.md): HyperDHT/Noise protocol, one-use authorisation and trust/fallback boundaries.
 - [Threat model](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/THREAT-MODEL.md): Implemented integrity/resource/privacy boundaries and outstanding adversarial work.
 - [FAQ](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FAQ.md): Distribution, encryption, phones, infrastructure, consent and measurement answers.

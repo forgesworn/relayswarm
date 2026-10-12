@@ -35,3 +35,5 @@ button:disabled { color: #b4beb8; border-color: #56665e; background: #28332e; cu
 .receipt-fields input, .receipt-fields select { margin-top: 6px; }
 footer { margin: 24px 0 0; }
 @media (max-width: 760px) { main { padding: 24px 16px; } .layout { grid-template-columns: 1fr; } .receipt-fields { flex-direction: column; gap: 8px; } .player-controls { flex-wrap: wrap; } }
+
+meter { display: block; width: 100%; height: 18px; margin-top: 12px; }
