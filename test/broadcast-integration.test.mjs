@@ -27,23 +27,27 @@ async function freePort() {
 }
 function child(command, args) {
   const process = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-  let output = "";
-  for (const stream of [process.stdout, process.stderr]) stream.on("data", (chunk) => { output = (output + chunk).slice(-32768); });
+  let stdout = "", stderr = "";
+  process.stdout.on("data", (chunk) => { stdout = (stdout + chunk).slice(-32768); });
+  process.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-32768); });
   const ended = new Promise((done) => { process.once("error", (error) => done({ error })); process.once("close", (code, signal) => done({ code, signal })); });
-  return { process, ended, output: () => output, async stop() {
+  return { process, ended, stdout: () => stdout, stderr: () => stderr,
+    output: () => (`[stdout]\n${stdout}\n[stderr]\n${stderr}`).slice(-32768), async stop() {
     if (process.exitCode !== null || process.signalCode !== null) return ended;
     process.kill("SIGTERM");
     const force = setTimeout(() => process.kill("SIGKILL"), 3000);
     try { return await ended; } finally { clearTimeout(force); }
   } };
 }
-async function probe(url) {
+async function probe(url, record) {
   const job = child("ffprobe", ["-v", "error", "-rtsp_transport", "tcp", "-timeout", "5000000", "-show_entries", "stream=codec_name,codec_type", "-of", "json", url]);
   const force = setTimeout(() => job.process.kill("SIGKILL"), 8000);
   try {
     const result = await job.ended;
+    record(result, job.stderr());
     if (result.code !== 0) return null;
-    return JSON.parse(job.output()).streams;
+    try { return JSON.parse(job.stdout()).streams; }
+    catch (error) { throw new Error("Invalid ffprobe JSON stdout: " + job.output(), { cause: error }); }
   } finally { clearTimeout(force); }
 }
 function producer(url) {
@@ -54,10 +58,31 @@ function producer(url) {
 }
 const tracks = (streams) => streams?.some((s) => s.codec_type === "video" && s.codec_name === "h264") && streams.some((s) => s.codec_type === "audio" && s.codec_name === "aac");
 
+test("child capture separates JSON stdout from bounded codec diagnostics", { timeout: 5000 }, async (t) => {
+  const json = JSON.stringify({ streams: [{ codec_type: "video", codec_name: "h264" }, { codec_type: "audio", codec_name: "aac" }] });
+  const diagnostic = "[h264 @ 0x123] non-existing PPS 0 referenced\n";
+  const job = child(process.execPath, ["-e", `process.stdout.write(${JSON.stringify(json)}); process.stderr.write("x".repeat(40000) + ${JSON.stringify(diagnostic)});`]);
+  t.after(() => job.stop());
+  assert.equal((await job.ended).code, 0);
+  assert.equal(job.stdout(), json);
+  assert.ok(tracks(JSON.parse(job.stdout()).streams));
+  assert.equal(job.stderr().length, 32768);
+  assert.ok(job.stderr().endsWith(diagnostic));
+  assert.equal(job.output().length, 32768);
+  assert.ok(job.output().endsWith(diagnostic));
+});
+
 test("live ingest recovers, forwarding is isolated, and publisher identity survives restart", { timeout: 180000 }, async (t) => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "relayswarm-broadcast-integration-")));
   const media = join(directory, "media");
   const jobs = [];
+  const probeDiagnostics = { attempts: 0, failed: 0, stderr: "" };
+  const inspect = (url) => probe(url, (result, stderr) => {
+    probeDiagnostics.attempts++;
+    if (result.code !== 0) probeDiagnostics.failed++;
+    if (stderr) probeDiagnostics.stderr = (probeDiagnostics.stderr + `[probe ${probeDiagnostics.attempts}; exit ${result.code ?? result.signal ?? "error"}]\n` + stderr).slice(-32768);
+  });
+  t.after(() => { if (probeDiagnostics.stderr) t.diagnostic("Bounded ffprobe stderr:\n" + probeDiagnostics.stderr); });
   let pipeline, demo, source, forwardRouter;
   t.after(async () => { await demo?.close(); await pipeline?.close(); await Promise.all(jobs.map((job) => job.stop())); await rm(directory, { recursive: true, force: true }); });
   async function router(name) {
@@ -77,13 +102,13 @@ test("live ingest recovers, forwarding is isolated, and publisher identity survi
   await until(async () => {
     if (ingestRouter.process.exitCode !== null) throw new Error("Ingest router failed: " + ingestRouter.output());
     if (source.process.exitCode !== null) throw new Error("Synthetic source failed: " + source.output());
-    return tracks(await probe(ingest.rtsp));
+    return tracks(await inspect(ingest.rtsp));
   }, "source with both tracks");
   pipeline = await startBroadcastPipeline({ input: ingest.rtsp, mediaDir: media, forwardUrl: target.rtmp, allowInsecureLoopbackForward: true,
     retryFloorMs: 200, retryCeilingMs: 1000, publicationIntervalMs: 50 });
   await pipeline.ready({ timeoutMs: 45000 });
   await until(() => pipeline.metrics().hls.progress?.frames > 0 && pipeline.metrics().hls.progress?.speed > 0, "numeric encoder progress");
-  assert.ok(tracks(await until(() => probe(target.rtsp), "forwarded tracks")), "forward did not carry both codecs");
+  assert.ok(tracks(await until(() => inspect(target.rtsp), "forwarded tracks")), "forward did not carry both codecs");
   const token = "broadcast-integration-operator-token-at-least-32";
   const state = join(directory, "publisher.json");
   demo = await startDemoServer({ mediaDir: media, publisherState: state, operatorToken: token, operatorExtraStatus: () => pipeline.metrics(), iceServers: [] });
@@ -104,13 +129,13 @@ test("live ingest recovers, forwarding is isolated, and publisher identity survi
   await until(() => pipeline.metrics().publications >= beforeForwardFailure + 4, "HLS continues while forwarding is down");
   assert.equal(ingestRouter.process.exitCode, null);
   forwardRouter = target.launch();
-  await until(async () => tracks(await probe(target.rtsp)), "forwarding reconnects with both tracks");
+  await until(async () => tracks(await inspect(target.rtsp)), "forwarding reconnects with both tracks");
   const priorGeneration = pipeline.metrics().generation;
   const priorDiscontinuity = number(await playlist("low"), "#EXT-X-DISCONTINUITY-SEQUENCE");
   await source.stop();
   await until(() => pipeline.metrics().generation > priorGeneration, "encoder retries after input loss");
   source = producer(ingest.rtmp); jobs.push(source);
-  await until(async () => tracks(await probe(ingest.rtsp)), "resumed broadcaster source");
+  await until(async () => tracks(await inspect(ingest.rtsp)), "resumed broadcaster source");
   await until(async () => number(await playlist("low"), "#EXT-X-DISCONTINUITY-SEQUENCE") > priorDiscontinuity, "new published HLS discontinuity");
   assert.equal(demo.publisher.streamEvent.id, event.id);
   assert.equal(demo.publisher.swarmId, swarmId);
@@ -167,7 +192,7 @@ test("live ingest recovers, forwarding is isolated, and publisher identity survi
   const receipt = { v: 1, kind: "relayswarm-broadcast-integration", at: new Date().toISOString(), ok: true,
     scope: "synthetic H.264/AAC over loopback RTMP/RTSP; no OBS workstation, remote NAT or YouTube acceptance",
     checks: ["two-rendition HLS", "independent forward failure and recovery", "source interruption and recovery", "playlist-bound signed commitment", "untrusted TLS rejected", "stable publisher identity after orderly restart"],
-    changingCatalogueResponses, metrics: pipeline.metrics() };
+    changingCatalogueResponses, probeDiagnostics, metrics: pipeline.metrics() };
   await mkdir("artifacts/broadcast", { recursive: true });
   await writeFile("artifacts/broadcast/integration.json", JSON.stringify(receipt, null, 2) + "\n");
 });

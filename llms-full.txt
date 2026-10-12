@@ -1070,7 +1070,7 @@ for the transfer regression. It does not establish synchronised live-edge
 coverage, uninterrupted playback or net bandwidth savings.
 
 Current checks include 53 swarm/discovery tests, 39 passing publisher/operator
-tests with one Windows-only test skipped on macOS, 20 broadcast guard/transport
+tests with one Windows-only test skipped on macOS, 21 broadcast fixture/transport
 tests, six native tests, Chrome operator/
 playback/broadcast receipts and public-relay transfers. These are local checks;
 the existing release CI links above cover the earlier release checkpoint.
