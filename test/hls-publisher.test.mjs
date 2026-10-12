@@ -189,26 +189,39 @@ test("atomic playlist races retry fresh verified data once, evict old contexts a
   const freshRange = { ...firstRange, path: "/media/fresh.ts", sequence: 22 };
   const probe = await open(path, "r"), prototype = Object.getPrototypeOf(probe), originalRead = prototype.read;
   await probe.close();
-  let mode = "once", reads = 0, mutations = 0, replacementBody = replacement;
+  let mode = "once", reads = 0, mutations = 0, replacementBody = replacement, reportedRenameError = false;
   t.mock.method(prototype, "read", async function (...args) {
     const result = await originalRead.apply(this, args);
-    if (args[0].length === 256 * 1024 + 1 && result.bytesRead) {
+    if (args[0].length === 256 * 1024 + 1 && args[3] === 0 && result.bytesRead) {
       reads++;
       if (mode !== "idle") {
         mutations++;
         if (mode === "once") mode = "idle";
         // Rename after the old bytes were read and before their stat checks.
         const temporary = join(directory, "replacement.tmp");
-        await writeFile(temporary, `${replacementBody}\n# replacement ${mutations}\n`);
-        await rename(temporary, path);
+        const body = `${replacementBody}\n# replacement ${mutations}\n`;
+        await writeFile(temporary, body);
+        try {
+          await rename(temporary, path);
+        } catch (error) {
+          if (process.platform !== "win32" || !["EPERM", "EACCES", "EBUSY"].includes(error.code)) throw error;
+          if (!reportedRenameError) {
+            t.diagnostic(`Windows open-playlist replacement returned ${error.code}; testing a real in-place mutation instead.`);
+            reportedRenameError = true;
+          }
+          // Some Windows filesystems reject replacing an open destination.
+          // Still mutate its bytes before verification and exercise the same guard.
+          await writeFile(path, body);
+          await rm(temporary);
+        }
       }
     }
     return result;
   });
 
   const results = await Promise.allSettled([publisher.media("/media/fresh.ts"), publisher.commitment(freshRange), publisher.commitment(firstRange)]);
-  assert.equal(results[0].status, "fulfilled");
-  assert.equal(results[1].status, "fulfilled");
+  assert.equal(results[0].status, "fulfilled", results[0].reason?.stack);
+  assert.equal(results[1].status, "fulfilled", results[1].reason?.stack);
   assert.equal(results[2].status, "rejected");
   assert.equal(results[2].reason.status, 404); // Never return the cached retired commitment.
   const event = results[1].value;
