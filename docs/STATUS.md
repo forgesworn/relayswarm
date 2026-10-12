@@ -61,10 +61,11 @@ production readiness.
 | Viewer allowance/scheduler | Concurrent/interrupted payload reservations, cumulative page allowance, healthy-peer preference and measured deadline budget | Full page reload resets allowance; real-network cost and live-edge peer coverage |
 | Operator controls/reports | Actual Chrome default report silence, explicit numeric reporting, remote off/on, viewer-off priority and policy outage recovery | Admission/Sybil resistance, persistent aggregated operations data |
 | Trusted stream adapter | Signed latest-update selection, author/origin allowlists, host relay/ICE policy, query flood/timeout/abort bounds | Host query/resource lifecycle, redirects/assets, publisher trust and complete NIP-53 advertisements |
-| Broadcast browser journey | Actual Chrome, both qualities, source reconnect, continuous visible sequence/CC and stable publisher identity | Synthetic loopback producer with a deliberate 600 ms receiving-viewer playlist delay |
+| Broadcast browser journey | Actual Chrome, both qualities, source reconnect, continuous visible sequence/CC and stable publisher identity | Synthetic loopback producer; receiving-viewer playlists wait for real peer availability advertisements |
 | Container package | Non-root image build, pinned router/proxy manifests, private ingest, resource/log bounds, Compose configuration | Sustained host capacity, disaster recovery and independent audience acceptance |
 
-The successful local broadcast Chrome run recorded five verified peer loads,
+An earlier local broadcast Chrome run, using a fixed 600 ms receiving-viewer
+playlist delay, recorded five verified peer loads,
 3,053,872 media payload bytes and zero consumer upload. All four players had
 zero stalls/fatal errors; its receiving viewer made three media HTTP requests
 versus ten for the baseline. Those counts exclude signalling, commitments and
@@ -72,6 +73,16 @@ wire overhead. A separate run at a synchronised live edge received no peer
 media. An earlier concurrent fixture attempt reported MSE append failures
 including on the origin-only baseline; its cause remains unresolved. The
 later isolated success does not close that load/decoder gate.
+
+The [current local broadcast receipt](../spikes/results/broadcast-browser-readiness-summary-20261012T143123Z.json)
+records six verified peer loads (3,065,716 bytes), both qualities and peer
+delivery after producer reconnection, zero consumer upload and zero fatal
+errors across all four players. The consumer recorded one 799 ms restart
+stall. The fixture now releases each unchanged playlist snapshot after its
+last four segment keys arrive in real peer HAVE frames, with a 10 s bound;
+all eleven availability checks succeeded. This controls segment availability
+for the transfer regression. It does not establish synchronised live-edge
+coverage, uninterrupted playback or net bandwidth savings.
 
 Current checks include 53 swarm/discovery tests, 39 passing publisher/operator
 tests with one Windows-only test skipped on macOS, 20 broadcast guard/transport
@@ -85,6 +96,13 @@ reject a certificate before completing negotiation. The corrected test
 measures zero RTMP application bytes plus prompt certificate failure; it
 passes on actual macOS/OpenSSL and Linux/GnuTLS. A separate peer-first job
 was cancelled during package installation before its browser test started.
+A later branch run passed the Windows atomic-playlist regression using a
+real in-place mutation when Windows denied rename with `EPERM`. Its sole
+failure was the broadcast browser's low-rendition peer deadline: the consumer
+requested fresh segments before either contributor held them. The fixed
+600 ms playlist delay did not establish availability; the bounded HAVE
+barrier above replaces that timing assumption. Linux CI must verify the
+revised fixture.
 
 An external pilot is available at
 [relayswarm.forgesworn.dev](https://relayswarm.forgesworn.dev) on the existing

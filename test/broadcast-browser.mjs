@@ -54,7 +54,7 @@ const log = (message) => console.error(`[broadcast-browser] ${message}`);
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const children = [], pages = [], pageErrors = [], consoleErrors = [];
 const receipt = { v: 1, kind: "relayswarm-broadcast-browser-test", at: new Date().toISOString(), ok: false, failures: [], scope: { network: "loopback", producer: "FFmpeg synthetic real-time H.264/AAC", router: "MediaMTX", ingress: "RTMP", pipelineInput: "RTSP over TCP", output: "two-rendition live HLS", browser: "Chrome", OBS: false, YouTube: false, physicalDevices: false }, checkpoints: [] };
-let root, router, producer, pipeline, demo, browser;
+let root, router, producer, pipeline, demo, browser, closingBrowser = false;
 function child(command, args) {
   const process = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
   const record = { process, stdout: "", stderr: "", done: null, error: null };
@@ -138,11 +138,58 @@ try {
     const network = { mediaRequests: 0, failedMediaRequests: 0 };
     pages.push({ name, page, network });
     if (name === "consumer") {
-      // A fresh live object needs an origin seeder. Model a viewer whose
-      // playlist arrives slightly later, so contributors can advertise real
-      // held payloads; media requests and the peer deadline remain unchanged.
-      receipt.scope.consumerPlaylistDelayMs = 600;
-      await page.route("**/media/**/*.m3u8", async (route) => { await pause(600); await route.continue(); });
+      // A fixed sleep cannot establish eligibility: independent live playlist
+      // poll phases can leave this viewer requesting a fresh object first.
+      // Observe the real incoming HAVE frames, without changing their handling.
+      await page.addInitScript(() => {
+        const add = RTCDataChannel.prototype.addEventListener, tracked = new WeakSet(), channels = [];
+        window.broadcastHaveKeys = () => [...new Set(channels.filter((channel) => !channel.closed).flatMap((channel) => [...channel.keys]))];
+        RTCDataChannel.prototype.addEventListener = function (type, listener, options) {
+          if (type === "message" && !tracked.has(this)) {
+            tracked.add(this);
+            const channel = { keys: new Set(), closed: false };
+            channels.push(channel);
+            add.call(this, "message", (event) => {
+              if (typeof event.data !== "string") return;
+              try {
+                const message = JSON.parse(event.data);
+                if (message.t !== "have") return;
+                if (Array.isArray(message.keys)) channel.keys = new Set(message.keys);
+                for (const key of message.add || []) channel.keys.add(key);
+                for (const key of message.del || []) channel.keys.delete(key);
+              } catch {}
+            });
+            add.call(this, "close", () => { channel.closed = true; channel.keys.clear(); });
+          }
+          return add.call(this, type, listener, options);
+        };
+      });
+      receipt.scope.consumerPlaylistReadiness = "unchanged live snapshot released after its last four segment keys arrive in real peer HAVE frames";
+      receipt.playlistReadiness = [];
+      await page.route("**/media/*/index.m3u8", async (route) => {
+        const response = await route.fetch({ timeout: 10000 });
+        if (!response.ok()) return route.fulfill({ response });
+        const body = await response.text(), uris = body.split(/\r?\n/u).filter((line) => line && !line.startsWith("#"));
+        const paths = uris.slice(-4).map((uri) => new URL(uri, route.request().url()).pathname);
+        const keys = paths.map((path) => createHash("sha256").update(`${original.swarmId}\n${path}`).digest("hex"));
+        const started = Date.now();
+        const entry = { at: new Date().toISOString(), playlist: new URL(route.request().url()).pathname, paths, keys, ready: false };
+        receipt.playlistReadiness.push(entry);
+        try {
+          await page.waitForFunction((keys) => keys.length > 0 && keys.every((key) => window.broadcastHaveKeys().includes(key)), keys, { timeout: 10000 });
+          entry.ready = true;
+          entry.waitMs = Date.now() - started;
+          // Serve the exact fetched snapshot, including its original sequence,
+          // discontinuity, generation URLs and durations. Media and signed
+          // commitments still use the real server and production loader.
+          await route.fulfill({ response, body });
+        } catch (error) {
+          entry.waitMs = Date.now() - started;
+          entry.error = error.message;
+          if (!closingBrowser) receipt.playlistReadinessFailure ||= error.message;
+          await route.abort().catch(() => {});
+        }
+      });
     }
     page.on("pageerror", (error) => pageErrors.push({ name, message: error.message }));
     page.on("console", (message) => { if (["error", "warning"].includes(message.type()) && consoleErrors.length < 100) consoleErrors.push({ viewer: name, type: message.type(), text: message.text().slice(0, 2000) }); });
@@ -195,6 +242,7 @@ try {
   assert.ok(measured.player.fragments.some((fragment) => fragment.source === "peer" && fragment.level === 1));
   assert.ok((await read(low)).totals.uploaded > 0); assert.ok((await read(high)).totals.uploaded > 0);
   for (const { page } of pages) assert.equal((await read(page)).player.fatalErrors, 0);
+  assert.equal(receipt.playlistReadinessFailure, undefined, "A real peer availability barrier failed");
   assert.equal(pageErrors.length, 0); receipt.ok = true;
 } catch (error) { log(`failed: ${error.message}`); receipt.failures.push(error.stack || error.message); }
 finally {
@@ -203,6 +251,7 @@ finally {
   receipt.pipeline = pipeline?.metrics();
   receipt.viewers = await Promise.all(pages.map(async ({ name, page, network }) => ({ name, network, receipt: await page.evaluate(() => window.relaySwarmDemo?.report()).catch(() => null), appendFailures: await page.evaluate(() => window.broadcastAppendFailures).catch(() => []) })));
   if (pipeline) receipt.playlists = Object.fromEntries(await Promise.all(["master.m3u8", "low/index.m3u8", "high/index.m3u8"].map(async (path) => [path, await readFile(join(pipeline.mediaDir, path), "utf8").catch(() => null)])));
+  closingBrowser = true;
   await browser?.close(); await demo?.close(); await pipeline?.close(); await stop(producer); await stop(router);
   receipt.childProcesses = children.map(({ code, signal, error, stderr, stdout }) => ({ code, signal, error, ...(receipt.ok ? {} : { stderr, stdout }) }));
   const payload = `${JSON.stringify(receipt, null, 2)}\n`;
