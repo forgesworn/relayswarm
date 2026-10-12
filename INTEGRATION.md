@@ -129,6 +129,12 @@ coverage fields are null in peer-first mode.
 
 ## Authenticated peer-first loading
 
+The runnable publisher/player example and the Node-only
+`relayswarm/hls-publisher` helper are documented in
+[`docs/FIELD-TEST.md`](docs/FIELD-TEST.md). The helper signs only contexts
+present in its own local playlists, including exact byte ranges and
+discontinuities; its supported HLS subset is deliberately limited.
+
 ```js
 const swarm = createHlsSwarm({
   swarmId,
@@ -224,3 +230,6 @@ decide its own mode.
   play from the origin.
 - **Relays.** Presence is one event per viewer per 20 s plus two events per
   connection. Point at a relay you control; a public relay may rate-limit.
+  Sessions subscribe to swarm-wide presence and only their own recipient-tagged
+  signals. Relay frames must match a live subscription before signature work
+  and dispatch; reconnect restores both subscriptions.

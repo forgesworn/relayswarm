@@ -213,12 +213,35 @@ peer budget or the original loader starts. This is a bounded experimental
 loader, not a production engine; the integration contract documents the
 experimental authorisation tag and commitment kind.
 
+## Try the publisher/player demo
+
+```bash
+npm ci
+npm run demo
+```
+
+Open `http://localhost:8787`. ffmpeg generates two live renditions; the Node
+publisher signs playlist-bound segment commitments, and the player offers
+origin-only, shadow and verified peer-first delivery. Uploading is off until
+the viewer opts in, with a selectable upload limit, a kill switch and a local
+JSON receipt download. Existing HLS directories can be supplied instead.
+The signing key stays on the publisher.
+
+[`docs/FIELD-TEST.md`](docs/FIELD-TEST.md) covers local media, HTTPS setup for
+separate devices, receipt interpretation and remaining field gates. The
+Chrome regression (`npm run test:playback`) drives this same demo through two
+renditions, shared-file byte ranges, quality changes, timestamp resets,
+forward/backward seeks and a relay outage, alongside an origin-only baseline.
+These are loopback tests; physical devices and broad real-network behaviour
+remain outstanding.
+
 ## Deliberately out of scope for the PoC
 
 These are the project deliverables, not the PoC:
 
-- **NIP-44 encryption of the WebRTC path.** The original `poc.mjs` signs but
-  does not encrypt SDP; the native spike does encrypt its dial authorization.
+- **Encrypted signalling in the original CLI PoC.** `poc.mjs` signs but
+  does not encrypt SDP. The separate browser loader encrypts its signalling
+  with NIP-44; the native path encrypts its dial authorisation.
 - **Authenticated segment digests.** The PoC verifies the transfer against a
   hash supplied by the sending peer - that detects corruption, not a
   malicious peer, since a bad seeder controls both bytes and hash. The

@@ -4,7 +4,7 @@ import { readdir } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const roots = ["src", "scripts", "spikes", "test"];
+const roots = ["src", "scripts", "spikes", "test", "demo"];
 const files = ["poc.mjs", "native-poc.mjs"];
 
 async function collect(directory) {

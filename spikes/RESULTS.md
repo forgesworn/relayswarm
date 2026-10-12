@@ -356,3 +356,51 @@ dependencies omitted successfully imported the native journey. GitHub CI now
 includes both real Chrome modes alongside the native OS matrix and live-relay
 tests; each browser job uploads its own receipt.
 
+## Publisher/player playback regression (12 October 2026)
+
+The field-test demo now supplies its own Node publisher and hls.js player.
+The publisher derives commitments from local playlist records instead of
+signing a viewer-supplied digest or accepting arbitrary context. The Chrome
+regression drives the same consent, quality, kill-switch and download controls
+used by a field participant.
+
+This local run used two opted-in seeders, a receive-only peer-first consumer
+and an origin-only baseline. Two VOD renditions used 2 s shared-file byte
+ranges, with a discontinuity and independently reset timestamps after 24 s.
+The consumer and baseline switched quality, sought forwards to 30 s, sought
+backwards to 16 s, and returned to automatic quality selection. The demo relay
+was unavailable for three seconds; its client reconnected. The consumer then
+switched to origin-only during playback and downloaded its receipt.
+
+| Measurement | Origin-only baseline | Receive-only consumer |
+|---|---|---|
+| Media fragments loaded | 50 | 53 |
+| Origin media requests observed by Playwright | 50 | 27 |
+| Verified peer-first fragment loads | 0 | 27 |
+| Verified bytes delivered instead of origin media loads | 0 | 7,290,640 (7.29 MB) |
+| Playback stalls / fatal errors | 0 / 0 | 0 / 0 |
+| Forward / backward seek recovery | 57 / 41 ms | 92 / 28 ms |
+| Media uploaded by the consumer | Not applicable | 0 |
+
+Counts include the whole session and can differ with load/abort timing; this
+is not an equal-fragment bandwidth benchmark. No request downloaded an entire
+shared media file, and all range responses were 206. Verified peer delivery
+covered both levels and discontinuity 1. hls.js retained complete loading
+statistics for peer fragments; aborts now notify its loader callback once.
+The kill switch restored the original loader, reported no peers, pending dials,
+relay connections or held bytes, and playback continued. The downloaded receipt
+contained the measurements and the stopped session.
+
+Receipt: [`playback`](results/hls-playback-20261012T091818Z.json).
+Reproduce with `npm run test:playback`. The local publisher/HTTP/relay suite
+passed ten tests, the swarm suite 25 and native tests six. Desktop and 390 px
+viewport layouts were inspected in Chrome with no horizontal overflow; that
+is a layout check, not a physical-phone test.
+
+All playback ran on one machine with no STUN or TURN. The test grants a fake
+microphone permission to unlock local interfaces; the field-test page never
+requests it. Origin bytes avoided exclude signatures, signalling and protocol
+overhead. Real mobile devices, separate-network throughput, broad adaptive
+bitrate behaviour, fMP4 playback and independent implementations remain field
+gates, listed in [`docs/FIELD-TEST.md`](../docs/FIELD-TEST.md).
+

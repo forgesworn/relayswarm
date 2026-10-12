@@ -325,6 +325,8 @@ try {
   if (stopChecks.some((c) => !c.loaderRestored)) failures.push("stop() did not restore the fragment loader");
   if (pageErrors.length) failures.push(`${pageErrors.length} uncaught page error(s)`);
   if (summary.aggregate.swarmErrors > 0) failures.push(`${summary.aggregate.swarmErrors} swarm error(s)`);
+  if (reports.filter((report) => report.swarm).some((report) => report.resourceSamples.some((sample) => sample.connected + sample.dialling > MAX_PEERS
+    || sample.heldBytes > 64 * 1024 * 1024 || sample.relays > 1))) failures.push("a sampled resource exceeded the configured limit");
   summary.ok = failures.length === 0;
   summary.failures = failures;
 

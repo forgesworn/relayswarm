@@ -33,6 +33,7 @@ const withoutRotation = { idleEvictMs: 10 ** 9, maxRetriesPerPeer: 0, maxReferra
 const mode = params.get("mode") || "shadow";
 const streamEvent = mode === "peer-first" ? await fetch("/authorisation.json").then((response) => response.json()) : undefined;
 let commitmentRequests = 0;
+const resourceSamples = [];
 
 const swarm = useSwarm
   ? createHlsSwarm({
@@ -54,6 +55,11 @@ const swarm = useSwarm
       iceServers: [],
       originFallbackMs: Number(params.get("fallbackMs") || 1500),
       metricsIntervalMs: 5000,
+      onMetrics: (metrics) => {
+        resourceSamples.push({ atMs: Math.round(performance.now()), connected: metrics.peers.connected, dialling: metrics.peers.dialling,
+          heldBytes: metrics.bytes.held, uploadedBytes: metrics.bytes.uploaded, relays: metrics.relays.connected });
+        if (resourceSamples.length > 120) resourceSamples.shift();
+      },
       ...(params.get("maxPeers") ? { maxPeers: Number(params.get("maxPeers")), maxUploadPeers: Number(params.get("maxPeers")) } : {}),
       testHooks: { corruptUploads: params.get("corrupt") === "1" },
       ...(rotation ? {} : withoutRotation),
@@ -79,7 +85,7 @@ video.play().catch(() => {});
 window.__viewer = {
   viewer,
   useSwarm,
-  report: () => ({ viewer, useSwarm, player: { ...player, currentTime: video.currentTime }, swarm: swarm?.metrics() ?? null }),
+  report: () => ({ viewer, useSwarm, player: { ...player, currentTime: video.currentTime }, swarm: swarm?.metrics() ?? null, resourceSamples: [...resourceSamples] }),
   stop: () => swarm?.stop(),
   loaderRestored: () => !hls.config.fLoader,
   stoppedMetrics: () => swarm?.metrics(),
