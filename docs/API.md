@@ -3,9 +3,9 @@
 [Documentation](README.md) · [Installation](GETTING-STARTED.md) ·
 [hls.js integration](../INTEGRATION.md)
 
-This describes the current experimental source, including the unreleased
-broadcaster pilot. The immutable v0.1.0 assets do not include the new publisher
-state, discovery or broadcast entry points. Package version `0.1.0`,
+This describes the experimental v0.2.0 release, including the broadcaster
+pilot. The immutable v0.1.0 assets do not include the new publisher
+state, discovery or broadcast entry points. Package version `0.2.0`,
 session wire version `3`, segment-commitment schema `1` and metrics snapshot
 version `2` are different version numbers. Source exports and protocol fields
 are not a stable interoperability promise.
@@ -18,9 +18,9 @@ are not a stable interoperability promise.
 | `relayswarm/hls-swarm` | Browser with hls.js | `createHlsSwarm`, `HLS_SWARM_METRICS_VERSION`, `rotationCandidate`, `retryAfterFor`, `readRefusal` |
 | `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `validStreamAuthorisation`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT` |
 | `relayswarm/hls-publisher` | Node only | `createHlsPublisher`, `PublisherError` |
-| `relayswarm/publisher-state` | Node only, unreleased | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent` |
-| `relayswarm/stream-discovery` | Browser or Node, unreleased | `resolveTrustedStream`, `discoverTrustedStreams`, `StreamDiscoveryError` |
-| `relayswarm/broadcast-pipeline` | Node with FFmpeg, unreleased | `startBroadcastPipeline`, `broadcastEncoderArgs`, `broadcastForwardArgs` |
+| `relayswarm/publisher-state` | Node only | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent` |
+| `relayswarm/stream-discovery` | Browser or Node | `resolveTrustedStream`, `discoverTrustedStreams`, `StreamDiscoveryError` |
+| `relayswarm/broadcast-pipeline` | Node with FFmpeg | `startBroadcastPipeline`, `broadcastEncoderArgs`, `broadcastForwardArgs` |
 | `relayswarm/package.json` | Package metadata | Name, version and declared dependencies |
 
 The wildcard export also permits source subpaths such as

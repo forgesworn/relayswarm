@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+No unreleased changes.
+
+## v0.2.0 — 12 October 2026
+
+[Experimental broadcaster-pilot release](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0).
+The earlier intermittent hosted MSE failure and physical-device, separate-network,
+sustained-operation and external-platform acceptance remain open.
+
 - Added a supervised H.264/AAC broadcast bridge with two HLS renditions,
   continuous sequence numbers, source recovery and independent RTMPS forwarding.
 - Added private persistent publisher identity, bounded hash/signature caches,
@@ -10,7 +18,7 @@
   numeric reporting; fixed cancelled HTTP media response cleanup.
 - Added a host-scoped trusted Nostr stream adapter and an isolated container
   pilot package, with real transport/browser checks and documented acceptance gaps.
-- Refreshed the documentation for the v0.1.0 GitHub distribution and measured
+- Refreshed the documentation for the GitHub distribution and measured
   browser/native capabilities; separated planned work and historical observations.
 - Added a documentation index, getting-started guide, module API reference and
   release evidence/status page.

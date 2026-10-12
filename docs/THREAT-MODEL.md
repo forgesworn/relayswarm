@@ -4,7 +4,7 @@
 [Integration](../INTEGRATION.md)
 
 This describes the implemented experimental boundaries and the remaining
-adversarial work at v0.1.0. Passing named regression cases does not establish
+adversarial work at v0.2.0. Passing named regression cases does not establish
 production security or completion of the threat model. The original CLI,
 browser loader and native path have different trust assumptions.
 
@@ -32,7 +32,7 @@ stream author it trusts. The demo's in-memory relay and HTTP signing endpoint
 have resource bounds, but no participant admission or Sybil defence. Receipts
 stay in the browser until downloaded; optional reporting requires viewer
 opt-in and accepts only bounded numeric summaries, without a swarm public key.
-These unreleased controls do not establish participant admission or net cost.
+These controls do not establish participant admission or net cost.
 
 These are specific tested boundaries, not completion of the adversarial suite
 below. Sybil resistance, broad NAT/mobile coverage and independent-client

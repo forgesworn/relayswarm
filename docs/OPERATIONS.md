@@ -2,7 +2,7 @@
 
 [Documentation](README.md) · [Broadcaster](BROADCASTING.md) · [Container deployment](../deploy/README.md) · [API](API.md) · [Evidence](STATUS.md)
 
-These controls describe the **unreleased source branch**, not the immutable v0.1.0 release assets. They support a bounded pilot; they do not establish production readiness, a hosted admission service or a verified public playback URL.
+These controls are included in the **experimental v0.2.0 release** and are absent from the immutable v0.1.0 assets. They support a bounded pilot; they do not establish production readiness or a hosted admission service. Public playback evidence and its limits are recorded in [Status](STATUS.md).
 
 Before the first broadcast is ready, the root returns an HTTP 200 waiting page with a three-second refresh. Other endpoints return HTTP 503 with `Retry-After: 3`, including the authenticated status route; the waiting listener exposes no session, relay or operator API. The launcher replaces it with the player on the same port when both renditions publish. Waiting-page reachability does not establish fresh media, successful decoding or a verified public deployment.
 

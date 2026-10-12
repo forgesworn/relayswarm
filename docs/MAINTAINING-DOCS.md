@@ -40,7 +40,7 @@ when updating them, rather than trusting an old comparison date.
 
 ## Release versus current documentation
 
-The immutable v0.1.0 tag and downloadable assets contain release-time
+The immutable v0.1.0 and v0.2.0 tags and downloadable assets contain release-time
 documentation. Main-branch guides can correct examples and claims afterwards.
 Use [Getting started](GETTING-STARTED.md) for pinned installation and
 [Status](STATUS.md) for the release checkpoint. Never retag or silently replace

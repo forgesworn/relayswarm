@@ -3,14 +3,14 @@
 [Documentation](README.md) · [API](API.md) · [hls.js integration](../INTEGRATION.md)
 
 The supported release is an experimental
-[v0.1.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0).
+[v0.2.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0).
 Node 22+ is required; CI runs Node 24. `npm install relayswarm` is not the
 documented distribution path: the npm registry is unpublished.
 
 ## Install for a host application
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.1.0/relayswarm-0.1.0.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/relayswarm-0.2.0.tgz
 npm install hls.js
 ```
 
@@ -26,20 +26,20 @@ Browser peer participation requires HTTPS or a loopback secure context,
 WebCrypto, WebRTC data channels and WebSocket. Native HLS alone does not attach
 this hls.js loader.
 
-A Git dependency can also be pinned to the released commit:
+A Git dependency can also be pinned to the immutable release tag:
 
 ```sh
-npm install 'git+https://github.com/forgesworn/relayswarm.git#3e480e19dfe4d675f14bcb2968f3dc4926fbca25'
+npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.2.0'
 ```
 
 ## Use the standalone browser bundle
 
 Download
-[`relayswarm-hls-swarm-0.1.0.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.1.0/relayswarm-hls-swarm-0.1.0.mjs)
+[`relayswarm-hls-swarm-0.2.0.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/relayswarm-hls-swarm-0.2.0.mjs)
 and serve it from your own application:
 
 ```js
-import { createHlsSwarm } from './relayswarm-hls-swarm-0.1.0.mjs';
+import { createHlsSwarm } from './relayswarm-hls-swarm-0.2.0.mjs';
 ```
 
 The bundle contains the loader's runtime dependencies; hls.js remains the
@@ -47,7 +47,7 @@ host's dependency. Prefer vendoring the verified file to relying on GitHub
 release-download URLs as a JavaScript CDN. The separate publisher helper uses
 Node filesystem/crypto APIs and does not belong in a browser bundle.
 
-The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.1.0/SHA256SUMS)
+The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/SHA256SUMS)
 covers both assets. Download all three into one directory and verify:
 
 ```sh
@@ -57,7 +57,7 @@ shasum -a 256 -c SHA256SUMS
 ## Run the source demo
 
 ```sh
-git clone --branch v0.1.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.2.0 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -73,8 +73,9 @@ npm run demo -- --media-dir /path/to/hls --manifest master.m3u8
 Keep uploading off until a viewer opts in. The demo has no participant admission
 service and is intended for controlled trials. See [FIELD-TEST.md](FIELD-TEST.md)
 for supported playlist features, TLS/reverse-proxy setup, relay/ICE choices and
-baseline/swarm receipts. For documentation tooling introduced after the release,
-use a current `main` checkout rather than the immutable `v0.1.0` source tag.
+baseline/swarm receipts. The release includes the broadcaster workflow and
+documentation tooling. See [Broadcasting](BROADCASTING.md) for live input and
+optional independent RTMPS forwarding.
 
 ## Run the transfer proofs
 

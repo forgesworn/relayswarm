@@ -3,7 +3,9 @@
 [Documentation](README.md) · [Field-test guide](FIELD-TEST.md) ·
 [Changelog](../CHANGELOG.md)
 
-Checkpoint: 12 October 2026. Release
+Checkpoint: 12 October 2026. The current experimental release is
+[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0), including
+the broadcaster pilot below. The previous release
 [v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0) points to
 `3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
@@ -20,6 +22,9 @@ on `main` do not change that tag or its immutable downloaded assets.
 | AI documentation | Curated `llms.txt`, generated `llms-full.txt`, public Markdown and repository/package metadata | Publication does not establish crawler discovery, indexing or recommendations |
 
 ## Release verification
+
+This section records v0.1.0's release checks; v0.2.0 broadcaster evidence
+appears below.
 
 [Main CI run 38233694634](https://github.com/forgesworn/relayswarm/actions/runs/38233694634)
 passed seven standard jobs: native suites on three operating systems, shadow and
@@ -50,9 +55,9 @@ retain their own dates, topology, code and integrity assumptions.
 
 ## Outstanding gates
 
-The current source also includes an **unreleased broadcaster pilot**. These
-changes are absent from v0.1.0's immutable release assets and do not establish
-production readiness.
+The **experimental v0.2.0 broadcaster pilot** includes the additions below.
+These changes are absent from v0.1.0's immutable release assets. Release and
+merged source do not establish production readiness.
 
 | Addition | Current local evidence | Remaining boundary |
 |---|---|---|
@@ -89,7 +94,7 @@ tests with one Windows-only test skipped on macOS, 21 broadcast fixture/transpor
 tests, six native tests, Chrome operator/
 playback/broadcast receipts and public-relay transfers. These are local checks;
 the existing release CI links above cover the earlier release checkpoint.
-Current branch checks are available on
+Broadcaster feature checks are available on
 [broadcaster pilot PR 8](https://github.com/forgesworn/relayswarm/pull/8).
 The initial branch CI found a TLS test that incorrectly required GnuTLS to
 reject a certificate before completing negotiation. The corrected test

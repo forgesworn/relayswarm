@@ -5,14 +5,14 @@
 
 The demo is a runnable publisher and an hls.js player with origin-only,
 shadow and authenticated peer-first modes. Uploading starts **off**. Receipts
-are downloaded locally. Reporting is disabled by default; the unreleased
-source can offer explicitly opted-in numeric reports and authenticated
+are downloaded locally. Reporting is disabled by default; v0.2.0
+can offer explicitly opted-in numeric reports and authenticated
 operator controls. See [operations](OPERATIONS.md). The publisher's signing
 key stays on the server. v0.1.0 release assets retain their original behaviour.
 
 ## Run locally
 
-From the [v0.1.0 source checkout](GETTING-STARTED.md#run-the-source-demo) or a
+From the [v0.2.0 source checkout](GETTING-STARTED.md#run-the-source-demo) or a
 current main checkout:
 
 ```bash
@@ -89,7 +89,7 @@ poll session identity and rejoin while retaining the page allowance. The demo
 does not establish trust in external publishers.
 
 For live OBS ingest and optional independent RTMPS forwarding, use the
-unreleased [broadcast launcher](BROADCASTING.md), which manages persistent
+[broadcast launcher](BROADCASTING.md), which manages persistent
 publisher state automatically. Existing media remains usable without ingest.
 
 ## Use separate devices and networks
@@ -176,7 +176,7 @@ GitHub CI runs this regression alongside both live harness modes. A manual
 workflow dispatch with `soak=true` adds a twelve-viewer peer-first run with
 three arrival waves, a 180 s final measurement window and sampled resource
 bounds. This remains a short loopback soak, not evidence of hours of operation.
-The release's [completed soak](STATUS.md#release-verification) recorded zero
+The v0.1.0 [completed soak](STATUS.md#release-verification) recorded zero
 stalls/fatal errors and 68.7% peer-first fragment loads, with uneven per-viewer
 benefits. Its recorded receipt does not establish separate-network performance.
 The live peer-first fixture caps forward buffering at 4 s (maximum 6 s), keeps

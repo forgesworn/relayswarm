@@ -4,7 +4,7 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.1.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0),
+**Status:** [v0.2.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0),
 MIT licensed, Node 22+; CI uses Node 24. This is a proof of concept with a
 bounded hls.js loader and a runnable publisher/player, not a production engine.
 The npm registry is unpublished.
@@ -19,7 +19,7 @@ The npm registry is unpublished.
 Install ffmpeg with libx264 for synthetic media, then:
 
 ```sh
-git clone --branch v0.1.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.2.0 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -41,7 +41,7 @@ See [the field-test guide](docs/FIELD-TEST.md) for the supported HLS subset,
 HTTPS access from separate devices and receipt interpretation. Synthetic
 media requires ffmpeg; serving an existing directory does not.
 
-Current source also includes an **unreleased broadcaster pilot**: live
+The v0.2.0 release also includes a **broadcaster pilot**: live
 RTMP-to-HLS ingest, persistent publisher identity, cumulative viewer upload
 allowances, measured peer choice and authenticated operator controls.
 Optional RTMPS forwarding can send the source to an external platform
@@ -55,7 +55,7 @@ The release supplies an installable tarball, a standalone browser ESM bundle
 and SHA-256 checksums:
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.1.0/relayswarm-0.1.0.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/relayswarm-0.2.0.tgz
 ```
 
 ```js
@@ -101,7 +101,7 @@ signals, then sends media over the direct peer connection.
 
 [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) kind-30311
 events can list relays. A host can reuse that selection, but this library does
-does not automatically read relay/STUN policy from them:
+not automatically read relay/STUN policy from them:
 the host passes `streamEvent`, `swarmId`, `relays` and `iceServers` explicitly.
 The HTTP origin remains responsible for initial media availability and fallback.
 
@@ -203,7 +203,7 @@ The canonical public repository is
 [`llms.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms.txt)
 is a short index with direct Markdown links;
 [`llms-full.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms-full.txt)
-is generated from the maintained guides. Released code is pinned at `v0.1.0`;
+is generated from the maintained guides. Released code is pinned at `v0.2.0`;
 documentation on `main` can include later corrections. [Maintaining the docs](docs/MAINTAINING-DOCS.md)
 explains regeneration and publication checks. [Changelog](CHANGELOG.md) records
 release and documentation changes.

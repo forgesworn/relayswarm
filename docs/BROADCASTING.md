@@ -2,7 +2,7 @@
 
 [Documentation](README.md) · [Operations](OPERATIONS.md) · [Container deployment](../deploy/README.md) · [Evidence](STATUS.md)
 
-This guide describes the current, unreleased source branch. The immutable v0.1.0 release tarball and standalone browser bundle do **not** include this broadcaster workflow, persistent publisher state or operator/reporting controls. Use a checkout containing these files and scripts; the package version remains 0.1.0. Publication of a guide does not establish deployed playback or platform acceptance.
+This guide describes the experimental v0.2.0 broadcaster workflow, persistent publisher state and operator/reporting controls. Use the [v0.2.0 source checkout or package](GETTING-STARTED.md); the immutable v0.1.0 assets do not include these additions. Publication of a guide does not establish deployed playback or platform acceptance.
 
 ## Local source and dependencies
 
@@ -69,4 +69,4 @@ Trusted host/container administrators can inspect ffmpeg's process arguments, wh
 
 ## Verification boundary
 
-The branch includes native process/publication tests and browser fixtures. Real-broadcast decoder/MSE playback remains an acceptance gate while that journey is being debugged; no successful physical-device, NAT, public-host or YouTube journey is claimed here. Check the dated [status](STATUS.md) for evidence as it becomes available. Deployment preparation and an authorised hostname do not prove a live service.
+The release includes native process/publication tests and actual Chrome fixtures. A short HTTPS/WSS pilot with a synthetic source has a passing receipt; an earlier hosted MSE append failure remains unresolved. Physical-device, separate-network/NAT, sustained-operation, actual OBS and YouTube acceptance remain open. The dated [status](STATUS.md) records both passing and failing evidence and its scope.

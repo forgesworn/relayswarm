@@ -1,11 +1,12 @@
 # RelaySwarm documentation
 
 RelaySwarm is an experimental peer-assisted HLS library and transfer proof of
-concept. The released code is [v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0);
-this source documentation includes subsequent corrections and an unreleased
-broadcaster pilot. The repository
-and GitHub release are the public distribution surfaces; there is no hosted
-RelaySwarm service or npm-registry publication.
+concept. The [v0.2.0 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0)
+includes the broadcaster pilot, operator controls and documentation tooling.
+The repository and GitHub release are the public distribution surfaces; the
+npm registry is unpublished. The operated
+[HTTPS pilot](https://relayswarm.forgesworn.dev) is a controlled trial, with
+its measured scope and acceptance gaps in [Status](STATUS.md).
 
 | Task | Read |
 |---|---|

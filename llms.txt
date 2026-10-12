@@ -3,7 +3,7 @@
 > Experimental peer-assisted HLS video delivery with WebRTC data channels,
 > Nostr relay rendezvous, author-signed segment commitments and an hls.js
 > loader. A separate native Node path uses HyperDHT and Noise. MIT licensed;
-> v0.1.0 is a GitHub prerelease, not a production engine or an npm-registry release.
+> v0.2.0 is a GitHub prerelease, not a production engine or an npm-registry release.
 
 The canonical repository is https://github.com/forgesworn/relayswarm. Node 22+
 is required; CI uses Node 24. Public distribution includes an installable
@@ -13,7 +13,7 @@ source demo runs with `npm run demo`; synthetic media needs ffmpeg/libx264.
 The original WebRTC CLI signs plaintext SDP and uses a digest supplied by its
 seeder. The browser loader and shared session wire version 3 use pairwise
 NIP-44-encrypted signals; the native path encrypts dial authorisation and uses
-Noise for transfer. Package version 0.1.0, session version 3, commitment schema
+Noise for transfer. Package version 0.2.0, session version 3, commitment schema
 1 and metrics version 2 are distinct. Related Swift RelaySwarmKit documentation
 describes wire version 2; current interoperability is unverified.
 
@@ -22,7 +22,7 @@ peer traffic) and peer-first (verified peer bytes within a deadline, then normal
 HTTP fallback). Uploading defaults to off and requires viewer opt-in. Peer-first
 also requires a trusted signed kind-30311 event with the experimental
 redistribution tag and a commitment signed by that same author. The host selects
-the stream, relays and ICE policy. The unreleased trusted-event adapter queries
+the stream, relays and ICE policy. The trusted-event adapter in v0.2.0 queries
 through a bounded host callback with explicit author/origin/relay allowlists;
 it does not adopt event-selected services or establish publisher trust.
 Native HyperDHT cannot run in an ordinary browser page.
@@ -36,15 +36,15 @@ accepted RelaySwarm NIP, delegated signing or durable media storage is implement
 Current source optionally persists a private publisher identity, caches verified
 file hashes/signatures, limits cumulative media upload, measures peer choice and
 provides authenticated operator policy plus explicitly opted-in numeric reports.
-An unreleased supervised broadcast bridge creates two live HLS renditions and
+The v0.2.0 supervised broadcast bridge creates two live HLS renditions and
 can forward H.264/AAC separately to RTMPS with explicit TLS verification.
-These additions are absent from the immutable v0.1.0 downloads.
+These additions first shipped in v0.2.0 and are absent from the immutable v0.1.0 downloads.
 
 Desktop Chrome regressions and a short twelve-viewer loopback soak are recorded;
 they do not establish physical-phone, varied-NAT or sustained operation readiness.
 Peer-first media loads/bytes avoided are not net connection-data savings, and
 upload counters measure quota consumption rather than acknowledged delivery.
-Documentation on main includes corrections after the immutable v0.1.0 release.
+Documentation on main can include corrections after the immutable releases.
 
 ## Documentation
 
@@ -54,7 +54,7 @@ Documentation on main includes corrections after the immutable v0.1.0 release.
 - [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md): Options, callbacks, consent, admission, metrics, commitments and stop semantics.
 - [API reference](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md): Module exports; browser, publisher, relay/session and native primitives.
 - [Publisher/player field test](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md): Supported HLS subset, HTTPS trials, local receipts and device/network gates.
-- [Broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md): Unreleased OBS/RTMP bridge, two-rendition HLS, persistent identity and separate optional RTMPS forwarding.
+- [Broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md): OBS/RTMP bridge, two-rendition HLS, persistent identity and separate optional RTMPS forwarding.
 - [Operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md): Private state, authenticated policy/status, upload consent, numeric reporting and recovery.
 - [Container pilot](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md): Isolated existing-server deployment, SSH ingest, HTTPS, health checks and rollback.
 - [Native transport](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NATIVE-TRANSPORT.md): HyperDHT/Noise protocol, one-use authorisation and trust/fallback boundaries.
@@ -64,7 +64,7 @@ Documentation on main includes corrections after the immutable v0.1.0 release.
 ## Evidence and maintenance
 
 - [Evidence and remaining work](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md): Dated release, CI/soak measurements, distribution proof and unverified gates.
-- [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): Released v0.1.0 and subsequent documentation changes.
+- [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): Released v0.2.0 broadcaster pilot and earlier release history.
 - [Maintaining the docs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/MAINTAINING-DOCS.md): AI-context generation, link/freshness checks and public metadata.
 
 ## Optional

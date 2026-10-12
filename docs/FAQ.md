@@ -5,11 +5,12 @@
 
 ## What is released?
 
-[v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0) is an
+[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0) is an
 experimental GitHub prerelease with an installable tarball, a standalone browser
 ESM bundle and checksums. It includes the browser loader, local publisher/player
-and native transfer PoC. The npm registry remains unpublished; the release does
-not provision hosting. Later broadcaster work is unreleased source. See
+and native transfer PoC, plus the live broadcaster, private publisher state and
+operator controls. The npm registry remains unpublished; the release does
+not provision hosting. See
 [Getting started](GETTING-STARTED.md) and [the broadcaster guide](BROADCASTING.md).
 
 ## Why use Nostr instead of a tracker?
@@ -39,14 +40,14 @@ It does not remove ingest, origin hosting or operator costs.
 
 No. The host selects trusted authors, allowed media origins, the swarm id, relays
 and ICE servers. The released loader accepts the selected event. An optional
-adapter in unreleased source filters a host-supplied query using those explicit
+adapter in v0.2.0 filters a host-supplied query using those explicit
 allowlists; it does not choose infrastructure or establish trust in arbitrary
 publishers. NIP-53 can carry relay information; the redistribution tag and
 commitment kind are RelaySwarm's experimental contract.
 
 ## Can it send a broadcast to YouTube?
 
-The unreleased broadcaster can send the same H.264/AAC source to a separately
+The v0.2.0 broadcaster can send the same H.264/AAC source to a separately
 configured RTMPS endpoint while producing HLS for RelaySwarm viewers. That
 forwarder has its own process and retries. A valid platform stream key, account
 configuration and an actual platform playback test are still needed. YouTube

@@ -88,22 +88,22 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 
 - `npm test` hits live public relays; a red run can mean relay weather, not
   a code fault. Re-run before concluding anything.
-- v0.1.0 is a GitHub prerelease with a tarball and standalone browser bundle.
+- v0.2.0 is a GitHub prerelease with a tarball and standalone browser bundle.
   The npm registry is unpublished; use the exact asset or pinned commit from
-  `docs/GETTING-STARTED.md`. Do not move the release tag or replace its artifacts
+  `docs/GETTING-STARTED.md`. Do not move any release tag or replace its artifacts
   when correcting main-branch documentation.
 - Do not present the original WebRTC PoC's signalling as encrypted.
 - The demo keeps its author key on the server and receipts in the browser.
   Preserve playlist-bound signing and explicit upload consent. Chrome fixture
   tests are loopback; do not describe them as physical-device/NAT validation.
-- Package version 0.1.0, session wire version 3, commitment schema 1 and metrics
+- Package version 0.2.0, session wire version 3, commitment schema 1 and metrics
   version 2 are distinct. RelaySwarmKit's README describes wire version 2;
   current cross-client interoperability has not been proved.
 - Update authored Markdown and `llms.txt`, then run `npm run docs:generate`
   and `npm run check:docs`. Do not hand-edit generated `llms-full.txt`.
 - Keep AI material factual: published links do not prove search indexing or
   recommendations. The public surface is GitHub, not a configured docs website.
-- Broadcaster additions are unreleased source, absent from v0.1.0 assets.
+- Broadcaster additions are included in v0.2.0, absent from v0.1.0 assets.
   Live-source sequence numbers continue across published generations; the
   attempt counter is distinct from visible HLS discontinuity.
 - Private publisher state and tokens require POSIX file permissions. An
