@@ -1,7 +1,7 @@
 {
   "name": "relayswarm",
   "version": "0.1.0",
-  "description": "Nostr-rendezvoused, hash-verified peer transfer over browser and native transports - proof of concept",
+  "description": "Experimental peer-assisted HLS video over WebRTC and Nostr relays, with signed segment commitments and a native HyperDHT proof of concept",
   "scripts": {
     "poc": "node poc.mjs",
     "poc:native": "node native-poc.mjs",
@@ -13,23 +13,30 @@
     "test:swarm": "node --test test/hls-swarm.test.mjs test/browser-hardening.test.mjs",
     "test:publisher": "node --test test/hls-publisher.test.mjs test/demo-server.test.mjs",
     "test:playback": "node test/hls-playback-browser.mjs",
-    "demo": "node demo/server.mjs"
+    "demo": "node demo/server.mjs",
+    "docs:generate": "node scripts/build-ai-context.mjs",
+    "check:docs": "node scripts/check-docs.mjs"
   },
   "keywords": [
     "nostr",
+    "nip-53",
     "webrtc",
-    "hyperdht",
-    "p2p",
     "hls",
+    "hls.js",
+    "peer-to-peer",
+    "peer-assisted",
     "live-streaming",
-    "peer-assisted"
+    "video-streaming",
+    "hyperdht",
+    "signed-segment-commitments",
+    "proof-of-concept"
   ],
   "author": "TheCryptoDonkey",
   "license": "MIT",
-  "homepage": "https://github.com/forgesworn/RelaySwarm#readme",
+  "homepage": "https://github.com/forgesworn/relayswarm#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/forgesworn/RelaySwarm.git"
+    "url": "git+https://github.com/forgesworn/relayswarm.git"
   },
   "type": "module",
   "engines": {
@@ -53,5 +60,8 @@
     "./*": "./*",
     "./segment-commitment": "./src/browser/segment-commitment.mjs",
     "./hls-publisher": "./src/hls-publisher.mjs"
+  },
+  "bugs": {
+    "url": "https://github.com/forgesworn/relayswarm/issues"
   }
 }

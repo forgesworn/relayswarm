@@ -1,15 +1,29 @@
 # Integrating the hls.js swarm in a host page
 
+[Documentation](docs/README.md) · [Installation](docs/GETTING-STARTED.md) ·
+[API reference](docs/API.md) · [Release evidence](docs/STATUS.md)
+
 `src/browser/hls-swarm.mjs` adds peer-assisted delivery to an hls.js player.
 In **shadow mode** it changes nothing the viewer sees: every fragment still
 comes from the origin, and the swarm only measures what peer delivery would
 have achieved. That is the mode to deploy first.
 
-The module is browser ESM with one runtime dependency (`nostr-tools`), so any
-bundler that resolves bare specifiers can take it. There is no npm release
-yet: pin a git dependency at a commit, or vendor the bundled file.
+The module is browser ESM with a direct runtime dependency on `nostr-tools`.
+The [v0.1.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0)
+supplies an installable tarball and a standalone bundle containing the browser
+runtime dependencies. The host supplies hls.js. The npm registry is unpublished;
+[Getting started](docs/GETTING-STARTED.md) gives exact asset and pinned-Git commands.
+
+The host selects a trusted stream event, shared swarm id, relay policy and ICE
+servers. This module does not perform Nostr stream discovery or automatically
+extract relay/STUN policy from a kind-30311 event.
 
 ## Attaching
+
+This host-page snippet assumes the application provides `eventId`,
+`manifestUrl` and the `video` element. Replace the example relay with your own
+tested endpoint. The metrics callback below logs locally; the library does not
+submit analytics automatically.
 
 ```js
 import Hls from "hls.js";
@@ -21,7 +35,7 @@ const swarm = createHlsSwarm({
   mode: "shadow",                      // "shadow" | "peer-first" | "off"
   originFallbackMs: 1500,              // "in time" means within this of the load starting
   shadowSampleRate: 0.25,              // race this share of fragments (see Cost)
-  onMetrics: (metrics) => post(metrics),
+  onMetrics: (metrics) => console.log(metrics),
 });
 
 const hls = new Hls();
@@ -33,7 +47,7 @@ hls.attachMedia(video);
 swarm.stop();
 ```
 
-`createHlsSwarm` never throws. An unusable option or browser yields a swarm
+An invalid supported configuration or unsupported browser yields a swarm
 whose `metrics().mode` is `"off"` and whose `metrics().disabledReason` says
 why (`invalid-swarm-id`, `invalid-relays`, `invalid-mode`, `mode-off`,
 `invalid-stream-authorisation`, `missing-commitment-provider`, `invalid-limits`, `no-webcrypto`, `no-webrtc`, `no-websocket`). A
@@ -57,9 +71,10 @@ connection and relay socket, drops held segments and emits one final
 | `originReserveMs` | `2000` | Peer-first reserves this much buffered playback for the origin; an empty buffer goes directly to origin. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
 | `maxPeers` | `6` | Connections in and out. |
+| `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
 | `maxUploadPeers` | `4` | Distinct peers served in any 30 s. |
 | `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. |
-| `serveOnCellular` | `false` | With `false`, a viewer on a metered connection neither uploads nor races. |
+| `serveOnCellular` | `false` | With `false`, detected cellular or `saveData` connections neither upload nor fetch peer media. Detection is advisory and does not identify every metered connection. |
 | `serve` | `false` | Set `true` only after the viewer opts into uploading. With `false`, the viewer is receive-only: it takes from peers but never uploads or advertises what it holds. Use it where the connection type cannot be read (Safari), so a phone on cellular is never asked to upload. |
 | `ticket` | none | An opaque string (up to 2 KB) this viewer presents in its presence and in every offer and answer, typically a short-lived credential the origin signed for this viewer's swarm key. |
 | `admit` | none | `(pubkey, ticket) => boolean \| Promise<boolean>`. With it set, a viewer never dials, answers or follows a referral to a peer it has not admitted, so its address (carried in the SDP) only reaches ticket holders. The host is called again before each dial and SDP publication, including retries and referrals; it must check expiry. A third argument provides an abort `signal`. At most 16 checks run concurrently and each has a 3 s deadline. |
@@ -68,7 +83,12 @@ connection and relay socket, drops held segments and emits one final
 | `maxConcurrentRaces` | `24` | Maximum retained shadow races. |
 | `admissionTimeoutMs` | `3000` | Deadline for a host admission check. |
 | `swarmParts` | `false` | Include low-latency HLS parts. Parts are small; leave off. |
-| `maxHeldSegments` / `maxHeldBytes` | `12` / 64 MB | What a viewer keeps to serve others. |
+| `maxHeldSegments` / `maxHeldBytes` | `12` / 64 MiB | What a viewer keeps to serve others. |
+| `maxSegmentBytes` | 16 MiB | Maximum accepted/retained segment payload. |
+| `minLinkLifeMs` / `idleEvictMs` / `evictionCooldownMs` | `15000` / `20000` / `10000` | Minimum link lifetime, bidirectional idle threshold and rotation cooldown. |
+| `retryFloorMs` / `retryCeilingMs` / `maxRetriesPerPeer` | `4000` / `45000` / `3` | Refusal retry bounds and retry attempts per peer. |
+| `maxReferrals` | `2` | Maximum referrals offered after a refusal. |
+| `reannounceDebounceMs` / `minReannounceGapMs` | `4000` / `12000` | Bound capacity-change presence announcements. |
 | `presenceIntervalMs` | `20000` | Presence heartbeat, jittered 30%. |
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
 | `iceServers` | one public STUN | Pass the deployment's own STUN. |
@@ -197,6 +217,10 @@ and the peer is banned. Init segments and, by default, low-latency parts use
 the original loader directly. `abort()`, `destroy()` and `stop()` cancel
 pending peer work; stopping also immediately releases a waiting load to its
 original loader. No late peer completion can invoke a second success callback.
+Peer success updates the statistics object retained by hls.js, including loaded
+bytes and timestamps. Aborting a pending peer load invokes `onAbort` once;
+destroying it cancels without a completion callback. The playback regression
+checks these behaviours alongside ranges, seeks and discontinuities.
 
 ## The kill switch
 

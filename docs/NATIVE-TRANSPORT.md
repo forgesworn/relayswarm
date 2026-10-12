@@ -1,7 +1,10 @@
 # Native transport spike
 
+[Documentation](README.md) · [Installation](GETTING-STARTED.md) ·
+[API reference](API.md#native-transfer-primitives) · [Release evidence](STATUS.md)
+
 RelaySwarm now has a second, experimental data path for installed Node
-applications. It uses Nostr for rendezvous and one-shot authorization, then
+applications. It uses Nostr for rendezvous and one-shot authorisation, then
 moves the bytes over a Noise-encrypted HyperDHT stream. It does not configure,
 contact or emulate a STUN or TURN server.
 
@@ -24,11 +27,11 @@ assignments.
    signed and NIP-44 encrypted. It binds the leecher's Noise key to one request
    id, digest and byte count.
 4. The seeder validates the signal, installs a short-lived, one-use firewall
-   authorization for that exact Noise key, then returns an encrypted `ready`
+   authorisation for that exact Noise key, then returns an encrypted `ready`
    signal.
 5. HyperDHT locates the seeder and attempts direct UDP traversal. The resulting
    duplex stream is encrypted and mutually authenticated by Noise keys.
-6. The leecher requests the already-authorized object. The sender re-checks its
+6. The leecher requests the already-authorised object. The sender re-checks its
    local bytes before serving them. The receiver enforces the expected byte
    count and computes SHA-256 itself before accepting the result.
 
@@ -44,17 +47,16 @@ punching and Noise transport.
 
 It does not remove infrastructure:
 
-- Nostr relays remain the signed rendezvous and authorization path.
+- Nostr relays remain the signed rendezvous and authorisation path.
 - HyperDHT needs bootstrap/routing nodes. The default client uses HyperDHT's
   public bootstrap set; tests inject a private local bootstrapper. A deployment
   can operate several independent bootstrappers and pass them with
   `--bootstrap host:port`.
 - UDP-blocking and difficult symmetric NATs can still prevent a direct path.
-  There is no relay fallback in this spike. Failure must fall back to the HTTPS
-  origin, Blossom, or another explicitly selected source.
+  There is no relay or HTTP fallback in the CLI journey. An integrating
+  application must implement its own failure handling and selected origin source.
 
-That is a much nicer dependency shape than TURN for native nodes, but it is not
-the abolition of networking.
+These bootstrap/routing and relay dependencies remain even without STUN/TURN.
 
 ## What this does not replace
 
@@ -79,9 +81,9 @@ The spike fails closed on the following boundaries:
 - non-loopback relay URLs must use `wss://`;
 - dial details are pairwise NIP-44 encrypted;
 - the native listener rejects Noise keys that do not have an unexpired Nostr
-  authorization, and consumes authorization on first connection;
+  authorisation, and consumes authorisation on first connection;
 - request id, digest and size must match across the encrypted Nostr signal,
-  firewall authorization and transfer request;
+  firewall authorisation and transfer request;
 - individual frames are capped at 64 KiB and objects at 256 MiB; empty and
   excessive object chunks are rejected; pending authorisations are capped at
   256 and active incoming transfers at 16, with a 30 s transfer deadline;
@@ -111,10 +113,10 @@ npm run poc:native -- --bootstrap bootstrap.example:49737
 ```
 
 The deterministic tests start a loopback Nostr relay and a loopback HyperDHT
-bootstrap node. They prove the complete authorization and transfer path without
+bootstrap node. They prove the complete authorisation and transfer path without
 using external infrastructure. CI is configured to run them on current GitHub
-Windows, Linux and macOS runners. The baseline transfer suite passed on all three
-platforms ([run 36015298994](https://github.com/forgesworn/relayswarm/actions/runs/36015298994)); that proves those tests rather than packaging,
+Windows, Linux and macOS runners. The v0.1.0 native suite passed on all three
+platforms ([release-main run 38233694634](https://github.com/forgesworn/relayswarm/actions/runs/38233694634)); that proves those tests rather than packaging,
 firewall prompts or real home-network reachability.
 
 Still required before choosing this for production:

@@ -1,0 +1,237 @@
+{
+  "ok": true,
+  "at": "2026-10-12T10:00:26.515Z",
+  "mode": "peer-first",
+  "rotation": "on",
+  "shape": {
+    "liveSyncDurationCount": 4,
+    "maxBufferLength": 4,
+    "maxMaxBufferLength": 6,
+    "viewers": 12,
+    "waves": 3,
+    "waveGapMs": 30000,
+    "maxPeers": 4,
+    "corruptPeer": true,
+    "plusCorruptPeer": 1,
+    "plusBaselineWithoutSwarm": 1,
+    "durationS": 180,
+    "staggerMs": 1000,
+    "segmentSeconds": 2,
+    "videoKbps": 1500,
+    "originFallbackMs": 1500
+  },
+  "waves": [
+    {
+      "wave": 0,
+      "viewers": 4,
+      "linksOpened": 22,
+      "offersRefused": 81,
+      "evicted": 2,
+      "retriesScheduled": 2,
+      "referralsFollowed": 3,
+      "noPeers": 0,
+      "peerInTime": 0,
+      "peerMiss": 0,
+      "peerCorrupt": 2,
+      "peerFirstLoaded": 338,
+      "inTimeShare": null,
+      "sampledInTimeShare": null,
+      "peerFirstShare": 0.65,
+      "viewersServedByAPeer": 3,
+      "secondsToFirstPeerSegment": [
+        2.2,
+        2.2,
+        6.2,
+        null
+      ],
+      "secondsToFirstLink": [
+        0.3,
+        0.3,
+        0.4,
+        1
+      ]
+    },
+    {
+      "wave": 1,
+      "viewers": 4,
+      "linksOpened": 20,
+      "offersRefused": 70,
+      "evicted": 0,
+      "retriesScheduled": 28,
+      "referralsFollowed": 6,
+      "noPeers": 0,
+      "peerInTime": 0,
+      "peerMiss": 0,
+      "peerCorrupt": 4,
+      "peerFirstLoaded": 327,
+      "inTimeShare": null,
+      "sampledInTimeShare": null,
+      "peerFirstShare": 0.732,
+      "viewersServedByAPeer": 4,
+      "secondsToFirstPeerSegment": [
+        2.2,
+        2.2,
+        2.3,
+        38.3
+      ],
+      "secondsToFirstLink": [
+        0.3,
+        0.5,
+        0.5,
+        0.7
+      ]
+    },
+    {
+      "wave": 2,
+      "viewers": 4,
+      "linksOpened": 14,
+      "offersRefused": 34,
+      "evicted": 0,
+      "retriesScheduled": 33,
+      "referralsFollowed": 54,
+      "noPeers": 0,
+      "peerInTime": 0,
+      "peerMiss": 0,
+      "peerCorrupt": 1,
+      "peerFirstLoaded": 258,
+      "inTimeShare": null,
+      "sampledInTimeShare": null,
+      "peerFirstShare": 0.686,
+      "viewersServedByAPeer": 3,
+      "secondsToFirstPeerSegment": [
+        2.2,
+        2.2,
+        2.3,
+        null
+      ],
+      "secondsToFirstLink": [
+        0.3,
+        0.4,
+        0.8,
+        0.9
+      ]
+    }
+  ],
+  "aggregate": {
+    "originLoaded": 420,
+    "peerFirstLoaded": 923,
+    "originFallbacks": 420,
+    "peerFirstBytes": 385107472,
+    "raced": 0,
+    "noPeers": 0,
+    "peerInTime": 0,
+    "peerLate": 0,
+    "peerMiss": 0,
+    "peerCorrupt": 7,
+    "inTimeShare": null,
+    "sampledInTimeShare": null,
+    "peerFirstShare": 0.687,
+    "medianOfViewerPeerLatencyMs": 32,
+    "bytesFromPeers": 385107472,
+    "bytesUploaded": 442741316,
+    "candidatePairs": {
+      "host/host": 56
+    },
+    "swarmErrors": 0,
+    "relayEventsPublished": 619,
+    "corruptPeerBannedBy": 7
+  },
+  "player": {
+    "withSwarm": [
+      {
+        "viewer": "v0",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 265.9
+      },
+      {
+        "viewer": "v1",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 263.4
+      },
+      {
+        "viewer": "v2",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 262.2
+      },
+      {
+        "viewer": "v3",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 260.9
+      },
+      {
+        "viewer": "v4",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 228.3
+      },
+      {
+        "viewer": "v5",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 227
+      },
+      {
+        "viewer": "v6",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 225.6
+      },
+      {
+        "viewer": "v7",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 224.4
+      },
+      {
+        "viewer": "v8",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 193
+      },
+      {
+        "viewer": "v9",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 191.6
+      },
+      {
+        "viewer": "v10",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 190.3
+      },
+      {
+        "viewer": "v11",
+        "stalls": 0,
+        "fatalErrors": 0,
+        "currentTime": 188.9
+      }
+    ],
+    "baseline": {
+      "stalls": 0,
+      "fatalErrors": 0,
+      "currentTime": 259.6
+    }
+  },
+  "failures": [],
+  "provenance": {
+    "workflow": "https://github.com/forgesworn/relayswarm/actions/runs/38231951028/attempts/2",
+    "artifact": "hls-soak-receipts",
+    "receipt": "hls-swarm-peer-first-rotation-on-20261012T100026Z.json",
+    "testedCommit": "97c93e7021c1c8507d02ac443155359b0ba8c12d",
+    "releaseCommitWithIdenticalTree": "3e480e19dfe4d675f14bcb2968f3dc4926fbca25",
+    "note": "Summary extracted from the hosted receipt; individual samples are retained in its CI artifact."
+  },
+  "resources": {
+    "samples": 571,
+    "maxConnectedAndDialling": 4,
+    "maxHeldBytes": 5091228,
+    "maxRelays": 1,
+    "allLoadersRestored": true,
+    "allStoppedResourcesReleased": true
+  }
+}

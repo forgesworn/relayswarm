@@ -1,308 +1,198 @@
 # RelaySwarm
 
-Nostr-rendezvoused, hash-verified peer transfer. Browsers use WebRTC; an
-experimental native path now uses HyperDHT and Noise without STUN or TURN.
+Experimental peer-assisted HLS video delivery using WebRTC data channels and
+Nostr relays for peer discovery and signalling. A separate native proof of
+concept uses HyperDHT and Noise for installed Node applications.
 
-Browser peer-assist needs rendezvous infrastructure; peers cannot find each
-other from nothing. Widely deployed systems get it from WebTorrent-compatible
-trackers - P2P Media Loader, the engine PeerTube embeds, gets its peer
-introductions there
-([its FAQ](https://github.com/Novage/p2p-media-loader/blob/main/FAQ.md#what-is-tracker)) -
-a dedicated, application-specific service somebody operates:
+**Status:** [v0.1.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0),
+MIT licensed, Node 22+; CI uses Node 24. This is a proof of concept with a
+bounded hls.js loader and a runnable publisher/player, not a production engine.
+The npm registry is unpublished.
 
-```mermaid
-flowchart TB
-    T["signalling tracker<br/>one operator - the seizable part"]
-    O["origin"]
-    A["viewer"]
-    B["viewer"]
-    C["viewer"]
-    A -. "find peers" .-> T
-    B -. "find peers" .-> T
-    C -. "find peers" .-> T
-    O -->|"segments"| A
-    A <-->|"segments"| B
-    B <-->|"segments"| C
-```
+[Documentation](docs/README.md) · [Installation](docs/GETTING-STARTED.md) ·
+[hls.js integration](INTEGRATION.md) · [API reference](docs/API.md) ·
+[Evidence and remaining work](docs/STATUS.md) · [FAQ](docs/FAQ.md) ·
+[AI index](llms.txt) · [Full AI context](llms-full.txt)
 
-A [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md)
-live-stream event can already carry a `relays` tag listing Nostr
-relays. RelaySwarm's claim: **the stream can use that same general-purpose
-relay layer for the swarm's signalling**, replacing the dedicated tracker
-with redundant, stream-selected infrastructure:
+## Try it
 
-```mermaid
-flowchart TB
-    O["origin"]
-    A["viewer"]
-    B["viewer"]
-    C["viewer"]
-    subgraph relays["stream-selected Nostr relays - no RelaySwarm signalling service"]
-        R1[("relay")]
-        R2[("relay")]
-    end
-    A -. "signed signalling" .-> R1
-    B -. "signed signalling" .-> R1
-    C -. "signed signalling" .-> R2
-    O -->|"segments, once"| A
-    A <-->|"segments, verified by hash"| B
-    B <-->|"segments, verified by hash"| C
-    O -.->|"plain HLS fallback<br/>the floor is today's behaviour"| C
-```
+Install ffmpeg with libx264 for synthetic media, then:
 
-## Status: proof of concept
-
-`poc.mjs` proves the load-bearing claim end to end, with no browser and no
-servers of its own:
-
-1. Two peers (a **seeder** holding a media segment, a **leecher** wanting it)
-   each connect to public Nostr relays.
-2. The seeder announces presence as an ephemeral event (kind 24170, tagged
-   with a swarm id); the leecher discovers it via its relay subscription.
-3. SDP offer/answer are exchanged as ephemeral events (kind 24171, `p`-tagged
-   to the counterparty) - the relays are the entire signalling path.
-4. A WebRTC data channel opens ([werift](https://github.com/shinyoshiaki/werift-webrtc),
-   pure-TypeScript WebRTC) and the segment moves peer-to-peer in 16KB chunks.
-5. The leecher reassembles and verifies the segment by SHA-256.
-
-```mermaid
-sequenceDiagram
-    participant S as seeder
-    participant R as Nostr relays
-    participant L as leecher
-    S->>R: presence (kind 24170, swarm-tagged)
-    R->>L: presence
-    L->>R: offer (kind 24171, p-tagged, SDP)
-    R->>S: offer
-    S->>R: answer (kind 24171, SDP)
-    R->>L: answer
-    Note over S,L: WebRTC data channel opens - relays leave the path
-    L->>S: want-segment
-    S->>L: meta + 16KB chunks + eof
-    Note over L: reassemble, verify SHA-256
-```
-
-Observed on public relays (relay.damus.io, nos.lol, relay.primal.net), Node
-fan-out signalling averaged roughly 0.57 seconds. The recorded Chrome and
-Safari flows transferred a verified 2MB end to end in 3.2 and 2.8 seconds
-respectively, inside a common 4-second HLS segment. These measurements support
-live feasibility; they do not claim that every peer joins inside a 2-second
-segment. Short-segment and mobile tuning remain engine work.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/chart-join-dark.svg">
-  <img alt="Stacked phase timings per context: every measured join completes within one 4-second HLS segment" src="docs/chart-join-light.svg">
-</picture>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/chart-throughput-dark.svg">
-  <img alt="Throughput by platform versus the 0.5 MB/s a 4 Mbps stream needs: laptops have 8-27x headroom, the untuned handheld sits just under" src="docs/chart-throughput-light.svg">
-</picture>
-
-```bash
-npm ci
-npm test                   # end-to-end: PoC + 3-leecher fan-out, hash-verified against live relays
-npm run poc                # just the two-peer PoC
-node poc.mjs --relay wss://your.relay --size 1048576
-```
-
-`npm test` needs nothing but the repo, Node 22+ (for the global `WebSocket`;
-tested on Node 24) and an internet connection - it proves the whole claim
-against real relays and exits non-zero if any transfer fails verification.
-
-The run prints a timing log and a JSON summary with the verified byte count,
-per-phase timings and throughput. A real run, verbatim:
-
-```json
-{
-  "ok": true,
-  "swarmId": "poc-7c215d301a0c9d5a",
-  "relays": ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"],
-  "segmentBytes": 614400,
-  "sha256Verified": true,
-  "timingsMs": {
-    "relaysConnected": 900,
-    "seederDiscovered": 1092,
-    "offerToAnswer": 114,
-    "signallingTotal": 530,
-    "transferMs": 51,
-    "endToEnd": 1675
-  },
-  "throughputMBps": 11.49
-}
-```
-
-### Native path: no WebRTC, STUN or TURN
-
-`native-poc.mjs` proves a separate path for installed Node applications:
-
-1. Nostr presence advertises a HyperDHT Noise public key and object digest.
-2. A signed, NIP-44-encrypted signal authorizes one leecher Noise key for one
-   request, digest and byte count.
-3. HyperDHT locates the peer and attempts a direct encrypted UDP path.
-4. The receiver independently enforces the expected size and SHA-256 digest.
-
-```bash
-npm run test:native        # deterministic local relay + local DHT bootstrap
-npm run poc:native         # public Nostr relays + HyperDHT's default DHT
-```
-
-This can replace WebRTC in installed Windows, Linux and macOS nodes. It cannot
-replace WebRTC in an ordinary browser page, and it does not make every NAT
-traversable. It still depends on selected Nostr relays and DHT bootstrap/routing
-nodes. It is a transfer spike, not durable decentralised storage: no persistence,
-pinning, replication or availability promise exists yet.
-
-The exact protocol, security boundary and honest gaps are in
-[`docs/NATIVE-TRANSPORT.md`](docs/NATIVE-TRANSPORT.md). CI is configured for all
-three desktop operating systems. Current-main native tests passed on Windows,
-Linux and macOS (run 36015298994); this is test evidence, not packaging or
-real NAT reachability.
-
-### A second implementation
-
-[RelaySwarmKit](https://github.com/forgesworn/relayswarm-kit) is a Swift
-package implementing the same rendezvous - Nostr presence plus
-NIP-44-encrypted SDP signalling (the PoC signs but does not encrypt) and a
-data-channel transport - validated against published nostr-tools test
-vectors. It exists so the protocol is specified by more than one codebase
-from the start, which is exactly what the planned NIP draft needs.
-
-## Beyond two peers: feasibility spikes
-
-`spikes/` holds throwaway measurement code that pushes the same protocol
-harder, with full results in [`spikes/RESULTS.md`](spikes/RESULTS.md):
-one seeder serving 10 simultaneous leechers (23 signed events for the whole
-swarm's signalling), a sustained 4Mbps live cadence with a 100% deadline hit rate over
-five minutes, a leecher re-serving its verified segment to a third peer with
-the origin silent (redistribution, not just fan-out), real Chrome and Safari peers, browser-to-browser transfer
-with no server-side peer, cross-NAT with STUN alone (srflx/srflx), and the
-two failure modes that shaped the design: symmetric NAT at VPN egresses
-(hence a super-peer strategy rather than TURN) and background-tab timer
-throttling (hence arriving peers announce, existing peers respond).
-
-A browser peer completing a verified transfer (headless Chrome, captured
-mid-run - `spikes/browser-peer.html`):
-
-![A browser tab pulls a 2MB segment over Nostr-signalled WebRTC and verifies it by SHA-256](docs/browser-verified.png)
-
-## Peer assist inside hls.js
-
-`src/browser/hls-swarm.mjs` attaches the same rendezvous and transfer to an
-[hls.js](https://github.com/video-dev/hls.js) player. In shadow mode the
-player is untouched: every fragment still loads from the origin, and the
-swarm races peers for the same fragment alongside it, verifies what arrives
-against the origin's own bytes, and reports what peer delivery would have
-achieved. It adds data traffic and local work; contributions are now off by
-default and the default sampling rate is 0.25.
-
-Measured in headless Chrome against a live ffmpeg HLS stream, eight viewers
-plus one tampering peer and one player with no swarm: 97.4% of races had a
-verified peer copy inside 1.5 s, the tampered delivery was detected and the
-peer dropped, and playback matched the baseline with no stalls. Everything ran
-on one machine, so the latencies are loopback rather than internet numbers -
-the full receipt and the honest limits are in
-[`spikes/RESULTS.md`](spikes/RESULTS.md).
-
-Host-page contract, options, metrics and the kill switch:
-[`INTEGRATION.md`](INTEGRATION.md). Peer-first delivery (peers in the playback
-path) now requires a segment commitment signed by the author of a verified
-kind-30311 stream event, bound to the exact stream, rendition, sequence,
-discontinuity, part, key, size and expiry. Verification must finish inside the
-peer budget or the original loader starts. This is a bounded experimental
-loader, not a production engine; the integration contract documents the
-experimental authorisation tag and commitment kind.
-
-## Try the publisher/player demo
-
-```bash
+```sh
+git clone --branch v0.1.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+cd relayswarm
 npm ci
 npm run demo
 ```
 
-Open `http://localhost:8787`. ffmpeg generates two live renditions; the Node
-publisher signs playlist-bound segment commitments, and the player offers
-origin-only, shadow and verified peer-first delivery. Uploading is off until
-the viewer opts in, with a selectable upload limit, a kill switch and a local
-JSON receipt download. Existing HLS directories can be supplied instead.
-The signing key stays on the publisher.
+Open `http://localhost:8787`. The server generates two live H.264/AAC
+renditions, keeps its publisher key in Node and signs commitments derived
+from the local playlists. The player starts origin-only. Uploading requires
+the viewer's explicit opt-in; controls include upload limits, quality
+selection, an origin-only kill switch and a local JSON receipt download.
 
-[`docs/FIELD-TEST.md`](docs/FIELD-TEST.md) covers local media, HTTPS setup for
-separate devices, receipt interpretation and remaining field gates. The
-Chrome regression (`npm run test:playback`) drives this same demo through two
-renditions, shared-file byte ranges, quality changes, timestamp resets,
-forward/backward seeks and a relay outage, alongside an origin-only baseline.
-These are loopback tests; physical devices and broad real-network behaviour
-remain outstanding.
+To use existing media:
 
-## Deliberately out of scope for the PoC
+```sh
+npm run demo -- --media-dir /path/to/hls --manifest master.m3u8
+```
 
-These are the project deliverables, not the PoC:
+See [the field-test guide](docs/FIELD-TEST.md) for the supported HLS subset,
+HTTPS access from separate devices and receipt interpretation. Synthetic
+media requires ffmpeg; serving an existing directory does not.
 
-- **Encrypted signalling in the original CLI PoC.** `poc.mjs` signs but
-  does not encrypt SDP. The separate browser loader encrypts its signalling
-  with NIP-44; the native path encrypts its dial authorisation.
-- **Authenticated segment digests.** The PoC verifies the transfer against a
-  hash supplied by the sending peer - that detects corruption, not a
-  malicious peer, since a bad seeder controls both bytes and hash. The
-  browser peer-first loader now verifies a streamer-signed commitment. The
-  original CLI PoC retains its same-peer digest.
-- **Advanced multi-peer/ABR scheduling** - the browser loader selects one
-  peer at a time with an origin deadline; broader scheduling remains future work.
-- **Broader hls.js engine integration** - the bounded loader now exists;
-  advanced ABR scheduling, independent-client interop and field validation
-  remain outstanding.
-- **A NIP draft** specifying the presence/signal kinds and tags so
-  independent implementations interoperate.
-- NAT traversal hardening (the super-peer strategy for symmetric NATs,
-  TURN only if wild data demands it) and mobile receive-path tuning.
+## Install the library
 
-## Privacy and decentralisation properties
+The release supplies an installable tarball, a standalone browser ESM bundle
+and SHA-256 checksums:
 
-Stated plainly, because the design only claims what it can prove:
+```sh
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.1.0/relayswarm-0.1.0.tgz
+```
 
-- **No protocol-mandated central operator.** Signalling still needs
-  rendezvous infrastructure - the point is that it is redundant,
-  general-purpose and stream-selected rather than a dedicated tracker.
-  Under the proposed protocol, relays and STUN servers are selected by the
-  stream and carried in its signed NIP-53 event. The PoC defaults to Google's
-  STUN service for demo reliability - pass `--stun`, or self-host coturn in one line.
-  No dedicated tracker, no project-operated signalling service, no TURN by
-  default. The native spike has no STUN or TURN configuration; it uses the
-  independently selectable HyperDHT bootstrap/routing layer instead.
-- **Pseudonymous, not anonymous.** Swarm events carry no social npub and
-  use independent per-session keys. Relays and network observers may still
-  correlate swarm activity with a viewer's other Nostr use through shared
-  connections, IP addresses and timing.
-- **What relays see:** event kinds, tags, timing and connecting IPs.
-  NIP-44 in the native spike hides the dial body, not the fact that signalling
-  is happening. The original WebRTC PoC still publishes plaintext SDP
-  ([NIP-44 limitations](https://github.com/nostr-protocol/nips/blob/master/44.md#limitations)).
-- **What peers see:** each other's network addresses - inherent to all
-  P2P. The engine's answer is risk-tiered participation: an origin-only
-  mode with no swarm subscription, no event publication and no
-  RTCPeerConnection - such a viewer never appears in the swarm and exposes
-  no address to peers, while the origin and website still see ordinary HLS
-  requests, as they do today.
-- **What the WebRTC path's STUN operator sees:** an IP, a timestamp and the
-  usual STUN protocol attributes. It receives no stream identifier and no media or
-  signalling traffic; where super-peers are reachable, STUN is often
-  unnecessary at all.
-- **The floor is today's behaviour.** If WebRTC or every named relay is
-  blocked, the player falls back to plain HLS from the origin.
+```js
+import { createHlsSwarm } from 'relayswarm/hls-swarm';
+import { createHlsPublisher } from 'relayswarm/hls-publisher'; // Node only
+```
 
-Deeper material lives in `docs/`: a [landscape survey](docs/LANDSCAPE.md)
-of neighbouring projects and the narrow novelty claim, a
-[threat-model outline](docs/THREAT-MODEL.md) the deliverable engine will be
-tested against, and an [FAQ](docs/FAQ.md) that answers the awkward
-questions first.
+The host supplies hls.js. Install it separately for a host-page integration;
+the source demo already lists it as a development dependency. The release
+bundle includes the browser loader's runtime dependencies. Pinned Git
+installation and bundle usage are in [Getting started](docs/GETTING-STARTED.md).
 
-## Why
+## What it does
 
-Live video is the least sovereign layer of the otherwise decentralised Nostr
-stack: the events, chat and payments are censorship-resistant, but the video
-itself still flows from one HTTP origin that can be overwhelmed or cut. Peer
-assistance inverts that - the bigger the audience, the more distribution
-capacity the stream has, and the origin only feeds the swarm's edge.
+| Path | Transfer and integrity | Signalling |
+|---|---|---|
+| Original CLI, `poc.mjs` | werift WebRTC; SHA-256 supplied by the sending peer detects transport corruption | Signed **plaintext SDP** on Nostr relays |
+| Browser loader, `relayswarm/hls-swarm` | Native WebRTC; shadow compares with origin bytes, peer-first verifies stream-author-signed segment commitments | Pairwise NIP-44-encrypted signals, session wire version 3 |
+| Native CLI, `native-poc.mjs` | HyperDHT/Noise; receiver enforces an independently expected digest and size | Pairwise NIP-44-encrypted one-shot dial authorisation, session wire version 3 |
 
-MIT licensed.
+The browser loader has three modes:
+
+- **Off:** origin-only HLS, without swarm sockets, publications or peer connections.
+- **Shadow:** origin bytes play as usual; sampled peer transfers measure
+  potential delivery and add data traffic. Uploading defaults to off.
+- **Peer-first:** a bounded peer attempt precedes the normal HTTP loader.
+  Signatures, exact media context, size and SHA-256 must verify before bytes
+  reach hls.js. Startup, thin buffers, missing peers and failed deadlines use
+  origin. Benefits can differ substantially between viewers.
+
+Peer-first requires a trusted signed kind-30311 stream event with the
+experimental `["relayswarm", "redistribute", "1"]` tag and an expiring
+commitment signed by that same author. Delegated signers are not supported.
+Kinds 24170/24171/24172 and this authorisation tag are experimental assignments,
+not an accepted RelaySwarm NIP or a stable interoperability guarantee.
+
+## Why use Nostr for rendezvous?
+
+Peers still need infrastructure to discover one another.
+[P2P Media Loader uses WebTorrent-compatible trackers](https://github.com/Novage/p2p-media-loader/blob/main/FAQ.md#what-is-tracker).
+RelaySwarm instead uses application-selected Nostr relays for presence and
+signals, then sends media over the direct peer connection.
+
+[NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) kind-30311
+events can list relays. A host can reuse that selection, but this library does
+not discover stream events or automatically read relay/STUN policy from them:
+the host passes `streamEvent`, `swarmId`, `relays` and `iceServers` explicitly.
+The HTTP origin remains responsible for initial media availability and fallback.
+
+```mermaid
+flowchart TB
+    O[HTTP origin and publisher]
+    R[Application-selected Nostr relays]
+    A[Viewer A]
+    B[Viewer B]
+    A -. presence and encrypted signals .-> R
+    B -. presence and encrypted signals .-> R
+    O -->|HLS and signed commitments| A
+    O -->|HLS fallback| B
+    A <-->|verified media over WebRTC| B
+```
+
+Other approaches and the narrow comparison are in [Landscape](docs/LANDSCAPE.md).
+[RelaySwarmKit](https://github.com/forgesworn/relayswarm-kit) is a separate Swift
+signalling/transport project. Its README describes wire version 2; the current
+Node/browser session here uses version 3. Shared kinds and NIP-44 test vectors
+do not establish current cross-client or signed-HLS interoperability.
+
+## Evidence
+
+The [release-main CI run](https://github.com/forgesworn/relayswarm/actions/runs/38233694634)
+passed all seven standard jobs: the publisher/player playback regression,
+shadow and peer-first Chrome harnesses, native tests on Linux/macOS/Windows,
+and public-relay transport tests.
+
+The [twelve-viewer loopback soak](https://github.com/forgesworn/relayswarm/actions/runs/38231951028/attempts/2)
+used three arrival waves and a 180 s final measurement window. Peers supplied
+923 of 1,343 fragment loads (68.7%); all twelve viewers and the baseline had
+zero stalls or fatal errors. Corruption was rejected, sampled resources stayed
+within limits and shutdown released resources. Two viewers used origin
+throughout. Media loads avoided exclude signalling, commitments and protocol
+overhead; they are not net connection-data savings.
+
+The two-rendition playback regression covers quality switches, forward/backward
+seeks, shared-file byte ranges, a timestamp reset, relay loss/recovery,
+receive-only behaviour, the kill switch and downloaded receipts.
+[Status](docs/STATUS.md) separates this evidence from remaining field gates;
+[spike results](spikes/RESULTS.md) retain dated historical measurements.
+Earlier CLI/browser and limited cross-NAT runs do not validate the new loader
+on physical phones or a broad range of internet networks.
+
+## Commands
+
+| Command | Purpose and prerequisites |
+|---|---|
+| `npm run demo` | Publisher/player; ffmpeg for synthetic media |
+| `npm run check` | JavaScript syntax |
+| `npm run check:docs` | Documentation links, AI index structure and generated-context freshness |
+| `npm run docs:generate` | Regenerate `llms-full.txt` from maintained Markdown |
+| `npm run test:swarm` | Browser-loader and hardening unit tests |
+| `npm run test:publisher` | Publisher context/range and demo HTTP/relay tests |
+| `npm run test:native` | Local relay and local HyperDHT bootstrap; no external network |
+| `npm run test:playback` | Two-rendition real Chrome regression; Chrome and ffmpeg |
+| `npm run test:browser -- --mode shadow` | Live HLS Chrome harness; Chrome and ffmpeg |
+| `npm run test:browser -- --mode peer-first` | Authenticated peer-first harness; Chrome and ffmpeg |
+| `npm test` / `npm run poc` | Original WebRTC PoC/fan-out against public Nostr relays |
+| `npm run poc:native` | Native PoC against public relays and DHT bootstrap nodes |
+| `npm run audit` | Dependency audit at the high-severity threshold |
+
+Use `--chrome /path/to/chrome` for either browser test, or set `CHROME_PATH`.
+The optional twelve-viewer CI soak is enabled by a manual workflow dispatch
+with `soak=true`. Public-relay failures can reflect relay policy or availability.
+
+## Privacy and limits
+
+Swarm keys are ephemeral and separate from social identities. Participation
+is pseudonymous: relays see metadata and connecting addresses, and connected
+peers can learn one another's network addresses. NIP-44 hides signal bodies,
+not those observations. The original CLI still exposes its SDP to relays.
+Origin-only mode avoids swarm participation; the origin still receives normal
+HLS requests. Upload consent and publisher redistribution permission are
+separate requirements.
+
+The browser defaults to Google's public STUN server unless the host supplies
+`iceServers`; the native path uses HyperDHT bootstrap/routing nodes instead.
+No TURN or super-peer path is implemented. For browser HLS, blocking peers or
+relays leaves the normal origin loader as fallback. The native CLI reports
+failure; its host must supply fallback. The swarm provides neither durable
+storage nor availability after every source disappears.
+
+Still outstanding: physical-phone and varied-NAT trials, sustained operation,
+broad adaptive bitrate scheduling, fMP4 playback coverage, a full Sybil suite,
+delegated commitment keys, an accepted NIP and independent-client interoperability.
+See [Threat model](docs/THREAT-MODEL.md) and [the field gates](docs/FIELD-TEST.md).
+
+## Documentation and AI readers
+
+The canonical public repository is
+[`forgesworn/relayswarm`](https://github.com/forgesworn/relayswarm).
+[`llms.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms.txt)
+is a short index with direct Markdown links;
+[`llms-full.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms-full.txt)
+is generated from the maintained guides. Released code is pinned at `v0.1.0`;
+documentation on `main` can include later corrections. [Maintaining the docs](docs/MAINTAINING-DOCS.md)
+explains regeneration and publication checks. [Changelog](CHANGELOG.md) records
+release and documentation changes.
+
+[MIT licence](LICENSE).
