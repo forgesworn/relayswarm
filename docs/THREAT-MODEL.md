@@ -20,6 +20,15 @@ Chrome tests require tampering detection, compare playback stalls with a
 baseline, check shutdown resources and prove peer-first avoids origin requests.
 Native nodes bound pending authorisations and active transfers.
 
+The example Node publisher signs only a full-segment context present in its
+local playlists, including the exact byte range and discontinuity. It serves
+listed media rather than arbitrary directory files and rejects symlink escapes.
+Its ephemeral private key stays in the process. This is an example publisher,
+not a trusted-stream discovery service: a real host must still establish which
+stream author it trusts. The demo's in-memory relay and HTTP signing endpoint
+have resource bounds, but no participant admission or Sybil defence. Receipts
+stay in the browser until downloaded.
+
 These are specific tested boundaries, not completion of the adversarial suite
 below. Sybil resistance, broad NAT/mobile coverage and independent-client
 protocol interoperability remain outstanding.

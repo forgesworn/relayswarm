@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RelaySwarm · field test</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/client.js"></script>
+</head>
+<body>
+  <main>
+    <header><span class="badge">Experimental</span><h1>RelaySwarm</h1><p class="lead">Watch a stream. Measure what peers contribute.</p></header>
+    <div class="layout">
+      <section aria-label="Player">
+        <video controls playsinline muted preload="none" aria-label="Test stream"></video>
+        <p id="status" role="status">Loading the publisher…</p>
+        <div class="player-controls"><label for="quality">Quality</label><select id="quality" disabled><option value="-1">Automatic</option></select><button id="kill" type="button" disabled>Use origin only</button></div>
+        <div class="metrics" aria-label="Session measurements">
+          <div><span id="saved">0 B</span><small>Verified origin bytes avoided</small></div>
+          <div><span id="origin">0</span><small>Origin media requests observed</small></div>
+          <div><span id="uploaded">0 B</span><small>Upload allowance used</small></div>
+          <div><span id="peers">0</span><small>Connected peers</small></div>
+        </div>
+        <p id="detail" class="muted">Measurements begin when playback starts.</p>
+      </section>
+      <section class="settings" aria-label="Playback settings">
+        <form id="settings">
+          <label for="mode">Delivery</label>
+          <select id="mode"><option value="off">Origin only</option><option value="shadow">Shadow measurement</option><option value="peer-first">Verified peer-first</option></select>
+          <p class="hint">Shadow mode adds sampled peer downloads alongside origin playback. Peer-first uses verified peer bytes when available, with origin fallback.</p>
+          <label class="check"><input id="upload" type="checkbox">Allow uploading to other viewers</label>
+          <p class="hint">Uploading redistributes this publisher’s media and uses your connection. It is off until you opt in.</p>
+          <label for="limit">Upload limit</label>
+          <select id="limit"><option value="128000">128 kB/s</option><option value="512000" selected>512 kB/s</option><option value="1250000">1.25 MB/s</option></select>
+          <label class="check"><input id="cellular" type="checkbox">Allow peer media on cellular or data-saving connections</label>
+          <p class="hint">Connection detection varies by browser. Choose origin only if you want to avoid all peer traffic.</p>
+          <p class="notice">Peer modes share your network address with connected participants. Receipts remain in this browser until you download them.</p>
+          <button id="start" class="primary" type="submit" disabled>Start playback</button>
+        </form>
+      </section>
+    </div>
+    <section class="receipt" aria-label="Test receipt">
+      <div><h2>Keep a test receipt</h2><p class="muted">Compare modes on the same device and network. These labels describe your setup; the player does not verify them.</p></div>
+      <div class="receipt-fields"><label for="network">Network<select id="network"><option value="unknown">Not recorded</option><option value="home-broadband">Home broadband</option><option value="mobile-data">Mobile data</option><option value="vpn">VPN</option><option value="other">Other</option></select></label><label for="device">Device label<input id="device" maxlength="80" placeholder="e.g. Android phone"></label></div>
+      <button id="download" type="button" disabled>Download receipt</button>
+      <p class="hint">Includes browser version, playback events, peer totals and your labels. No private signing key or peer IP address is recorded. No receipt is sent to this server.</p>
+    </section>
+    <footer>This demo tests an experimental full-segment HLS protocol. A successful local run does not establish mobile, cross-network or production readiness.</footer>
+  </main>
+</body>
+</html>

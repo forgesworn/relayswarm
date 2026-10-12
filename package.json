@@ -10,7 +10,10 @@
     "check": "node scripts/check-syntax.mjs",
     "audit": "npm audit --audit-level=high",
     "test:browser": "node test/hls-swarm-browser.mjs",
-    "test:swarm": "node --test test/hls-swarm.test.mjs test/browser-hardening.test.mjs"
+    "test:swarm": "node --test test/hls-swarm.test.mjs test/browser-hardening.test.mjs",
+    "test:publisher": "node --test test/hls-publisher.test.mjs test/demo-server.test.mjs",
+    "test:playback": "node test/hls-playback-browser.mjs",
+    "demo": "node demo/server.mjs"
   },
   "keywords": [
     "nostr",
@@ -48,6 +51,7 @@
     "./hls-swarm": "./src/browser/hls-swarm.mjs",
     "./package.json": "./package.json",
     "./*": "./*",
-    "./segment-commitment": "./src/browser/segment-commitment.mjs"
+    "./segment-commitment": "./src/browser/segment-commitment.mjs",
+    "./hls-publisher": "./src/hls-publisher.mjs"
   }
 }

@@ -20,6 +20,9 @@ bounded peer-first mode using author-signed segment commitments.
 | `npm run test:native` | Native path tests, local relay + local DHT bootstrap |
 | `npm run test:swarm` | `src/browser/hls-swarm.mjs` unit tests |
 | `npm run test:browser` | hls.js browser test (`--mode shadow` or `--mode peer-first`) |
+| `npm run test:publisher` | Publisher context/range and demo HTTP/relay tests |
+| `npm run test:playback` | Two-rendition Chrome playback and field-test demo regression |
+| `npm run demo` | Local publisher/player, synthetic live media unless `--media-dir` supplied |
 | `npm run audit` | `npm audit --audit-level=high` |
 
 Node 22+ is required (the global `WebSocket`); CI runs on Node 24. `npm test`
@@ -34,6 +37,8 @@ src/relay-session.mjs          RelayPool, RelaySwarmSession, ticket validation (
 src/browser/hls-swarm.mjs      hls.js shadow and peer-first integration (./hls-swarm export)
 src/browser/segment-commitment.mjs  experimental signed media commitment contract
 src/browser/peer-link.mjs      browser WebRTC peer link
+src/hls-publisher.mjs          Node-only local HLS publisher and signed commitments
+demo/                         runnable publisher/player with consent and local receipts
 src/native-journey.mjs         native HyperDHT transfer orchestration
 src/native-dht-transport.mjs   NativeDhtTransport, HyperDHT wiring
 src/object-transfer.mjs        framing, hashing and object transfer primitives
@@ -64,6 +69,7 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 | `docs/NATIVE-TRANSPORT.md` | Native path protocol and security boundary |
 | `docs/THREAT-MODEL.md` | Threat model the deliverable engine is tested against |
 | `spikes/RESULTS.md` | Full results for the feasibility spikes |
+| `docs/FIELD-TEST.md` | Demo, HTTPS configuration, receipt scope and unverified field gates |
 
 ## Common Pitfalls
 
@@ -72,3 +78,6 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 - There is no npm release yet: pin a git dependency at a commit, as described
   in `INTEGRATION.md`, rather than relying on an npm version.
 - Do not present the original WebRTC PoC's signalling as encrypted.
+- The demo keeps its author key on the server and receipts in the browser.
+  Preserve playlist-bound signing and explicit upload consent. Chrome fixture
+  tests are loopback; do not describe them as physical-device/NAT validation.

@@ -43,8 +43,9 @@ test("a bad configuration yields a disabled swarm, never an exception", () => {
 
 test("shadow mode hands the player its bytes untouched and restores the loader on stop", async () => {
   const relay = await startLocalRelay();
+  let swarm;
   try {
-    const swarm = createHlsSwarm({
+    swarm = createHlsSwarm({
       swarmId: "swarm-abcdefgh",
       relays: [relay.url],
       serve: true,
@@ -79,7 +80,8 @@ test("shadow mode hands the player its bytes untouched and restores the loader o
     });
     assert.equal(reached, true, "a throwing segmentKey never blocks a fragment");
 
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    const deadline = Date.now() + 5000;
+    while (swarm.metrics().bytes.held !== 4096 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
     const metrics = swarm.metrics();
     assert.equal(metrics.segments.originLoaded, 1);
     assert.equal(metrics.errors.byStage["begin-race"], 1, "the host page's bug is counted, not thrown");
@@ -90,6 +92,7 @@ test("shadow mode hands the player its bytes untouched and restores the loader o
     assert.equal(swarm.metrics().stopped, true);
     assert.equal(swarm.metrics().bytes.held, 0);
   } finally {
+    swarm?.stop();
     await relay.close();
   }
 });

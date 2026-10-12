@@ -2,6 +2,7 @@
 // crypto.getRandomValues are globals in both.
 import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from "nostr-tools/pure";
 import { v2 as nip44 } from "nostr-tools/nip44";
+import { matchFilter } from "nostr-tools/filter";
 
 export const RELAYSWARM_VERSION = 3;
 export const KIND_PRESENCE = 24170;
@@ -193,7 +194,12 @@ export class RelayPool {
     }
     if (!Array.isArray(frame) || frame[0] !== "EVENT" || !frame[2] || typeof frame[2] !== "object") return;
     const event = frame[2];
-    if (typeof event.id !== "string" || this.seen.has(event.id) || !verifyEvent(event)) return;
+    const filter = this.subscriptions.get(frame[1]);
+    // Reject unsolicited/misrouted frames cheaply, before Schnorr work or
+    // deduplication. A relay cannot widen a recipient-scoped subscription.
+    try {
+      if (!filter || !matchFilter(filter, event) || typeof event.id !== "string" || this.seen.has(event.id) || !verifyEvent(event)) return;
+    } catch { return; }
     this.seen.add(event.id);
     if (this.seen.size > 10_000) this.seen.delete(this.seen.values().next().value);
     for (const handler of this.handlers) handler(event);
@@ -267,17 +273,24 @@ export class RelaySwarmSession {
     this.errorHandlers = new Set();
     this.started = false;
     this.unsubscribe = null;
+    this.subscriptionIds = [];
   }
 
   start() {
     if (this.started) return;
     this.started = true;
     this.unsubscribe = this.pool.onEvent((event) => this.#receive(event));
-    this.subscriptionId = this.pool.subscribe({
-      kinds: [KIND_PRESENCE, KIND_SIGNAL],
-      [`#${SWARM_TAG}`]: [this.swarmId],
-      since: Math.floor(Date.now() / 1000) - 2,
-    });
+    const filter = { [`#${SWARM_TAG}`]: [this.swarmId], since: Math.floor(Date.now() / 1000) - 2 };
+    try {
+      this.subscriptionId = this.pool.subscribe({ ...filter, kinds: [KIND_PRESENCE] });
+      this.subscriptionIds.push(this.subscriptionId);
+      this.subscriptionIds.push(this.pool.subscribe({ ...filter, kinds: [KIND_SIGNAL], "#p": [this.pubkey] }));
+    } catch (error) {
+      for (const id of this.subscriptionIds) this.pool.unsubscribe?.(id);
+      this.subscriptionIds = [];
+      this.unsubscribe?.(); this.unsubscribe = null; this.started = false;
+      throw error;
+    }
   }
 
   onPresence(handler) {
@@ -433,7 +446,8 @@ export class RelaySwarmSession {
 
   close() {
     this.unsubscribe?.();
-    this.pool.unsubscribe?.(this.subscriptionId);
+    for (const id of this.subscriptionIds) this.pool.unsubscribe?.(id);
+    this.subscriptionIds = [];
     this.unsubscribe = null;
     this.started = false;
     this.presenceHandlers.clear();

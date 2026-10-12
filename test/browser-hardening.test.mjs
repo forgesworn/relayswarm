@@ -223,9 +223,12 @@ test("a fragment no peer advertises uses origin; abort suppresses late callbacks
     }
     const swarm = createHlsSwarm({ ...base, relays: [relay.url], mode: "peer-first", streamEvent: fixture.options.streamEvent, getCommitment: () => new Promise(() => {}), originFallbackMs: 30 });
     const hls = { config: { loader: Loader } }; swarm.attach(hls);
-    let delivered = 0;
-    const loader = new hls.config.fLoader({}); loader.load(context, {}, { onSuccess: () => { delivered++; } });
-    loader.abort(); await sleep(50); assert.equal(delivered, 0); swarm.stop();
+    let delivered = 0, aborted = 0;
+    const loader = new hls.config.fLoader({});
+    const statsReference = loader.stats;
+    loader.load(context, {}, { onSuccess: () => { delivered++; }, onAbort: (stats, ctx) => { aborted++; assert.equal(stats, statsReference); assert.equal(ctx, context); assert.equal(stats.aborted, true); } });
+    loader.abort(); loader.abort(); await sleep(50);
+    assert.equal(delivered, 0); assert.equal(aborted, 1, "hls.js receives one abort outcome"); swarm.stop();
   } finally { await relay.close(); }
 });
 
@@ -260,4 +263,70 @@ test("stalled host operations have a deadline and shutdown cancels them", async 
   const operation = boundedOperation(stalled, controller.signal, 1000);
   controller.abort();
   await assert.rejects(operation, /cancelled/);
+});
+
+test("peer-first fallback preserves a single-use HTTP loader's statistics contract", async () => {
+  const relay = await startLocalRelay();
+  const fixture = signedFixture();
+  class SingleUseLoader extends Loader {
+    stats = { loading: { start: 0 } };
+    load(ctx, _config, callbacks) {
+      assert.equal(this.stats.loading.start, 0, "unused HTTP loader has not been marked started");
+      this.stats.loading.start = performance.now(); this.stats.loaded = 32;
+      callbacks.onSuccess({ data: new Uint8Array(32).buffer }, this.stats, ctx, null);
+    }
+  }
+  const swarm = createHlsSwarm({ ...base, relays: [relay.url], mode: "peer-first", streamEvent: fixture.options.streamEvent, getCommitment: () => assert.fail("no advertised peer") });
+  try {
+    const hls = { config: { loader: SingleUseLoader } }; swarm.attach(hls);
+    const loader = new hls.config.fLoader({}), reference = loader.stats;
+    let deliveries = 0;
+    loader.load(context, {}, { onSuccess: (_response, stats) => { deliveries++; assert.equal(stats, reference); assert.equal(stats.loaded, 32); } });
+    await until(() => deliveries === 1);
+    assert.equal(swarm.metrics().segments.originFallbacks, 1);
+  } finally { swarm.stop(); await relay.close(); }
+});
+
+test("relay frames must match a live subscription before deduplication or dispatch", async () => {
+  let socket;
+  class Socket extends EventTarget {
+    constructor(url) { super(); this.url = url; socket = this; queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
+    send() {}
+    close() {}
+    receive(id, event) { this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(["EVENT", id, event]) })); }
+  }
+  const pool = new RelayPool(["wss://relay.example"], { WebSocketImpl: Socket });
+  await pool.connect();
+  try {
+    const presence = pool.subscribe({ kinds: [24170], "#x": [base.swarmId] });
+    const signals = pool.subscribe({ kinds: [24171], "#x": [base.swarmId], "#p": ["a".repeat(64)] });
+    const event = finalizeEvent({ kind: 24171, created_at: Math.floor(Date.now() / 1000), tags: [["x", base.swarmId], ["p", "a".repeat(64)]], content: "test payload" }, generateSecretKey());
+    let received = 0; pool.onEvent(() => received++);
+    socket.receive("unknown", event); socket.receive(presence, event);
+    assert.equal(received, 0); assert.equal(pool.seen.has(event.id), false);
+    socket.receive(signals, { ...event, tags: null });
+    assert.equal(received, 0);
+    socket.receive(signals, event); assert.equal(received, 1);
+    pool.unsubscribe(signals);
+    socket.receive(signals, finalizeEvent({ ...event, content: "late frame" }, generateSecretKey()));
+    assert.equal(received, 1);
+  } finally { pool.close(); }
+});
+
+test("session subscribes only to its own signals and cleans up partial subscription failures", async () => {
+  const filters = [], closed = [];
+  let failSecond = false, handlerPresent = false;
+  const pool = {
+    onEvent() { handlerPresent = true; return () => { handlerPresent = false; }; },
+    subscribe(filter) { if (failSecond && filters.length === 1) throw new Error("capacity"); filters.push(filter); return String(filters.length); },
+    unsubscribe(id) { closed.push(id); },
+  };
+  const session = new RelaySwarmSession({ pool, swarmId: base.swarmId }); session.start();
+  assert.deepEqual(filters.map((filter) => filter.kinds), [[24170], [24171]]);
+  assert.deepEqual(filters[1]["#p"], [session.pubkey]);
+  session.close(); assert.deepEqual(closed, ["1", "2"]); assert.equal(handlerPresent, false);
+  filters.length = 0; closed.length = 0; failSecond = true;
+  const partial = new RelaySwarmSession({ pool, swarmId: base.swarmId });
+  assert.throws(() => partial.start(), /capacity/u);
+  assert.deepEqual(closed, ["1"]); assert.equal(partial.started, false); assert.equal(handlerPresent, false);
 });

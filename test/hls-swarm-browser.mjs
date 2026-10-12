@@ -20,7 +20,6 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -138,8 +137,19 @@ try {
   cleanups.push(() => new Promise((resolve) => server.close(resolve)));
   const base = `http://localhost:${server.address().port}`;
 
-  for (let i = 0; i < 40 && !existsSync(join(hlsDir, "index.m3u8")); i++) await sleep(250);
-  await sleep(4500); // a few segments in the playlist before anyone joins
+  // Both live targets must fit before the first viewer joins. A short initial
+  // playlist collapses the corrupt seeder's one-segment lead: nobody asks it
+  // for advertised bytes, so the integrity assertion is never exercised.
+  const initialSegments = MODE === "peer-first" && CORRUPT_PEER ? 8 : 3;
+  const streamDeadline = Date.now() + 40000;
+  while (true) {
+    try {
+      const text = await readFile(join(hlsDir, "index.m3u8"), "utf8");
+      if ((text.match(/^#EXTINF:/gmu) || []).length >= initialSegments) break;
+    } catch {}
+    if (Date.now() >= streamDeadline) throw new Error(`Live fixture did not publish ${initialSegments} segments within 40 s.`);
+    await sleep(250);
+  }
   log(`stream up, relay ${relay.url}, pages at ${base}`);
 
   // --- the viewers ----------------------------------------------------------
@@ -196,7 +206,12 @@ try {
       // Give the first honest viewer only the tampering peer to ask. This
       // makes corruption detection an exercised requirement, not luck in a
       // larger swarm's peer selection.
-      if (CORRUPT_PEER && role.viewer === "v0") await sleep(8000);
+      if (CORRUPT_PEER && role.viewer === "v0") {
+        // Wait for an observed challenge, rather than assuming that eight
+        // seconds of two-player playback caused a request to the bad seeder.
+        // The final assertion still fails if it was never exercised.
+        await pages.find((page) => page.role.viewer === "v0").tab.waitForFunction(() => window.__viewer.report().swarm.peers.banned > 0, null, { timeout: 25000 }).catch(() => {});
+      }
     }
   }
 
@@ -259,7 +274,7 @@ try {
     at: new Date().toISOString(),
     mode: MODE,
     rotation: process.env.RELAYSWARM_NO_ROTATION === "1" ? "off" : "on",
-    shape: { liveSyncDurationCount: MODE === "peer-first" ? 4 : 3, viewers: VIEWERS, waves: WAVES, waveGapMs: WAVE_GAP_MS, maxPeers: MAX_PEERS, corruptPeer: CORRUPT_PEER, plusCorruptPeer: CORRUPT_PEER ? 1 : 0, plusBaselineWithoutSwarm: 1, durationS: DURATION_S, staggerMs: STAGGER_MS, segmentSeconds: 2, videoKbps: 1500, originFallbackMs: FALLBACK_MS },
+    shape: { liveSyncDurationCount: MODE === "peer-first" ? 4 : 3, ...(MODE === "peer-first" ? { maxBufferLength: 4, maxMaxBufferLength: 6 } : {}), viewers: VIEWERS, waves: WAVES, waveGapMs: WAVE_GAP_MS, maxPeers: MAX_PEERS, corruptPeer: CORRUPT_PEER, plusCorruptPeer: CORRUPT_PEER ? 1 : 0, plusBaselineWithoutSwarm: 1, durationS: DURATION_S, staggerMs: STAGGER_MS, segmentSeconds: 2, videoKbps: 1500, originFallbackMs: FALLBACK_MS },
     waves: waveRows,
     aggregate: {
       originLoaded: sum("originLoaded"),
@@ -325,6 +340,8 @@ try {
   if (stopChecks.some((c) => !c.loaderRestored)) failures.push("stop() did not restore the fragment loader");
   if (pageErrors.length) failures.push(`${pageErrors.length} uncaught page error(s)`);
   if (summary.aggregate.swarmErrors > 0) failures.push(`${summary.aggregate.swarmErrors} swarm error(s)`);
+  if (reports.filter((report) => report.swarm).some((report) => report.resourceSamples.some((sample) => sample.connected + sample.dialling > MAX_PEERS
+    || sample.heldBytes > 64 * 1024 * 1024 || sample.relays > 1))) failures.push("a sampled resource exceeded the configured limit");
   summary.ok = failures.length === 0;
   summary.failures = failures;
 

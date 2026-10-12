@@ -534,11 +534,12 @@ class HlsSwarm {
         this.active = null;
         this.peerStats = null;
         this.peerContext = null;
+        this.pendingCallbacks = null;
       }
       get stats() { return this.peerStats || this.inner.stats; }
       get context() { return this.peerContext || this.inner.context; }
       load(context, config, callbacks) {
-        this.cancel?.();
+        this.abort();
         this.peerStats = null;
         this.peerContext = context;
         const budgetMs = swarm.#peerBudget();
@@ -548,22 +549,33 @@ class HlsSwarm {
         const token = {};
         this.active = token;
         const t0 = now();
+        // hls.js assigns frag.stats before calling load(). Preserve that
+        // reference for the peer path, including aborts and ABR estimates.
+        Object.assign(this.inner.stats, { aborted: false, loaded: 0, total: 0, chunkCount: 0, bwEstimate: 0,
+          loading: { start: t0, first: 0, end: 0 }, parsing: { start: 0, end: 0 }, buffering: { start: 0, first: 0, end: 0 } });
+        this.pendingCallbacks = { callbacks, context };
         let timer;
         const cleanup = () => {
           clearTimeout(timer);
           swarm.lifecycle.signal.removeEventListener("abort", fallback);
         };
         this.cancel = () => {
+          const pending = this.active === token;
           this.active = null;
           cleanup();
           controller.abort();
+          return pending;
         };
         const fallback = () => {
           if (this.active !== token) return;
           this.active = null;
+          this.pendingCallbacks = null;
           cleanup();
           controller.abort();
           swarm.counters.originFallbacks += 1;
+          // The unused hls.js loader requires a zero start timestamp on its
+          // first load. Its normal HTTP statistics replace the pending wait.
+          this.inner.stats.loading.start = 0;
           // Fallback delegates errors, retries and progressive loading to the
           // host's original loader. Only one path can call the player back.
           this.inner.load(context, config, {
@@ -588,15 +600,17 @@ class HlsSwarm {
           if (this.active !== token || controller.signal.aborted || swarm.stopped) return;
           if (!result || now() >= t0 + budgetMs) return fallback();
           this.active = null;
+          this.pendingCallbacks = null;
           cleanup();
           const end = now();
           const size = result.bytes.byteLength;
-          this.peerStats = {
-            aborted: false, loaded: size, retry: 0, total: size, chunkCount: 1,
+          this.peerStats = this.inner.stats;
+          Object.assign(this.peerStats, {
+            aborted: false, loaded: size, total: size, chunkCount: 1,
             bwEstimate: size * 8_000 / Math.max(1, end - t0),
             loading: { start: t0, first: end, end },
             parsing: { start: 0, end: 0 }, buffering: { start: 0, first: 0, end: 0 },
-          };
+          });
           swarm.counters.peerFirstLoaded += 1;
           swarm.counters.peerFirstBytes += size;
           swarm.counters.bytesFromPeers += size;
@@ -611,8 +625,17 @@ class HlsSwarm {
           }
         });
       }
-      abort() { this.cancel?.(); if (this.peerStats) this.peerStats.aborted = true; this.inner.abort(); }
-      destroy() { this.cancel?.(); this.inner.destroy(); }
+      abort() {
+        const pending = this.cancel?.();
+        if (pending && this.pendingCallbacks) {
+          const { callbacks, context } = this.pendingCallbacks;
+          this.pendingCallbacks = null;
+          this.inner.stats.aborted = true;
+          swarm.counters.aborted += 1;
+          callbacks.onAbort?.(this.inner.stats, context, null);
+        } else this.inner.abort();
+      }
+      destroy() { this.cancel?.(); this.pendingCallbacks = null; this.inner.destroy(); }
       getCacheAge() { return this.peerStats ? null : this.inner.getCacheAge?.() ?? null; }
       getResponseHeader(name) { return this.peerStats ? null : this.inner.getResponseHeader?.(name) ?? null; }
     };

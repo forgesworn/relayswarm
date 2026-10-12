@@ -31,6 +31,7 @@ export async function startLocalRelay() {
       let frame;
       try { frame = JSON.parse(raw.toString()); } catch { return; }
       if (!Array.isArray(frame)) return;
+      if (frame[0] === "CLOSE") { subscriptions.get(socket).delete(frame[1]); return; }
       if (frame[0] === "REQ" && typeof frame[1] === "string" && frame[2] && typeof frame[2] === "object") {
         subscriptions.get(socket).set(frame[1], frame[2]);
         for (const event of events) {
