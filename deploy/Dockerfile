@@ -11,7 +11,12 @@ COPY demo ./demo
 COPY scripts ./scripts
 COPY broadcast ./broadcast
 COPY deploy/start.sh deploy/healthcheck.mjs ./deploy/
-RUN chmod 0555 /app/deploy/start.sh && mkdir /state && chown node:node /state && chmod 0700 /state
+# Public runtime code must remain accessible when the build context has private modes.
+RUN chmod -R go-w,a+rX /app/src /app/demo /app/scripts /app/broadcast \
+      /app/package.json /app/package-lock.json /app/deploy/start.sh /app/deploy/healthcheck.mjs \
+    && chmod go-w,a+rX /app/deploy \
+    && chmod 0555 /app/deploy/start.sh \
+    && mkdir /state && chown node:node /state && chmod 0700 /state
 ARG SOURCE_REVISION=unreleased
 LABEL org.opencontainers.image.source="https://github.com/forgesworn/RelaySwarm" \
     org.opencontainers.image.revision="$SOURCE_REVISION"

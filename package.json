@@ -25,7 +25,7 @@
     "native:fetch": "node scripts/native-client.mjs",
     "test:interop": "node test/interop-swift.mjs",
     "test:interop:kit": "node test/interop-current-sdk-browser.mjs",
-    "test:media-recovery": "node test/media-recovery-browser.mjs",
+    "test:media-recovery": "node test/media-recovery-browser.mjs && node test/sparse-aac-recovery-browser.mjs",
     "test:live-recovery": "node test/live-restart-browser.mjs --baseline --resultsDir artifacts/live-restart-browser/baseline && node test/live-restart-browser.mjs --resultsDir artifacts/live-restart-browser/treatment"
   },
   "keywords": [

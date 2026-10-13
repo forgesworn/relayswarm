@@ -63,6 +63,7 @@ jobs:
             artifacts/media-browser/*.json
             artifacts/ll-browser/*.json
             artifacts/media-recovery-browser/*.json
+            artifacts/sparse-aac-recovery-browser/*.json
             artifacts/live-restart-browser/**/*.json
 
   swift-interop:

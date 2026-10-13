@@ -568,6 +568,11 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 - Fixed demo, broadcaster and probe commands silently doing nothing when
   launched through an absolute filesystem alias. Imports still leave their
   commands stopped.
+- Fixed the single VOD repair repeating a video-only prefix after a later
+  fragment introduced audio. It waits for media reattachment before resuming
+  at the validated failing fragment; original errors and allowance remain.
+- Made container public code readable and directories traversable when a build
+  context uses private modes, while retaining private state permissions.
 
 ## 0.2.0 source candidate — broadcaster work on 12 October 2026
 
@@ -1182,15 +1187,21 @@ merged source do not establish production readiness.
 ## Current source acceptance on 13 October
 
 The last verified public pilot upgrade used source
-`219719843f3f7175725d16535749b303c8e34cc4`, whose nine required jobs passed in
-[CI run 38420116433](https://github.com/forgesworn/relayswarm/actions/runs/38420116433).
+`768a3a4f20d91bf2194513181354be70f6a8e5da`, whose nine required jobs passed in
+[CI run 38439565770](https://github.com/forgesworn/relayswarm/actions/runs/38439565770).
 Its client bundle SHA-256 is
-`3e97b497acf0fc7ff6d79781e48a0d54d1ca7c70a05f9cf41585ec8d390c0ce9`.
+`1e63662e12b392c9d2a61c1adb95d65253f4e41061adfb9c50855e0da5d36549`
+(722,414 bytes). Normal public TLS, both fresh rendition playlists and retained
+publisher identity were verified. Its first image failed before startup because
+archived public directories were unreadable by UID 1000. Explicit audited
+rollback restored the previous image without deleting state or fences. The
+corrected image passed a non-root, no-network check of all 50 copied runtime
+files, module imports and the actual container entry point before replacement.
 The earlier source `a0231aadcdd81fe67fe702ac7214042d196eb39f` passed ten jobs,
 including the optional two-hour soak, in
 [CI run 38392804791](https://github.com/forgesworn/relayswarm/actions/runs/38392804791).
-Each result applies to its tested source. Later control-request diagnostics and
-private ICE-file configuration form a separate candidate requiring their own CI.
+Each result applies to its tested source. The next sparse-audio recovery and
+permanent image-permission changes require their own final CI and deployment.
 v0.2.0 release assets and fresh downloaded-consumer verification remain pending.
 
 The a023 CI soak measured 7,200.366 s after its final arrival wave, with twelve
@@ -1259,13 +1270,18 @@ total wire reduction and net cash saving remain unproved.
 
 Later retained MPEG-TS segments reproduced a fatal hls.js AAC track-discovery
 error: the first segment contained video without AAC, and the next introduced
-audio after only a video SourceBuffer existed. The current one-shot repair
-recovered through the alternate rendition in 603 ms, retaining the fatal error
-and leaving uploading/reporting off. The constructed VOD clips differ from the
-original failing live window; recovery in the low rendition alone and the cause
-of the original missing segments remain unproved.
+audio after only a video SourceBuffer existed. The earlier one-shot repair
+recovered through the alternate rendition in 603 ms. A constructed single-variant
+VOD then reproduced the same low-only failure: resetting MSE immediately reloaded
+the video-only prefix and failed again. The next repair waits for the actual media
+attachment, then resumes at the validated failing fragment. Exact unchanged low
+bytes recovered in 403 ms with 60 decoded video frames and 4,206 decoded audio
+bytes; the original fatal error remained. Uploading/reporting stayed off and the
+spent allowance stayed at 1,234 bytes. The maintained browser regression uses
+those synthetic bytes. This supported case differs from the original failing
+live window, whose missing bytes still prevent a causal claim.
 
-The diagnostics candidate passes 93 publisher tests with one opt-in skip and
+The diagnostics/CLI source passed 95 publisher tests with one opt-in skip and
 serial Chrome operator/playback checks. Playback accepted 28 verified peer loads
 (7,805,572 bytes), both renditions, with zero observed stalls, fatal/native errors
 or uploads by the receiver. Those existing loopback fixtures use fake-media and
@@ -1278,9 +1294,18 @@ opt-in, then timed out before a report response within 17 s. Root verified
 reporting-off restoration and removal of its temporary source. Request lifecycle
 and later checkbox/policy state were not retained, so no collector or transport
 cause is inferred. A fresh diagnostic setup subsequently lost host connectivity
-before a browser started; its remote outcome requires inspection when access
-returns. The [investigation summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/control-path-media-investigation-summary-20261013.json)
-retains the media, local-candidate and reporting evidence separately.
+before a browser started; later inspection found no resources from that
+interrupted attempt. The subsequent deployed 768 reporting check passed with
+ordinary Chrome, normal TLS and trusted Start/reporting opt-in. The numeric
+measurement survived a real same-volume process restart; exact duplicates
+preserved totals and acceptance time. Its entry remained at age 295,610 ms and
+expired naturally at 301,767 ms. Reporting-off restoration, original policy,
+lease inodes and temporary-source cleanup passed. No clock, timestamp or retention
+override was applied. The first red attempt's cause remains unknown. The
+[later acceptance summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/recovery-reporting-acceptance-summary-20261013.json)
+records the separate source and scope of these results; the earlier
+[investigation summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/control-path-media-investigation-summary-20261013.json)
+remains unchanged.
 
 The [current acceptance summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/current-source-acceptance-summary-20261013.json)
 names the receipts, source and scope. Historical MSE causation, sustained
@@ -2946,16 +2971,16 @@ acceptance remain pending; passing CI does not close the full checklist.
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
 | P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Local Chrome and exact-source CI pass; deployed two-hour run completed red after policy timeouts withdrew contribution, so sustained peer delivery and matched field benefit remain open |
-| P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Later retained sparse-AAC inputs reproduce track-discovery failure; current repair recovered through the alternate rendition in 603 ms; earlier repair/hosted checks pass within scope, but original failing bytes were not retained and low-only recovery remains unproved |
+| P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; the next repair recovered video/audio in 403 ms with the original fatal retained and has a maintained regression; final CI and repeated updated hosted playback remain pending, and original missing bytes do not establish historical causation |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/Chrome and exact-source CI evidence pass within the documented threat/resource bounds; operational capacity is recorded under P12 |
-| P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Local GUI reporting, real process restart, duplicate handling and natural five-minute expiry pass; first deployed 219 attempt timed out after trusted opt-in, with reporting-off/source cleanup verified; deployed persistence/retention acceptance remains open |
+| P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Deployed 768 ordinary-Chrome trusted opt-in, real process restart, duplicate handling and natural five-minute expiry pass; reporting-off/policy/lease preservation and source cleanup pass; first deployed 219 timeout remains separately retained |
 | P06 | Upload budgets across reloads and tabs | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; uploading still requires new consent | Chrome reload/tab and installed Firefox durable quota/fresh-consent evidence pass; complete physical upload journeys remain open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-219 production-only package/all exports/bundle/installed separate-process transfer/fallback pass; later candidate and final downloaded release assets require fresh verification; WAN success and timeout remain separately recorded |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-768 production-only package/all exports/bundle/installed directory-alias ICE CLI/separate-process transfer/fallback pass; next candidate and final downloaded release assets require fresh verification; WAN success and timeout remain separately recorded |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed 219 passed all nine required CI jobs and source/client checks; a023 load/churn and guarded host recovery are retained separately; the diagnostics/ICE candidate needs its own checks; v0.2.0 assets, fresh downloaded consumers and final release/deployment remain pending |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed 768 passed all nine required CI jobs, non-root runtime byte/entrypoint preflight, normal-TLS client/fresh-media checks and guarded reporting restarts; failed initial image and audited rollback retained; next recovery/image changes, v0.2.0 assets, fresh downloaded consumers and final release/deployment remain pending |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Separate real OBS and private YouTube video/audio/end/deletion pass; installed Firefox ordinary-actor journey passes; deployed two-hour contribution gate red, Safari/Pixel peer gates red, iPhone origin owner pass but background owner red; partial network/resource counters do not prove billing, varied/hard NAT or full device acceptance |
 
 ## Evidence rules

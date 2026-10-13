@@ -33,6 +33,11 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 - Fixed demo, broadcaster and probe commands silently doing nothing when
   launched through an absolute filesystem alias. Imports still leave their
   commands stopped.
+- Fixed the single VOD repair repeating a video-only prefix after a later
+  fragment introduced audio. It waits for media reattachment before resuming
+  at the validated failing fragment; original errors and allowance remain.
+- Made container public code readable and directories traversable when a build
+  context uses private modes, while retaining private state permissions.
 
 ## 0.2.0 source candidate — broadcaster work on 12 October 2026
 

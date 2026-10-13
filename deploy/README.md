@@ -4,6 +4,14 @@ This package prepares a RelaySwarm broadcaster on an existing Docker host. It do
 
 The app runs as uid/gid 1000, with a read-only image and a private named `/state` volume. Docker initialises that volume from the image's owner-controlled 0700 directory; the launcher creates 0600 publisher identity and operator token files. Keep this volume private and preserve it across upgrades. The app has 2 CPU/1536 MB limits; the router has 0.5 CPU/128 MB limits. These are starting limits, not throughput evidence. Measure encoding latency, memory and disk usage on the actual host before increasing load.
 
+The image makes only copied public runtime code readable and its directories
+traversable, removes group/other write and preserves existing executable files.
+This also supports source contexts extracted with private filesystem modes.
+Private state, credentials and configuration are outside that normalisation.
+Before replacing a running app, check the built image as its non-root user,
+including module imports and the actual entry point; an image label alone does
+not prove usable installed code.
+
 ## Prepare and start
 
 From the repository root, create the configuration and inspect it before starting:
