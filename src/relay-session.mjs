@@ -282,7 +282,9 @@ export class RelaySwarmSession {
     this.unsubscribe = this.pool.onEvent((event) => this.#receive(event));
     const filter = { [`#${SWARM_TAG}`]: [this.swarmId], since: Math.floor(Date.now() / 1000) - 2 };
     try {
-      this.subscriptionId = this.pool.subscribe({ ...filter, kinds: [KIND_PRESENCE] });
+      // Native initialisation and periodic announcements can take longer than
+      // the signal replay window. Presence remains advisory and age-checked.
+      this.subscriptionId = this.pool.subscribe({ ...filter, since: Math.floor(Date.now() / 1000) - this.maxEventAgeSeconds, kinds: [KIND_PRESENCE] });
       this.subscriptionIds.push(this.subscriptionId);
       this.subscriptionIds.push(this.pool.subscribe({ ...filter, kinds: [KIND_SIGNAL], "#p": [this.pubkey] }));
     } catch (error) {

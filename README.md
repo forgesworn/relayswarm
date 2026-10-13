@@ -122,9 +122,11 @@ flowchart TB
 
 Other approaches and the narrow comparison are in [Landscape](docs/LANDSCAPE.md).
 [RelaySwarmKit](https://github.com/forgesworn/relayswarm-kit) is a separate Swift
-signalling/transport project. Its README describes wire version 2; the current
-Node/browser session here uses version 3. Shared kinds and NIP-44 test vectors
-do not establish current cross-client or signed-HLS interoperability.
+signalling/transport project. Published Kit v0.5.0 supports session version 3
+and signed media. Its public SDK received verified author/delegate HLS bytes
+from the production browser loader and rejected corruption and revocation.
+That measured macOS arm64/Chrome loopback journey and its boundaries are in the
+[protocol draft](docs/NIP-DRAFT.md); physical-device and NAT acceptance remain open.
 
 ## Evidence
 

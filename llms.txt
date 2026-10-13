@@ -14,8 +14,9 @@ The original WebRTC CLI signs plaintext SDP and uses a digest supplied by its
 seeder. The browser loader and shared session wire version 3 use pairwise
 NIP-44-encrypted signals; the native path encrypts dial authorisation and uses
 Noise for transfer. Package version 0.2.0, session version 3, commitment schemas
-1/2 and metrics version 2 are distinct. Related Swift RelaySwarmKit documentation
-describes wire version 2; current interoperability is unverified.
+1/2 and metrics version 2 are distinct. Published Swift RelaySwarmKit v0.5.0
+supports wire version 3 and signed media, with actual SDK/Chrome loopback proof;
+physical Apple-device and public-NAT compatibility remain unverified.
 
 Browser modes are off (origin-only), shadow (origin playback plus extra sampled
 peer traffic) and peer-first (verified peer bytes within a deadline, then normal

@@ -115,8 +115,9 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
   Preserve playlist-bound signing and explicit upload consent. Chrome fixture
   tests are loopback; do not describe them as physical-device/NAT validation.
 - Package version 0.2.0, session wire version 3, commitment schemas 1/2 and metrics
-  version 2 are distinct. RelaySwarmKit's README describes wire version 2;
-  current cross-client interoperability has not been proved.
+  version 2 are distinct. Published RelaySwarmKit v0.5.0 supports wire version 3
+  and signed media; current SDK/browser interoperability is measured on macOS
+  arm64 loopback. Physical Apple devices and public-NAT interop remain unproved.
 - Update authored Markdown and `llms.txt`, then run `npm run docs:generate`
   and `npm run check:docs`. Do not hand-edit generated `llms-full.txt`.
 - Keep AI material factual: published links do not prove search indexing or

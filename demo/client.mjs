@@ -1,6 +1,7 @@
 import Hls from "hls.js";
 import { generateSecretKey, getPublicKey, finalizeEvent } from "nostr-tools/pure";
 import { createPersistentUploadBudget } from "./upload-budget.mjs";
+import { createMediaRecovery } from "./media-recovery.mjs";
 import { segmentMediaContext } from "../src/browser/segment-commitment.mjs";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 
@@ -16,13 +17,22 @@ const startedAt = new Date().toISOString(), clockStart = performance.now();
 const elapsed = () => Math.round(performance.now() - clockStart);
 const push = (list, value, cap = 256) => { list.push(value); if (list.length > cap) list.shift(); };
 const bytes = (amount) => amount < 1000 ? `${amount} B` : amount < 1e6 ? `${(amount / 1000).toFixed(1)} kB` : `${(amount / 1e6).toFixed(1)} MB`;
-const player = { engine: "pending", firstPlayingAtMs: null, startupMs: null, stalls: 0, stallMs: 0, seeks: 0, seekRecoveryMs: [], fatalErrors: 0, errors: {}, fragmentsLoaded: 0, fragments: [], levelChanges: [], errorRecords: [] };
+const player = { engine: "pending", firstPlayingAtMs: null, startupMs: null, stalls: 0, stallMs: 0, seeks: 0, seekRecoveryMs: [], fatalErrors: 0, errors: {}, fragmentsLoaded: 0, fragments: [], levelChanges: [], errorRecords: [], nativeErrors: [] };
 const network = { originMediaRequests: 0, encodedOriginMediaBytes: 0, transferOriginMediaBytes: 0 };
 const sessions = [], snapshots = [];
 let deliveryPolicy = { mode: null, revision: 0, telemetry: false }, policyUnavailable = false, policyInFlight = false;
 const archivedTotals = { peerFirstBytes: 0, uploaded: 0, peerFirstLoads: 0, sessions: 0 };
 let session, hls, swarm, initialLoader, startRequestedAt = null, stallAt = null, seekAt = null, native = false, activeConfig;
 const status = (message) => { byId("status").textContent = message; };
+const mediaRecovery = createMediaRecovery({ media: video, getHls: () => hls, getSession: () => session, now: elapsed,
+  revokeContribution() { stopSwarm(); byId("mode").value = "off"; byId("upload").checked = false; },
+  status(message) {
+    status(message);
+    const active = mediaRecovery.active();
+    byId("kill").textContent = active ? "Stop recovery" : "Use origin only"; byId("kill").disabled = !active;
+    for (const id of ["start", "mode", "upload", "reset-allowance", "quality"]) byId(id).disabled = active;
+  },
+});
 
 video.addEventListener("playing", () => {
   if (player.firstPlayingAtMs === null) { player.firstPlayingAtMs = elapsed(); player.startupMs = startRequestedAt === null ? null : player.firstPlayingAtMs - startRequestedAt; }
@@ -33,7 +43,10 @@ video.addEventListener("playing", () => {
 video.addEventListener("seeking", () => { player.seeks++; seekAt = elapsed(); stallAt = null; });
 video.addEventListener("seeked", () => { if (!video.paused && video.readyState >= 3 && seekAt !== null) { push(player.seekRecoveryMs, elapsed() - seekAt); seekAt = null; } });
 video.addEventListener("waiting", () => { if (player.firstPlayingAtMs !== null && !video.seeking && seekAt === null && !video.paused && stallAt === null) { player.stalls++; stallAt = elapsed(); } });
-video.addEventListener("error", () => { if (native) { player.fatalErrors++; status("The browser could not play this stream."); } });
+video.addEventListener("error", () => {
+  push(player.nativeErrors, { atMs: elapsed(), code: video.error?.code ?? null, message: String(video.error?.message ?? "").slice(0, 512) }, 64);
+  if (native) { player.fatalErrors++; status("The browser could not play this stream."); }
+});
 
 const observer = typeof PerformanceObserver === "function" ? new PerformanceObserver((list) => {
   for (const entry of list.getEntries()) {
@@ -64,6 +77,7 @@ function stopSwarm() {
   swarm = null;
 }
 function configure() {
+  if (mediaRecovery.active()) return;
   stopSwarm();
   const chosenMode = byId("mode").value;
   const requestedMode = native || policyUnavailable || chosenMode === "off" ? "off" : deliveryPolicy.mode ?? chosenMode;
@@ -113,7 +127,7 @@ function report() {
   return { v: 1, kind: "relayswarm-field-receipt", startedAt, recordedAt: new Date().toISOString(), durationMs: elapsed(),
     environment: { browser: navigator.userAgent, secureContext: isSecureContext, networkLabel: byId("network").value, deviceLabel: byId("device").value, automated: navigator.webdriver === true },
     stream: { eventId: session?.streamEvent.id, publisher: session?.streamEvent.pubkey, swarmId: session?.swarmId, experimental: true },
-    player: { ...player, isLive: hls?.latestLevelDetails?.live === true, liveLatencySeconds: Number.isFinite(hls?.latency) ? hls.latency : null, targetLatencySeconds: Number.isFinite(hls?.targetLatency) ? hls.targetLatency : null, liveSyncPosition: Number.isFinite(hls?.liveSyncPosition) ? hls.liveSyncPosition : null, currentTime: video.currentTime, paused: video.paused, bufferedSeconds: hls?.mainForwardBufferInfo?.len ?? null, activeStallMs: stallAt === null ? 0 : elapsed() - stallAt },
+    player: { ...player, mediaRecovery: mediaRecovery.snapshot(), isLive: hls?.latestLevelDetails?.live === true, liveLatencySeconds: Number.isFinite(hls?.latency) ? hls.latency : null, targetLatencySeconds: Number.isFinite(hls?.targetLatency) ? hls.targetLatency : null, liveSyncPosition: Number.isFinite(hls?.liveSyncPosition) ? hls.liveSyncPosition : null, currentTime: video.currentTime, paused: video.paused, bufferedSeconds: hls?.mainForwardBufferInfo?.len ?? null, activeStallMs: stallAt === null ? 0 : elapsed() - stallAt },
     network: { ...network, ...(native ? { originMediaRequests: null, encodedOriginMediaBytes: null, transferOriginMediaBytes: null } : {}), supported: Boolean(observer) && !native,
       scope: "same-origin media resource timings; includes init segments and cache hits; encoded bytes exclude protocol overhead; native HLS requests are not measured" },
     totals: totals(), uploadBudget: uploadBudget.snapshot(), deliveryPolicy: { ...deliveryPolicy, unavailable: policyUnavailable }, current: swarm ? { ...activeConfig, metrics: swarm.metrics() } : null, sessions: [...sessions], snapshots: [...snapshots],
@@ -138,13 +152,14 @@ async function obtainAdmission() {
 }
 byId("settings").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!session) return;
+  if (!session || mediaRecovery.active()) return;
   byId("start").disabled = true;
   try {
     await uploadBudget.setLimit(Number(byId("allowance").value));
     if (byId("mode").value !== "off" && !policyUnavailable && deliveryPolicy.mode !== "off") await obtainAdmission();
   } catch { admissionCredential = null; status("Peer admission unavailable · origin playback remains available."); }
-  finally { byId("start").disabled = false; }
+  finally { byId("start").disabled = mediaRecovery.active(); }
+  if (mediaRecovery.active()) return;
   if (startRequestedAt === null) {
     startRequestedAt = elapsed();
     if (Hls.isSupported()) {
@@ -164,14 +179,18 @@ byId("settings").addEventListener("submit", async (event) => {
         render();
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => push(player.levelChanges, { atMs: elapsed(), level: data.level }));
-      hls.on(Hls.Events.ERROR, (_event, data) => { push(player.errorRecords, { atMs: elapsed(), details: data.details, fatal: Boolean(data.fatal), type: data.type, reason: String(data.reason ?? "").slice(0, 512), message: String(data.error?.message ?? "").slice(0, 512), mediaType: data.frag?.type ?? null, playlist: data.frag ? segmentMediaContext({ frag: data.frag, url: data.frag.url })?.playlist ?? null : null }, 64); player.errors[data.details] = (player.errors[data.details] || 0) + 1; if (data.fatal) { player.fatalErrors++; status("Playback stopped after a fatal error. Download a receipt to retain the measurements."); } });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        push(player.errorRecords, { atMs: elapsed(), details: data.details, fatal: Boolean(data.fatal), type: data.type, reason: String(data.reason ?? "").slice(0, 512), message: String(data.error?.message ?? "").slice(0, 512), nativeError: video.error && { code: video.error.code, message: video.error.message.slice(0, 512) }, mediaType: data.frag?.type ?? null, playlist: data.frag ? segmentMediaContext({ frag: data.frag, url: data.frag.url })?.playlist ?? null : null }, 64);
+        player.errors[data.details] = (player.errors[data.details] || 0) + 1;
+        if (data.fatal) { player.fatalErrors++; if (!mediaRecovery.handle(data)) status("Playback stopped after a fatal error. Download a receipt to retain the measurements."); }
+      });
       configure();
       hls.loadSource(session.manifest); hls.attachMedia(video);
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
       native = true; player.engine = "native HLS"; byId("mode").value = "off"; byId("mode").disabled = true; byId("upload").disabled = true; configure(); video.src = session.manifest;
     } else { player.engine = "unsupported"; status("This browser cannot play the test stream."); startRequestedAt = null; return; }
     byId("start").textContent = "Apply settings"; byId("download").disabled = false;
-    video.play().catch(() => status("Press play on the video to begin."));
+    video.play().catch(() => { if (!mediaRecovery.snapshot().attempted) status("Press play on the video to begin."); });
   } else configure();
 });
 byId("reset-allowance")?.addEventListener("click", async () => {
@@ -180,15 +199,15 @@ byId("reset-allowance")?.addEventListener("click", async () => {
   if (startRequestedAt !== null) configure(); render();
 });
 byId("quality").addEventListener("change", () => { if (hls) { const level = Number(byId("quality").value); if (player.firstPlayingAtMs === null) hls.loadLevel = level; else hls.nextLevel = level; } });
-byId("kill").addEventListener("click", () => { byId("mode").value = "off"; configure(); });
+byId("kill").addEventListener("click", () => { if (mediaRecovery.active()) { mediaRecovery.cancel(); return; } byId("mode").value = "off"; configure(); });
 byId("download").addEventListener("click", () => {
   const url = URL.createObjectURL(new Blob([`${JSON.stringify(report(), null, 2)}\n`], { type: "application/json" }));
   const link = document.createElement("a"); link.href = url; link.download = `relayswarm-field-${new Date().toISOString().replace(/[:.]/gu, "-")}.json`; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
-window.addEventListener("pagehide", stopSwarm);
+window.addEventListener("pagehide", () => { mediaRecovery.cancel("page-hidden"); stopSwarm(); });
 window.addEventListener("pageshow", () => { if (startRequestedAt !== null && !swarm) { byId("kill").disabled = true; status("Peer delivery stopped while this page was inactive. Playback uses origin; apply settings to rejoin."); } });
-window.relaySwarmDemo = { report, stop: () => { stopSwarm(); render(); }, ready: () => Boolean(session), media: video };
+window.relaySwarmDemo = { report, stop: () => { mediaRecovery.cancel(); stopSwarm(); render(); }, ready: () => Boolean(session), media: video };
 async function refreshPolicy() {
   if (policyInFlight || !session) return;
   policyInFlight = true;
@@ -203,7 +222,7 @@ async function refreshPolicy() {
     if (current.v !== 1 || typeof current.swarmId !== "string" || !current.streamEvent || !Array.isArray(current.relays) || current.manifest !== session.manifest) throw new Error("Publisher session changed incompatibly.");
     const identityChanged = current.swarmId !== session.swarmId || current.streamEvent.id !== session.streamEvent.id || current.admission?.epoch !== session.admission?.epoch;
     const changed = policyUnavailable || next.mode !== deliveryPolicy.mode || identityChanged;
-    if (identityChanged) { stopSwarm(); admissionCredential = null; session = current; }
+    if (identityChanged) { mediaRecovery.cancel("publisher-session-changed"); stopSwarm(); admissionCredential = null; session = current; }
     const renewAdmission = Boolean(current.admission && startRequestedAt !== null && byId("mode").value !== "off" && next.mode !== "off" && (!admissionCredential || admissionCredential.expiresAt * 1000 - Date.now() <= 20000));
     if (renewAdmission) await obtainAdmission();
     deliveryPolicy = next; policyUnavailable = false;

@@ -1,10 +1,35 @@
-# RelaySwarmKit v3 review proposal
+# RelaySwarmKit interoperability
 
-The current public Kit revision is incompatible with RelaySwarm's encrypted
-session v3. A test-only adapter proved that its unchanged crypto, relay and
-libdatachannel components can participate in a real v3 session and verified
-binary transfer. This directory contains a concrete migration proposal for the
-separate Kit repository. No external checkout, branch or release was changed.
+Published [Kit v0.5.0](https://github.com/forgesworn/relayswarm-kit/releases/tag/v0.5.0)
+points to `2f0b26ace4096a5dca87baf715274f91c331ac3a`. Its PR and merged-head CI
+pass, including 39 tests with one opt-in public-relay test skipped. The SDK
+supplies mandatory encrypted v3 signalling, bounded media framing and independent
+author/delegation/revocation verification. All five release assets were
+downloaded anonymously and checked against their SHA-256 manifest. GitHub
+reports the release's `immutable` flag as false; checksum-pinned bytes are
+verified, but platform-enforced locking is not claimed.
+
+`test/interop-current-sdk-browser.mjs` uses the public `SwarmGuest`,
+`MediaDataChannel` and `SignedMediaTransfer` APIs with the production browser
+loader. At JavaScript source `c3dabf6` and the same SDK tree as the release,
+author and delegate transfers each returned 108,950 real fMP4 HLS bytes.
+Corruption, tampering, pre-request revocation and revocation at EOF each returned
+zero bytes. There is no Swift wire adapter. This is macOS arm64 and desktop
+Chrome on loopback; it does not establish physical Apple-device, public-NAT
+or native HLS decoding acceptance.
+
+Run `npm run test:interop:kit` with the pinned SDK checkout in
+`../relayswarm-kit`, or set `RELAYSWARM_KIT_DIR`. The hosted interop job pins the
+released SDK commit. The consuming application still owns publisher trust,
+revocation freshness, origin fallback, playback and upload consent.
+
+## Historical v2 review proposal
+
+The baseline below was incompatible with encrypted session v3. A test-only
+adapter proved its unchanged crypto, relay and libdatachannel components could
+participate in a real v3 session and verified binary transfer. The retained
+proposal was prepared before the separate repository upgrade; it is not the
+complete diff of the published v0.5.0 SDK.
 
 - Base Kit revision: `7eb042ee0fc0e960780c61d755a2ec50f1a8be40`.
 - Review patch: [relayswarm-kit-v3.patch](relayswarm-kit-v3.patch).
@@ -65,19 +90,18 @@ It includes exact toolkit/dependency revisions and hashes for the tested
 working-tree implementation. This proves the fixture/component boundary,
 not interoperability of a published Kit v3 client.
 
-## Remaining upstream/client gates
+## Historical proposal boundary and remaining acceptance
 
-Applying this patch is a deliberate cross-repository scope decision. After
-approval, run the external repository's exact-head checks, update its public
-API documentation, release and pin the resulting revision, and replace the
-fixture adapter with the published APIs before claiming current stock-client
-compatibility.
+The subsequent authorised upgrade added media verification/framing and public
+API documentation, passed exact-head checks and released the pinned SDK above.
+Current compatibility evidence uses its public APIs; the earlier adapter receipt
+remains historical component evidence.
 
-The proposal updates rendezvous and SDK negotiation. It does not add an HLS
+The original proposal updated rendezvous and SDK negotiation. It did not add an HLS
 consumer, a trusted author/delegation/revocation resolver, signed media framing
-or viewer upload-consent policy to the Kit. Those checks remain application
-responsibilities. Host admission before SDP disclosure and bounded buffering of
-application data also need explicit production policies; a valid Nostr event
+or viewer upload-consent policy. The released SDK now verifies signed media and
+bounds its framing; the application still supplies current trust and admission
+policies. A valid Nostr event
 alone is not permission to join a stream or redistribute content. Physical
 Apple devices, real NAT combinations and long-running cross-client operation
 remain unverified. HyperDHT is a different transport and is not implemented by

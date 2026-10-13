@@ -1,0 +1,77 @@
+{
+  "v": 1,
+  "date": "2026-10-13",
+  "baseCommit": "c3dabf64e794ca8e86364f03ab21a2c6a21008e5",
+  "scope": "Working-source local macOS and Linux native checks; final-source hosted CI and physical NAT acceptance remain separate",
+  "sourceSHA256": {
+    "src/native-client.mjs": "249e24aaa9ff87e87e23d692ae6e4aec24109e3878064fcab7a57dd9a2eb2717",
+    "src/native-dht-transport.mjs": "4b521de9e3dce16a82a6e99b65830fa3ec63996dc7bea1df3c0f1b6294b6e585",
+    "src/relay-session.mjs": "d6c260458a14918560259d1835b49a8b7e2ed13bf2bdb05ca765ef5f23832aed",
+    "test/native-client.test.mjs": "6bf632b4770a94f035315b2dde9fd95c96af3cff9603a3b40608d6e56168878f",
+    "test/native-journey.test.mjs": "fc9f791d513c4188d5ffc6fa8578a6637338e28996abfeeabd63d996fc6110fe",
+    "test/browser-hardening.test.mjs": "b22abab7db511b99f06fb661424acc382cf990cfe8d40a12001c3775e487371c",
+    "test/support/local-dht.mjs": "773a30dcce97595d72ec4e664e845ef8006e843c10fc34b8aa07791bb5b075d2"
+  },
+  "localChecks": {
+    "macOS": {
+      "native": {
+        "tests": 14,
+        "passed": 14,
+        "failed": 0
+      },
+      "swarm": {
+        "tests": 65,
+        "passed": 65,
+        "failed": 0
+      },
+      "publisher": {
+        "tests": 72,
+        "passed": 71,
+        "skipped": 1,
+        "failed": 0
+      },
+      "exitCode": 0
+    },
+    "linux": {
+      "native": {
+        "tests": 14,
+        "passed": 14,
+        "failed": 0
+      },
+      "runtime": "Node 24.21.0",
+      "dependency": "hyperdht 6.33.2",
+      "peerTimeoutMs": 5000,
+      "bootstrapResponders": 4,
+      "exitCode": 0
+    }
+  },
+  "diagnosis": {
+    "evidenceFile": "artifacts/native-linux-review/review-summary.json",
+    "evidenceSHA256": "618686e73b5d731297e5a644d162380afd467958d44e6b13b75ebc8c9a50ca6d",
+    "underlyingAbort": {
+      "stack": "Holepuncher.onabort -> Holepuncher.destroy -> Server._abort -> Server._onpeerholepunch at hyperdht/lib/server.js:555",
+      "condition": "Remote is not holepunching and NAT analysis remains unstable after analyze(false) and analyze(true).",
+      "rawStream": "Destroyed and unconnected before 800 ms; no server raw-firewall packet or serving handler entered.",
+      "client": "Matching remote stream ID; one UDX packet, 241 bytes transmitted, zero bytes/ACKs received.",
+      "explicitLoopbackBinding": "Same abort and original deadline failure; binding geometry alone does not repair it.",
+      "fastOpenFalseAndFlush": "Passed two, failed third; stopped on first failure."
+    },
+    "populatedLocalDhtExperiment": {
+      "fixtureChange": "Four independent real local bootstrap responder nodes; pass every address to the installed CLI. No vendor changes or NAT/open-firewall assertion.",
+      "originalC3ProductAndCli": "10/10 first-test passes without an ACK wrapper",
+      "originalC3ProductAndCliWithAck": "10/10 first-test passes with successful live header ACK",
+      "peerTimeoutMsUnchanged": 5000,
+      "actualEvidence": "All 20 runs had server connection handoff, SHA-verified native object bytes, private output, and refusal to overwrite existing output.",
+      "conclusion": "The isolated one-node fixture cannot supply enough independent observations for HyperDHT's NAT analyser (classification requires at least three samples; auto-sampling targets four). A populated local DHT repairs this observed fixture failure without weakening protocol or raising its deadline.",
+      "limits": "This is local cross-process Linux evidence, not physical NAT traversal. One configured bootstrap URL can still join a populated DHT; do not require three URLs as a product policy."
+    }
+  },
+  "preservedBoundaries": [
+    "Authenticated transport key and one-use dial grant",
+    "Trusted seeder, exact size and SHA-256",
+    "Five-second peer attempt budget",
+    "Signal subscription window remains two seconds",
+    "Acknowledged open and flush share one connection deadline",
+    "No delivery after the absolute transfer deadline"
+  ]
+}

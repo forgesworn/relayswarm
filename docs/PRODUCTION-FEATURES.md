@@ -17,6 +17,14 @@ invalid signatures or insufficient playback buffer use the HTTP loader.
 Measured HTTP latency raises the origin reserve; peer transfer estimates
 cannot spend the time retained for fallback. hls.js retains bitrate selection.
 
+The demo retains fatal/native decoder records and allows one deferred attempt
+to recover a fatal append/MediaSource-reset error. It restores the HTTP loader,
+stops contribution, clears upload consent and retries the current live/VOD
+position. Advancing playback must be observed within ten seconds; repeated
+failure, user cancellation or publisher changes stop recovery. Budget state
+is preserved. A recovered outcome does not erase the fatal error or establish
+the cause of an earlier unrelated failure.
+
 The publisher supports exact local playlist identities for mixed codec and
 frame-rate variants, alternate audio, fMP4 maps, complete low-latency parts and
 warm delta playlists. Schema 1 remains valid for its original contexts.
@@ -96,6 +104,12 @@ origin. A bounded HyperDHT/Noise attempt precedes automatic verified HTTP
 fallback. Redirects are refused. Exact size and SHA-256 are checked before
 bytes are returned or a new output file is published. Cancellation does not
 start fallback, and existing output files are never replaced.
+
+Connections require the expected Noise key and acknowledged handshake writes
+within one connection deadline. Final completion checks the absolute transfer
+deadline even when synchronous work delays an abort timer. Discovery accepts
+valid presence within its configured age bound while encrypted signals retain
+their shorter subscription window.
 
 This entry point requires installed Node; it is not a self-contained binary.
 The original `native-poc.mjs` remains a separate two-peer proof, with its

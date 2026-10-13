@@ -127,9 +127,13 @@ verified HTTP fallback and wider-media tests:
 ```sh
 npm run native:fetch -- --help
 npm run test:media-browser
+npm run test:media-recovery          # actual corrupt-media repair/cancel/deadline journeys
 npm run test:interop
+npm run test:interop:kit             # published SDK API, not the historical adapter
 ```
 
-The Swift interoperability fixture requires macOS arm64 and a GitHub token
-with read access to the pinned public dependency. It proves the local v3
-adapter; the released unchanged Swift client remains incompatible.
+The historical adapter fixture requires macOS arm64 and read-only authenticated
+`gh` access to its pinned public sources. The current SDK fixture uses published
+Kit v0.5.0 in `../relayswarm-kit` (or `RELAYSWARM_KIT_DIR`) and requires Swift 6,
+macOS arm64, Chrome and ffmpeg. Its verified transfer and acceptance boundaries
+are in the [interop guide](interop/README.md).

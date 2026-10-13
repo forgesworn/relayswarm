@@ -157,7 +157,7 @@ creation timestamp within the allowed clock tolerance, avoiding an addressable
 event ID tie. Standard NIP-53 fields are described in the
 [upstream draft](https://github.com/nostr-protocol/nips/blob/master/53.md).
 
-## Measured Swift interoperability boundary
+## Historical Swift baseline and current interoperability
 
 On 13 October 2026, `test/interop-swift.mjs` tested public RelaySwarmKit revision
 [`7eb042ee0fc0e960780c61d755a2ec50f1a8be40`](https://github.com/forgesworn/relayswarm-kit/tree/7eb042ee0fc0e960780c61d755a2ec50f1a8be40)
@@ -172,13 +172,13 @@ with its pinned secp256k1 dependency and macOS arm64 libdatachannel binary.
 | Independent Swift commitment verification | 12 schema/context/signature/expiry cases passed |
 | Corrupted bytes over the real WebRTC channel | Rejected against the signed commitment |
 | Plaintext and malformed encrypted session probes | Rejected by the fixture adapter |
-| Published Swift v3 client, physical devices, NAT variety | Not proved |
+| Published Swift v3 client, physical devices, NAT variety | Not proved at that baseline checkpoint |
 | Kit ↔ HyperDHT native transport | Unsupported by the inspected Kit |
 
 The test adapter uses unchanged pinned toolkit crypto, relay and WebRTC
 components, but adds a separate strict v3 envelope parser and browser object
 receiver inside this repository. Its passing journey **does not establish
-compatibility of the unmodified or released Kit client**. The stock Kit uses
+compatibility of the Kit client at that revision**. That baseline Kit uses
 presence version 2, signal version tags and top-level `type`/`sdp`, and retains a
 plaintext fallback. Current RelaySwarm accepts none of those as v3 sessions.
 
@@ -190,10 +190,9 @@ fixture services after success. The named receipt is retained. A failed build
 keeps owned scratch for diagnosis and reuse; remove it once its evidence is
 recorded. No external repository is edited.
 
-### Concrete Kit migration proposal
+### Historical Kit migration requirements
 
-Changes are required in the separate RelaySwarmKit repository before claiming
-stock cross-client compatibility:
+These requirements guided the subsequent RelaySwarmKit upgrade:
 
 1. Update `Sources/RelaySwarmSignalling/Swarm.swift` to emit/require `v:3`,
    transport, request ID and nested payloads; require NIP-44 for every signal.
@@ -220,5 +219,12 @@ stock cross-client compatibility:
 
 The concrete [Kit review proposal](interop/README.md) includes an exact-source
 patch and SHA-256 manifest. Its full local SDK suite passed 25 tests with one
-public-relay test skipped. That proposal is unapplied to the external repository;
-merging/releasing it and proving a published HLS consumer remain separate gates.
+public-relay test skipped. The later authorised upgrade adds public signed-media
+APIs and is published as [Kit v0.5.0](https://github.com/forgesworn/relayswarm-kit/releases/tag/v0.5.0)
+at `2f0b26ace4096a5dca87baf715274f91c331ac3a`. PR and merged-head CI passed
+39 tests with one opt-in public-relay skip. The production browser sender and
+current `SwarmGuest`, `MediaDataChannel` and `SignedMediaTransfer` APIs completed
+author/delegate transfers of 108,950 fMP4 HLS bytes; corruption, tampering and
+pre-request/during-transfer revocation each returned zero bytes. No wire adapter
+was used. The exact source/receipt boundary and remaining physical/NAT/playback
+responsibilities are in the [interop guide](interop/README.md).

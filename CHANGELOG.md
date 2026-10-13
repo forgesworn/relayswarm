@@ -10,8 +10,13 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
   and linked signed NIP-53 advertisements without changing stable authorisation.
 - Added bounded admission, persistent cross-tab upload budgets, idempotent
   durable reports and two-lease worker supervision with tested crash cleanup.
-- Added an installed native client with verified HTTP fallback and an
-  independent Swift adapter/conformance fixture; stock Kit compatibility is open.
+- Added an installed native client with verified HTTP fallback, acknowledged
+  connection readiness and an absolute completion deadline. Native presence
+  discovery accepts valid cached announcements without widening signal replay.
+- Upgraded and published RelaySwarmKit v0.5.0; its public SDK passes author,
+  delegate, corruption and revocation journeys against the actual browser sender.
+- Added one bounded origin-only media repair, cancellation and timeout handling;
+  fatal records and spent upload allowance remain in the receipt.
 - Fixed Windows hash-cache deduplication, malformed relay-filter crashes,
   discovery eviction, worker descendant cleanup and pending-write queue bounds.
 

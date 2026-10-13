@@ -124,17 +124,24 @@ export async function fetchNativeObject(input, { bootstrap, signal, peerTimeoutM
   if (signal !== undefined && !(signal instanceof AbortSignal)) throw new TypeError("Invalid native cancellation signal.");
   if (typeof fetchImpl !== "function") throw new TypeError("Invalid native HTTP implementation.");
   const descriptor = validateNativeDescriptor(input, { maxObjectBytes, allowLoopback });
+  const started = performance.now();
   const overall = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(timeoutMs)]);
-  if (overall.aborted) throw overall.reason;
-  const peerSignal = AbortSignal.any([overall, AbortSignal.timeout(peerTimeoutMs)]), started = performance.now();
+  function checkDeadline() {
+    if (overall.aborted) throw overall.reason;
+    // Synchronous hashing or a custom reader can delay the abort timer.
+    if (performance.now() - started >= timeoutMs) throw new DOMException("Native transfer deadline exceeded.", "TimeoutError");
+  }
+  checkDeadline();
+  const peerSignal = AbortSignal.any([overall, AbortSignal.timeout(peerTimeoutMs)]);
   let bytes, source;
   try {
     bytes = await peerObject(descriptor, { bootstrap, signal: peerSignal, peerTimeoutMs, WebSocketImpl, maxObjectBytes }); source = NATIVE_TRANSPORT;
   } catch (error) {
-    if (overall.aborted) throw overall.reason;
+    checkDeadline();
     if (!descriptor.originUrl) throw new Error("Native peer attempt failed and no trusted origin fallback is configured.", { cause: error });
     bytes = await originObject(descriptor, { signal: overall, fetchImpl }); source = new URL(descriptor.originUrl).protocol === "https:" ? "https-origin" : "http-loopback-origin";
   }
+  checkDeadline();
   return { bytes, receipt: { v: 1, ok: true, source, objectBytes: bytes.length, sha256: descriptor.sha256, sha256Verified: true,
     elapsedMs: Math.round(performance.now() - started), fallback: source !== NATIVE_TRANSPORT } };
 }

@@ -134,9 +134,11 @@ flowchart TB
 
 Other approaches and the narrow comparison are in [Landscape](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/LANDSCAPE.md).
 [RelaySwarmKit](https://github.com/forgesworn/relayswarm-kit) is a separate Swift
-signalling/transport project. Its README describes wire version 2; the current
-Node/browser session here uses version 3. Shared kinds and NIP-44 test vectors
-do not establish current cross-client or signed-HLS interoperability.
+signalling/transport project. Published Kit v0.5.0 supports session version 3
+and signed media. Its public SDK received verified author/delegate HLS bytes
+from the production browser loader and rejected corruption and revocation.
+That measured macOS arm64/Chrome loopback journey and its boundaries are in the
+[protocol draft](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md); physical-device and NAT acceptance remain open.
 
 ## Evidence
 
@@ -543,8 +545,13 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
   and linked signed NIP-53 advertisements without changing stable authorisation.
 - Added bounded admission, persistent cross-tab upload budgets, idempotent
   durable reports and two-lease worker supervision with tested crash cleanup.
-- Added an installed native client with verified HTTP fallback and an
-  independent Swift adapter/conformance fixture; stock Kit compatibility is open.
+- Added an installed native client with verified HTTP fallback, acknowledged
+  connection readiness and an absolute completion deadline. Native presence
+  discovery accepts valid cached announcements without widening signal replay.
+- Upgraded and published RelaySwarmKit v0.5.0; its public SDK passes author,
+  delegate, corruption and revocation journeys against the actual browser sender.
+- Added one bounded origin-only media repair, cancellation and timeout handling;
+  fatal records and spent upload allowance remain in the receipt.
 - Fixed Windows hash-cache deduplication, malformed relay-filter crashes,
   discovery eviction, worker descendant cleanup and pending-write queue bounds.
 
@@ -764,12 +771,16 @@ verified HTTP fallback and wider-media tests:
 ```sh
 npm run native:fetch -- --help
 npm run test:media-browser
+npm run test:media-recovery          # actual corrupt-media repair/cancel/deadline journeys
 npm run test:interop
+npm run test:interop:kit             # published SDK API, not the historical adapter
 ```
 
-The Swift interoperability fixture requires macOS arm64 and a GitHub token
-with read access to the pinned public dependency. It proves the local v3
-adapter; the released unchanged Swift client remains incompatible.
+The historical adapter fixture requires macOS arm64 and read-only authenticated
+`gh` access to its pinned public sources. The current SDK fixture uses published
+Kit v0.5.0 in `../relayswarm-kit` (or `RELAYSWARM_KIT_DIR`) and requires Swift 6,
+macOS arm64, Chrome and ffmpeg. Its verified transfer and acceptance boundaries
+are in the [interop guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/interop/README.md).
 
 ---
 
@@ -1168,17 +1179,42 @@ before a new broadcaster owns publication. Guardian failure leaves a durable
 fence for explicit recovery. The Windows cache race has a deterministic local
 regression; actual Windows CI must still verify the final source.
 
-A compiled Swift test adapter using pinned unchanged RelaySwarmKit components
-completed an encrypted session and a verified 262,181-byte WebRTC transfer.
-It also checked commitments independently. The stock v2 client remains
-incompatible with v3; the [protocol draft](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md) explains this boundary.
-An adapter test does not establish compatibility of a released unchanged client.
+The next native candidate passes 14 tests on both macOS and Linux. Its
+separate-process CLI uses the unchanged five-second peer budget. The earlier
+Linux failure traced to an isolated one-node DHT whose NAT analysis aborted
+before the server received the object request. Four independent local
+responders passed 20 consecutive diagnostic transfers; the fixture now
+models that populated network. This does not require multiple bootstrap URLs
+as a public-client policy or prove real-network NAT traversal. The
+[native review summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/native-readiness-summary-20261013.json)
+also records cached-presence discovery, a shared open/ACK deadline and late
+completion rejection. Final-source CI remains required.
+
+A historical Swift adapter using unchanged Kit v2 components completed an
+encrypted session and a verified 262,181-byte transfer. The subsequent authorised
+upgrade is published as [RelaySwarmKit v0.5.0](https://github.com/forgesworn/relayswarm-kit/releases/tag/v0.5.0)
+at `2f0b26a`, with PR/main CI green (39 tests, one opt-in skip) and all five
+public assets checksum-verified. Its actual public SDK and the production
+browser sender completed author/delegate transfers of 108,950 fMP4 bytes;
+corruption, tampering and both pre-request/EOF revocation returned zero bytes.
+That macOS arm64/Chrome loopback journey uses no wire adapter. The
+[protocol draft](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md) and [interop guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/interop/README.md) distinguish
+the published SDK from the historical incompatible v2 baseline.
+
+The player now retains fatal/native error records and permits one bounded
+origin-only MSE repair per viewing session. Five real corrupt-fMP4 Chrome
+journeys verify live/VOD recovery, repeated-error termination, cancellation
+and a ten-second no-progress timeout. Recovery stops contribution and preserves
+spent allowance; successful repair is recorded separately from the fatal error.
+This impact treatment does not establish the historical hosted failure's cause.
 
 Physical Pixel preflight confirmed a Pixel 10 Pro XL on M4. Its connection was
-restored after a disconnection; no physical playback receipt exists yet. The private
+restored once, then disappeared from ADB again; no physical playback receipt exists yet. The private
 YouTube test is awaiting channel setup. The earlier hosted H.264 MSE failure,
 varied NAT, sustained audience/cost evidence and final deployment acceptance
-remain open. Initial wider-media failures and later passes are retained;
+remain open. Safari WebDriver explicitly requires remote automation to be
+enabled; that setting is unchanged. Installed Firefox readiness passes, but
+neither readiness probe proves final playback. Initial wider-media failures and later passes are retained;
 corrected codec-fixture metadata and startup quality handling do not by
 themselves establish the cause of the earlier hosted failure.
 
@@ -2310,7 +2346,7 @@ creation timestamp within the allowed clock tolerance, avoiding an addressable
 event ID tie. Standard NIP-53 fields are described in the
 [upstream draft](https://github.com/nostr-protocol/nips/blob/master/53.md).
 
-## Measured Swift interoperability boundary
+## Historical Swift baseline and current interoperability
 
 On 13 October 2026, `test/interop-swift.mjs` tested public RelaySwarmKit revision
 [`7eb042ee0fc0e960780c61d755a2ec50f1a8be40`](https://github.com/forgesworn/relayswarm-kit/tree/7eb042ee0fc0e960780c61d755a2ec50f1a8be40)
@@ -2325,13 +2361,13 @@ with its pinned secp256k1 dependency and macOS arm64 libdatachannel binary.
 | Independent Swift commitment verification | 12 schema/context/signature/expiry cases passed |
 | Corrupted bytes over the real WebRTC channel | Rejected against the signed commitment |
 | Plaintext and malformed encrypted session probes | Rejected by the fixture adapter |
-| Published Swift v3 client, physical devices, NAT variety | Not proved |
+| Published Swift v3 client, physical devices, NAT variety | Not proved at that baseline checkpoint |
 | Kit ↔ HyperDHT native transport | Unsupported by the inspected Kit |
 
 The test adapter uses unchanged pinned toolkit crypto, relay and WebRTC
 components, but adds a separate strict v3 envelope parser and browser object
 receiver inside this repository. Its passing journey **does not establish
-compatibility of the unmodified or released Kit client**. The stock Kit uses
+compatibility of the Kit client at that revision**. That baseline Kit uses
 presence version 2, signal version tags and top-level `type`/`sdp`, and retains a
 plaintext fallback. Current RelaySwarm accepts none of those as v3 sessions.
 
@@ -2343,10 +2379,9 @@ fixture services after success. The named receipt is retained. A failed build
 keeps owned scratch for diagnosis and reuse; remove it once its evidence is
 recorded. No external repository is edited.
 
-### Concrete Kit migration proposal
+### Historical Kit migration requirements
 
-Changes are required in the separate RelaySwarmKit repository before claiming
-stock cross-client compatibility:
+These requirements guided the subsequent RelaySwarmKit upgrade:
 
 1. Update `Sources/RelaySwarmSignalling/Swarm.swift` to emit/require `v:3`,
    transport, request ID and nested payloads; require NIP-44 for every signal.
@@ -2373,8 +2408,15 @@ stock cross-client compatibility:
 
 The concrete [Kit review proposal](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/interop/README.md) includes an exact-source
 patch and SHA-256 manifest. Its full local SDK suite passed 25 tests with one
-public-relay test skipped. That proposal is unapplied to the external repository;
-merging/releasing it and proving a published HLS consumer remain separate gates.
+public-relay test skipped. The later authorised upgrade adds public signed-media
+APIs and is published as [Kit v0.5.0](https://github.com/forgesworn/relayswarm-kit/releases/tag/v0.5.0)
+at `2f0b26ace4096a5dca87baf715274f91c331ac3a`. PR and merged-head CI passed
+39 tests with one opt-in public-relay skip. The production browser sender and
+current `SwarmGuest`, `MediaDataChannel` and `SignedMediaTransfer` APIs completed
+author/delegate transfers of 108,950 fMP4 HLS bytes; corruption, tampering and
+pre-request/during-transfer revocation each returned zero bytes. No wire adapter
+was used. The exact source/receipt boundary and remaining physical/NAT/playback
+responsibilities are in the [interop guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/interop/README.md).
 
 ---
 
@@ -2468,6 +2510,14 @@ invalid signatures or insufficient playback buffer use the HTTP loader.
 Measured HTTP latency raises the origin reserve; peer transfer estimates
 cannot spend the time retained for fallback. hls.js retains bitrate selection.
 
+The demo retains fatal/native decoder records and allows one deferred attempt
+to recover a fatal append/MediaSource-reset error. It restores the HTTP loader,
+stops contribution, clears upload consent and retries the current live/VOD
+position. Advancing playback must be observed within ten seconds; repeated
+failure, user cancellation or publisher changes stop recovery. Budget state
+is preserved. A recovered outcome does not erase the fatal error or establish
+the cause of an earlier unrelated failure.
+
 The publisher supports exact local playlist identities for mixed codec and
 frame-rate variants, alternate audio, fMP4 maps, complete low-latency parts and
 warm delta playlists. Schema 1 remains valid for its original contexts.
@@ -2548,6 +2598,12 @@ fallback. Redirects are refused. Exact size and SHA-256 are checked before
 bytes are returned or a new output file is published. Cancellation does not
 start fallback, and existing output files are never replaced.
 
+Connections require the expected Noise key and acknowledged handshake writes
+within one connection deadline. Final completion checks the absolute transfer
+deadline even when synchronous work delays an abort timer. Discovery accepts
+valid presence within its configured age bound while encrypted signals retain
+their shorter subscription window.
+
 This entry point requires installed Node; it is not a self-contained binary.
 The original `native-poc.mjs` remains a separate two-peer proof, with its
 original failure-reporting behaviour. Neither client is durable media storage.
@@ -2566,7 +2622,7 @@ An entry remains open until the evidence described below exists.
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
 | P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Local Chrome evidence passes; final CI/deployment pending |
-| P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Open |
+| P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Real corrupt-media recovery/cancel/timeout evidence passes; historical cause remains open; final hosted repeat pending |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Local Chrome evidence passes; final CI/deployment pending |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/Chrome evidence passes; final CI pending |
 | P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Local restart/Chrome/queue evidence passes; deployment pending |
@@ -2574,8 +2630,8 @@ An entry remains open until the evidence described below exists.
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Local forced-parent/guardian/descendant tests pass; host acceptance pending |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Local scope/revocation/discovery evidence passes; final CI pending |
 | P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Clean production package/export/bundle/installed transfer/fallback evidence passes; final release asset verification pending |
-| P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Adapter/independent verifier pass; user-approved Kit upgrade underway |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Open; PR 8 is open and Windows CI fails |
+| P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0/main CI/assets and actual public-SDK/browser author/delegate/adversarial journeys pass; final JS head CI pending |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Open; c3dabf6 Windows/browser CI pass; corrected native fixture passes locally on macOS/Linux; final head CI/release/deployment pending |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Open |
 
 ## Evidence rules

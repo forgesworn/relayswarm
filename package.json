@@ -11,7 +11,7 @@
     "audit": "npm audit --audit-level=high",
     "test:browser": "node test/hls-swarm-browser.mjs",
     "test:swarm": "node --test test/hls-swarm.test.mjs test/browser-hardening.test.mjs test/stream-discovery.test.mjs",
-    "test:publisher": "node --test test/hls-publisher.test.mjs test/hls-media.test.mjs test/commitment-delegation.test.mjs test/publisher-advertisement.test.mjs test/publisher-state.test.mjs test/demo-server.test.mjs test/demo-operator.test.mjs test/demo-client.test.mjs test/broadcast-waiting.test.mjs test/admission.test.mjs test/upload-budget.test.mjs test/production-adversarial.test.mjs",
+    "test:publisher": "node --test test/hls-publisher.test.mjs test/hls-media.test.mjs test/commitment-delegation.test.mjs test/publisher-advertisement.test.mjs test/publisher-state.test.mjs test/demo-server.test.mjs test/demo-operator.test.mjs test/demo-client.test.mjs test/media-recovery.test.mjs test/broadcast-waiting.test.mjs test/admission.test.mjs test/upload-budget.test.mjs test/production-adversarial.test.mjs",
     "test:playback": "node test/hls-playback-browser.mjs",
     "demo": "node demo/server.mjs",
     "docs:generate": "node scripts/build-ai-context.mjs",
@@ -23,7 +23,9 @@
     "broadcast:install": "node scripts/install-test-mediamtx.mjs",
     "test:media-browser": "node test/hls-fmp4-browser.mjs && node test/hls-media-browser.mjs && node test/hls-ll-browser.mjs",
     "native:fetch": "node scripts/native-client.mjs",
-    "test:interop": "node test/interop-swift.mjs"
+    "test:interop": "node test/interop-swift.mjs",
+    "test:interop:kit": "node test/interop-current-sdk-browser.mjs",
+    "test:media-recovery": "node test/media-recovery-browser.mjs"
   },
   "keywords": [
     "nostr",

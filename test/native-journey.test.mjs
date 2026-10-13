@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { Duplex, Readable } from "node:stream";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 import { WebSocket } from "ws";
 import { runNativeJourney } from "../src/native-journey.mjs";
@@ -8,6 +9,33 @@ import { decodeFrames, encodeFrame, FRAME, requestObject, serveAuthorizedObject,
 import { KIND_SIGNAL } from "../src/relay-session.mjs";
 import { startLocalDht } from "./support/local-dht.mjs";
 import { startLocalRelay } from "./support/local-relay.mjs";
+
+test("native connect waits for acknowledged live readiness within one deadline", { timeout: 5000 }, async () => {
+  const key = "a".repeat(64);
+  for (const mode of ["acknowledged", "refused", "closed", "stalled"]) {
+    const transport = new NativeDhtTransport({ bootstrap: [], connectionTimeoutMs: 80 });
+    let acknowledge, settled = false;
+    const socket = new EventEmitter();
+    socket.remotePublicKey = Buffer.from(key, "hex"); socket.destroyed = false; socket.destroying = false;
+    socket.flush = () => new Promise((done) => { acknowledge = done; });
+    socket.destroy = () => { socket.destroyed = true; };
+    transport.dht.connect = () => { queueMicrotask(() => socket.emit("open")); return socket; };
+    try {
+      const pending = transport.connect(key);
+      pending.then(() => { settled = true; }, () => { settled = true; });
+      await new Promise((done) => setImmediate(done));
+      assert.equal(settled, false, "Noise open alone must not permit an object request");
+      assert.equal(typeof acknowledge, "function");
+      if (mode === "acknowledged") { acknowledge(true); assert.equal(await pending, socket); }
+      else {
+        if (mode === "refused") acknowledge(false);
+        if (mode === "closed") { socket.destroyed = true; acknowledge(true); }
+        await assert.rejects(pending, /readiness|timed out/u);
+        assert.equal(socket.destroyed, true);
+      }
+    } finally { socket.destroy(); await transport.close(); }
+  }
+});
 
 test("Nostr authorizes a STUN-free native transfer whose bytes are independently verified", { timeout: 20_000 }, async () => {
   const relay = await startLocalRelay();

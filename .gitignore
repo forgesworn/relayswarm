@@ -2,3 +2,4 @@ node_modules/
 artifacts/
 deploy/.env
 operator-header
+.interop-sdk/

@@ -80,17 +80,42 @@ before a new broadcaster owns publication. Guardian failure leaves a durable
 fence for explicit recovery. The Windows cache race has a deterministic local
 regression; actual Windows CI must still verify the final source.
 
-A compiled Swift test adapter using pinned unchanged RelaySwarmKit components
-completed an encrypted session and a verified 262,181-byte WebRTC transfer.
-It also checked commitments independently. The stock v2 client remains
-incompatible with v3; the [protocol draft](NIP-DRAFT.md) explains this boundary.
-An adapter test does not establish compatibility of a released unchanged client.
+The next native candidate passes 14 tests on both macOS and Linux. Its
+separate-process CLI uses the unchanged five-second peer budget. The earlier
+Linux failure traced to an isolated one-node DHT whose NAT analysis aborted
+before the server received the object request. Four independent local
+responders passed 20 consecutive diagnostic transfers; the fixture now
+models that populated network. This does not require multiple bootstrap URLs
+as a public-client policy or prove real-network NAT traversal. The
+[native review summary](../spikes/results/native-readiness-summary-20261013.json)
+also records cached-presence discovery, a shared open/ACK deadline and late
+completion rejection. Final-source CI remains required.
+
+A historical Swift adapter using unchanged Kit v2 components completed an
+encrypted session and a verified 262,181-byte transfer. The subsequent authorised
+upgrade is published as [RelaySwarmKit v0.5.0](https://github.com/forgesworn/relayswarm-kit/releases/tag/v0.5.0)
+at `2f0b26a`, with PR/main CI green (39 tests, one opt-in skip) and all five
+public assets checksum-verified. Its actual public SDK and the production
+browser sender completed author/delegate transfers of 108,950 fMP4 bytes;
+corruption, tampering and both pre-request/EOF revocation returned zero bytes.
+That macOS arm64/Chrome loopback journey uses no wire adapter. The
+[protocol draft](NIP-DRAFT.md) and [interop guide](interop/README.md) distinguish
+the published SDK from the historical incompatible v2 baseline.
+
+The player now retains fatal/native error records and permits one bounded
+origin-only MSE repair per viewing session. Five real corrupt-fMP4 Chrome
+journeys verify live/VOD recovery, repeated-error termination, cancellation
+and a ten-second no-progress timeout. Recovery stops contribution and preserves
+spent allowance; successful repair is recorded separately from the fatal error.
+This impact treatment does not establish the historical hosted failure's cause.
 
 Physical Pixel preflight confirmed a Pixel 10 Pro XL on M4. Its connection was
-restored after a disconnection; no physical playback receipt exists yet. The private
+restored once, then disappeared from ADB again; no physical playback receipt exists yet. The private
 YouTube test is awaiting channel setup. The earlier hosted H.264 MSE failure,
 varied NAT, sustained audience/cost evidence and final deployment acceptance
-remain open. Initial wider-media failures and later passes are retained;
+remain open. Safari WebDriver explicitly requires remote automation to be
+enabled; that setting is unchanged. Installed Firefox readiness passes, but
+neither readiness probe proves final playback. Initial wider-media failures and later passes are retained;
 corrected codec-fixture metadata and startup quality handling do not by
 themselves establish the cause of the earlier hosted failure.
 

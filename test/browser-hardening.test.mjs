@@ -516,6 +516,34 @@ test("relay frames must match a live subscription before deduplication or dispat
   } finally { pool.close(); }
 });
 
+test("cached presence can be discovered without replaying old signals or expired presence", async () => {
+  const relay = await startLocalRelay(), senderPool = new RelayPool([relay.url]), receiverPool = new RelayPool([relay.url]);
+  const sender = new RelaySwarmSession({ pool: senderPool, swarmId: base.swarmId });
+  const receiver = new RelaySwarmSession({ pool: receiverPool, swarmId: base.swarmId });
+  const presences = [], signals = [];
+  receiver.onPresence((value) => presences.push(value)); receiver.onSignal((value) => signals.push(value));
+  try {
+    await Promise.all([senderPool.connect(), receiverPool.connect()]);
+    const now = Math.floor(Date.now() / 1000);
+    const fresh = sender.announcePresence({ role: "seeder", transports: [], have: [] });
+    senderPool.publish(finalizeEvent({ ...fresh, created_at: now - 10 }, sender.secretKey));
+    senderPool.publish(finalizeEvent({ ...fresh, created_at: now - 121 }, sender.secretKey));
+    const old = sender.sendSignal(receiver.pubkey, { type: "offer", transport: "webrtc", requestId: "old-signal-probe", payload: { type: "offer", sdp: "cached" } });
+    senderPool.publish(finalizeEvent({ ...old, created_at: now - 10 }, sender.secretKey));
+    await until(() => relay.events.length >= 5);
+    // Keep only historical frames, so replay cannot be hidden by a fresh copy.
+    relay.events.splice(0, relay.events.length, ...relay.events.filter((event) => event.created_at < now));
+    receiver.start();
+    await until(() => presences.length === 1);
+    await sleep(30);
+    assert.equal(presences[0].event.created_at, now - 10);
+    assert.equal(signals.length, 0);
+    sender.sendSignal(receiver.pubkey, { type: "offer", transport: "webrtc", requestId: "fresh-signal-probe", payload: { type: "offer", sdp: "fresh" } });
+    await until(() => signals.length === 1);
+    assert.equal(signals[0].payload.requestId, "fresh-signal-probe");
+  } finally { sender.close(); receiver.close(); senderPool.close(); receiverPool.close(); await relay.close(); }
+});
+
 test("session subscribes only to its own signals and cleans up partial subscription failures", async () => {
   const filters = [], closed = [];
   let failSecond = false, handlerPresent = false;
