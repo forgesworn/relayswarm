@@ -1,3 +1,10 @@
+{
+    servers {
+        protocols h1 h2
+    }
+}
+
 {$PUBLIC_URL} {
+    header Alt-Svc clear
     reverse_proxy app:8787
 }

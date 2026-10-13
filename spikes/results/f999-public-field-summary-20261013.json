@@ -1,0 +1,511 @@
+{
+  "v": 1,
+  "kind": "f999-public-field-acceptance-summary",
+  "recordedUTC": "2026-10-13T21:10:38.496856+00:00",
+  "sourceSha": "f9990b36956282f3d4e849b55bd64a79eb440151",
+  "publicClientSHA256": "b746f45216d3ac6e5d1bd21b5748f91c0115c71d00ee678c930070596bbef50d",
+  "publicClientBytes": 723954,
+  "deployedImageSHA256": "sha256:20199491827b9ea69ac560ac50be5eed5376aab30fbd0a07227544ce8898b243",
+  "releaseClaim": false,
+  "productionReadinessClaim": false,
+  "laterCandidateChanges": "A separately validated proxy-only h1/h2 and Alt-Svc clear change was reloaded in place; app/client identity remains f999. Final candidate CI and release acceptance remain pending.",
+  "ci": {
+    "runId": 38449139246,
+    "headSha": "f9990b36956282f3d4e849b55bd64a79eb440151",
+    "successfulRequiredJobs": 9,
+    "requiredJobs": 9,
+    "conclusion": "success",
+    "optionalTwoHourSoakAtThisHeadProved": false,
+    "earlierA023Loopback7200SoakRetainedSeparately": true
+  },
+  "shortPublic": {
+    "receipt": "artifacts/public-observer-f9990b3-diagnostic-r2-run-20261013/receipt.json",
+    "receiptSHA256": "7c86ef7fa6fae14317ae21968fdf8aec9a9567f244807f8ceb392973a5cd482b",
+    "startedUTC": "2026-10-13T19:45:57.171Z",
+    "endedUTC": "2026-10-13T19:47:22.809Z",
+    "measuredMs": 60008,
+    "ok": true,
+    "gates": {
+      "playback": {
+        "status": "green",
+        "scope": "Actual frame/time plus native audio decoded-byte progress at each requested quality; zero fatal/native/page errors. Decode does not prove audible output."
+      },
+      "contribution": {
+        "status": "green",
+        "scope": "Both explicitly consented contributors remain serving and send media within100MB each; no reconsent/reset."
+      },
+      "verifiedPeerPayload": {
+        "status": "green",
+        "scope": "Receive-only actor records verified peer bytes/fragments at low and high qualities during the measured window; links alone do not pass."
+      }
+    },
+    "scope": "One ordinary headless Chrome process with four isolated contexts, public TLS/WSS and no fake media, permission, mDNS, RTC or TLS flags; observed host/host candidate pairs, without physical-device or hard-NAT proof.",
+    "trustedStartAndContributorUpload": true,
+    "contributorAllowanceBytesEach": 100000000,
+    "contributorsUploadedBytes": [
+      3151256,
+      8106372
+    ],
+    "receiveOnlyPeerBytes": 10576128,
+    "receiveOnlyVerifiedLoads": 26,
+    "receiverBothQualities": true,
+    "receiverUploadedBytes": 0,
+    "fatalHighwater": 0,
+    "nativeHighwater": 0,
+    "stallsHighwater": 0,
+    "spontaneousConsentWithdrawal": false,
+    "cleanupPassed": true,
+    "twoHourAcceptanceProved": false,
+    "earlierPublicContributionRedResolved": false
+  },
+  "attemptedLongPublic": {
+    "receipt": "artifacts/public-two-hour-f9990b3-r2-run-20261013/receipt.json",
+    "receiptSHA256": "127cd24f3cf01c16ec95333abb80efe2a133604ef598c965ff1fabc0575464c9",
+    "ok": false,
+    "completed": false,
+    "targetMeasurementMs": 7200000,
+    "wholeObserverMs": 644855,
+    "measuredMs": 611134,
+    "startedUTC": "2026-10-13T20:17:53.534Z",
+    "measurementStartedUTC": "2026-10-13T20:18:26.142Z",
+    "endedUTC": "2026-10-13T20:28:38.389Z",
+    "stoppedAfterIrreversibleContributionFailure": true,
+    "rawReceiptGateStatuses": {
+      "playback": {
+        "status": "unmeasured"
+      },
+      "contribution": {
+        "status": "unmeasured"
+      },
+      "verifiedPeerPayload": {
+        "status": "unmeasured"
+      }
+    },
+    "sustainedContributionGate": "red",
+    "scope": "Four ordinary isolated Chrome contexts on one laptop, public TLS/WSS; 1 GB allowance per contributor and 512 kB/s chosen once, no reset or reconsent. Planned paired low for 90 minutes then high for 30 minutes stopped before the high receiver phase.",
+    "configuredContributorPayloadCeilingBytes": 2000000000,
+    "firstFailure": {
+      "duringWarmup": true,
+      "actor": "contributor-high",
+      "fixedRoute": "policy",
+      "requestUTC": "2026-10-13T20:18:17.082Z",
+      "cancelledUTC": "2026-10-13T20:18:22.091Z",
+      "clientDurationMs": 5001.6,
+      "headersObserved": false,
+      "bodyObserved": false,
+      "networkFailure": "net::ERR_ABORTED",
+      "firstUnavailableUncheckedUTC": "2026-10-13T20:18:22.308Z",
+      "freshPolicyAvailableConsentStillOffUTC": "2026-10-13T20:18:24.323Z",
+      "trigger": "The five-second policy fetch cancellation matches the fail-closed policy catch. It is the trigger, not a commitment request aborted by teardown.",
+      "individualServerRequestArrivalProved": false,
+      "underlyingTransportProxyBrowserCauseProved": false,
+      "relevantServerPolicyHeaderMaxMs": 0.2,
+      "relevantServerPolicyTerminalMaxMs": 3,
+      "relevantServerEventLoopDelayMaxMs": 25.3
+    },
+    "viewerResults": [
+      {
+        "name": "contributor-low",
+        "receivedPeerBytes": 0,
+        "uploadedBytes": 60508176,
+        "verifiedPeerLoads": 0,
+        "contributionWithdrawn": false,
+        "fatalHighwater": 0,
+        "nativeHighwater": 0,
+        "stallsHighwater": 0,
+        "intervalsWithoutFrameProgress": 0,
+        "videoQualities": [
+          "low"
+        ],
+        "audioQualities": [
+          "low"
+        ]
+      },
+      {
+        "name": "contributor-high",
+        "receivedPeerBytes": 0,
+        "uploadedBytes": 0,
+        "verifiedPeerLoads": 0,
+        "contributionWithdrawn": true,
+        "fatalHighwater": 0,
+        "nativeHighwater": 0,
+        "stallsHighwater": 0,
+        "intervalsWithoutFrameProgress": 0,
+        "videoQualities": [
+          "high"
+        ],
+        "audioQualities": [
+          "high"
+        ]
+      },
+      {
+        "name": "origin-baseline-low",
+        "receivedPeerBytes": 0,
+        "uploadedBytes": 0,
+        "verifiedPeerLoads": 0,
+        "contributionWithdrawn": false,
+        "fatalHighwater": 0,
+        "nativeHighwater": 0,
+        "stallsHighwater": 0,
+        "intervalsWithoutFrameProgress": 0,
+        "videoQualities": [
+          "low"
+        ],
+        "audioQualities": [
+          "low"
+        ]
+      },
+      {
+        "name": "receive-only",
+        "receivedPeerBytes": 60508176,
+        "uploadedBytes": 0,
+        "verifiedPeerLoads": 287,
+        "contributionWithdrawn": false,
+        "fatalHighwater": 0,
+        "nativeHighwater": 0,
+        "stallsHighwater": 0,
+        "intervalsWithoutFrameProgress": 0,
+        "videoQualities": [
+          "low"
+        ],
+        "audioQualities": [
+          "low"
+        ]
+      }
+    ],
+    "plannedHighReceiverPhaseMeasured": false,
+    "browserCleanupPassed": true,
+    "providerReaderCleanupPassed": true,
+    "traceDropsOrWriteErrors": 0,
+    "sourceMediaMaximumSeconds": 7800,
+    "sourceIndependentWallBoundSeconds": 7795,
+    "firstSourceExpiryRefusalPreserved": true,
+    "firstSourceExpiryRefusalCreatedChrome": false
+  },
+  "tcpTurnSshSimulation": {
+    "receipt": "artifacts/turn-tcp-config-20261013/root-ssh-execution-r5/browser-run/receipt.json",
+    "receiptSHA256": "f620befa8a3dacc69dcdd7907a6c533ecca90e8e46e025d244886d60efa0424f",
+    "ok": true,
+    "measuredMs": 5036,
+    "wholeBrowserMs": 22864,
+    "verifiedBytes": 224096,
+    "verifiedSegments": 2,
+    "scope": "Actual temporary browser credentials and an injected forced relay policy; TCP TURN over an operator-owned SSH local forward into a relay-host self-routing fixture, with a local publisher and data channel only.",
+    "directInternetTurn": false,
+    "hardNAT": false,
+    "physicalDevice": false,
+    "trustedStart": true,
+    "fakeMediaOrMdnsFlags": false,
+    "normalTLS": true,
+    "relayPolicyInjection": true,
+    "originalControllerCleanupRemainsRed": true,
+    "explicitRootCleanupResolutionPassed": true,
+    "rootCleanupReceipt": "artifacts/turn-tcp-config-20261013/root-ssh-execution-r5/root-cleanup-resolution.json",
+    "existingFirewallSetMembershipDifferenceRetained": true,
+    "exactExpiryCauseProved": false,
+    "rootChangedFirewallRules": false
+  },
+  "physicalPixel": {
+    "receipt": "artifacts/physical-android-f999-owner-unlocked/summary.json",
+    "receiptSHA256": "a58d9362abc2cac1f16b0d74003694335dc7fa5dfab6832221a215b3fe7b53be",
+    "browser": "Vanadium",
+    "recordedUTC": "2026-10-13T20:12:37.794Z",
+    "originControlsPassed": true,
+    "rawOverallReceiptOK": false,
+    "actualFramesLowAndHigh": true,
+    "seekPassed": true,
+    "backgroundResumePassed": true,
+    "originOnlyControlPassed": true,
+    "uploadedBytes": 0,
+    "verifiedPeerBytes": 0,
+    "peerAssessment": "Unmeasured: no available contributor actor in this physical check.",
+    "completePeerAcceptanceProved": false,
+    "existingPrivacyPolicyUnchanged": true,
+    "fatalHlsErrors": 0,
+    "nativeVideoErrorObserved": false,
+    "independentNativeErrorCountInstrumented": false,
+    "stalls": 0,
+    "earlierDefaultAndTemporaryPolicyPeerRedsRetained": true,
+    "ownedPhoneAccessClosedUTC": "2026-10-13T20:12:38.545278+00:00"
+  },
+  "cleanup": {
+    "allOwnedCandidateSourcesRemoved": true,
+    "sourceCleanupReceipts": [
+      {
+        "path": "artifacts/deployment-f9990b3-preparation/host-cleanup-verification-source.json",
+        "sha256": "cb5c9b86925173c05b9b2be768d24552164f4b0d25c96d938e86a4c78e0f7fed",
+        "ok": true
+      },
+      {
+        "path": "artifacts/deployment-f9990b3-preparation/concurrent-source-cleanup.json",
+        "sha256": "5b1a2538554df95f4016fb46584514b4de3b23737f33c935594ddd4b8f618ea6",
+        "ok": true
+      },
+      {
+        "path": "artifacts/control-diagnostic-source-f9990b3-preparation/host-cleanup.json",
+        "sha256": "256f2495d67bf541803de592ccfa99ae9d85e5ff35103287f4af42701b894066",
+        "ok": true
+      },
+      {
+        "path": "artifacts/public-two-hour-f9990b3-preparation/source/host-cleanup.json",
+        "sha256": "ea9adee353b0c81c7d20af583a3aa7cdfb15b6553a4f8eb6fca19027751bf92d",
+        "ok": true
+      },
+      {
+        "path": "artifacts/public-two-hour-f9990b3-preparation/source-r2/host-cleanup.json",
+        "sha256": "8d35ced75703d830d02301bd69a6770a941b0290ce3e8cf4d0b876979c0358b5",
+        "ok": true
+      }
+    ],
+    "latestSourceRemovedUTC": "2026-10-13T20:28:58.987088+00:00",
+    "latestSourceIdentityMatched": true,
+    "pilotCurrentFreshIngestClaim": false
+  },
+  "remainingFullScope": [
+    "Sustained deployed contribution with a complete 7,200-second receipt.",
+    "Safari and physical Android/iPhone verified peer and background journeys.",
+    "Actual native application/input and wider physical integration.",
+    "Direct Internet TCP TURN and varied/hard-NAT acceptance.",
+    "Matched total wire traffic, resource and provider-cost attribution.",
+    "Final source CI, package, downloaded-release validation and publication."
+  ],
+  "historicalRecordsPreserved": [
+    "a023 deployed 7,205.094-second contribution red, including 34 zero-frame intervals and stalls.",
+    "Earlier f999 four-role public contribution red.",
+    "First diagnostic receipt-persistence red.",
+    "Source-expiry refusal before Chrome.",
+    "Safari and default/temporary-policy Pixel peer reds.",
+    "iPhone owner origin pass and background red."
+  ],
+  "limits": [
+    "Signed verified media payload is not total wire traffic or provider billing.",
+    "Successful SDK/browser protocol interoperability does not replace native application/input acceptance.",
+    "Decoded audio progress in automated Chrome is not physical audibility.",
+    "Aggregate server counters cannot identify an individual timed-out request.",
+    "No personal device IDs, credentials, candidate addresses, request URLs/query/body/header sets or private filesystem paths are included."
+  ],
+  "proxyConfiguration": {
+    "caddyVersion": "2.11.7",
+    "candidateCaddyfileSHA256": "9735d7065291fdd1d625e149f18132a290c7d68b1576922ffb54cf992bae960b",
+    "pinnedBinaryValidation": "green",
+    "adapterDiff": "h1/h2 plus one Alt-Svc clear handler only",
+    "normalTLSHTTP1": {
+      "ok": true,
+      "normalTLS": true,
+      "httpVersion": "1.1",
+      "status": 200,
+      "altSvcClear": true,
+      "clientBytes": 723954,
+      "clientSHA256": "b746f45216d3ac6e5d1bd21b5748f91c0115c71d00ee678c930070596bbef50d"
+    },
+    "reloadAndAudit": {
+      "ok": true,
+      "phase": "audit",
+      "journalPhase": "committed",
+      "watchdogAbsent": true,
+      "receipt": {
+        "failureClass": null,
+        "finalAudit": true,
+        "finalAuditFailureClass": null,
+        "ok": true,
+        "phase": "committed",
+        "scope": "proxy configuration only; policy-timeout cause not proved",
+        "watchdogExitCode": 0,
+        "watchdogReaped": true
+      },
+      "publicChecks": [
+        {
+          "altSvcClear": true,
+          "httpVersion": "2",
+          "route": "client",
+          "status": 200
+        },
+        {
+          "altSvcClear": true,
+          "httpVersion": "2",
+          "route": "policy",
+          "status": 200
+        },
+        {
+          "altSvcClear": true,
+          "httpVersion": "2",
+          "route": "session",
+          "status": 200
+        }
+      ],
+      "inode": 414178,
+      "elapsedMs": 323
+    },
+    "namespaceUDP443Listeners": 0,
+    "fileInodePreserved": true,
+    "appRouterProxyNotRestarted": true,
+    "priorPolicyTimeoutCauseProved": false,
+    "receipt": "artifacts/caddy-tcp-only-20261013/root-r6-apply.json",
+    "receiptSHA256": "9d5ee4aa0e9cc44b26fc67086d1cd097c369ac9042d876ef04e39f1481f06bfb"
+  },
+  "publicAfterProxy": {
+    "sourceSha": "f9990b36956282f3d4e849b55bd64a79eb440151",
+    "ok": false,
+    "startedAtUTC": "2026-10-13T21:03:33.882Z",
+    "measurementStartedAtUTC": "2026-10-13T21:04:04.003Z",
+    "measurementMs": 60120,
+    "gates": {
+      "playback": {
+        "status": "green",
+        "scope": "Actual frame/time plus native audio decoded-byte progress at each requested quality; zero fatal/native/page errors. Decode does not prove audible output."
+      },
+      "contribution": {
+        "status": "red",
+        "scope": "Both explicitly consented contributors remain serving and send media within100MB each; no reconsent/reset."
+      },
+      "verifiedPeerPayload": {
+        "status": "red",
+        "scope": "Receive-only actor records verified peer bytes/fragments at low and high qualities during the measured window; links alone do not pass."
+      }
+    },
+    "roles": [
+      {
+        "name": "contributor-low",
+        "videoQualities": [
+          "low"
+        ],
+        "audioQualities": [
+          "low"
+        ],
+        "verifiedPeerQualities": [],
+        "fatalHighwater": 0,
+        "nativeHighwater": 0,
+        "stallsHighwater": 1,
+        "contributionWithdrawn": true,
+        "allowanceViolation": false,
+        "unconsentedUpload": false,
+        "reportingViolation": false,
+        "totals": {
+          "peerFirstBytes": 0,
+          "uploaded": 2942952,
+          "peerFirstLoads": 0
+        },
+        "finalConsent": false,
+        "finalServing": false
+      },
+      {
+        "name": "contributor-high",
+        "videoQualities": [
+          "high"
+        ],
+        "audioQualities": [
+          "high"
+        ],
+        "verifiedPeerQualities": [],
+        "fatalHighwater": 0,
+        "nativeHighwater": 0,
+        "stallsHighwater": 2,
+        "contributionWithdrawn": true,
+        "allowanceViolation": false,
+        "unconsentedUpload": false,
+        "reportingViolation": false,
+        "totals": {
+          "peerFirstBytes": 0,
+          "uploaded": 0,
+          "peerFirstLoads": 0
+        },
+        "finalConsent": false,
+        "finalServing": false
+      },
+      {
+        "name": "origin-baseline-low",
+        "videoQualities": [
+          "low"
+        ],
+        "audioQualities": [
+          "low"
+        ],
+        "verifiedPeerQualities": [],
+        "fatalHighwater": 0,
+        "nativeHighwater": 0,
+        "stallsHighwater": 0,
+        "contributionWithdrawn": false,
+        "allowanceViolation": false,
+        "unconsentedUpload": false,
+        "reportingViolation": false,
+        "totals": {
+          "peerFirstBytes": 0,
+          "uploaded": 0,
+          "peerFirstLoads": 0
+        },
+        "finalConsent": false,
+        "finalServing": false
+      },
+      {
+        "name": "receive-only",
+        "videoQualities": [
+          "low",
+          "high"
+        ],
+        "audioQualities": [
+          "low",
+          "high"
+        ],
+        "verifiedPeerQualities": [
+          "low"
+        ],
+        "fatalHighwater": 0,
+        "nativeHighwater": 0,
+        "stallsHighwater": 1,
+        "contributionWithdrawn": false,
+        "allowanceViolation": false,
+        "unconsentedUpload": false,
+        "reportingViolation": false,
+        "totals": {
+          "peerFirstBytes": 2731076,
+          "uploaded": 0,
+          "peerFirstLoads": 13
+        },
+        "finalConsent": false,
+        "finalServing": false
+      }
+    ],
+    "netlog": {
+      "bytes": 0,
+      "files": 1,
+      "privateModes": true,
+      "withinBound": true,
+      "highWaterBytes": 0,
+      "guardTriggered": false,
+      "rawPrivate": true,
+      "rawRetained": true,
+      "loggingOverheadUnquantified": true,
+      "hardFilesystemQuota": false,
+      "summaryStatus": "incomplete-json",
+      "protocolOrQueueEvidenceAvailable": false,
+      "failure": "Empty raw capture; cause not established; incomplete-json must not be called a protocol pass"
+    },
+    "cleanup": {
+      "browserProved": true,
+      "providerProved": true,
+      "sourceProved": true
+    },
+    "forensicLimitations": [
+      "No NetLog events available, so no HTTP2/QUIC selection or queue timing can be extracted.",
+      "Logging instrumentation overhead is unquantified; actual logging activation is not proved by flags or empty file.",
+      "First high session timeout preceded measured window. Later low policy timeout also revoked consent. No automatic reconsent occurred.",
+      "Proxy configuration fix is independent; timeout recurrence does not identify historic or current cause.",
+      "No new host requests/browser/source/device activity during analysis."
+    ],
+    "evidenceHashes": {
+      "artifacts/public-netlog-f9990b3-run-20261013/wrapper-receipt.json": "32ab012594f54d4ab8bef77aa6492ed4411980bc73c74657af7936825315019d",
+      "artifacts/public-netlog-f9990b3-run-20261013/browser/receipt.json": "89c8676d5909a8da9ee9a7870103bd3afd87a047278d0c6abb048d66c75ac65d",
+      "artifacts/public-netlog-f9990b3-run-20261013/browser/netlog-summary.json": "ed325dadd699e73c16f1f034b5046cd6492e3658da07a234ccd9f75c3d8394b8",
+      "artifacts/public-netlog-f9990b3-run-20261013/provider/receipt.json": "5b7c33b0e724da223559994511c03e098bdb44168378a91f7ebc77b17e3ad79c",
+      "artifacts/public-netlog-source-f9990b3-preparation/host-cleanup.json": "e82eff95bcbc2a9a2fcd41d45db432300933db273bdee5ce87874a6e683a8f80"
+    },
+    "controlFailureCount": 6,
+    "firstWithdrawalTrigger": {
+      "role": "contributor-high",
+      "route": "session",
+      "durationMs": 5000.9,
+      "duringWarmup": true,
+      "underlyingCauseProved": false
+    }
+  }
+}

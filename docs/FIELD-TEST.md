@@ -232,8 +232,14 @@ Chrome tests.
 
 ## Current field checkpoint: 13 October 2026
 
-The last verified pilot deployment used source `219719843f3f7175725d16535749b303c8e34cc4`,
-client SHA-256 `3e97b497acf0fc7ff6d79781e48a0d54d1ca7c70a05f9cf41585ec8d390c0ce9`.
+The latest verified pilot checkpoint used source `f9990b36956282f3d4e849b55bd64a79eb440151`,
+client SHA-256 `b746f45216d3ac6e5d1bd21b5748f91c0115c71d00ee678c930070596bbef50d`
+(723,954 bytes), with nine required jobs green in
+[CI run 38449139246](https://github.com/forgesworn/relayswarm/actions/runs/38449139246).
+A later proxy-only h1/h2 and `Alt-Svc: clear` configuration passed pinned-binary
+validation and a guarded in-place reload, with fresh HTTP/1.1 and HTTP/2 checks
+and unchanged application identity. It does not establish the cause of the
+recorded policy timeout. The [f999 public field summary](../spikes/results/f999-public-field-summary-20261013.json) records the later measurements. These receipts describe past test windows, not a final release.
 The [current acceptance summary](../spikes/results/current-source-acceptance-summary-20261013.json)
 retains the earlier a023 load/churn and field results with their original identity.
 Its named raw receipts remain local evidence; the summary excludes private
@@ -243,9 +249,13 @@ device identifiers, credentials and personal filesystem paths.
 |---|---|---|
 | CI two-hour load/churn | Twelve honest roles, 22 replacements, zero retained stalls/fatal hls.js errors and clean resource stops | Loopback flags and host candidates; native media errors not separately instrumented |
 | Deployed 7,205 s four-context run | Completed but red: policy timeout withdrew contribution before quota exhaustion; 34 zero-frame intervals and stalls retained | Same Mac/headless contexts; separate support audiences prevent controlled traffic attribution |
+| f999 ordinary public 60.008 s | Requested video/audio qualities, both contributors and verified receive-only payload passed; 10,576,128 peer bytes, zero uploads/fatal/native errors/stalls | One same-laptop `host/host` browser process; short result does not close sustained/hard-NAT/cost gates |
+| f999 attempted public two-hour rerun | Stopped after 644.855 s whole/611.134 s measured; high upload cleared during warmup following a five-second policy fetch cancellation; low receiver retained 60,508,176 peer bytes | No high receiver phase or 7,200 s completion; individual transport/proxy/browser cause unproved; historical reds retained |
+| f999 public 60.120 s after proxy correction | Decode passed; contribution and peer payload at both qualities failed; receiver accepted 2,731,076 low peer bytes/13 loads; first high session timeout preceded measurement | Empty requested NetLog capture; underlying cause unproved, stalls retained, all owned actors/readers/source cleaned |
+| TCP TURN over owned SSH forward | 224,096 signed media bytes/two segments verified in 5.036 s; browser and later explicit cleanup audit passed | Forced relay-policy data-channel/self-routing simulation, not direct Internet TURN, physical playback or hard-NAT proof; original controller red retained |
 | Installed Firefox with ordinary contributors | Verified receive/upload, quality, seek, quota across reload, fresh consent and origin kill passed | One installed-browser journey; native-picker/human usability and hard NAT not proved |
 | Visible Safari with ordinary contributors | Origin video played; five RTC links but zero peer payload inside gate | Complete verified receive/upload/reload/kill journey remains red |
-| Physical Pixel/Vanadium | Origin video observation; default and temporary-policy peer gates red | Temporary policy restored; connections to non-serving roles do not prove peer transfer |
+| Physical Pixel/Vanadium | Later f999 actual origin frames, low/high quality, seek and background/resume passed; upload off and privacy unchanged | Peer unmeasured without a contributor in this check; original raw overall false plus default/temporary-policy reds retained; phone access closed |
 | Physical iPhone/Safari | Owner observed moving origin video and audible tone | Owner background/Play return remained stopped; engine diagnosis, peer and complete input journey open |
 | a023 host parent crash | Explicit audited dirty-marker recovery; same page progressed low/high at continuity 17, final 15 s frames and cleanup passed | One short origin-only observer, with stall and transient HTTP errors; no automatic clean-drain claim |
 | Resource/network supplement | Exact owned-process/container and partial isolated HTTPS TCP counters retained | Missing windows, resets and other audiences; total wire and billed cost unproved |

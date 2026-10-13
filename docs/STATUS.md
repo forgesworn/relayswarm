@@ -62,23 +62,39 @@ merged source do not establish production readiness.
 
 ## Current source acceptance on 13 October
 
-The last verified public pilot upgrade used source
-`768a3a4f20d91bf2194513181354be70f6a8e5da`, whose nine required jobs passed in
+The latest verified public pilot checkpoint used source
+`f9990b36956282f3d4e849b55bd64a79eb440151`, whose nine required jobs passed in
+[CI run 38449139246](https://github.com/forgesworn/relayswarm/actions/runs/38449139246).
+Its image is `sha256:20199491827b9ea69ac560ac50be5eed5376aab30fbd0a07227544ce8898b243`;
+its public client SHA-256 is
+`b746f45216d3ac6e5d1bd21b5748f91c0115c71d00ee678c930070596bbef50d`
+(723,954 bytes). Normal public TLS, both fresh rendition playlists and retained
+publisher identity were verified. The image permission challenge extracted
+public directories as 0700 and files as 0600, then proved all 50 copied files,
+module imports and actual entry-point help readable by UID 1000 without network
+or state mounts. The permanent Dockerfile defence normalises copied public
+runtime permissions while leaving private state untouched. Clean production-only
+package consumption and the standalone ESM candidate also passed locally.
+These facts bind the f999 application snapshot. A later proxy-only change was
+validated with the pinned Caddy 2.11.7 binary and reloaded in place: the TCP-only
+overlay now enables HTTP/1.1 and HTTP/2 and returns `Alt-Svc: clear`. Fresh normal-TLS
+checks passed for both protocols with the same client identity. The Caddyfile
+inode, app/router/proxy container identities and mounts remained unchanged; no
+UDP 443 listener remained and the rollback watchdog was reaped. This corrects an
+unavailable HTTP/3 advertisement; it does not establish the cause of previous
+policy timeouts. Final candidate CI, v0.2.0 assets and fresh downloaded-release
+consumer verification remain pending.
+
+The earlier `768a3a4f20d91bf2194513181354be70f6a8e5da` passed nine required jobs in
 [CI run 38439565770](https://github.com/forgesworn/relayswarm/actions/runs/38439565770).
-Its client bundle SHA-256 is
-`1e63662e12b392c9d2a61c1adb95d65253f4e41061adfb9c50855e0da5d36549`
-(722,414 bytes). Normal public TLS, both fresh rendition playlists and retained
-publisher identity were verified. Its first image failed before startup because
-archived public directories were unreadable by UID 1000. Explicit audited
-rollback restored the previous image without deleting state or fences. The
-corrected image passed a non-root, no-network check of all 50 copied runtime
-files, module imports and the actual container entry point before replacement.
-The earlier source `a0231aadcdd81fe67fe702ac7214042d196eb39f` passed ten jobs,
-including the optional two-hour soak, in
+Its first image failed before startup because archived public directories were
+unreadable by UID 1000. Explicit audited rollback restored the previous image
+without deleting state or fences; the corrected image passed its non-root
+50-file/import/entry-point preflight before replacement. Source
+`a0231aadcdd81fe67fe702ac7214042d196eb39f` passed ten jobs, including the optional
+two-hour soak, in
 [CI run 38392804791](https://github.com/forgesworn/relayswarm/actions/runs/38392804791).
-Each result applies to its tested source. The next sparse-audio recovery and
-permanent image-permission changes require their own final CI and deployment.
-v0.2.0 release assets and fresh downloaded-consumer verification remain pending.
+Each result retains its original tested source.
 
 The a023 CI soak measured 7,200.366 s after its final arrival wave, with twelve
 honest viewer roles, one corrupt peer and one origin-only baseline. Twenty-two
@@ -102,6 +118,54 @@ peer bytes with zero uploads, including receiving from separately recorded
 support actors after formal contribution stopped. The red result is not
 reclassified as a sustained peer or production-capacity pass.
 
+A later f999 public ordinary-Chrome observer measured 60.008 s and passed its
+three separate gates: video/native-audio decode at the requested qualities,
+both explicit contributors remaining serving, and verified receive-only peer
+payload at low and high. Contributors reserved 3,151,256 and 8,106,372 media
+bytes; the receiver accepted 10,576,128 bytes in 26 verified loads with zero
+upload. Fatal/native/page errors and stalls were zero. No fake media, permission,
+mDNS, RTC or TLS overrides were used. This short same-laptop `host/host` result
+does not close the deployed two-hour gate. The preceding public contribution red
+and first diagnostic observer's receipt-file race remain preserved separately.
+
+The next f999 public two-hour attempt was stopped incomplete after 644.855 s
+whole observer lifetime and 611.134 s measured, rather than 7,200 s. High
+contribution failed during warmup: `/delivery-policy.json` started at
+20:18:17.082 UTC, returned no observed headers or body, and was cancelled by the
+existing five-second deadline. At 20:18:22.308, the own DOM showed policy
+unavailable, upload unchecked and origin fallback. At 20:18:24.323 the policy
+was available again, with upload still unchecked. No reconsent or quota reset
+was applied. The request is the demonstrated withdrawal trigger; aggregate
+server windows showed fast handler work, but cannot establish whether this
+individual request reached the app or identify transport, proxy or browser
+scheduling as the cause. Partial video/audio progress and zero fatal/native
+errors/stalls were retained; the receiver accepted 60,508,176 low-quality peer
+bytes. There was no measured high receiver phase or completed sustained pass.
+The first source-expiry refusal created no Chrome actor. All owned sources,
+browser groups, profiles and readers from these checks were subsequently
+removed/stopped with guarded receipts; the pilot awaits its next ingest.
+
+A subsequent public Chrome check after the proxy change measured 60.120 s.
+Video/audio decode passed; contribution and peer payload at both qualities
+failed. A five-second session fetch cancellation withdrew high contribution
+during warmup, and a later policy cancellation withdrew low contribution.
+The receiver accepted 2,731,076 low-quality peer bytes in 13 loads, with no
+upload or verified high-quality loads. Fatal/native errors were zero; stalls
+were 1/2/0/1 across low/high/origin/receiver. The requested private NetLog capture
+was empty, so protocol and queue attribution remain unavailable. All owned
+browsers, readers and the finite source were stopped/removed. The independent
+proxy correction does not close sustained contribution or identify the cause.
+
+A separate TCP TURN test accepted 224,096 signed, verified media bytes in two
+segments during 5.036 s. It used actual temporary browser credentials and a
+forced relay policy over an operator-owned SSH TCP forward to the relay host's
+self-routing fixture. It was a data-channel simulation with a local publisher,
+not direct Internet TURN, hard-NAT or physical playback proof. The browser
+receipt passed, while the original controller cleanup stayed red; a later
+explicit root audit verified fixture/container/credential/listener removal and
+unchanged project services/firewall rules. An observed existing firewall set
+membership difference was retained without a proven expiry cause.
+
 An installed Firefox 152.0.6 public journey with ordinary Chrome contributors
 passed verified receiving/uploading, quality and seek, durable quota across
 reload, fresh consent and origin-only kill. Its pre-reload checkpoint recorded
@@ -112,7 +176,14 @@ payload within 45 s despite five RTC links; its complete peer journey remains
 red. The earlier Safari journey's peer bytes and later pause are retained
 separately and do not close that gate.
 
-Physical Pixel/Vanadium peer acceptance remains red. A separately authorised
+A later physical Pixel/Vanadium check against f999 passed actual origin frames
+at low and high quality, seek and background/resume. Uploading stayed off, the
+existing UDP privacy policy was unchanged, and the owned phone access was closed
+by 20:12:38 UTC. Peer payload was zero because no contributor actor was available
+for that check; peer acceptance is unmeasured. Its raw overall receipt stays
+false and the earlier default/temporary-policy peer reds are retained.
+
+Physical Pixel/Vanadium peer acceptance from the earlier tests remains red. A separately authorised
 temporary public-interface-only WebRTC policy test also missed its 45 s peer
 gate; the original restrictive policy was restored and verified by 14:37:34 UTC.
 All retained links in that diagnostic matched known non-serving formal roles,

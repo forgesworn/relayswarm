@@ -79,7 +79,11 @@ docker compose --env-file deploy/.env -f deploy/compose.yml \
   -f deploy/compose.caddy.yml --profile standalone-https up -d
 ```
 
+The overlay publishes TCP ports 80 and 443. The Caddyfile explicitly enables HTTP/1.1 and HTTP/2 and sends `Alt-Svc: clear` so clients invalidate previously advertised HTTP/3 alternatives. It does not publish a UDP listener. These settings follow [Caddy's server protocol options](https://caddyserver.com/docs/caddyfile/options#servers) and [RFC 7838's cache invalidation rule](https://www.rfc-editor.org/rfc/rfc7838#section-3).
+
 Caddy obtains certificates for `PUBLIC_URL` and proxies WebSockets/media directly to the app on its outbound Docker network. Its named certificate volume contains private TLS keys. Preserve it privately across restarts; this does not replace an existing proxy. Use the same overlay/profile when stopping the stack so Caddy is included. To remove the optional proxy while preserving the broadcaster, stop/remove only the `https` service through that overlay; do not remove certificate volumes as part of routine rollback. Combining the Caddy and YouTube overlays is supported by including both `-f` arguments.
+
+Before changing a running proxy, preserve its current Caddyfile privately and validate the candidate with the pinned Caddy version. Reload only the `https` service using `caddy reload`; a proxy configuration change does not require restarting the broadcaster. The Caddyfile is a file bind mount: preserve its inode when updating it, because replacing the host file by rename can leave the container reading the old inode. Verify the mounted bytes before reloading and retain the original bytes for a guarded rollback. Keep certificate volumes, app state and port mappings intact. See [Caddy's validation and reload commands](https://caddyserver.com/docs/command-line).
 
 ## Operator access and private identity
 
