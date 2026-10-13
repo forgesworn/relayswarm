@@ -556,6 +556,13 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
   discovery eviction, worker descendant cleanup and pending-write queue bounds.
 - Fixed expired host callbacks leaving HTTP requests outstanding, and added
   bounded native discovery when relays replay no ephemeral presence history.
+- Reproduced and repaired a nonfatal live-playback stall after an interrupted
+  quality switch and a new media continuity. A fresh live window and ten
+  seconds without decoded-frame progress permit the existing single origin
+  repair; cancellation, allowance usage and original errors remain preserved.
+- Made playback checks prove each rendition's peer delivery before seeking,
+  and added physical iPhone targeting and scoped Safari-window focus to the
+  acceptance harness.
 
 ## 0.2.0 source candidate — broadcaster work on 12 October 2026
 
@@ -1230,7 +1237,14 @@ The subsequent host-callback correction aborts each expired operation's HTTP
 request; real withholding tests show no outstanding request accumulation.
 Native discovery also works with zero ephemeral-history replay: a separate
 process verified 131,097 bytes. Both changes retain the existing deadlines,
-authorisation and consent rules; their final-source CI/deployment is pending.
+authorisation and consent rules. All nine standard jobs passed at
+[`8d5cae3`](https://github.com/forgesworn/relayswarm/actions/runs/38383249960),
+and its exact image and committed browser bundle run on the public pilot.
+The playback job required an unchanged-source rerun. A later dispatch repeated
+the high-rendition miss: the fixture sought before that rendition's peer
+opportunity completed. Bounded per-rendition checkpoints now precede the
+intentional seek; the actual corrected test received 31 peer loads
+(8,662,100 bytes), with zero stalls or fatal/native errors.
 Separately, one native WAN retry accepted all bytes within 8,873 ms, while
 another timed out before a UDP route/Noise handoff. That variability remains
 open and is not explained by the ephemeral-history discovery correction.
@@ -1239,11 +1253,38 @@ The Pixel is connected again and initial origin playback started, but its
 first acceptance run received no verified peer media. Firefox also missed
 peer delivery in its first run. Safari automation is now enabled: omitting
 its optional certificate capability returned `acceptInsecureCerts: false`,
-but its automation page was hidden during the readiness check. Complete
-device/browser journeys remain open. The private YouTube test is awaiting
-private channel setup and forwarding acceptance. The earlier hosted H.264
-MSE cause, varied NAT, hours of audience/cost evidence, restart/rollback and
-final release/deployment acceptance remain open.
+and selecting its own automation window passed visible-tab readiness with
+consent off. Complete device/browser journeys remain open. The authorised
+private YouTube test reported excellent stream health; its owner watch page
+decoded 428 more video frames and 232,756 more audio bytes over 14.268 s.
+The stream ended, the archive was deleted and verified unavailable, forwarding
+was disabled and both temporary credential copies were removed. The channel's
+default stream key was unchanged. This proves synthetic-source external
+platform acceptance, with no public broadcast or OBS workstation claim.
+
+A separate installed OBS 32.1.2 test used only a generated video/audio scene,
+the localhost-only SSH ingest forward and an isolated task configuration.
+Over 92.7 s the public origin-only player decoded both qualities and audio,
+with zero stalls, fatal/native errors or uploads. OBS closed and the temporary
+configuration routes were restored. This is real OBS ingest acceptance; it
+does not combine OBS and YouTube into one measured run or prove physical
+audibility, screen/camera capture or peer delivery.
+
+An actual same-volume `4bffa96` to `8d5cae3` upgrade, rollback and second
+upgrade retained public identity, increasing sequences and both permanent
+lease inodes after clean worker shutdown. The same origin-only page recovered
+both qualities after the first two switches, but remained stalled after the
+last despite fresh playlists and zero fatal/native errors. Read-only library
+inspection and a real rolling-playlist control reproduced the obsolete
+continuity selection. The correction shares the existing one-attempt repair
+budget, revokes uploading and observes real decoded-frame progress. Treatment,
+actual held-request cancellation and the ten-second deadline pass locally;
+the new runtime still needs host acceptance. Old-source long runs were
+cancelled and are not final sustained-operation evidence.
+
+The [private-platform and live-restart summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/youtube-live-restart-summary-20261013.json)
+retains these outcomes. The earlier hosted H.264 MSE cause, varied NAT, hours
+of audience/cost evidence and final release/deployment acceptance remain open.
 Initial wider-media failures and later passes are retained;
 corrected codec-fixture metadata and startup quality handling do not by
 themselves establish the cause of the earlier hosted failure.
@@ -2561,6 +2602,14 @@ failure, user cancellation or publisher changes stop recovery. Budget state
 is preserved. A recovered outcome does not erase the fatal error or establish
 the cause of an earlier unrelated failure.
 
+The same single repair budget also covers a reproduced nonfatal live stall:
+successful playlists advance to a new continuity outside the current buffer,
+while decoded frames and playback time remain stopped for ten seconds. The
+demo restarts loading at the fresh live position through hls.js's public API.
+Actual rolling-playlist tests retain the failing control, recovered video,
+cancelled held requests and a ten-second no-progress failure. This does not
+establish the cause of the older hosted MSE append error.
+
 The publisher supports exact local playlist identities for mixed codec and
 frame-rate variants, alternate audio, fMP4 maps, complete low-latency parts and
 warm delta playlists. Schema 1 remains valid for its original contexts.
@@ -2672,17 +2721,17 @@ An entry remains open until the evidence described below exists.
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
 | P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Local Chrome evidence passes; final CI/deployment pending |
-| P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Real corrupt-media recovery/cancel/timeout evidence passes; historical cause remains open; final hosted repeat pending |
+| P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Corrupt-media and reproduced live-window stall repair/cancel/timeout tests pass; historical MSE cause and final hosted repeat remain open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Local Chrome evidence passes; final CI/deployment pending |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/Chrome evidence passes; final CI pending |
 | P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Local restart/Chrome/queue evidence passes; deployment pending |
 | P06 | Upload budgets across reloads and tabs | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; uploading still requires new consent | Actual Chrome reload/tab evidence passes; physical/deployment pending |
-| P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Local forced-parent/guardian/descendant tests pass; host acceptance pending |
+| P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Local ownership tests and host identity/sequence/lease preservation pass; same-page final restart stalled; corrected local regression passes, new host repeat pending |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Local scope/revocation/discovery evidence passes; final CI pending |
 | P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Clean production package/export/bundle/installed transfer/fallback evidence passes; final release asset verification pending |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0/main CI/assets and actual public-SDK/browser author/delegate/adversarial journeys pass; final JS head CI pending |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Open; nine CI jobs and exact public pilot at 4bffa96 pass; callback/discovery fixes need final CI/deployment; release/restart/rollback pending |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Open; nine standard jobs and deployed source at 8d5cae3 pass; live-restart correction needs final CI/deployment/host acceptance; release pending |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Private YouTube video/audio/end/deletion and separate real OBS ingest/playback pass; desktop Safari readiness passes; complete device and sustained/network/cost gates remain open |
 
 ## Evidence rules
 

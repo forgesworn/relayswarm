@@ -179,6 +179,9 @@ byId("settings").addEventListener("submit", async (event) => {
         render();
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => push(player.levelChanges, { atMs: elapsed(), level: data.level }));
+      hls.on(Hls.Events.LEVEL_UPDATED, (_event, { details }) => mediaRecovery.observeLive(details, {
+        lastFragmentCC: player.fragments.at(-1)?.discontinuity, fatalErrors: player.fatalErrors,
+      }));
       hls.on(Hls.Events.ERROR, (_event, data) => {
         push(player.errorRecords, { atMs: elapsed(), details: data.details, fatal: Boolean(data.fatal), type: data.type, reason: String(data.reason ?? "").slice(0, 512), message: String(data.error?.message ?? "").slice(0, 512), nativeError: video.error && { code: video.error.code, message: video.error.message.slice(0, 512) }, mediaType: data.frag?.type ?? null, playlist: data.frag ? segmentMediaContext({ frag: data.frag, url: data.frag.url })?.playlist ?? null : null }, 64);
         player.errors[data.details] = (player.errors[data.details] || 0) + 1;

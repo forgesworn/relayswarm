@@ -29,6 +29,14 @@ failure, user cancellation or publisher changes stop recovery. Budget state
 is preserved. A recovered outcome does not erase the fatal error or establish
 the cause of an earlier unrelated failure.
 
+The same single repair budget also covers a reproduced nonfatal live stall:
+successful playlists advance to a new continuity outside the current buffer,
+while decoded frames and playback time remain stopped for ten seconds. The
+demo restarts loading at the fresh live position through hls.js's public API.
+Actual rolling-playlist tests retain the failing control, recovered video,
+cancelled held requests and a ten-second no-progress failure. This does not
+establish the cause of the older hosted MSE append error.
+
 The publisher supports exact local playlist identities for mixed codec and
 frame-rate variants, alternate audio, fMP4 maps, complete low-latency parts and
 warm delta playlists. Schema 1 remains valid for its original contexts.

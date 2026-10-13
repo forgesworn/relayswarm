@@ -21,6 +21,13 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
   discovery eviction, worker descendant cleanup and pending-write queue bounds.
 - Fixed expired host callbacks leaving HTTP requests outstanding, and added
   bounded native discovery when relays replay no ephemeral presence history.
+- Reproduced and repaired a nonfatal live-playback stall after an interrupted
+  quality switch and a new media continuity. A fresh live window and ten
+  seconds without decoded-frame progress permit the existing single origin
+  repair; cancellation, allowance usage and original errors remain preserved.
+- Made playback checks prove each rendition's peer delivery before seeking,
+  and added physical iPhone targeting and scoped Safari-window focus to the
+  acceptance harness.
 
 ## 0.2.0 source candidate — broadcaster work on 12 October 2026
 

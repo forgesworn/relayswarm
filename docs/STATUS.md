@@ -123,7 +123,14 @@ The subsequent host-callback correction aborts each expired operation's HTTP
 request; real withholding tests show no outstanding request accumulation.
 Native discovery also works with zero ephemeral-history replay: a separate
 process verified 131,097 bytes. Both changes retain the existing deadlines,
-authorisation and consent rules; their final-source CI/deployment is pending.
+authorisation and consent rules. All nine standard jobs passed at
+[`8d5cae3`](https://github.com/forgesworn/relayswarm/actions/runs/38383249960),
+and its exact image and committed browser bundle run on the public pilot.
+The playback job required an unchanged-source rerun. A later dispatch repeated
+the high-rendition miss: the fixture sought before that rendition's peer
+opportunity completed. Bounded per-rendition checkpoints now precede the
+intentional seek; the actual corrected test received 31 peer loads
+(8,662,100 bytes), with zero stalls or fatal/native errors.
 Separately, one native WAN retry accepted all bytes within 8,873 ms, while
 another timed out before a UDP route/Noise handoff. That variability remains
 open and is not explained by the ephemeral-history discovery correction.
@@ -132,11 +139,38 @@ The Pixel is connected again and initial origin playback started, but its
 first acceptance run received no verified peer media. Firefox also missed
 peer delivery in its first run. Safari automation is now enabled: omitting
 its optional certificate capability returned `acceptInsecureCerts: false`,
-but its automation page was hidden during the readiness check. Complete
-device/browser journeys remain open. The private YouTube test is awaiting
-private channel setup and forwarding acceptance. The earlier hosted H.264
-MSE cause, varied NAT, hours of audience/cost evidence, restart/rollback and
-final release/deployment acceptance remain open.
+and selecting its own automation window passed visible-tab readiness with
+consent off. Complete device/browser journeys remain open. The authorised
+private YouTube test reported excellent stream health; its owner watch page
+decoded 428 more video frames and 232,756 more audio bytes over 14.268 s.
+The stream ended, the archive was deleted and verified unavailable, forwarding
+was disabled and both temporary credential copies were removed. The channel's
+default stream key was unchanged. This proves synthetic-source external
+platform acceptance, with no public broadcast or OBS workstation claim.
+
+A separate installed OBS 32.1.2 test used only a generated video/audio scene,
+the localhost-only SSH ingest forward and an isolated task configuration.
+Over 92.7 s the public origin-only player decoded both qualities and audio,
+with zero stalls, fatal/native errors or uploads. OBS closed and the temporary
+configuration routes were restored. This is real OBS ingest acceptance; it
+does not combine OBS and YouTube into one measured run or prove physical
+audibility, screen/camera capture or peer delivery.
+
+An actual same-volume `4bffa96` to `8d5cae3` upgrade, rollback and second
+upgrade retained public identity, increasing sequences and both permanent
+lease inodes after clean worker shutdown. The same origin-only page recovered
+both qualities after the first two switches, but remained stalled after the
+last despite fresh playlists and zero fatal/native errors. Read-only library
+inspection and a real rolling-playlist control reproduced the obsolete
+continuity selection. The correction shares the existing one-attempt repair
+budget, revokes uploading and observes real decoded-frame progress. Treatment,
+actual held-request cancellation and the ten-second deadline pass locally;
+the new runtime still needs host acceptance. Old-source long runs were
+cancelled and are not final sustained-operation evidence.
+
+The [private-platform and live-restart summary](../spikes/results/youtube-live-restart-summary-20261013.json)
+retains these outcomes. The earlier hosted H.264 MSE cause, varied NAT, hours
+of audience/cost evidence and final release/deployment acceptance remain open.
 Initial wider-media failures and later passes are retained;
 corrected codec-fixture metadata and startup quality handling do not by
 themselves establish the cause of the earlier hosted failure.

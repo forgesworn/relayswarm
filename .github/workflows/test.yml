@@ -48,6 +48,7 @@ jobs:
       - run: npm run test:operator -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
       - run: CHROME_PATH=/opt/google/chrome/chrome npm run test:media-browser
       - run: CHROME_PATH=/opt/google/chrome/chrome npm run test:media-recovery
+      - run: CHROME_PATH=/opt/google/chrome/chrome npm run test:live-recovery
       - run: npm run test:broadcast
       - run: npm run test:broadcast:browser -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -62,6 +63,7 @@ jobs:
             artifacts/media-browser/*.json
             artifacts/ll-browser/*.json
             artifacts/media-recovery-browser/*.json
+            artifacts/live-restart-browser/**/*.json
 
   swift-interop:
     name: current Swift SDK and browser interoperability

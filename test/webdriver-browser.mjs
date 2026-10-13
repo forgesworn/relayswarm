@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Real desktop browser acceptance, with isolated WebDriver sessions. No personal
+// Real browser acceptance, with isolated WebDriver sessions. No personal
 // browser profiles, permission grants, fake media devices or global driver install.
 import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";
@@ -13,12 +13,20 @@ import { createServer } from "node:net";
 const run = promisify(execFile);
 const { values } = parseArgs({ options: {
   browser: { type: "string" }, driver: { type: "string" }, "download-driver": { type: "boolean", default: false },
+  platform: { type: "string", default: "desktop" }, "device-udid": { type: "string" },
   "browser-binary": { type: "string" }, url: { type: "string", default: "https://relayswarm.forgesworn.dev" },
   "expected-client-sha256": { type: "string" }, revision: { type: "string" },
   probe: { type: "boolean", default: false }, "results-dir": { type: "string" },
   "journey-ms": { type: "string", default: "180000" }, "reset-allowance": { type: "boolean", default: false },
 } });
 assert.ok(["firefox", "safari"].includes(values.browser), "Supply --browser firefox or safari.");
+assert.ok(["desktop", "ios"].includes(values.platform), "Supply --platform desktop or ios.");
+const physicalIOS = values.platform === "ios";
+assert.ok(!physicalIOS || values.browser === "safari", "Physical iOS requires --browser safari.");
+assert.ok(physicalIOS || values["device-udid"] === undefined, "Device pinning requires --platform ios.");
+assert.ok(!physicalIOS || /^(?:[a-f\d]{40}|[a-f\d]{8}-[a-f\d]{16})$/iu.test(values["device-udid"] ?? ""),
+  "Physical iOS requires an exact --device-udid in Apple's device identifier format.");
+assert.ok(!physicalIOS || !values["browser-binary"], "Physical iOS does not accept a desktop browser binary.");
 const origin = new URL(values.url), journeyMs = Number(values["journey-ms"]);
 assert.ok(origin.protocol === "https:" && !origin.username && !origin.password && origin.pathname === "/" && !origin.search && !origin.hash,
   "Use a credential-free public HTTPS origin.");
@@ -27,20 +35,23 @@ if (values["expected-client-sha256"]) assert.match(values["expected-client-sha25
 if (values.revision) assert.match(values.revision, /^[a-f0-9]{7,40}$/u);
 if (!values.probe) assert.ok(values["expected-client-sha256"], "Acceptance requires the expected deployed client SHA-256; use --probe for capabilities only.");
 assert.ok(!values["download-driver"] || values.browser === "firefox", "Download is supported only for the pinned Mozilla driver.");
-const results = resolve(values["results-dir"] ?? `artifacts/webdriver-${values.browser}`);
+const results = resolve(values["results-dir"] ?? `artifacts/webdriver-${values.browser}${physicalIOS ? "-ios" : ""}`);
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const log = (message) => console.error(`[webdriver-${values.browser}] ${message}`);
 const deadline = Date.now() + journeyMs;
 let scratch, driverProcess, sessionId, endpoint, driverOutput = "", journeyStarted = false;
 let exited = false, driverExit;
-const receipt = { v: 1, kind: "relayswarm-real-desktop-webdriver", browser: values.browser, target: origin.origin,
+const receipt = { v: 1, kind: physicalIOS ? "relayswarm-physical-ios-webdriver" : "relayswarm-real-desktop-webdriver", browser: values.browser, target: origin.origin,
   at: new Date().toISOString(), probe: values.probe, ok: false, checkpoints: [], playbackSamples: [], screenshots: [], interactions: [], failures: [], manualSteps: [],
   scope: { physicalAndroid: false, emulator: false, realInstalledBrowser: true, freshFirefoxProfile: values.browser === "firefox", isolatedSafariAutomationWindow: values.browser === "safari",
     targetScope: "new public RelaySwarm automation tab only", personalProfiles: "never selected", personalPages: "never enumerated or inspected", permissionOverrides: false,
     fakeMedia: false, systemSettingsChanged: false, peerAddresses: "not requested; IP-like diagnostic text redacted", qualitySelection: "DOM select/change automation; no native picker usability claim" },
   selectedCandidateTypes: {}, cleanup: {} };
+if (physicalIOS) Object.assign(receipt.scope, { requestedPlatform: "ios", physicalIPhone: false, exactDevicePinRequired: true,
+  isolatedIOSSafariAutomationWindow: true, nativeHLS: "engine determined during playback; native playback cannot establish peer transfer" });
 
 function redacted(input, key) {
+  if (typeof input === "string" && physicalIOS) input = input.replaceAll(values["device-udid"], "[redacted-device]");
   if (typeof input === "string") return ["userAgent", "browserVersion", "driverVersion"].includes(key) ? input
     : input.replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/gu, "[redacted-ip]")
       .replace(/\b(?:[a-f\d]{1,4}:){3,}[a-f\d:]*\b/giu, "[redacted-ip]");
@@ -57,7 +68,9 @@ async function command(method, path, body, timeout = 10000) {
   const response = await fetch(`${endpoint}${path}`, { method, ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }), signal: AbortSignal.timeout(timeout) });
   const data = JSON.parse((await boundedBody(response)).toString("utf8"));
   if (!response.ok || data.value?.error) {
-    const error = new Error(`${data.value?.error ?? response.status}: ${String(data.value?.message ?? "WebDriver command failed").slice(0, 1600)}`);
+    // iOS driver diagnostics can contain the connected device's personal name.
+    const detail = physicalIOS ? "Physical iOS WebDriver command failed; device details omitted." : String(data.value?.message ?? "WebDriver command failed").slice(0, 1600);
+    const error = new Error(`${data.value?.error ?? response.status}: ${detail}`);
     error.webdriver = data.value?.error; throw error;
   }
   return data.value;
@@ -149,10 +162,11 @@ async function startDriver() {
   driverProcess.once("exit", (code, signal) => { exited = true; driverExit = { code, signal }; });
   for (const source of [driverProcess.stdout, driverProcess.stderr]) source.on("data", (data) => { driverOutput = `${driverOutput}${data}`.slice(-8192); });
   await until(async () => {
-    if (exited) throw Error(`Owned WebDriver exited before readiness: ${driverOutput.slice(0, 1000)}`);
-    try { receipt.driverStatus = await command("GET", "/status", undefined, 800); return true; } catch { return false; }
+    if (exited) throw Error(`Owned WebDriver exited before readiness: ${physicalIOS ? "device details omitted" : driverOutput.slice(0, 1000)}`);
+    try { const status = await command("GET", "/status", undefined, 800); receipt.driverStatus = physicalIOS ? { ready: status.ready === true } : status; return true; } catch { return false; }
   }, "Owned WebDriver did not become ready.", 6000);
   const options = values.browser === "firefox" ? { browserName: "firefox", "moz:firefoxOptions": { ...(values["browser-binary"] ? { binary: resolve(values["browser-binary"]) } : {}), args: ["-no-remote"] } } : { browserName: "safari" };
+  if (physicalIOS) Object.assign(options, { platformName: "ios", "safari:deviceUDID": values["device-udid"], "safari:deviceType": "iPhone", "safari:useSimulator": false });
   // Safari's older driver returned true when explicitly given false. Omit this
   // optional capability there, then still require the actual response to be false.
   const certificateCapability = values.browser === "safari" ? {} : { acceptInsecureCerts: false };
@@ -162,6 +176,15 @@ async function startDriver() {
   receipt.capabilities = { browserName: session.capabilities?.browserName, browserVersion: session.capabilities?.browserVersion,
     platformName: session.capabilities?.platformName, acceptInsecureCerts: session.capabilities?.acceptInsecureCerts ?? null,
     setWindowRect: session.capabilities?.setWindowRect === true };
+  if (physicalIOS) {
+    const capabilities = session.capabilities ?? {};
+    assert.ok(String(capabilities.platformName).toLowerCase() === "ios", "Driver did not select iOS; refuse desktop fallback.");
+    assert.ok(String(capabilities.browserName).toLowerCase() === "safari", "Driver did not select Safari.");
+    assert.ok(capabilities["safari:useSimulator"] === false, "Driver did not confirm a physical device.");
+    assert.ok(String(capabilities["safari:deviceType"]).toLowerCase() === "iphone", "Driver did not confirm an iPhone.");
+    assert.ok(String(capabilities["safari:deviceUDID"]).toLowerCase() === values["device-udid"].toLowerCase(), "Driver did not confirm the exact device pin.");
+    receipt.scope.physicalIPhone = true;
+  }
   assert.equal(receipt.capabilities.acceptInsecureCerts, false, "Browser must verify public TLS normally.");
   await command("POST", `/session/${sessionId}/timeouts`, { script: 8000, pageLoad: 15000, implicit: 0 });
   await command("POST", `/session/${sessionId}/url`, { url: origin.href }, 18000);
@@ -177,6 +200,14 @@ try {
     receipt.deployment = { suppliedRevision: values.revision ?? null, clientSha256, expectedClientHashVerified: true };
   }
   await startDriver();
+  if (values.browser === "safari" && !physicalIOS) {
+    await ownTab();
+    const handle = await command("GET", `/session/${sessionId}/window`);
+    await command("POST", `/session/${sessionId}/window`, { handle });
+    await run("osascript", ["-e", 'tell application "Safari" to activate'], { timeout: 3000 });
+    receipt.windowFocus = { method: "WebDriver own window switch and Safari activation" };
+    await until(async () => await evaluate("document.visibilityState==='visible'"), "Own Safari automation window did not become visible.", 5000);
+  }
   await until(async () => await evaluate("window.relaySwarmDemo?.ready()===true && !document.getElementById('start').disabled"), "Hosted RelaySwarm player is not ready.", 15000);
   receipt.environment = await evaluate("({userAgent:navigator.userAgent,secureContext:isSecureContext,webdriver:navigator.webdriver===true,visibility:document.visibilityState,mse:typeof MediaSource!=='undefined',webrtc:typeof RTCPeerConnection!=='undefined',webLocks:!!navigator.locks})");
   assert.equal(receipt.environment.secureContext, true); assert.equal(receipt.environment.visibility, "visible");

@@ -60,9 +60,23 @@ try {
         totals: report.totals, mode: report.current?.mode, peers: report.current?.metrics.peers.connected, relays: report.current?.metrics.relays.connected };
     })) });
   };
-  await sleep(5000); await checkpoint("initial-low-rendition");
+  const verifiedPeerLevel = async (level, afterMs = -1) => {
+    const started = Date.now();
+    await consumer.page.waitForFunction(({ level, afterMs }) => window.relaySwarmDemo.report().player.fragments.some((frag) =>
+      frag.level === level && frag.atMs > afterMs && frag.source === "peer" && frag.statsLoaded === frag.size && frag.loadingMs > 0),
+    { level, afterMs }, { timeout: 20000 });
+    const report = await consumer.page.evaluate(() => window.relaySwarmDemo.report());
+    const fragment = report.player.fragments.find((frag) => frag.level === level && frag.atMs > afterMs && frag.source === "peer");
+    (receipt.verifiedQualityCheckpoints ??= []).push({ level, afterMs, waitedMs: Date.now() - started, fragment });
+  };
+  await sleep(5000); await verifiedPeerLevel(0); await checkpoint("initial-low-rendition");
+  const qualityChangeAtMs = await consumer.page.evaluate(() => window.relaySwarmDemo.report().durationMs);
   for (const viewer of [baseline, consumer]) await viewer.page.locator("#quality").selectOption("1");
-  await sleep(4000); await checkpoint("quality-change-high");
+  // The seeder's bounded cache can already have evicted the early high-quality
+  // segments. Prove this quality's peer delivery before intentionally seeking;
+  // a fixed four-second delay previously interrupted the first opportunity.
+  // This observation bound changes no media, origin or peer request deadline.
+  await verifiedPeerLevel(1, qualityChangeAtMs); await checkpoint("quality-change-high");
   for (const viewer of [baseline, consumer]) await viewer.page.evaluate(() => { window.relaySwarmDemo.media.currentTime = 30; });
   await sleep(4500); await checkpoint("seek-past-timestamp-reset");
   log("relay unavailable for three seconds"); demo.relay.pause(); await sleep(3000); demo.relay.resume();
