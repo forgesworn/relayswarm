@@ -60,7 +60,85 @@ The **0.2.0 source broadcaster candidate** includes the additions below.
 These changes are absent from v0.1.0's immutable release assets. Release and
 merged source do not establish production readiness.
 
-## Current source acceptance on 13 October
+## Current source acceptance on 14 October
+
+The deployed checkpoint is source
+`bb90bd6a54cabc163846ee1737ac3fe28b63eaa2`. All nine required jobs passed in
+[CI run 38478501111](https://github.com/forgesworn/relayswarm/actions/runs/38478501111);
+the optional long soak was skipped. Fresh offline production-only consumption
+passed all ten documented imports, exact packaged demo/renewal/recovery bytes,
+the installed CLI and independent-process verified native transfer plus HTTP
+fallback. The unpublished tarball contains 188 files, is 837,701 bytes and has
+SHA-256 `7358efafe3e3332d749e8ea515a70d8d2e8b8bb5721f97d2054e962170dce49e`.
+The standalone ESM is 114,201 bytes, SHA-256
+`01de11837fbd08098bf98b6e8be945866ef766f76629030fec89de2318170d19`.
+These local candidates do not prove downloaded-release acceptance.
+
+The guarded app-only deployment passed exact archive-byte verification, a
+51-file UID-1000 no-network/no-state-mount image preflight and a clean drain
+with all scoped old writers gone. Stable publisher identity, private lease/token
+metadata, shared services and the active TCP-only proxy configuration were
+preserved. The actual image is
+`sha256:1e63daaf47dd4e41cd28713838112e816a679a6017d1d440ce9e70a7a400a592`;
+its app started at 22:49:26.883960902 UTC on 13 October. Normal-TLS public client
+bytes matched SHA-256
+`25a8416911bc51b1f6764a784d4444295db02c12396c59ddd82450bf56fff58c`
+(728,262 bytes), both fresh playlists passed and reporting stayed off.
+
+The subsequent ordinary four-role Chrome 155.0.8059.40 public check measured
+60.010 s. Requested video/native-audio decode passed with zero fatal, native
+or page errors in every role; each contributor retained one stall. Both
+contributors uploaded zero bytes and the receiver verified zero peer bytes,
+so contribution and peer acceptance remain **red**. Trusted input enabled both
+upload controls, and recorded contributor rows stayed visible/focused. Their
+withdrawals closely matched the last completed renewal's issuance plus the
+five-second authority lifetime. Later overlapping policy requests showed about
+three seconds of delay before send and completed too late to preserve authority.
+This supports expiry as the withdrawal boundary, without a captured reason code
+or a proven cache, protocol, transport or host cause. The initial cancelled
+requests had no response, extra-info, protocol or send timing; successful
+neighbours used reused HTTP/2. A later admission-verification cancellation
+occurred after withdrawal and cannot explain its onset.
+
+Named receipts are `artifacts/public-cdp-bb90bd6-r3-analysis-20261014/analysis.json`
+and `artifacts/public-cdp-bb90bd6-r3-run-20261013/wrapper-receipt.json`.
+The public-safe analysis manifest SHA-256 is
+`bd2d5ad098ca639f83398aff5a8b4b23994817b67a892d723193439fd439c926`.
+Browser/provider cleanup passed. The observer intentionally did not remove
+Root's finite source; separate guarded cleanup passed in
+`artifacts/public-m4-phone-source-bb90bd6-preparation-20261013/host-cleanup.json`.
+This short desktop check does not close sustained, physical, hard-NAT or cost
+gates. v0.2.0 publication and downloaded-release acceptance remain pending.
+
+
+A separate local real-HTTP comparison on 14 October held the first policy
+response before headers. With the default client, the next identical-URL
+request reached the server after 5,002 ms and consent expired. An in-memory
+no-store comparison reached the server after 2,001 ms while the first request
+was still held, preserving consent and serving. Both retained the original
+five-second request timeout (5,000.4/5,000.8 ms observed). Ordinary Chrome,
+trusted native controls and real server arrival evidence were used, without
+route interception, cache flags, fake media or permission overrides.
+
+The supported production change adds `cache: 'no-store'` to three authoritative
+policy/session fetch calls; authority lifetimes, request deadlines and admission
+checks are unchanged. Prepared client SHA-256 is
+`b0bc1f84f9c24cdf210bbfdfec9eb25cbfdd07521fad0b43c90f299c66b8b2b8`.
+The comparison receipt is
+`artifacts/policy-cache-lock-20261014-run-r2/receipt.json`; its original failed
+setup and the earlier maintained-harness result remain separate. This establishes
+a local identical-request scheduling defect and a supported correction; it does
+not identify why the initial public request had no response. The final corrected
+maintained regression passed: later policy/session requests reached the real
+server after 2,000/2,001 ms while their predecessors were held. Full 503 outage
+expired authority and cleared consent; restored policy left consent off. Root's
+combined suite exited zero with eight existing operator checkpoints, 117
+publisher tests passed/one skipped and syntax checks for 105 modules. Source and
+evidence hashes were rechecked unchanged in
+`artifacts/policy-cache-integration-20261014/validation.json`. Browser/demo/relay/
+media closes were awaited; no independent kernel inventory was captured.
+New committed-source CI, package, image/client attestation and public acceptance
+are still required; the deployed bb90 contribution result remains red.
 
 The earlier candidate checkpoint is source
 `cee92281b20aa5e60fc39d0e0cb2a368daa83747`. All nine required jobs passed in
@@ -88,7 +166,7 @@ observation and preserves the timing assertions, including an 80 ms delayed
 client continuation. The cee checkpoint does not replace the deployed f999
 application or close its sustained public contribution/device/cost gates.
 
-The latest verified public pilot checkpoint used source
+The earlier verified public pilot checkpoint used source
 `f9990b36956282f3d4e849b55bd64a79eb440151`, whose nine required jobs passed in
 [CI run 38449139246](https://github.com/forgesworn/relayswarm/actions/runs/38449139246).
 Its image is `sha256:20199491827b9ea69ac560ac50be5eed5376aab30fbd0a07227544ce8898b243`;
@@ -207,8 +285,9 @@ checks for 103 modules passed; the publisher suite passed 117 tests with one
 skip. This loopback fixture uses its existing fake WebRTC permission/media
 flags and does not prove public, physical or NAT behaviour. Normal exit followed
 all close awaits; no separate kernel process inventory was captured. The
-implementation requires a new committed-source CI, package and deployed
-browser gate; the public f999 failures remain open.
+bb90 committed-source CI, package and guarded deployment passed as recorded
+above; its public contribution/peer gate and the historical f999 failures remain
+open.
 
 A separate TCP TURN test accepted 224,096 signed, verified media bytes in two
 segments during 5.036 s. It used actual temporary browser credentials and a

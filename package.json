@@ -16,7 +16,7 @@
     "demo": "node demo/server.mjs",
     "docs:generate": "node scripts/build-ai-context.mjs",
     "check:docs": "node scripts/check-docs.mjs",
-    "test:operator": "node test/operator-browser.mjs",
+    "test:operator": "node test/operator-browser-suite.mjs",
     "test:broadcast": "node scripts/install-test-mediamtx.mjs && node --test test/broadcast-guards.test.mjs test/exclusive-state-lease.test.mjs test/broadcast-integration.test.mjs",
     "test:broadcast:browser": "node test/broadcast-browser.mjs",
     "broadcast": "node scripts/broadcast.mjs",

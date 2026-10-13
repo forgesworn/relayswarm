@@ -5,7 +5,31 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
-The deployed checkpoint is source
+The current deployed checkpoint is source
+`bb90bd6a54cabc163846ee1737ac3fe28b63eaa2`, with all nine required jobs green in
+[CI run 38478501111](https://github.com/forgesworn/relayswarm/actions/runs/38478501111).
+Its production-only consumer, ten imports, installed separate-process native
+transfer/fallback and standalone ESM pass locally; these artifacts remain
+unpublished. Actual app-only deployment passed a 51-file non-root image
+preflight, clean writer drain, stable identity/lease/service preservation and
+normal-TLS exact-client/fresh-playlist attestation. Its ordinary public four-role
+60.010 s check passed requested video/native-audio decode with zero fatal/native/
+page errors, but both contributors uploaded zero and the receiver verified zero
+peer bytes. The five-second authority-expiry boundary and delayed later sends
+are retained; their underlying transport/cache/host cause is unproved. Browser,
+provider and separately Root-owned source cleanup passed. Sustained public
+sharing, final publication/downloaded assets and the full field scope remain open.
+
+The later local real-HTTP comparison reproduced delayed identical-URL renewal
+(default server arrival 5,002 ms versus no-store 2,001 ms), with the original
+five-second timeout retained and consent preserved only in the treatment. A
+three-call no-store correction passed final maintained real-HTTP policy/session
+arrivals at 2,000/2,001 ms, outage expiry and recovery without consent restoration;
+source hashes, eight existing operator checkpoints, publisher 117 pass/one skip
+and syntax 105 passed. New committed-source and field gates remain pending. It does not explain the initial public missing
+response or replace the deployed bb90 red.
+
+The earlier deployed checkpoint is source
 `f9990b36956282f3d4e849b55bd64a79eb440151`, whose nine required jobs passed in
 [CI run 38449139246](https://github.com/forgesworn/relayswarm/actions/runs/38449139246).
 The earlier a023 two-hour load/churn run retains its separate source and scope.
@@ -34,7 +58,7 @@ records the later short/partial-long, TCP relay and Android checks separately.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Local Chrome and earlier exact-source CI pass; new renewal regression preserves fresh authority across one cancelled refresh, expires fail-closed and leaves consent off after recovery (eight operator checkpoints, 25 focused tests, publisher 117 pass/one skip); deployed two-hour and later public short contribution remain red, so new exact-source gates, sustained delivery and matched field benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | bb90 CI/deployment pass but its public contribution/peer gate is red; later no-store correction passes ordinary local real-HTTP renewal/expiry/recovery regression, with new committed-source/public gates pending; initial public missing-response cause unproved; prior two-hour reds, sustained delivery and matched field benefit remain open |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/Chrome and exact-source CI evidence pass within the documented threat/resource bounds; operational capacity is recorded under P12 |
@@ -42,9 +66,9 @@ records the later short/partial-long, TCP relay and Android checks separately.
 | P06 | Upload budgets across reloads and tabs | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; uploading still requires new consent | Chrome reload/tab and installed Firefox durable quota/fresh-consent evidence pass; complete physical upload journeys remain open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-cee9228 offline production-only package/ten documented imports/standalone ESM/installed directory-alias ICE CLI/separate-process verified transfer and origin fallback pass; downloaded release assets remain open; WAN success and timeout retain their separate scope |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-bb90 offline production-only package/ten documented imports/standalone ESM/installed directory-alias ICE CLI/separate-process verified transfer and origin fallback pass; downloaded release assets remain open; WAN success and timeout retain their separate scope |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed f999 passed all nine required CI jobs, non-root runtime byte/entrypoint preflight and normal-TLS client/fresh-media checks; later proxy-only reload passed HTTP/1.1/2, inode/runtime preservation and cleanup checks; earlier image failure/rollback and guarded reporting restarts retained; earlier cee candidate has nine green required CI jobs and fresh local package/ESM gates; v0.2.0 immutable publication, downloaded consumers and final exact-source deployment remain pending |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed bb90 passed all nine required CI jobs, fresh local consumer/ESM, non-root runtime byte/entrypoint preflight, guarded app-only drain/replacement and normal-TLS exact client/fresh playlists; short playback passes but sharing remains red; earlier proxy/image rollback/reporting evidence retained; v0.2.0 immutable publication, downloaded consumers and full production acceptance remain pending |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Separate real OBS and private YouTube video/audio/end/deletion pass; installed Firefox ordinary-actor journey passes; deployed two-hour contribution gate red, Safari/Pixel peer gates red, iPhone origin owner pass but background owner red; partial network/resource counters do not prove billing, varied/hard NAT or full device acceptance |
 
 ## Evidence rules

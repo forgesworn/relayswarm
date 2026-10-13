@@ -252,9 +252,11 @@ const policyRenewal = createPolicyRenewal({
   async load({ signal, policy, invalidate }) {
     const base = session, credential = admissionCredential;
     const requestSignal = () => AbortSignal.any([signal, AbortSignal.timeout(5000)]);
-    const next = await fetchDiagnostics.json("policy", base.deliveryPolicyEndpoint || "/delivery-policy.json", { signal: requestSignal() });
+    // Same-URL cache locking can queue a renewal behind a stuck earlier check,
+    // even before the server's no-store response headers have arrived.
+    const next = await fetchDiagnostics.json("policy", base.deliveryPolicyEndpoint || "/delivery-policy.json", { cache: "no-store", signal: requestSignal() });
     if (!policy(next)) return null;
-    const current = await fetchDiagnostics.json("session", "/session.json", { signal: requestSignal() });
+    const current = await fetchDiagnostics.json("session", "/session.json", { cache: "no-store", signal: requestSignal() });
     if (current?.v !== 1 || typeof current.swarmId !== "string" || !current.streamEvent || typeof current.streamEvent.id !== "string" || !Array.isArray(current.relays) || current.manifest !== base.manifest) {
       invalidate("invalid-session"); throw new Error("Publisher session changed incompatibly.");
     }
@@ -292,6 +294,6 @@ setInterval(sendReport, 15000);
 setInterval(render, 1000);
 setInterval(() => { if (swarm) push(snapshots, { atMs: elapsed(), metrics: swarm.metrics() }, 60); }, 5000);
 try {
-  session = await fetchDiagnostics.json("session", "/session.json"); byId("allowance").value = String(uploadBudget.snapshot().limit); await refreshPolicy(); byId("start").disabled = false;
+  session = await fetchDiagnostics.json("session", "/session.json", { cache: "no-store" }); byId("allowance").value = String(uploadBudget.snapshot().limit); await refreshPolicy(); byId("start").disabled = false;
   status(isSecureContext ? "Ready · choose a delivery mode and start playback." : "This address needs HTTPS for peer delivery. Origin playback is available.");
 } catch { status("The publisher is unavailable. Reload after it has started."); }

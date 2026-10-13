@@ -240,9 +240,50 @@ These field gates remain outstanding until their actual receipts are recorded.
 No new physical-device or internet-network result is claimed by the automated
 Chrome tests.
 
-## Current field checkpoint: 13 October 2026
+## Current field checkpoint: 14 October 2026
 
-The latest verified pilot checkpoint used source `f9990b36956282f3d4e849b55bd64a79eb440151`,
+Source `bb90bd6a54cabc163846ee1737ac3fe28b63eaa2` is now deployed after all nine
+required jobs passed in
+[CI run 38478501111](https://github.com/forgesworn/relayswarm/actions/runs/38478501111),
+fresh local consumer/ESM gates, a 51-file non-root image preflight and guarded
+app-only clean drain. Normal-TLS public client SHA-256 is
+`25a8416911bc51b1f6764a784d4444295db02c12396c59ddd82450bf56fff58c`
+(728,262 bytes). Identity, private leases and shared service/proxy configuration
+were preserved; reporting stayed off.
+
+Its ordinary four-role public Chrome check measured 60.010 s: requested video
+and native-audio decode passed with zero fatal/native/page errors, while both
+contributors uploaded zero and the receiver verified zero peer bytes. Each
+contributor recorded one stall. Both native upload opt-ins were witnessed and
+recorded rows stayed visible/focused. Withdrawal closely matched issuance plus
+the five-second authority lifetime; later overlapping checks delayed about
+three seconds before send and completed after expiry. Expiry is a supported
+timing inference; no reason code or underlying cache/protocol/transport/host
+cause was proved. A later admission-verification cancellation followed withdrawal.
+Browser and provider cleanup passed, with finite-source cleanup verified
+separately by Root. Decode does not prove audible output, and this short same-
+desktop check does not close the sustained, physical, hard-NAT or cost gates.
+Named evidence is retained under
+`artifacts/public-cdp-bb90bd6-r3-analysis-20261014` and
+`artifacts/public-cdp-bb90bd6-r3-run-20261013`; the public-safe analysis manifest
+SHA-256 is `bd2d5ad098ca639f83398aff5a8b4b23994817b67a892d723193439fd439c926`.
+
+
+A later ordinary-Chrome local real-HTTP comparison held the first policy
+response before headers. The default client sent the later same-URL request to
+the server after 5,002 ms and lost consent; a no-store treatment sent it after
+2,001 ms and retained consent/serving, while both kept the five-second deadline.
+No route interception, cache flags, fake media or permission overrides were used.
+The final maintained
+three-fetch correction passed real-server policy/session arrivals at 2,000/2,001 ms
+while the previous response remained held, plus full-outage expiry and recovery
+with consent off. Root's combined local suite/source hashes passed, and resource
+closes completed without a separate kernel inventory. No new field result exists:
+the initial public missing response remains unexplained and bb90 contribution
+remains red. Final receipt:
+`artifacts/policy-cache-integration-20261014/validation.json`.
+
+The earlier verified pilot checkpoint used source `f9990b36956282f3d4e849b55bd64a79eb440151`,
 client SHA-256 `b746f45216d3ac6e5d1bd21b5748f91c0115c71d00ee678c930070596bbef50d`
 (723,954 bytes), with nine required jobs green in
 [CI run 38449139246](https://github.com/forgesworn/relayswarm/actions/runs/38449139246).
@@ -257,6 +298,7 @@ device identifiers, credentials and personal filesystem paths.
 
 | Journey | Measured outcome | Remaining boundary |
 |---|---|---|
+| bb90 ordinary public 60.010 s | Requested video/native-audio decode green; contribution and verified peer red, both contributors uploaded zero/receiver peer zero, all fatal/native/page errors zero | Authority-expiry timing and delayed sends retained; underlying cause unproved; short desktop scope, historical reds remain |
 | CI two-hour load/churn | Twelve honest roles, 22 replacements, zero retained stalls/fatal hls.js errors and clean resource stops | Loopback flags and host candidates; native media errors not separately instrumented |
 | Deployed 7,205 s four-context run | Completed but red: policy timeout withdrew contribution before quota exhaustion; 34 zero-frame intervals and stalls retained | Same Mac/headless contexts; separate support audiences prevent controlled traffic attribution |
 | f999 ordinary public 60.008 s | Requested video/audio qualities, both contributors and verified receive-only payload passed; 10,576,128 peer bytes, zero uploads/fatal/native errors/stalls | One same-laptop `host/host` browser process; short result does not close sustained/hard-NAT/cost gates |
