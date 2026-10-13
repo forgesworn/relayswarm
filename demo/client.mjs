@@ -4,6 +4,9 @@ import { createPersistentUploadBudget } from "./upload-budget.mjs";
 import { createMediaRecovery } from "./media-recovery.mjs";
 import { segmentMediaContext } from "../src/browser/segment-commitment.mjs";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
+import { createFetchDiagnostics } from "./fetch-diagnostics.mjs";
+
+const fetchDiagnostics = createFetchDiagnostics();
 
 let persistentStorage; try { persistentStorage = globalThis.localStorage; } catch { /* Upload stays off when storage is blocked. */ }
 const uploadBudget = createPersistentUploadBudget({ storage: persistentStorage, locks: navigator.locks });
@@ -92,14 +95,14 @@ function configure() {
       if (mediaContext) { query.set("playlist", mediaContext.playlist); query.set("mediaType", mediaContext.mediaType); }
       if (context.rangeEnd) { query.set("start", String(context.rangeStart || 0)); query.set("end", String(context.rangeEnd)); }
       if (context.part) query.set("part", String(context.part.index));
-      const response = await fetch(`${session.commitmentEndpoint}?${query}`, { signal });
-      if (!response.ok) throw new Error("Publisher commitment unavailable.");
-      return response.json();
+      return fetchDiagnostics.json("commitment", `${session.commitmentEndpoint}?${query}`, { signal });
     },
     secretKey: admissionKey,
     ...(session.admission && admissionCredential ? { ticket: admissionCredential.ticket, admit: async (pubkey, ticket, { signal }) => {
-      const response = await fetch(session.admission.verifyEndpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey, ticket }), signal });
-      if (!response.ok) return false; const result = await response.json(); return result.admitted === true && result.epoch === session.admission.epoch;
+      try {
+        const result = await fetchDiagnostics.json("admissionVerify", session.admission.verifyEndpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey, ticket }), signal });
+        return result.admitted === true && result.epoch === session.admission.epoch;
+      } catch { return false; }
     } } : {}),
     reserveUploadBytes: (amount, options) => uploadBudget.reserve(amount, options),
     serve: activeConfig.upload, maxUploadBytesPerSession: remaining, maxUploadBytesPerSecond: activeConfig.uploadLimit, serveOnCellular: activeConfig.cellular,
@@ -132,21 +135,18 @@ function report() {
       scope: "same-origin media resource timings; includes init segments and cache hits; encoded bytes exclude protocol overhead; native HLS requests are not measured" },
     totals: totals(), uploadBudget: uploadBudget.snapshot(), deliveryPolicy: { ...deliveryPolicy, unavailable: policyUnavailable }, current: swarm ? { ...activeConfig, metrics: swarm.metrics() } : null, sessions: [...sessions], snapshots: [...snapshots],
     retention: { fragments: "latest 256", snapshots: "latest 60, every five seconds", sessions: "latest 64", archivedSessions: archivedTotals.sessions, totals: "whole page session" },
-    loaderRestored: !hls || hls.config.fLoader === initialLoader, limits: ["Network and device labels are supplied by the viewer.", "No peer IP addresses or private signing keys are recorded.", "A receipt is evidence for this session only; it is not a production-readiness claim."],
+    loaderRestored: !hls || hls.config.fLoader === initialLoader, controlTimings: fetchDiagnostics.snapshot(), limits: ["Network and device labels are supplied by the viewer.", "No peer IP addresses or private signing keys are recorded.", "A receipt is evidence for this session only; it is not a production-readiness claim."],
   };
 }
 
 async function obtainAdmission() {
   if (!session.admission) return;
   if (admissionCredential?.epoch === session.admission.epoch && admissionCredential.expiresAt * 1000 - Date.now() > 20000) return;
-  const post = async (endpoint, body) => {
-    const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
-    if (!response.ok) throw new Error("Peer admission unavailable."); return response.json();
-  };
-  const challenge = await post(session.admission.challengeEndpoint, { pubkey: admissionPubkey });
+  const post = (label, endpoint, body) => fetchDiagnostics.json(label, endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
+  const challenge = await post("admissionChallenge", session.admission.challengeEndpoint, { pubkey: admissionPubkey });
   if (challenge.issuer !== session.admission.issuer || challenge.epoch !== session.admission.epoch || challenge.swarmId !== session.swarmId || typeof challenge.challenge !== "string") throw new Error("Peer admission changed.");
   const proof = finalizeEvent({ kind: 27235, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify({ challenge: challenge.challenge, swarmId: session.swarmId, epoch: challenge.epoch }) }, admissionKey);
-  const credential = await post(session.admission.ticketEndpoint, { proof });
+  const credential = await post("admissionTicket", session.admission.ticketEndpoint, { proof });
   if (credential.issuer !== session.admission.issuer || credential.epoch !== session.admission.epoch || credential.swarmId !== session.swarmId || typeof credential.ticket !== "string" || credential.ticket.length > 2048 || !Number.isSafeInteger(credential.expiresAt) || credential.expiresAt * 1000 <= Date.now()) throw new Error("Invalid peer admission.");
   admissionCredential = credential;
 }
@@ -215,13 +215,9 @@ async function refreshPolicy() {
   if (policyInFlight || !session) return;
   policyInFlight = true;
   try {
-    const response = await fetch(session?.deliveryPolicyEndpoint || "/delivery-policy.json", { signal: AbortSignal.timeout(5000) });
-    if (!response.ok) throw new Error("Policy unavailable.");
-    const next = await response.json();
+    const next = await fetchDiagnostics.json("policy", session?.deliveryPolicyEndpoint || "/delivery-policy.json", { signal: AbortSignal.timeout(5000) });
     if (!next || ![null, "off", "shadow", "peer-first"].includes(next.mode)) throw new Error("Invalid policy.");
-    const currentResponse = await fetch("/session.json", { signal: AbortSignal.timeout(5000) });
-    if (!currentResponse.ok) throw new Error("Session unavailable.");
-    const current = await currentResponse.json();
+    const current = await fetchDiagnostics.json("session", "/session.json", { signal: AbortSignal.timeout(5000) });
     if (current.v !== 1 || typeof current.swarmId !== "string" || !current.streamEvent || !Array.isArray(current.relays) || current.manifest !== session.manifest) throw new Error("Publisher session changed incompatibly.");
     const identityChanged = current.swarmId !== session.swarmId || current.streamEvent.id !== session.streamEvent.id || current.admission?.epoch !== session.admission?.epoch;
     const changed = policyUnavailable || next.mode !== deliveryPolicy.mode || identityChanged;
@@ -249,14 +245,13 @@ async function sendReport() {
   if (!byId("telemetry").checked || !deliveryPolicy.telemetry || startRequestedAt === null) return;
   const total = totals();
   const values = { durationMs: elapsed(), peerBytes: total.peerFirstBytes, uploadedBytes: total.uploaded, originMediaRequests: network.originMediaRequests, originMediaBytes: network.encodedOriginMediaBytes, stalls: player.stalls, stallMs: Math.round(player.stallMs), fatalErrors: player.fatalErrors };
-  try { await fetch("/reports", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ v: 1, reportId, sequence: ++reportSequence, values }) }); } catch { /* Playback does not depend on reporting. */ }
+  try { await fetchDiagnostics.json("report", "/reports", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ v: 1, reportId, sequence: ++reportSequence, values }) }); } catch { /* Playback does not depend on reporting. */ }
 }
 setInterval(refreshPolicy, 2000);
 setInterval(sendReport, 15000);
 setInterval(render, 1000);
 setInterval(() => { if (swarm) push(snapshots, { atMs: elapsed(), metrics: swarm.metrics() }, 60); }, 5000);
 try {
-  const response = await fetch("/session.json"); if (!response.ok) throw new Error("Session unavailable.");
-  session = await response.json(); byId("allowance").value = String(uploadBudget.snapshot().limit); await refreshPolicy(); byId("start").disabled = false;
+  session = await fetchDiagnostics.json("session", "/session.json"); byId("allowance").value = String(uploadBudget.snapshot().limit); await refreshPolicy(); byId("start").disabled = false;
   status(isSecureContext ? "Ready · choose a delivery mode and start playback." : "This address needs HTTPS for peer delivery. Origin playback is available.");
 } catch { status("The publisher is unavailable. Reload after it has started."); }

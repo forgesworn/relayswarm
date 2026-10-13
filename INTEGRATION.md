@@ -97,7 +97,7 @@ connection and relay socket, drops held segments and emits one final
 | `reannounceDebounceMs` / `minReannounceGapMs` | `4000` / `12000` | Bound capacity-change presence announcements. |
 | `presenceIntervalMs` | `20000` | Presence heartbeat, jittered 30%. |
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
-| `iceServers` | one public STUN | Pass the deployment's own STUN. |
+| `iceServers` | one public STUN | Host-provided STUN/TURN configuration. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster CLI accepts a private `--ice-config FILE`. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 

@@ -5,11 +5,12 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
-The tested/deployed checkpoint below is source
-`a0231aadcdd81fe67fe702ac7214042d196eb39f`, with all ten jobs passing in
-[CI run 38392804791](https://github.com/forgesworn/relayswarm/actions/runs/38392804791).
-Later reporting-UI and field-harness changes form a new candidate and do not
-inherit that exact-source CI claim. The
+The deployed checkpoint is source
+`219719843f3f7175725d16535749b303c8e34cc4`, whose nine required jobs passed in
+[CI run 38420116433](https://github.com/forgesworn/relayswarm/actions/runs/38420116433).
+The earlier a023 two-hour load/churn run retains its separate source and scope.
+Later control-request diagnostics and private ICE-file configuration form a new
+candidate and require their own exact-source CI. The
 [current acceptance summary](../spikes/results/current-source-acceptance-summary-20261013.json)
 retains receipt identities and limits. v0.2.0 release and final downloaded-asset
 acceptance remain pending; passing CI does not close the full checklist.
@@ -17,16 +18,16 @@ acceptance remain pending; passing CI does not close the full checklist.
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
 | P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Local Chrome and exact-source CI pass; deployed two-hour run completed red after policy timeouts withdrew contribution, so sustained peer delivery and matched field benefit remain open |
-| P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Corrupt-media/live-window repair regressions and same-page host restart pass; completed field run retained zero observed fatal/native errors but stalls and 34 zero-frame intervals; historical MSE cause remains open |
+| P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Later retained sparse-AAC inputs reproduce track-discovery failure; current repair recovered through the alternate rendition in 603 ms; earlier repair/hosted checks pass within scope, but original failing bytes were not retained and low-only recovery remains unproved |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/Chrome and exact-source CI evidence pass within the documented threat/resource bounds; operational capacity is recorded under P12 |
-| P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Local persistence/restart/Chrome/queue evidence and host state preservation pass; field runs kept reporting off, so actual deployed reporting/retention acceptance remains open |
+| P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Local GUI reporting, real process restart, duplicate handling and natural five-minute expiry pass; first deployed 219 attempt timed out after trusted opt-in, with reporting-off/source cleanup verified; deployed persistence/retention acceptance remains open |
 | P06 | Upload budgets across reloads and tabs | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; uploading still requires new consent | Chrome reload/tab and installed Firefox durable quota/fresh-consent evidence pass; complete physical upload journeys remain open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-a023 production-only package/all exports/bundle/installed separate-process transfer/fallback pass; final downloaded release-asset verification pending; WAN success and timeout remain separately recorded |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-219 production-only package/all exports/bundle/installed separate-process transfer/fallback pass; later candidate and final downloaded release assets require fresh verification; WAN success and timeout remain separately recorded |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | a023 passed all ten CI jobs and public source/client identity and host recovery checks; subsequent UI/harness candidate needs its own checks; v0.2.0 assets, fresh downloaded consumers and final release/deployment remain pending |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed 219 passed all nine required CI jobs and source/client checks; a023 load/churn and guarded host recovery are retained separately; the diagnostics/ICE candidate needs its own checks; v0.2.0 assets, fresh downloaded consumers and final release/deployment remain pending |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Separate real OBS and private YouTube video/audio/end/deletion pass; installed Firefox ordinary-actor journey passes; deployed two-hour contribution gate red, Safari/Pixel peer gates red, iPhone origin owner pass but background owner red; partial network/resource counters do not prove billing, varied/hard NAT or full device acceptance |
 
 ## Evidence rules

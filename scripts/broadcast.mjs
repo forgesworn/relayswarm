@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { startBroadcastPipeline } from "../src/broadcast-pipeline.mjs";
 import { startDemoServer } from "../demo/server.mjs";
 import { startBroadcastWaitingServer } from "../demo/broadcast-waiting.mjs";
+import { readIceConfigFile } from "../src/ice-config.mjs";
 
 async function privateFile(path, create) {
   const parent = dirname(resolve(path));
@@ -37,14 +38,16 @@ async function main() {
     input: { type: "string", default: "rtsp://127.0.0.1:8554/live" }, "state-dir": { type: "string", default: "artifacts/broadcast" }, ffmpeg: { type: "string", default: "ffmpeg" },
     mediamtx: { type: "string" }, "router-config": { type: "string", default: fileURLToPath(new URL("../broadcast/mediamtx.yml", import.meta.url)) },
     "youtube-url-file": { type: "string" }, "public-url": { type: "string" }, host: { type: "string", default: "127.0.0.1" }, port: { type: "string", default: "8787" },
-    "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" },
+    "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" },
   } });
   if (values.help) {
-    console.log("npm run broadcast -- [--mediamtx PATH] [--input rtsp://127.0.0.1:8554/live] [--state-dir DIR] [--youtube-url-file FILE] [--public-url https://trial.example] [--host 127.0.0.1] [--port 8787] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478] [--telemetry]\nSource must supply video and audio. Publisher identity and operator credentials remain in the private state directory. See docs/BROADCASTING.md.");
+    console.log("npm run broadcast -- [--mediamtx PATH] [--input rtsp://127.0.0.1:8554/live] [--state-dir DIR] [--youtube-url-file FILE] [--public-url https://trial.example] [--host 127.0.0.1] [--port 8787] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE] [--telemetry]\nSource must supply video and audio. Publisher identity and operator credentials remain in the private state directory. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/BROADCASTING.md.");
     return;
   }
   const port = Number(values.port);
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535 || values.stun?.some((url) => !/^stuns?:[^\s]+$/u.test(url))) throw new Error("Invalid broadcaster port or STUN configuration.");
+  if (values.stun && values["ice-config"]) throw new Error("Supply either --stun or --ice-config.");
+  const iceServers = values["ice-config"] ? await readIceConfigFile(values["ice-config"]) : values.stun?.map((urls) => ({ urls }));
   await mkdir(resolve(values["state-dir"]), { recursive: true, mode: 0o700 });
   const state = resolve(values["state-dir"]), stateStat = await lstat(state);
   if (!stateStat.isDirectory() || await realpath(state) !== state || (stateStat.mode & 0o022) || (typeof process.getuid === "function" && stateStat.uid !== process.getuid())) throw new Error("Broadcaster state directory must be owner-controlled without symlinks.");
@@ -95,7 +98,7 @@ async function main() {
         await waiting.close();
         if (stopping) throw new Error("Broadcaster stopped during listener handoff.");
       },
-      operatorExtraStatus: () => pipeline.metrics(), ...(values.stun ? { iceServers: values.stun.map((urls) => ({ urls })) } : {}) });
+      operatorExtraStatus: () => pipeline.metrics(), ...(iceServers ? { iceServers } : {}) });
     if (stopping) { await server.close(); return; }
     console.log(`RelaySwarm broadcaster player: ${server.base}\nOperator token file: ${tokenFile}\nPublisher identity persists across restarts. Press Ctrl-C to stop.`);
     await Promise.race([stopped, pipeline.failure.then((error) => { throw error; })]);

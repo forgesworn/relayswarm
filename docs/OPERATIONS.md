@@ -14,7 +14,7 @@ The token is never in the player page, `/session.json`, public policy or operato
 
 | Route | Method/authentication | Result |
 |---|---|---|
-| `/operator/status` | GET, `Authorization: Bearer TOKEN` | Policy, origin HTTP counters, publisher work/cache metrics, report aggregate and optional redacted broadcast worker/publication status |
+| `/operator/status` | GET, `Authorization: Bearer TOKEN` | Policy, origin HTTP counters, publisher work/cache metrics, report aggregate, bounded request diagnostics and optional redacted broadcast worker/publication status |
 | `/operator/policy` | POST, bearer token, `application/json` | Accepts only `{"mode":null}`, `{"mode":"off"}`, `{"mode":"shadow"}` or `{"mode":"peer-first"}`; returns incremented policy revision |
 | `/delivery-policy.json` | GET, public | Mode, revision and reporting availability; no token or publisher secret |
 | `/reports` | POST, explicit server enablement and same-origin browser request | Accepts only bounded numeric measurement fields |
@@ -38,6 +38,45 @@ The library option is `maxUploadBytesPerSession`; omission means unlimited and z
 Server `origin` counters separate `/media/` requests/body bytes from commitment requests/body bytes. Media counts include playlists, init segments, ranges and error responses; HEAD contributes no response body. Body bytes are bytes handed to HTTP responses, not confirmed physical-wire totals or network overhead. Browser resource timings have their own scope and exclude native-HLS requests. Verified peer payload records media accepted from peers; shadow mode adds peer traffic alongside origin loading. None of these counters alone establish net traffic/cost savings.
 
 Publisher metrics include signing/hashing/cache activity, concurrent work and rejections. Broadcast metrics include worker states/restarts, rendition shape, generation and last publication time; they contain no input/output URLs or stream keys. A running process does not prove a fresh source, successful decoding or platform acceptance.
+
+## Diagnosing control-path timeouts
+
+The source candidate adds a numeric `Server-Timing: rs-app;dur=...` header to
+session, policy, admission, report and commitment responses. It measures handler
+entry to response headers. It excludes queueing before the handler, network
+transport and response-body receipt. Media responses are not instrumented.
+
+Authenticated status includes `requestDiagnostics`: seven fixed route labels,
+128 active observations, a 30-second observation expiry and the latest 120
+one-second windows. Histograms distinguish headers from terminal outcomes
+(finished, cancelled or expired). A server finish means handing the response to
+the HTTP stack, rather than confirmation that the browser received it. Event-loop
+delay, scheduler drift and utilisation accompany each completed window. The
+sampler is unreferenced and closes with the server. No request identities, IPs,
+URLs, query strings, headers, bodies or credentials are stored in these aggregates.
+
+Downloaded page receipts include `controlTimings`, with at most 64 numeric
+observations and 64 pending observations, measuring headers and JSON-body time
+separately. Application-header duration is included when available. Caller
+signals, timeouts and single-request behaviour remain unchanged. These local
+timings are not submitted as numeric reports and do not grant upload or reporting
+consent. Durations above one minute are clipped and counted.
+
+For matched probes, run the following **on the server hosting the loopback
+endpoint**, using its configured public origin:
+
+```sh
+node scripts/probe-control-path.mjs \
+  --public-origin https://trial.example \
+  --loopback-origin http://127.0.0.1:8787 \
+  --duration 60000 --interval 5000 --timeout 5000
+```
+
+The probe is bounded to five minutes, verifies public TLS, retains numeric
+observations only and discards response bodies after a byte limit. Its fresh
+HTTP/1.1 connections differ from browser HTTP/2. Pair these observations with
+actual failure timestamps; the instrumentation cannot retroactively diagnose
+an earlier incident or establish a network cause from a healthy later sample.
 
 ## Optional numeric reporting
 

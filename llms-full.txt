@@ -334,7 +334,7 @@ connection and relay socket, drops held segments and emits one final
 | `reannounceDebounceMs` / `minReannounceGapMs` | `4000` / `12000` | Bound capacity-change presence announcements. |
 | `presenceIntervalMs` | `20000` | Presence heartbeat, jittered 30%. |
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
-| `iceServers` | one public STUN | Pass the deployment's own STUN. |
+| `iceServers` | one public STUN | Host-provided STUN/TURN configuration. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster CLI accepts a private `--ice-config FILE`. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 
@@ -1176,16 +1176,19 @@ merged source do not establish production readiness.
 
 ## Current source acceptance on 13 October
 
-Source `a0231aadcdd81fe67fe702ac7214042d196eb39f` passed all ten jobs in
+The last verified public pilot upgrade used source
+`219719843f3f7175725d16535749b303c8e34cc4`, whose nine required jobs passed in
+[CI run 38420116433](https://github.com/forgesworn/relayswarm/actions/runs/38420116433).
+Its client bundle SHA-256 is
+`3e97b497acf0fc7ff6d79781e48a0d54d1ca7c70a05f9cf41585ec8d390c0ce9`.
+The earlier source `a0231aadcdd81fe67fe702ac7214042d196eb39f` passed ten jobs,
+including the optional two-hour soak, in
 [CI run 38392804791](https://github.com/forgesworn/relayswarm/actions/runs/38392804791).
-The public pilot serves that source's client bundle, SHA-256
-`76b1600b5692b31ed53687b217a538f4685644a68f6640e69c0ef0f5499afa28`.
-This is acceptance evidence for the tested source. Subsequent reporting-UI and
-field-harness changes form a separate candidate and do not inherit its exact-head
-CI claim. v0.2.0 release assets and fresh downloaded-consumer verification remain
-pending.
+Each result applies to its tested source. Later control-request diagnostics and
+private ICE-file configuration form a separate candidate requiring their own CI.
+v0.2.0 release assets and fresh downloaded-consumer verification remain pending.
 
-The CI soak measured 7,200.366 s after its final arrival wave, with twelve
+The a023 CI soak measured 7,200.366 s after its final arrival wave, with twelve
 honest viewer roles, one corrupt peer and one origin-only baseline. Twenty-two
 departures/rejoins replaced eight roles; it was not twelve uninterrupted
 two-hour sessions. Final incarnations accepted 8,268,934,096 peer bytes, and
@@ -1196,7 +1199,7 @@ not separately instrumented, so no independent zero-native-error claim follows.
 This was a single-Chrome loopback fixture with fake microphone/permission flags,
 an mDNS override and `host/host` candidates, not public-network acceptance.
 
-The deployed HTTPS/WSS four-context run completed 7,205.094 s but **failed
+The deployed a023 HTTPS/WSS four-context run completed 7,205.094 s but **failed
 sustained contribution**. After policy timeouts around 13:24:57 UTC, both
 contributors withdrew with allowance remaining. No automatic reconsent or
 quota reset was applied. The receipt retains 34 of 2,932 sampled intervals
@@ -1228,7 +1231,7 @@ did not resume after backgrounding or an explicit Play action. Engine/error
 diagnosis, complete peer/background journeys and automated native
 input remain unproved.
 
-The same-head host parent-crash observer closed green over 309.682 s. A guarded
+The a023 host parent-crash observer closed green over 309.682 s. A guarded
 main-process `SIGKILL` stopped the old container namespace. A complete scoped
 writer/volume/descriptor audit established absence before explicit operator
 recovery of the retained dirty marker while holding both permanent leases.
@@ -1248,6 +1251,31 @@ deltas sum to 4,509,684,301 bytes, covering all audiences and excluding complete
 IP/link overhead. Internal bridge counters are not summed as Internet egress.
 There is no matched origin-only network baseline or provider billing evidence:
 total wire reduction and net cash saving remain unproved.
+
+Later retained MPEG-TS segments reproduced a fatal hls.js AAC track-discovery
+error: the first segment contained video without AAC, and the next introduced
+audio after only a video SourceBuffer existed. The current one-shot repair
+recovered through the alternate rendition in 603 ms, retaining the fatal error
+and leaving uploading/reporting off. The constructed VOD clips differ from the
+original failing live window; recovery in the low rendition alone and the cause
+of the original missing segments remain unproved.
+
+The diagnostics candidate passes 93 publisher tests with one opt-in skip and
+serial Chrome operator/playback checks. Playback accepted 28 verified peer loads
+(7,805,572 bytes), both renditions, with zero observed stalls, fatal/native errors
+or uploads by the receiver. Those existing loopback fixtures use fake-media and
+mDNS accommodations. A failed-TLS-startup regression also verifies timer and
+private operational-lease cleanup. Local results do not inherit the deployed
+source's CI or establish physical acceptance.
+
+The first deployed 219 reporting attempt recorded trusted Start and reporting
+opt-in, then timed out before a report response within 17 s. Root verified
+reporting-off restoration and removal of its temporary source. Request lifecycle
+and later checkbox/policy state were not retained, so no collector or transport
+cause is inferred. A fresh diagnostic setup subsequently lost host connectivity
+before a browser started; its remote outcome requires inspection when access
+returns. The [investigation summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/control-path-media-investigation-summary-20261013.json)
+retains the media, local-candidate and reporting evidence separately.
 
 The [current acceptance summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/current-source-acceptance-summary-20261013.json)
 names the receipts, source and scope. Historical MSE causation, sustained
@@ -1602,9 +1630,36 @@ LAN address is insufficient for browser WebCrypto.
 
 Optional `--relay wss://relay.example` (repeatable, at most eight) chooses external
 relays instead of the embedded one. Optional `--stun stun:stun.example:3478`
-(repeatable) overrides STUN. The loader also accepts host-provided TURN
-credentials in `iceServers`; this demo CLI does not supply a TURN or super-peer
-service. An unreachable peer should leave the viewer playing from origin.
+(repeatable) overrides STUN. Alternatively, `--ice-config FILE` reads a private
+STUN/TURN configuration. The same option is available to the broadcaster. The
+file is a canonical, owner-controlled POSIX regular file, mode 0600, with one
+link and at most 16 KiB; its parent must have no group/world writes or symlinks.
+Supply either `--stun` or `--ice-config`, rather than both.
+
+```json
+{
+  "v": 1,
+  "iceServers": [
+    { "urls": "stun:stun.example:3478" },
+    {
+      "urls": "turns:turn.example:5349?transport=tcp",
+      "username": "temporary-user",
+      "credential": "temporary-browser-password"
+    }
+  ]
+}
+```
+
+The configuration permits at most eight servers, four URLs per server and
+512 characters per URL. TURN requires username/password strings of at most
+256 characters; keep STUN in a separate entry without credentials. Use only
+browser credentials, preferably short-lived: `/session.json` intentionally
+discloses them to viewers. Never put a TURN server's shared signing secret in
+this file. Restart the server and reload players when the configuration changes.
+The CLI configures an existing host-provided service; it supplies no managed
+TURN or super-peer deployment. A TCP TURN configuration needs its own actual
+transport, capacity and privacy acceptance. An unreachable peer should leave
+the viewer playing from origin.
 
 The embedded relay is for a controlled trial: at most 64 connections, eight
 subscriptions per connection, 24 KiB frames, 80 incoming messages per 10 s per
@@ -1698,9 +1753,10 @@ Chrome tests.
 
 ## Current field checkpoint: 13 October 2026
 
-Source `a0231aadcdd81fe67fe702ac7214042d196eb39f` and public client SHA-256
-`76b1600b5692b31ed53687b217a538f4685644a68f6640e69c0ef0f5499afa28` are
-bound to the [current acceptance summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/current-source-acceptance-summary-20261013.json).
+The last verified pilot deployment used source `219719843f3f7175725d16535749b303c8e34cc4`,
+client SHA-256 `3e97b497acf0fc7ff6d79781e48a0d54d1ca7c70a05f9cf41585ec8d390c0ce9`.
+The [current acceptance summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/current-source-acceptance-summary-20261013.json)
+retains the earlier a023 load/churn and field results with their original identity.
 Its named raw receipts remain local evidence; the summary excludes private
 device identifiers, credentials and personal filesystem paths.
 
@@ -1712,8 +1768,13 @@ device identifiers, credentials and personal filesystem paths.
 | Visible Safari with ordinary contributors | Origin video played; five RTC links but zero peer payload inside gate | Complete verified receive/upload/reload/kill journey remains red |
 | Physical Pixel/Vanadium | Origin video observation; default and temporary-policy peer gates red | Temporary policy restored; connections to non-serving roles do not prove peer transfer |
 | Physical iPhone/Safari | Owner observed moving origin video and audible tone | Owner background/Play return remained stopped; engine diagnosis, peer and complete input journey open |
-| Same-head host parent crash | Explicit audited dirty-marker recovery; same page progressed low/high at continuity 17, final 15 s frames and cleanup passed | One short origin-only observer, with stall and transient HTTP errors; no automatic clean-drain claim |
+| a023 host parent crash | Explicit audited dirty-marker recovery; same page progressed low/high at continuity 17, final 15 s frames and cleanup passed | One short origin-only observer, with stall and transient HTTP errors; no automatic clean-drain claim |
 | Resource/network supplement | Exact owned-process/container and partial isolated HTTPS TCP counters retained | Missing windows, resets and other audiences; total wire and billed cost unproved |
+| Deployed 219 reporting | Trusted reporting opt-in followed by a 17 s response timeout; reporting-off restoration and owned-source cleanup verified | No accepted-report/restart/retention checkpoint; original request lifecycle and later control state unavailable |
+| Later sparse-AAC replay | Actual retained bytes reproduce a missing audio SourceBuffer; current one-shot repair resumed through another rendition in 603 ms | Constructed VOD differs from original failing live window; low-only recovery and original cause unproved |
+
+The [investigation summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/control-path-media-investigation-summary-20261013.json)
+records those later observations and the local diagnostics-candidate tests.
 
 Physical and separate-network tests require their own evidence for each control,
 engine, contribution policy, background/resume and metered/battery behaviour.
@@ -2335,7 +2396,7 @@ An external OBS workstation can use an authorised SSH tunnel rather than a publi
 ssh -N -L 1935:127.0.0.1:1935 deploy@your-host
 ```
 
-OBS then targets its own loopback address. The container router uses an internal app/router network plus a separate normal bridge needed for its loopback RTMP port publication; RTSP has no published host port. Container ingest mappings and the existing/new HTTPS proxy choices are in the [deployment guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md). Remote browsers require configured TLS or an explicit `--public-url https://your-hostname` behind an HTTPS proxy. The public origin must match browser Origin headers. Configure repeated `--relay wss://...` options if using external relays; otherwise the server supplies its own bounded relay at `/relay`. `--stun` accepts a STUN URL; this launcher does not provide TURN credentials or a TURN deployment.
+OBS then targets its own loopback address. The container router uses an internal app/router network plus a separate normal bridge needed for its loopback RTMP port publication; RTSP has no published host port. Container ingest mappings and the existing/new HTTPS proxy choices are in the [deployment guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md). Remote browsers require configured TLS or an explicit `--public-url https://your-hostname` behind an HTTPS proxy. The public origin must match browser Origin headers. Configure repeated `--relay wss://...` options if using external relays; otherwise the server supplies its own bounded relay at `/relay`. `--stun` accepts a STUN URL. Alternatively, `--ice-config FILE` loads private host-provided STUN/TURN browser credentials; the [field guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#use-separate-devices-and-networks) gives the bounded format and disclosure boundary. No TURN deployment is supplied.
 
 ## Output and recovery
 
@@ -2628,7 +2689,7 @@ The token is never in the player page, `/session.json`, public policy or operato
 
 | Route | Method/authentication | Result |
 |---|---|---|
-| `/operator/status` | GET, `Authorization: Bearer TOKEN` | Policy, origin HTTP counters, publisher work/cache metrics, report aggregate and optional redacted broadcast worker/publication status |
+| `/operator/status` | GET, `Authorization: Bearer TOKEN` | Policy, origin HTTP counters, publisher work/cache metrics, report aggregate, bounded request diagnostics and optional redacted broadcast worker/publication status |
 | `/operator/policy` | POST, bearer token, `application/json` | Accepts only `{"mode":null}`, `{"mode":"off"}`, `{"mode":"shadow"}` or `{"mode":"peer-first"}`; returns incremented policy revision |
 | `/delivery-policy.json` | GET, public | Mode, revision and reporting availability; no token or publisher secret |
 | `/reports` | POST, explicit server enablement and same-origin browser request | Accepts only bounded numeric measurement fields |
@@ -2652,6 +2713,45 @@ The library option is `maxUploadBytesPerSession`; omission means unlimited and z
 Server `origin` counters separate `/media/` requests/body bytes from commitment requests/body bytes. Media counts include playlists, init segments, ranges and error responses; HEAD contributes no response body. Body bytes are bytes handed to HTTP responses, not confirmed physical-wire totals or network overhead. Browser resource timings have their own scope and exclude native-HLS requests. Verified peer payload records media accepted from peers; shadow mode adds peer traffic alongside origin loading. None of these counters alone establish net traffic/cost savings.
 
 Publisher metrics include signing/hashing/cache activity, concurrent work and rejections. Broadcast metrics include worker states/restarts, rendition shape, generation and last publication time; they contain no input/output URLs or stream keys. A running process does not prove a fresh source, successful decoding or platform acceptance.
+
+## Diagnosing control-path timeouts
+
+The source candidate adds a numeric `Server-Timing: rs-app;dur=...` header to
+session, policy, admission, report and commitment responses. It measures handler
+entry to response headers. It excludes queueing before the handler, network
+transport and response-body receipt. Media responses are not instrumented.
+
+Authenticated status includes `requestDiagnostics`: seven fixed route labels,
+128 active observations, a 30-second observation expiry and the latest 120
+one-second windows. Histograms distinguish headers from terminal outcomes
+(finished, cancelled or expired). A server finish means handing the response to
+the HTTP stack, rather than confirmation that the browser received it. Event-loop
+delay, scheduler drift and utilisation accompany each completed window. The
+sampler is unreferenced and closes with the server. No request identities, IPs,
+URLs, query strings, headers, bodies or credentials are stored in these aggregates.
+
+Downloaded page receipts include `controlTimings`, with at most 64 numeric
+observations and 64 pending observations, measuring headers and JSON-body time
+separately. Application-header duration is included when available. Caller
+signals, timeouts and single-request behaviour remain unchanged. These local
+timings are not submitted as numeric reports and do not grant upload or reporting
+consent. Durations above one minute are clipped and counted.
+
+For matched probes, run the following **on the server hosting the loopback
+endpoint**, using its configured public origin:
+
+```sh
+node scripts/probe-control-path.mjs \
+  --public-origin https://trial.example \
+  --loopback-origin http://127.0.0.1:8787 \
+  --duration 60000 --interval 5000 --timeout 5000
+```
+
+The probe is bounded to five minutes, verifies public TLS, retains numeric
+observations only and discards response bodies after a byte limit. Its fresh
+HTTP/1.1 connections differ from browser HTTP/2. Pair these observations with
+actual failure timestamps; the instrumentation cannot retroactively diagnose
+an earlier incident or establish a network cause from a healthy later sample.
 
 ## Optional numeric reporting
 
@@ -2828,11 +2928,12 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
-The tested/deployed checkpoint below is source
-`a0231aadcdd81fe67fe702ac7214042d196eb39f`, with all ten jobs passing in
-[CI run 38392804791](https://github.com/forgesworn/relayswarm/actions/runs/38392804791).
-Later reporting-UI and field-harness changes form a new candidate and do not
-inherit that exact-source CI claim. The
+The deployed checkpoint is source
+`219719843f3f7175725d16535749b303c8e34cc4`, whose nine required jobs passed in
+[CI run 38420116433](https://github.com/forgesworn/relayswarm/actions/runs/38420116433).
+The earlier a023 two-hour load/churn run retains its separate source and scope.
+Later control-request diagnostics and private ICE-file configuration form a new
+candidate and require their own exact-source CI. The
 [current acceptance summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/current-source-acceptance-summary-20261013.json)
 retains receipt identities and limits. v0.2.0 release and final downloaded-asset
 acceptance remain pending; passing CI does not close the full checklist.
@@ -2840,16 +2941,16 @@ acceptance remain pending; passing CI does not close the full checklist.
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
 | P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Local Chrome and exact-source CI pass; deployed two-hour run completed red after policy timeouts withdrew contribution, so sustained peer delivery and matched field benefit remain open |
-| P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Corrupt-media/live-window repair regressions and same-page host restart pass; completed field run retained zero observed fatal/native errors but stalls and 34 zero-frame intervals; historical MSE cause remains open |
+| P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Later retained sparse-AAC inputs reproduce track-discovery failure; current repair recovered through the alternate rendition in 603 ms; earlier repair/hosted checks pass within scope, but original failing bytes were not retained and low-only recovery remains unproved |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/Chrome and exact-source CI evidence pass within the documented threat/resource bounds; operational capacity is recorded under P12 |
-| P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Local persistence/restart/Chrome/queue evidence and host state preservation pass; field runs kept reporting off, so actual deployed reporting/retention acceptance remains open |
+| P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Local GUI reporting, real process restart, duplicate handling and natural five-minute expiry pass; first deployed 219 attempt timed out after trusted opt-in, with reporting-off/source cleanup verified; deployed persistence/retention acceptance remains open |
 | P06 | Upload budgets across reloads and tabs | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; uploading still requires new consent | Chrome reload/tab and installed Firefox durable quota/fresh-consent evidence pass; complete physical upload journeys remain open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-a023 production-only package/all exports/bundle/installed separate-process transfer/fallback pass; final downloaded release-asset verification pending; WAN success and timeout remain separately recorded |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-219 production-only package/all exports/bundle/installed separate-process transfer/fallback pass; later candidate and final downloaded release assets require fresh verification; WAN success and timeout remain separately recorded |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | a023 passed all ten CI jobs and public source/client identity and host recovery checks; subsequent UI/harness candidate needs its own checks; v0.2.0 assets, fresh downloaded consumers and final release/deployment remain pending |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed 219 passed all nine required CI jobs and source/client checks; a023 load/churn and guarded host recovery are retained separately; the diagnostics/ICE candidate needs its own checks; v0.2.0 assets, fresh downloaded consumers and final release/deployment remain pending |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Separate real OBS and private YouTube video/audio/end/deletion pass; installed Firefox ordinary-actor journey passes; deployed two-hour contribution gate red, Safari/Pixel peer gates red, iPhone origin owner pass but background owner red; partial network/resource counters do not prove billing, varied/hard NAT or full device acceptance |
 
 ## Evidence rules

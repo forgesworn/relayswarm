@@ -109,9 +109,36 @@ LAN address is insufficient for browser WebCrypto.
 
 Optional `--relay wss://relay.example` (repeatable, at most eight) chooses external
 relays instead of the embedded one. Optional `--stun stun:stun.example:3478`
-(repeatable) overrides STUN. The loader also accepts host-provided TURN
-credentials in `iceServers`; this demo CLI does not supply a TURN or super-peer
-service. An unreachable peer should leave the viewer playing from origin.
+(repeatable) overrides STUN. Alternatively, `--ice-config FILE` reads a private
+STUN/TURN configuration. The same option is available to the broadcaster. The
+file is a canonical, owner-controlled POSIX regular file, mode 0600, with one
+link and at most 16 KiB; its parent must have no group/world writes or symlinks.
+Supply either `--stun` or `--ice-config`, rather than both.
+
+```json
+{
+  "v": 1,
+  "iceServers": [
+    { "urls": "stun:stun.example:3478" },
+    {
+      "urls": "turns:turn.example:5349?transport=tcp",
+      "username": "temporary-user",
+      "credential": "temporary-browser-password"
+    }
+  ]
+}
+```
+
+The configuration permits at most eight servers, four URLs per server and
+512 characters per URL. TURN requires username/password strings of at most
+256 characters; keep STUN in a separate entry without credentials. Use only
+browser credentials, preferably short-lived: `/session.json` intentionally
+discloses them to viewers. Never put a TURN server's shared signing secret in
+this file. Restart the server and reload players when the configuration changes.
+The CLI configures an existing host-provided service; it supplies no managed
+TURN or super-peer deployment. A TCP TURN configuration needs its own actual
+transport, capacity and privacy acceptance. An unreachable peer should leave
+the viewer playing from origin.
 
 The embedded relay is for a controlled trial: at most 64 connections, eight
 subscriptions per connection, 24 KiB frames, 80 incoming messages per 10 s per
@@ -205,9 +232,10 @@ Chrome tests.
 
 ## Current field checkpoint: 13 October 2026
 
-Source `a0231aadcdd81fe67fe702ac7214042d196eb39f` and public client SHA-256
-`76b1600b5692b31ed53687b217a538f4685644a68f6640e69c0ef0f5499afa28` are
-bound to the [current acceptance summary](../spikes/results/current-source-acceptance-summary-20261013.json).
+The last verified pilot deployment used source `219719843f3f7175725d16535749b303c8e34cc4`,
+client SHA-256 `3e97b497acf0fc7ff6d79781e48a0d54d1ca7c70a05f9cf41585ec8d390c0ce9`.
+The [current acceptance summary](../spikes/results/current-source-acceptance-summary-20261013.json)
+retains the earlier a023 load/churn and field results with their original identity.
 Its named raw receipts remain local evidence; the summary excludes private
 device identifiers, credentials and personal filesystem paths.
 
@@ -219,8 +247,13 @@ device identifiers, credentials and personal filesystem paths.
 | Visible Safari with ordinary contributors | Origin video played; five RTC links but zero peer payload inside gate | Complete verified receive/upload/reload/kill journey remains red |
 | Physical Pixel/Vanadium | Origin video observation; default and temporary-policy peer gates red | Temporary policy restored; connections to non-serving roles do not prove peer transfer |
 | Physical iPhone/Safari | Owner observed moving origin video and audible tone | Owner background/Play return remained stopped; engine diagnosis, peer and complete input journey open |
-| Same-head host parent crash | Explicit audited dirty-marker recovery; same page progressed low/high at continuity 17, final 15 s frames and cleanup passed | One short origin-only observer, with stall and transient HTTP errors; no automatic clean-drain claim |
+| a023 host parent crash | Explicit audited dirty-marker recovery; same page progressed low/high at continuity 17, final 15 s frames and cleanup passed | One short origin-only observer, with stall and transient HTTP errors; no automatic clean-drain claim |
 | Resource/network supplement | Exact owned-process/container and partial isolated HTTPS TCP counters retained | Missing windows, resets and other audiences; total wire and billed cost unproved |
+| Deployed 219 reporting | Trusted reporting opt-in followed by a 17 s response timeout; reporting-off restoration and owned-source cleanup verified | No accepted-report/restart/retention checkpoint; original request lifecycle and later control state unavailable |
+| Later sparse-AAC replay | Actual retained bytes reproduce a missing audio SourceBuffer; current one-shot repair resumed through another rendition in 603 ms | Constructed VOD differs from original failing live window; low-only recovery and original cause unproved |
+
+The [investigation summary](../spikes/results/control-path-media-investigation-summary-20261013.json)
+records those later observations and the local diagnostics-candidate tests.
 
 Physical and separate-network tests require their own evidence for each control,
 engine, contribution policy, background/resume and metered/battery behaviour.

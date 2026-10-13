@@ -62,16 +62,19 @@ merged source do not establish production readiness.
 
 ## Current source acceptance on 13 October
 
-Source `a0231aadcdd81fe67fe702ac7214042d196eb39f` passed all ten jobs in
+The last verified public pilot upgrade used source
+`219719843f3f7175725d16535749b303c8e34cc4`, whose nine required jobs passed in
+[CI run 38420116433](https://github.com/forgesworn/relayswarm/actions/runs/38420116433).
+Its client bundle SHA-256 is
+`3e97b497acf0fc7ff6d79781e48a0d54d1ca7c70a05f9cf41585ec8d390c0ce9`.
+The earlier source `a0231aadcdd81fe67fe702ac7214042d196eb39f` passed ten jobs,
+including the optional two-hour soak, in
 [CI run 38392804791](https://github.com/forgesworn/relayswarm/actions/runs/38392804791).
-The public pilot serves that source's client bundle, SHA-256
-`76b1600b5692b31ed53687b217a538f4685644a68f6640e69c0ef0f5499afa28`.
-This is acceptance evidence for the tested source. Subsequent reporting-UI and
-field-harness changes form a separate candidate and do not inherit its exact-head
-CI claim. v0.2.0 release assets and fresh downloaded-consumer verification remain
-pending.
+Each result applies to its tested source. Later control-request diagnostics and
+private ICE-file configuration form a separate candidate requiring their own CI.
+v0.2.0 release assets and fresh downloaded-consumer verification remain pending.
 
-The CI soak measured 7,200.366 s after its final arrival wave, with twelve
+The a023 CI soak measured 7,200.366 s after its final arrival wave, with twelve
 honest viewer roles, one corrupt peer and one origin-only baseline. Twenty-two
 departures/rejoins replaced eight roles; it was not twelve uninterrupted
 two-hour sessions. Final incarnations accepted 8,268,934,096 peer bytes, and
@@ -82,7 +85,7 @@ not separately instrumented, so no independent zero-native-error claim follows.
 This was a single-Chrome loopback fixture with fake microphone/permission flags,
 an mDNS override and `host/host` candidates, not public-network acceptance.
 
-The deployed HTTPS/WSS four-context run completed 7,205.094 s but **failed
+The deployed a023 HTTPS/WSS four-context run completed 7,205.094 s but **failed
 sustained contribution**. After policy timeouts around 13:24:57 UTC, both
 contributors withdrew with allowance remaining. No automatic reconsent or
 quota reset was applied. The receipt retains 34 of 2,932 sampled intervals
@@ -114,7 +117,7 @@ did not resume after backgrounding or an explicit Play action. Engine/error
 diagnosis, complete peer/background journeys and automated native
 input remain unproved.
 
-The same-head host parent-crash observer closed green over 309.682 s. A guarded
+The a023 host parent-crash observer closed green over 309.682 s. A guarded
 main-process `SIGKILL` stopped the old container namespace. A complete scoped
 writer/volume/descriptor audit established absence before explicit operator
 recovery of the retained dirty marker while holding both permanent leases.
@@ -134,6 +137,31 @@ deltas sum to 4,509,684,301 bytes, covering all audiences and excluding complete
 IP/link overhead. Internal bridge counters are not summed as Internet egress.
 There is no matched origin-only network baseline or provider billing evidence:
 total wire reduction and net cash saving remain unproved.
+
+Later retained MPEG-TS segments reproduced a fatal hls.js AAC track-discovery
+error: the first segment contained video without AAC, and the next introduced
+audio after only a video SourceBuffer existed. The current one-shot repair
+recovered through the alternate rendition in 603 ms, retaining the fatal error
+and leaving uploading/reporting off. The constructed VOD clips differ from the
+original failing live window; recovery in the low rendition alone and the cause
+of the original missing segments remain unproved.
+
+The diagnostics candidate passes 93 publisher tests with one opt-in skip and
+serial Chrome operator/playback checks. Playback accepted 28 verified peer loads
+(7,805,572 bytes), both renditions, with zero observed stalls, fatal/native errors
+or uploads by the receiver. Those existing loopback fixtures use fake-media and
+mDNS accommodations. A failed-TLS-startup regression also verifies timer and
+private operational-lease cleanup. Local results do not inherit the deployed
+source's CI or establish physical acceptance.
+
+The first deployed 219 reporting attempt recorded trusted Start and reporting
+opt-in, then timed out before a report response within 17 s. Root verified
+reporting-off restoration and removal of its temporary source. Request lifecycle
+and later checkbox/policy state were not retained, so no collector or transport
+cause is inferred. A fresh diagnostic setup subsequently lost host connectivity
+before a browser started; its remote outcome requires inspection when access
+returns. The [investigation summary](../spikes/results/control-path-media-investigation-summary-20261013.json)
+retains the media, local-candidate and reporting evidence separately.
 
 The [current acceptance summary](../spikes/results/current-source-acceptance-summary-20261013.json)
 names the receipts, source and scope. Historical MSE causation, sustained

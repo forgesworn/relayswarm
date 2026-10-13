@@ -1,7 +1,7 @@
 import { get as httpGet } from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, realpath, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import WebSocket from "ws";
@@ -9,6 +9,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure
 import { resolveTrustedStream } from "../src/browser/stream-discovery.mjs";
 import { startDemoServer } from "../demo/server.mjs";
 import { startBroadcastWaitingServer } from "../demo/broadcast-waiting.mjs";
+import { appServerTiming } from "../demo/fetch-diagnostics.mjs";
 
 async function start(t, options = {}) {
   const directory = await mkdtemp(join(tmpdir(), "relayswarm-demo-test-"));
@@ -51,6 +52,44 @@ test("demo refuses insecure remote bindings and invalid external configuration",
   await assert.rejects(startDemoServer({ host: "0.0.0.0" }), /require HTTPS/u);
   for (const publicUrl of ["http://example.test", "https://user:pass@example.test", "https://example.test/path"]) await assert.rejects(startDemoServer({ publicUrl }), /HTTPS origin/u);
   await assert.rejects(startDemoServer({ relays: ["ws://public.example"] }), /wss/u);
+});
+
+test("control timings expose numeric headers and authenticated bounded aggregates without request details", async (t) => {
+  const token = "b".repeat(64), marker = "private-query-marker";
+  const demo = await start(t, { operatorToken: token });
+  const response = await fetch(`${demo.base}/session.json?credential=${marker}`);
+  const appMs = appServerTiming(response.headers.get("server-timing"));
+  assert.ok(Number.isFinite(appMs) && appMs >= 0);
+  assert.equal((await response.json()).requestDiagnostics, undefined);
+  assert.equal((await fetch(`${demo.base}/operator/status`)).status, 401);
+  const status = await fetch(`${demo.base}/operator/status`, { headers: { authorization: `Bearer ${token}` } }).then((value) => value.json());
+  const diagnostic = status.requestDiagnostics;
+  assert.equal(diagnostic.current.routes.session.started, 1);
+  assert.equal(diagnostic.current.routes.session.finished, 1);
+  assert.equal(diagnostic.maxActive, 128);
+  assert.equal(diagnostic.retainWindows, 120);
+  assert.ok(!JSON.stringify(diagnostic).includes(marker));
+  assert.ok(!JSON.stringify(diagnostic).includes(token));
+  assert.equal((await fetch(`${demo.base}/media/shared.ts`)).headers.get("server-timing"), null);
+});
+
+test("failed TLS startup releases owned timers and the private operational lease", async (t) => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "relayswarm-startup-cleanup-")));
+  await chmod(directory, 0o700);
+  const handles = [], cleared = new Set(), originalSet = globalThis.setInterval, originalClear = globalThis.clearInterval;
+  t.after(async () => { for (const handle of handles) originalClear(handle); await rm(directory, { recursive: true, force: true }); });
+  t.mock.method(globalThis, "setInterval", (...args) => { const handle = originalSet(...args); handles.push(handle); return handle; });
+  t.mock.method(globalThis, "clearInterval", (handle) => { cleared.add(handle); return originalClear(handle); });
+  const state = join(directory, "operator.json"), key = join(directory, "bad-key"), cert = join(directory, "bad-cert");
+  await writeFile(key, "not a private key", { mode: 0o600 });
+  await writeFile(cert, "not a certificate", { mode: 0o600 });
+  const operationalState = process.platform === "win32" ? {} : { operatorState: state };
+  await assert.rejects(start(t, { operatorToken: "c".repeat(64), ...operationalState, tlsKey: key, tlsCert: cert }));
+  assert.ok(handles.every((handle) => cleared.has(handle)), "Every failed-startup sampler must be cleared.");
+  const demo = await start(t, { operatorToken: "c".repeat(64), ...operationalState });
+  assert.equal((await fetch(`${demo.base}/delivery-policy.json`)).status, 200);
+  await demo.close();
+  assert.ok(handles.every((handle) => cleared.has(handle)), "Successful shutdown must also clear owned timers.");
 });
 
 test("bounded demo relay delivers signed swarm events, honours CLOSE and recovers after an outage", async (t) => {

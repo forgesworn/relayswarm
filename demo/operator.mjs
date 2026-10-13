@@ -27,10 +27,11 @@ export async function readOperatorTokenFile(path) {
 
 const fields = ["durationMs", "peerBytes", "uploadedBytes", "originMediaRequests", "originMediaBytes", "stalls", "stallMs", "fatalErrors"];
 const fail = (message, status) => Object.assign(new Error(message), { status });
-export function createOperatorControls({ token, telemetry = false, reportCapacity = 256, reportTtlMs = 300000, now = Date.now, operatorExtraStatus, statePath, admission, mutationCapacity = 64 } = {}) {
+export function createOperatorControls({ token, telemetry = false, reportCapacity = 256, reportTtlMs = 300000, now = Date.now, operatorExtraStatus, requestDiagnostics, statePath, admission, mutationCapacity = 64 } = {}) {
   if (token !== undefined && (typeof token !== "string" || token.length < 32 || token.length > 256 || /\s/u.test(token))) throw new Error("Operator token must contain 32-256 non-whitespace characters.");
   if (!Number.isSafeInteger(reportCapacity) || reportCapacity < 1 || reportCapacity > 4096 || !Number.isSafeInteger(reportTtlMs) || reportTtlMs < 1000 || reportTtlMs > 3600000) throw new Error("Invalid report retention limits.");
   if (!Number.isSafeInteger(mutationCapacity) || mutationCapacity < 1 || mutationCapacity > 256) throw new Error("Invalid operator mutation queue limit.");
+  if (requestDiagnostics !== undefined && typeof requestDiagnostics !== "function") throw new Error("Invalid request diagnostics provider.");
   const credential = token ? Buffer.from(token) : null;
   let mode = null, revision = 0, reports = [], reportWindow = 0, reportCount = 0, store, lease, persistenceFailure = null;
   let mutations = Promise.resolve(), pendingMutations = 0;
@@ -109,7 +110,7 @@ export function createOperatorControls({ token, telemetry = false, reportCapacit
       if (path.startsWith("/operator/")) authenticate(request, base);
       let result;
       if (path === "/delivery-policy.json") result = policy();
-      if (path === "/operator/status") result = { policy: policy(), origin: { ...origin }, publisher: publisher.getMetrics?.() ?? null, reports: summary(), ...(admission ? { admission: admission.metrics() } : {}), ...(operatorExtraStatus ? { broadcast: operatorExtraStatus() } : {}) };
+      if (path === "/operator/status") result = { policy: policy(), origin: { ...origin }, publisher: publisher.getMetrics?.() ?? null, reports: summary(), ...(admission ? { admission: admission.metrics() } : {}), ...(operatorExtraStatus ? { broadcast: operatorExtraStatus() } : {}), ...(requestDiagnostics ? { requestDiagnostics: requestDiagnostics() } : {}) };
       if (path === "/operator/policy") {
         const input = await json(request);
         if (Object.keys(input).length !== 1 || !Object.hasOwn(input, "mode") || ![null, "off", "shadow", "peer-first"].includes(input.mode)) throw fail("Supply only mode: null, off, shadow or peer-first.", 400);
