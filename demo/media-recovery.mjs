@@ -8,6 +8,11 @@ export function createMediaRecovery({ media, getHls, getSession, revokeContribut
     if (!pending) return;
     const attempt = pending; pending = null;
     clearInterval(attempt.timer); clearTimeout(attempt.deadline);
+    if (attempt.onAttached) {
+      attempt.hls.off("hlsMediaAttached", attempt.onAttached); attempt.onAttached = null;
+      attempt.hls.stopLoad(); attempt.hls.detachMedia();
+    }
+    attempt.restoreConfiguration?.();
     Object.assign(attempt.record, { outcome, reason, endedAtMs: now() }); state.outcome = outcome;
     if (outcome !== "recovered") {
       attempt.hls.stopLoad(); if (getHls() === attempt.hls) media.pause();
@@ -27,12 +32,28 @@ export function createMediaRecovery({ media, getHls, getSession, revokeContribut
     if (error.type !== "mediaError" || !["bufferAppendError", "mediaSourceRequiresReset"].includes(error.details)) return false;
     return begin(error);
   }
+  function trackDiscoveryFragment(error, hls) {
+    const details = hls.latestLevelDetails, frag = error.frag;
+    // A video-only TS fragment can initialise MSE before a later fragment
+    // reveals audio. Replaying the video-only prefix repeats the same failure.
+    // Only the exact failing fragment in the current VOD may skip that prefix.
+    if (error.details !== "bufferAppendError" || error.error?.name !== "HlsJsTrackRemovedError"
+      || details?.live !== false || !frag || frag.type !== "main" || error.part != null
+      || !Array.isArray(details.fragments) || !details.fragments.includes(frag)
+      || ![frag.sn, frag.cc, frag.level].every((value) => Number.isSafeInteger(value) && value >= 0)
+      || ![frag.start, frag.duration, details.fragmentStart, details.edge, media.currentTime].every(Number.isFinite)
+      || frag.duration <= 0 || frag.start < 0 || frag.start < details.fragmentStart
+      || frag.start + frag.duration > details.edge + 0.001 || frag.start <= media.currentTime) return null;
+    return frag;
+  }
   function begin(error, liveRestart = false) {
     const hls = getHls(), session = getSession();
     if (!hls || !session || state.attempted) return false;
     const live = hls.latestLevelDetails?.live === true;
-    const position = live ? (Number.isFinite(hls.liveSyncPosition) ? hls.liveSyncPosition : -1) : media.currentTime;
+    const trackFragment = liveRestart ? null : trackDiscoveryFragment(error, hls);
+    const position = trackFragment ? trackFragment.start : live ? (Number.isFinite(hls.liveSyncPosition) ? hls.liveSyncPosition : -1) : media.currentTime;
     const record = { attemptedAtMs: now(), outcome: "queued", live, requestedPosition: position, details: error.details,
+      ...(trackFragment ? { kind: "vod-track-discovery", sequence: trackFragment.sn, cc: trackFragment.cc, level: trackFragment.level, skippedSeconds: position - media.currentTime } : {}),
       ...(liveRestart ? { kind: "live-window-stall", fromCC: error.fromCC, toCC: error.toCC, stalledForMs: error.stalledForMs } : {}) };
     state.attempted = 1; state.outcome = "queued"; state.records.push(record);
     const attempt = { hls, session, record, timer: null, deadline: null }; pending = attempt;
@@ -43,8 +64,9 @@ export function createMediaRecovery({ media, getHls, getSession, revokeContribut
     queueMicrotask(() => {
       if (pending !== attempt) return;
       if (getHls() !== hls || getSession() !== session) { finish("cancelled", "player-or-session-changed"); return; }
+      if (trackFragment && (trackDiscoveryFragment(error, hls) !== trackFragment || trackFragment.start !== position)) { finish("cancelled", "fragment-context-changed"); return; }
       let baseline = position >= 0 ? position : null;
-      const framesBefore = media.getVideoPlaybackQuality?.().totalVideoFrames ?? media.webkitDecodedFrameCount;
+      let framesBefore = media.getVideoPlaybackQuality?.().totalVideoFrames ?? media.webkitDecodedFrameCount;
       state.outcome = record.outcome = "recovering";
       attempt.deadline = setTimeout(() => finish("failed", "progress-timeout"), 10000);
       attempt.timer = setInterval(() => {
@@ -52,15 +74,46 @@ export function createMediaRecovery({ media, getHls, getSession, revokeContribut
         if (baseline === null && media.readyState >= 2) baseline = media.currentTime;
         const framesNow = media.getVideoPlaybackQuality?.().totalVideoFrames ?? media.webkitDecodedFrameCount;
         if (!media.error && !media.paused && media.readyState >= 2 && baseline !== null && media.currentTime > baseline + 0.25
-          && (!liveRestart || framesNow > framesBefore)) finish("recovered", "playback-advanced");
+          && (!(liveRestart || trackFragment) || framesNow > framesBefore)) finish("recovered", "playback-advanced");
       }, 200);
       try {
-        if (liveRestart) hls.stopLoad();
-        else hls.recoverMediaError();
-        if (pending !== attempt) return;
-        hls.startLoad(position);
-        if (pending !== attempt) return;
-        Promise.resolve(media.play()).catch(() => { if (pending === attempt) finish("failed", "play-rejected"); });
+        const resume = () => {
+          if (pending !== attempt) return;
+          hls.startLoad(position);
+          if (pending !== attempt) return;
+          Promise.resolve(media.play()).catch(() => { if (pending === attempt) finish("failed", "play-rejected"); });
+        };
+        if (trackFragment) {
+          // MEDIA_ATTACHED follows the new MediaSource's asynchronous opening.
+          // Its default autostart can otherwise load the video-only prefix
+          // before an immediate startLoad(position) takes effect.
+          const autoStartLoad = hls.config.autoStartLoad;
+          attempt.restoreConfiguration = () => { hls.config.autoStartLoad = autoStartLoad; };
+          hls.config.autoStartLoad = false;
+          hls.stopLoad();
+          attempt.onAttached = () => {
+            hls.off("hlsMediaAttached", attempt.onAttached); attempt.onAttached = null;
+            if (pending !== attempt) return;
+            if (getHls() !== hls || getSession() !== session) { finish("cancelled", "player-or-session-changed"); return; }
+            if (trackDiscoveryFragment(error, hls) !== trackFragment || trackFragment.start !== position) { finish("cancelled", "fragment-context-changed"); return; }
+            try {
+              // Decoded-frame counters may restart with the media resource.
+              framesBefore = media.getVideoPlaybackQuality?.().totalVideoFrames ?? media.webkitDecodedFrameCount;
+              record.framesAfterReattach = Number.isFinite(framesBefore) ? framesBefore : null;
+              media.currentTime = position;
+              attempt.restoreConfiguration(); resume();
+            } catch { finish("failed", "recovery-exception"); }
+          };
+          hls.on("hlsMediaAttached", attempt.onAttached);
+          hls.recoverMediaError();
+          // A synchronous fatal/cancel can occur inside recoverMediaError and
+          // finish before that convenience method has completed reattachment.
+          if (pending !== attempt) { hls.stopLoad(); hls.detachMedia(); }
+        } else {
+          if (liveRestart) hls.stopLoad();
+          else hls.recoverMediaError();
+          resume();
+        }
       } catch { finish("failed", "recovery-exception"); }
     });
     return true;
