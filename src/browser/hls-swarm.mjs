@@ -770,7 +770,7 @@ class HlsSwarm {
     let commitment;
     try {
       this.counters.commitmentRequests += 1;
-      const event = await boundedOperation(() => this.options.getCommitment(context, { signal }), signal, Math.max(1, deadline - now()));
+      const event = await boundedOperation((operationSignal) => this.options.getCommitment(context, { signal: operationSignal }), signal, Math.max(1, deadline - now()));
       commitment = verifySegmentCommitment(event, {
         streamEvent: this.options.streamEvent, swarmId: this.options.swarmId, key, context,
         maxSegmentBytes: this.options.maxSegmentBytes,
@@ -1120,7 +1120,7 @@ class HlsSwarm {
     if (this.#uploadRemaining() === 0) this.#withdrawContribution();
     if (this.options.reserveUploadBytes) {
       let accepted = false;
-      try { accepted = await boundedOperation(() => this.options.reserveUploadBytes(bytes.byteLength, { signal: this.lifecycle.signal }), this.lifecycle.signal, this.options.admissionTimeoutMs) === true; }
+      try { accepted = await boundedOperation((signal) => this.options.reserveUploadBytes(bytes.byteLength, { signal }), this.lifecycle.signal, this.options.admissionTimeoutMs) === true; }
       catch { this.#noteError("upload-reservation"); }
       if (!accepted || this.stopped || link.closed || this.options.serve !== true || (!this.options.serveOnCellular && onCellular())) {
         if (!accepted) this.counters.bytesUploaded -= bytes.byteLength;
@@ -1322,7 +1322,7 @@ class HlsSwarm {
     check.promise = (async () => {
       let ok = false;
       try {
-        ok = await boundedOperation(() => this.options.admit(pubkey, ticket, { signal: this.lifecycle.signal }), this.lifecycle.signal, this.options.admissionTimeoutMs) === true;
+        ok = await boundedOperation((signal) => this.options.admit(pubkey, ticket, { signal }), this.lifecycle.signal, this.options.admissionTimeoutMs) === true;
       } catch (error) { this.#noteError("admit", error); }
       if (this.stopped) return false;
       if (ok) {

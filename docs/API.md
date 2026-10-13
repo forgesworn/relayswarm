@@ -300,6 +300,12 @@ requires an explicit application call. Descriptors from untrusted seeders
 cannot establish provenance. `validateNativeDescriptor` validates the same
 policy without opening network resources.
 
+Clients subscribe before announcing receive-only native presence (`open: false`,
+empty `have`). Seeders coalesce replies globally with a minimum one-second
+publication gap and cancel the pending timer on close. This permits discovery
+without ephemeral history replay. Presence discloses the temporary Nostr/native
+public-key link but never authorises a dial or implies an inbound service.
+
 The installed `relayswarm-native` executable accepts `--descriptor`,
 `--output`, repeated `--bootstrap`, `--peer-timeout` and `--allow-loopback`.
 It requires Node and atomically creates a new verified output without

@@ -39,6 +39,15 @@ The relay never receives the object bytes or plaintext dial details. It still
 sees event metadata, swarm tags, ephemeral Nostr public keys, timing and source
 IP addresses.
 
+The installed API also handles relays that do not retain ephemeral events:
+after subscribing, a receiver publishes native leecher presence with `open:
+false` and no held hashes. A seeder coalesces live announcements globally to
+at most one per second, sharing one timer with its periodic heartbeat. This
+presence exposes the temporary Nostr/native public-key link but creates no
+transport grant. The exact encrypted dial remains mandatory. See the
+[installed API](API.md#installed-native-client) for verified HTTP fallback,
+which is separate from the original CLI spike's failure behaviour.
+
 ## What this replaces
 
 For an installed RelaySwarm process, `hyperdht-v1` can replace the WebRTC data

@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import { once } from "node:events";
 import { generateSecretKey, finalizeEvent } from "nostr-tools/pure";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 import { PeerLink } from "../src/browser/peer-link.mjs";
@@ -466,6 +468,76 @@ test("stalled host operations have a deadline and shutdown cancels them", async 
   const operation = boundedOperation(stalled, controller.signal, 1000);
   controller.abort();
   await assert.rejects(operation, /cancelled/);
+});
+
+test("real withheld admission HTTP requests abort at each deadline without accumulating or admitting peers", async () => {
+  const held = new Set(), signals = [], peers = [], connections = [], serverErrors = [];
+  let reply = null, aborted = 0, peakHeld = 0;
+  const http = createServer(async (request, response) => {
+    try {
+      assert.equal(request.url, "/admission/verify"); assert.equal(request.method, "POST");
+      const chunks = []; for await (const chunk of request) chunks.push(chunk);
+      const input = JSON.parse(Buffer.concat(chunks).toString());
+      assert.match(input.pubkey, /^[0-9a-f]{64}$/); assert.equal(input.ticket, "fixture-ticket");
+      if (reply !== null) { response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ admitted: reply })); return; }
+      held.add(response); peakHeld = Math.max(peakHeld, held.size);
+      response.on("close", () => { held.delete(response); if (!response.writableEnded) aborted++; });
+    } catch (error) { serverErrors.push(error.message); response.destroy(); }
+  });
+  http.listen(0, "127.0.0.1"); await once(http, "listening");
+  const url = `http://127.0.0.1:${http.address().port}/admission/verify`;
+  const relay = await startLocalRelay(), pool = new RelayPool([relay.url]);
+  class Connection extends PC { constructor() { super(); connections.push(this); } }
+  const swarm = createHlsSwarm({ ...base, relays: [relay.url], RTCPeerConnectionImpl: Connection, admissionTimeoutMs: 150,
+    admit: async (pubkey, ticket, { signal }) => {
+      signals.push(signal);
+      const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey, ticket }), signal });
+      return (await response.json()).admitted === true;
+    },
+  });
+  const offer = (peer, id) => peer.sendSignal(swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: id, payload: { sdp: "fixture-offer", ticket: "fixture-ticket" } });
+  try {
+    swarm.attach({ config: { loader: Loader } }); await pool.connect(); await until(() => swarm.metrics().pubkey);
+    const peer = new RelaySwarmSession({ pool, swarmId: base.swarmId }); peer.start(); peers.push(peer);
+    for (let round = 1; round <= 3; round++) {
+      offer(peer, `withheld-${round}`); await until(() => held.size === 1);
+      await until(() => aborted === round && held.size === 0 && swarm.metrics().peers.admitRefused === round);
+      assert.equal(signals[round - 1].aborted, true);
+      assert.equal(connections.length, 0); assert.equal(swarm.metrics().relays.signalsSent, 0, "no SDP may be published on expired admission");
+    }
+    assert.equal(peakHeld, 1); assert.equal(swarm.metrics().errors.byStage.admit, 3);
+    reply = false; offer(peer, "explicit-denial"); await until(() => swarm.metrics().peers.admitRefused === 4);
+    assert.equal(swarm.metrics().errors.byStage.admit, 3, "false admission is not a callback error");
+    assert.equal(connections.length, 0);
+    reply = true; offer(peer, "valid-after-timeouts"); await until(() => swarm.metrics().peers.offersAccepted === 1);
+    assert.equal(connections.length, 1, "operation deadlines must not abort the swarm lifecycle");
+    const second = new RelaySwarmSession({ pool, swarmId: base.swarmId }); second.start(); peers.push(second);
+    reply = null; offer(second, "stop-withheld"); await until(() => held.size === 1);
+    swarm.stop(); await until(() => aborted === 4 && held.size === 0);
+    assert.equal(connections.length, 1, "stopped admission cannot create a late peer");
+    assert.equal(signals.at(-1).aborted, true);
+    assert.equal(new Set(signals).size, signals.length, "each host operation owns a distinct cancellation signal");
+    assert.equal(signals[3].aborted, false); assert.equal(signals[4].aborted, false, "settled operations remove the lifecycle abort listener");
+    assert.deepEqual(serverErrors, []);
+  } finally {
+    swarm.stop(); for (const peer of peers) peer.close(); pool.close(); await relay.close();
+    for (const response of held) response.destroy(); http.closeAllConnections(); await new Promise((resolve) => http.close(resolve));
+  }
+});
+
+test("a deadline settles once, ignores a late host result and preserves callback rejection values", async () => {
+  const parent = new AbortController(); let release, signal, aborts = 0;
+  const promise = boundedOperation((ownedSignal) => {
+    signal = ownedSignal; signal.addEventListener("abort", () => { aborts++; });
+    return new Promise((resolve) => { release = resolve; });
+  }, parent.signal, 20);
+  await assert.rejects(promise, /timed out/);
+  assert.equal(parent.signal.aborted, false); assert.equal(signal.aborted, true);
+  release(true); parent.abort(); await sleep(10); assert.equal(aborts, 1);
+  await assert.rejects(promise, /timed out/);
+  let rejected = false;
+  await boundedOperation(() => Promise.reject(undefined), undefined, 100).catch((error) => { rejected = true; assert.equal(error, undefined); });
+  assert.equal(rejected, true, "even a falsy rejection must not become successful admission");
 });
 
 test("peer-first fallback preserves a single-use HTTP loader's statistics contract", async () => {

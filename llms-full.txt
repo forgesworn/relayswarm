@@ -319,7 +319,7 @@ connection and relay socket, drops held segments and emits one final
 | `serveOnCellular` | `false` | With `false`, detected cellular or `saveData` connections neither upload nor fetch peer media. Detection is advisory and does not identify every metered connection. |
 | `serve` | `false` | Set `true` only after the viewer opts into uploading. With `false`, the viewer is receive-only: it takes from peers but never uploads or advertises what it holds. Use it where the connection type cannot be read (Safari), so a phone on cellular is never asked to upload. |
 | `ticket` | none | An opaque string (up to 2 KB) this viewer presents in its presence and in every offer and answer, typically a short-lived credential the origin signed for this viewer's swarm key. |
-| `admit` | none | `(pubkey, ticket) => boolean \| Promise<boolean>`. With it set, a viewer never dials, answers or follows a referral to a peer it has not admitted, so its address (carried in the SDP) only reaches ticket holders. The host is called again before each dial and SDP publication, including retries and referrals; it must check expiry. A third argument provides an abort `signal`. At most 16 checks run concurrently and each has a 3 s deadline. |
+| `admit` | none | `(pubkey, ticket) => boolean \| Promise<boolean>`. With it set, a viewer never dials, answers or follows a referral to a peer it has not admitted, so its address (carried in the SDP) only reaches ticket holders. The host is called again before each dial and SDP publication, including retries and referrals; it must check expiry. A third argument provides an operation-specific abort `signal`, cancelled on its deadline or swarm stop. At most 16 checks run concurrently and each has a 3 s deadline. |
 | `shadowSampleRate` | `0.25` | Share of fragments raced. |
 | `streamEvent` / `getCommitment` | required for peer-first | Signed kind-30311 stream event and `(context, { signal }) => signedCommitment`. See below. |
 | `delegation` / `revokedDelegationIds` / `delegationRevocations` | none / empty | Explicit author-signed scope and current host revocation view for delegated commitments. |
@@ -554,6 +554,8 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
   fatal records and spent upload allowance remain in the receipt.
 - Fixed Windows hash-cache deduplication, malformed relay-filter crashes,
   discovery eviction, worker descendant cleanup and pending-write queue bounds.
+- Fixed expired host callbacks leaving HTTP requests outstanding, and added
+  bounded native discovery when relays replay no ephemeral presence history.
 
 ## 0.2.0 source candidate — broadcaster work on 12 October 2026
 
@@ -1088,6 +1090,12 @@ requires an explicit application call. Descriptors from untrusted seeders
 cannot establish provenance. `validateNativeDescriptor` validates the same
 policy without opening network resources.
 
+Clients subscribe before announcing receive-only native presence (`open: false`,
+empty `have`). Seeders coalesce replies globally with a minimum one-second
+publication gap and cancel the pending timer on close. This permits discovery
+without ephemeral history replay. Presence discloses the temporary Nostr/native
+public-key link but never authorises a dial or implies an inbound service.
+
 The installed `relayswarm-native` executable accepts `--descriptor`,
 `--output`, repeated `--bootstrap`, `--peer-timeout` and `--allow-loopback`.
 It requires Node and atomically creates a new verified output without
@@ -1208,13 +1216,35 @@ and a ten-second no-progress timeout. Recovery stops contribution and preserves
 spent allowance; successful repair is recorded separately from the fatal error.
 This impact treatment does not establish the historical hosted failure's cause.
 
-Physical Pixel preflight confirmed a Pixel 10 Pro XL on M4. Its connection was
-restored once, then disappeared from ADB again; no physical playback receipt exists yet. The private
-YouTube test is awaiting channel setup. The earlier hosted H.264 MSE failure,
-varied NAT, sustained audience/cost evidence and final deployment acceptance
-remain open. Safari WebDriver explicitly requires remote automation to be
-enabled; that setting is unchanged. Installed Firefox readiness passes, but
-neither readiness probe proves final playback. Initial wider-media failures and later passes are retained;
+All nine required [CI jobs at `4bffa96`](https://github.com/forgesworn/relayswarm/actions/runs/38375824009)
+passed. That exact image runs on the public pilot; its browser bundle matches
+the committed source. The old app stopped cleanly, and an encrypted private
+state backup passed an isolated identity/token/generation and permission
+restore check. An actual fifteen-minute four-context HTTPS/WSS diagnostic
+received both peer qualities (145,183,188 bytes), with zero receiver upload
+and zero fatal/native errors. All 372 sampled intervals advanced decoded
+frames. Stalls and one explicit reconsent following a policy timeout remain
+recorded. This is short, same-Mac synthetic-source evidence.
+
+The subsequent host-callback correction aborts each expired operation's HTTP
+request; real withholding tests show no outstanding request accumulation.
+Native discovery also works with zero ephemeral-history replay: a separate
+process verified 131,097 bytes. Both changes retain the existing deadlines,
+authorisation and consent rules; their final-source CI/deployment is pending.
+Separately, one native WAN retry accepted all bytes within 8,873 ms, while
+another timed out before a UDP route/Noise handoff. That variability remains
+open and is not explained by the ephemeral-history discovery correction.
+
+The Pixel is connected again and initial origin playback started, but its
+first acceptance run received no verified peer media. Firefox also missed
+peer delivery in its first run. Safari automation is now enabled: omitting
+its optional certificate capability returned `acceptInsecureCerts: false`,
+but its automation page was hidden during the readiness check. Complete
+device/browser journeys remain open. The private YouTube test is awaiting
+private channel setup and forwarding acceptance. The earlier hosted H.264
+MSE cause, varied NAT, hours of audience/cost evidence, restart/rollback and
+final release/deployment acceptance remain open.
+Initial wider-media failures and later passes are retained;
 corrected codec-fixture metadata and startup quality handling do not by
 themselves establish the cause of the earlier hosted failure.
 
@@ -1585,6 +1615,15 @@ assignments.
 The relay never receives the object bytes or plaintext dial details. It still
 sees event metadata, swarm tags, ephemeral Nostr public keys, timing and source
 IP addresses.
+
+The installed API also handles relays that do not retain ephemeral events:
+after subscribing, a receiver publishes native leecher presence with `open:
+false` and no held hashes. A seeder coalesces live announcements globally to
+at most one per second, sharing one timer with its periodic heartbeat. This
+presence exposes the temporary Nostr/native public-key link but creates no
+transport grant. The exact encrypted dial remains mandatory. See the
+[installed API](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md#installed-native-client) for verified HTTP fallback,
+which is separate from the original CLI spike's failure behaviour.
 
 ## What this replaces
 
@@ -2510,6 +2549,10 @@ invalid signatures or insufficient playback buffer use the HTTP loader.
 Measured HTTP latency raises the origin reserve; peer transfer estimates
 cannot spend the time retained for fallback. hls.js retains bitrate selection.
 
+Commitment, admission and persistent-reservation host callbacks receive an
+operation-specific signal. A deadline aborts the callback's I/O as well as its
+caller; stopped or expired checks cannot accumulate outstanding HTTP requests.
+
 The demo retains fatal/native decoder records and allows one deferred attempt
 to recover a fatal append/MediaSource-reset error. It restores the HTTP loader,
 stops contribution, clears upload consent and retries the current live/VOD
@@ -2604,6 +2647,13 @@ deadline even when synchronous work delays an abort timer. Discovery accepts
 valid presence within its configured age bound while encrypted signals retain
 their shorter subscription window.
 
+The receiver subscribes before announcing receive-only native presence, with
+no held objects and `open: false`. A seeder coalesces live replies globally to
+at most one per second, using one timer and no requester map; close cancels a
+pending reply. Relay history is optional for ephemeral events. This public
+readiness metadata links the temporary Nostr identity and native public key;
+only an exact signed dial can grant a transfer.
+
 This entry point requires installed Node; it is not a self-contained binary.
 The original `native-poc.mjs` remains a separate two-peer proof, with its
 original failure-reporting behaviour. Neither client is durable media storage.
@@ -2631,7 +2681,7 @@ An entry remains open until the evidence described below exists.
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Local scope/revocation/discovery evidence passes; final CI pending |
 | P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Clean production package/export/bundle/installed transfer/fallback evidence passes; final release asset verification pending |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0/main CI/assets and actual public-SDK/browser author/delegate/adversarial journeys pass; final JS head CI pending |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Open; c3dabf6 Windows/browser CI pass; corrected native fixture passes locally on macOS/Linux; final head CI/release/deployment pending |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Open; nine CI jobs and exact public pilot at 4bffa96 pass; callback/discovery fixes need final CI/deployment; release/restart/rollback pending |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Open |
 
 ## Evidence rules

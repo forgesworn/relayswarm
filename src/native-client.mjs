@@ -67,12 +67,20 @@ async function peerObject(descriptor, { bootstrap, signal, peerTimeoutMs, WebSoc
     const presence = waitFor(session, "onPresence", ({ from, payload }) => descriptor.trustedSeeders.includes(from)
       && payload.role === "seeder" && payload.have.includes(descriptor.sha256)
       && payload.transports.some(({ type }) => type === NATIVE_TRANSPORT), signal);
+    // A startup/publication failure must not leave an unobserved wait rejection.
+    presence.catch(() => {});
     session.start();
+    if (signal.aborted) throw signal.reason;
+    // Ephemeral presence may have no relay history. Request a live announcement
+    // after subscribing, without advertising an inbound service or held objects.
+    session.announcePresence({ role: "leecher", transports: [{ type: NATIVE_TRANSPORT, publicKey: transport.publicKey }],
+      have: [], open: false });
     const seeder = await presence;
     const key = seeder.payload.transports.find(({ type }) => type === NATIVE_TRANSPORT).publicKey;
     const requestId = randomBytes(16).toString("hex");
     const ready = waitFor(session, "onSignal", ({ from, payload }) => from === seeder.from
       && payload.type === "ready" && payload.transport === NATIVE_TRANSPORT && payload.requestId === requestId, signal);
+    ready.catch(() => {});
     session.sendSignal(seeder.from, { type: "dial", transport: NATIVE_TRANSPORT, requestId,
       payload: { transportPublicKey: transport.publicKey, sha256: descriptor.sha256, size: descriptor.size } });
     const response = (await ready).payload.payload;
@@ -157,12 +165,42 @@ export async function createNativeObjectSeeder({ bytes, swarmId, relayUrls, boot
     trustedSeeders: [session.pubkey], ...(originUrl ? { originUrl } : {}) }, { allowLoopback });
   const transport = new NativeDhtTransport({ bootstrap, connectionTimeoutMs: timeoutMs });
   const handled = new Map();
-  let heartbeat;
-  const close = async () => { clearInterval(heartbeat); session.close(); pool.close(); await transport.close(); };
+  let heartbeat, presenceTimer, unsubscribePresence, closing;
+  let stopped = false, lastAnnouncementAt = -Infinity;
+  const announce = () => {
+    if (stopped) return;
+    try {
+      session.announcePresence({ role: "seeder", transports: [{ type: NATIVE_TRANSPORT, publicKey: transport.publicKey }], have: [descriptor.sha256] });
+    } finally { lastAnnouncementAt = performance.now(); }
+  };
+  const schedulePresence = () => {
+    if (stopped || presenceTimer !== undefined) return;
+    const publishWhenDue = () => {
+      presenceTimer = undefined;
+      if (stopped) return;
+      const remaining = 1000 - (performance.now() - lastAnnouncementAt);
+      if (remaining > 0) {
+        presenceTimer = setTimeout(publishWhenDue, Math.ceil(remaining));
+        presenceTimer.unref();
+        return;
+      }
+      try { announce(); } catch { /* A relay failure does not escape a timer callback. */ }
+    };
+    presenceTimer = setTimeout(publishWhenDue, Math.max(0, Math.ceil(1000 - (performance.now() - lastAnnouncementAt))));
+    presenceTimer.unref();
+  };
+  const close = () => {
+    if (closing) return closing;
+    stopped = true; clearInterval(heartbeat); clearTimeout(presenceTimer);
+    presenceTimer = undefined; unsubscribePresence?.(); session.close(); pool.close();
+    closing = transport.close();
+    return closing;
+  };
   try {
     await Promise.all([pool.connect(), transport.ready()]);
     await transport.listen((socket, authorization) => serveAuthorizedObject(socket, authorization, () => object));
     session.onSignal(({ from, payload }) => {
+      if (stopped) return;
       if (payload.type !== "dial" || payload.transport !== NATIVE_TRANSPORT || payload.payload.sha256 !== descriptor.sha256 || payload.payload.size !== descriptor.size) return;
       const replayKey = `${from}:${payload.requestId}`, now = Date.now();
       for (const [key, expires] of handled) if (expires <= now) handled.delete(key);
@@ -175,9 +213,13 @@ export async function createNativeObjectSeeder({ bytes, swarmId, relayUrls, boot
           payload: { transportPublicKey: transport.publicKey, sha256: descriptor.sha256, size: descriptor.size } });
       } catch { /* Exhausted or invalid grants do not create an unbounded queue. */ }
     });
+    // This readiness hint only coalesces a public announcement. A signed dial
+    // with the exact object identity still creates each one-use transport grant.
+    unsubscribePresence = session.onPresence(({ payload }) => {
+      if (payload.role === "leecher" && payload.transports.some(({ type }) => type === NATIVE_TRANSPORT)) schedulePresence();
+    });
     session.start();
-    const announce = () => session.announcePresence({ role: "seeder", transports: [{ type: NATIVE_TRANSPORT, publicKey: transport.publicKey }], have: [descriptor.sha256] });
-    announce(); heartbeat = setInterval(announce, 20000); heartbeat.unref();
+    announce(); heartbeat = setInterval(schedulePresence, 20000); heartbeat.unref();
     return { descriptor, close };
   } catch (error) { await close(); throw error; }
 }

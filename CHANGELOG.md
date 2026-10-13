@@ -19,6 +19,8 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
   fatal records and spent upload allowance remain in the receipt.
 - Fixed Windows hash-cache deduplication, malformed relay-filter crashes,
   discovery eviction, worker descendant cleanup and pending-write queue bounds.
+- Fixed expired host callbacks leaving HTTP requests outstanding, and added
+  bounded native discovery when relays replay no ephemeral presence history.
 
 ## 0.2.0 source candidate — broadcaster work on 12 October 2026
 

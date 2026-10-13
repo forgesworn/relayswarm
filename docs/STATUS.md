@@ -109,13 +109,35 @@ and a ten-second no-progress timeout. Recovery stops contribution and preserves
 spent allowance; successful repair is recorded separately from the fatal error.
 This impact treatment does not establish the historical hosted failure's cause.
 
-Physical Pixel preflight confirmed a Pixel 10 Pro XL on M4. Its connection was
-restored once, then disappeared from ADB again; no physical playback receipt exists yet. The private
-YouTube test is awaiting channel setup. The earlier hosted H.264 MSE failure,
-varied NAT, sustained audience/cost evidence and final deployment acceptance
-remain open. Safari WebDriver explicitly requires remote automation to be
-enabled; that setting is unchanged. Installed Firefox readiness passes, but
-neither readiness probe proves final playback. Initial wider-media failures and later passes are retained;
+All nine required [CI jobs at `4bffa96`](https://github.com/forgesworn/relayswarm/actions/runs/38375824009)
+passed. That exact image runs on the public pilot; its browser bundle matches
+the committed source. The old app stopped cleanly, and an encrypted private
+state backup passed an isolated identity/token/generation and permission
+restore check. An actual fifteen-minute four-context HTTPS/WSS diagnostic
+received both peer qualities (145,183,188 bytes), with zero receiver upload
+and zero fatal/native errors. All 372 sampled intervals advanced decoded
+frames. Stalls and one explicit reconsent following a policy timeout remain
+recorded. This is short, same-Mac synthetic-source evidence.
+
+The subsequent host-callback correction aborts each expired operation's HTTP
+request; real withholding tests show no outstanding request accumulation.
+Native discovery also works with zero ephemeral-history replay: a separate
+process verified 131,097 bytes. Both changes retain the existing deadlines,
+authorisation and consent rules; their final-source CI/deployment is pending.
+Separately, one native WAN retry accepted all bytes within 8,873 ms, while
+another timed out before a UDP route/Noise handoff. That variability remains
+open and is not explained by the ephemeral-history discovery correction.
+
+The Pixel is connected again and initial origin playback started, but its
+first acceptance run received no verified peer media. Firefox also missed
+peer delivery in its first run. Safari automation is now enabled: omitting
+its optional certificate capability returned `acceptInsecureCerts: false`,
+but its automation page was hidden during the readiness check. Complete
+device/browser journeys remain open. The private YouTube test is awaiting
+private channel setup and forwarding acceptance. The earlier hosted H.264
+MSE cause, varied NAT, hours of audience/cost evidence, restart/rollback and
+final release/deployment acceptance remain open.
+Initial wider-media failures and later passes are retained;
 corrected codec-fixture metadata and startup quality handling do not by
 themselves establish the cause of the earlier hosted failure.
 

@@ -17,6 +17,10 @@ invalid signatures or insufficient playback buffer use the HTTP loader.
 Measured HTTP latency raises the origin reserve; peer transfer estimates
 cannot spend the time retained for fallback. hls.js retains bitrate selection.
 
+Commitment, admission and persistent-reservation host callbacks receive an
+operation-specific signal. A deadline aborts the callback's I/O as well as its
+caller; stopped or expired checks cannot accumulate outstanding HTTP requests.
+
 The demo retains fatal/native decoder records and allows one deferred attempt
 to recover a fatal append/MediaSource-reset error. It restores the HTTP loader,
 stops contribution, clears upload consent and retries the current live/VOD
@@ -110,6 +114,13 @@ within one connection deadline. Final completion checks the absolute transfer
 deadline even when synchronous work delays an abort timer. Discovery accepts
 valid presence within its configured age bound while encrypted signals retain
 their shorter subscription window.
+
+The receiver subscribes before announcing receive-only native presence, with
+no held objects and `open: false`. A seeder coalesces live replies globally to
+at most one per second, using one timer and no requester map; close cancels a
+pending reply. Relay history is optional for ephemeral events. This public
+readiness metadata links the temporary Nostr identity and native public key;
+only an exact signed dial can grant a transfer.
 
 This entry point requires installed Node; it is not a self-contained binary.
 The original `native-poc.mjs` remains a separate two-peer proof, with its

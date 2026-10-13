@@ -1,20 +1,23 @@
-// Bound asynchronous host callbacks without keeping listeners or timers alive
-// after completion. The host receives the same signal to cancel its own I/O.
+// Give each host operation its own cancellation signal. Expiry must cancel the
+// underlying I/O as well as the caller's wait, without stopping other operations.
 export function boundedOperation(operation, signal, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const fail = () => finish(new Error("Operation cancelled or timed out."));
-    const timer = setTimeout(fail, timeoutMs);
-    const finish = (error, value) => {
+    const controller = new AbortController();
+    let settled = false, timer;
+    const finish = (ok, value, abort = false, reason = value) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      signal?.removeEventListener("abort", fail);
-      if (error) reject(error);
-      else resolve(value);
+      signal?.removeEventListener("abort", cancel);
+      if (abort) controller.abort(reason);
+      if (ok) resolve(value); else reject(value);
     };
-    if (signal?.aborted) return fail();
-    signal?.addEventListener("abort", fail, { once: true });
+    const cancel = () => finish(false, new Error("Operation cancelled."), true, signal.reason);
+    if (signal?.aborted) return cancel();
+    signal?.addEventListener("abort", cancel, { once: true });
+    timer = setTimeout(() => finish(false, new Error("Operation cancelled or timed out."), true), timeoutMs);
     Promise.resolve().then(() => {
-      if (signal?.aborted) throw new Error("Operation cancelled.");
-      return operation();
-    }).then((value) => finish(null, value), finish);
+      if (!settled) return operation(controller.signal);
+    }).then((value) => finish(true, value), (error) => finish(false, error));
   });
 }

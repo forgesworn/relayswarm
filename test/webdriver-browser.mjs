@@ -153,10 +153,14 @@ async function startDriver() {
     try { receipt.driverStatus = await command("GET", "/status", undefined, 800); return true; } catch { return false; }
   }, "Owned WebDriver did not become ready.", 6000);
   const options = values.browser === "firefox" ? { browserName: "firefox", "moz:firefoxOptions": { ...(values["browser-binary"] ? { binary: resolve(values["browser-binary"]) } : {}), args: ["-no-remote"] } } : { browserName: "safari" };
-  const session = await command("POST", "/session", { capabilities: { alwaysMatch: { ...options, acceptInsecureCerts: false } } }, 18000);
+  // Safari's older driver returned true when explicitly given false. Omit this
+  // optional capability there, then still require the actual response to be false.
+  const certificateCapability = values.browser === "safari" ? {} : { acceptInsecureCerts: false };
+  receipt.requestedCertificateCapability = values.browser === "safari" ? "omitted" : false;
+  const session = await command("POST", "/session", { capabilities: { alwaysMatch: { ...options, ...certificateCapability } } }, 18000);
   sessionId = session.sessionId; assert.ok(sessionId);
   receipt.capabilities = { browserName: session.capabilities?.browserName, browserVersion: session.capabilities?.browserVersion,
-    platformName: session.capabilities?.platformName, acceptInsecureCerts: session.capabilities?.acceptInsecureCerts === true,
+    platformName: session.capabilities?.platformName, acceptInsecureCerts: session.capabilities?.acceptInsecureCerts ?? null,
     setWindowRect: session.capabilities?.setWindowRect === true };
   assert.equal(receipt.capabilities.acceptInsecureCerts, false, "Browser must verify public TLS normally.");
   await command("POST", `/session/${sessionId}/timeouts`, { script: 8000, pageLoad: 15000, implicit: 0 });
@@ -184,6 +188,7 @@ try {
     const initialSpent = (await report()).uploadBudget.spent;
     journeyStarted = true; await select("mode", "peer-first"); await click("start");
     await until(async () => (await report()).player.firstPlayingAtMs !== null, "Real browser playback did not start.");
+    await playbackSample("initial-playback");
     const native = (await report()).player.engine === "native HLS";
     receipt.peerCapability = native ? "native HLS origin fallback; peer loader unavailable" : "hls.js peer path";
     receipt.acceptanceScope = native ? "native origin playback and seek only" : "verified receive/upload, durable quota, quality, seek and kill";
@@ -237,6 +242,7 @@ try {
   log(error.message);
 } finally {
   if (sessionId) {
+    if (journeyStarted) receipt.finalReport = await report().then(redacted).catch(() => null);
     try { if (journeyStarted) await evaluate("(()=>{const u=document.getElementById('upload');if(u)u.checked=false;window.relaySwarmDemo?.stop();})()"); } catch { /* Scope guard prevents inspection outside our tab. */ }
     try { await command("DELETE", `/session/${sessionId}`, undefined, 10000); receipt.cleanup.sessionDeleted = true; }
     catch (error) { receipt.cleanup.sessionDeleted = false; receipt.cleanup.sessionError = String(error.message).slice(0, 512); receipt.ok = false; }

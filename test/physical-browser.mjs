@@ -222,6 +222,7 @@ try {
     await checkpoint("initial-consent-off");
     journeyStarted = true; await select("mode", "peer-first"); await tap("start");
     await until(async () => (await report())?.player?.firstPlayingAtMs !== null, "Physical origin playback did not start.");
+    await playbackSample("initial-origin-playback");
     await until(async () => (await report())?.totals?.peerFirstBytes > 0, "No verified physical peer download was measured. Keep an authorised desktop contributor active; if Vanadium requests permission, grant it manually for this site.", 45000);
     assert.equal((await report()).totals.uploaded, 0); await playbackSample("receive-only"); await checkpoint("physical-receive-only-peer-payload");
     const availableQualities = await evaluate("Array.from(document.getElementById('quality').options).map(option=>option.value).filter(value=>Number(value)>=0)");
@@ -277,7 +278,14 @@ try {
   log(error.message);
 } finally {
   if (peerSocket?.readyState === WebSocket.OPEN) {
+    if (journeyStarted) receipt.finalReport = await report().then(redacted).catch(() => null);
     try { if (journeyStarted) { await assertOurTab(); await evaluate("(()=>{const u=document.getElementById('upload');if(u)u.checked=false;window.relaySwarmDemo?.stop();})()"); } } catch { /* Never inspect another target to recover cleanup. */ }
+    if (journeyStarted) {
+      try {
+        await assertOurTab(); await cdpCommand("Page.reload", { ignoreCache: false });
+        receipt.cleanup = { selectedPublicTabReloaded: true, reason: "Stop fixture media and return to a fresh page with upload consent off; durable usage retained." };
+      } catch { receipt.cleanup = { selectedPublicTabReloaded: false }; }
+    }
     peerSocket.close(); const closed = new Promise((done) => peerSocket.once("close", done));
     await Promise.race([closed, pause(1000)]); if (peerSocket.readyState !== WebSocket.CLOSED) peerSocket.terminate();
   }
