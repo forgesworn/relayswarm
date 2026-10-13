@@ -57,6 +57,40 @@ try {
   };
   await consumer.waitForFunction(() => window.relaySwarmDemo.report().totals.peerFirstLoads > 0, null, { timeout: 20000 });
   await seeder.waitForFunction(() => window.relaySwarmDemo.report().totals.uploaded > 0, null, { timeout: 20000 });
+  // One real control request outlives its caller deadline. Later independent
+  // checks must preserve still-fresh authority without touching viewer consent.
+  const renewalBefore = await read(seeder), renewalStart = renewalBefore.durationMs;
+  assert.equal(renewalBefore.current.metrics.serving, true);
+  assert.ok(renewalBefore.uploadBudget.remaining > 1000000);
+  let withheld = false, releaseHeld;
+  const released = new Promise((resolve) => { releaseHeld = resolve; });
+  const holdOne = async (route) => {
+    if (withheld) return route.continue();
+    withheld = true;
+    await Promise.race([pause(6500), released]);
+    await route.abort("timedout").catch(() => {});
+  };
+  const renewalSamples = [];
+  await seeder.route("**/delivery-policy.json", holdOne);
+  try {
+    const started = Date.now();
+    while (Date.now() - started < 9000) {
+      const current = await read(seeder), checked = await seeder.locator("#upload").isChecked();
+      renewalSamples.push({ atMs: current.durationMs, checked, serving: current.current.metrics.serving, unavailable: current.deliveryPolicy.unavailable, remaining: current.uploadBudget.remaining });
+      assert.equal(checked, true); assert.equal(current.current.metrics.serving, true); assert.equal(current.deliveryPolicy.unavailable, false);
+      const cancelled = current.controlTimings.records.some((r) => r.route === "policy" && r.outcome === "cancelled" && r.atMs >= renewalStart && r.durationMs >= 4900);
+      if (withheld && cancelled && Date.now() - started >= 7000) break;
+      await pause(100);
+    }
+    const after = await read(seeder);
+    assert.ok(withheld);
+    assert.ok(after.controlTimings.records.some((r) => r.route === "policy" && r.outcome === "cancelled" && r.atMs >= renewalStart && r.durationMs >= 4900), "Retain actual held-request cancellation");
+    assert.ok(after.controlTimings.records.some((r) => r.route === "policy" && r.outcome === "ok" && r.atMs >= renewalStart + 2000), "An independent later policy check succeeded");
+    assert.ok(after.policyRenewal.records.some((r) => r.outcome === "cancelled"));
+    assert.ok(after.uploadBudget.spent >= renewalBefore.uploadBudget.spent, "No quota reset");
+    receipt.policyRenewal = { scope: "One held loopback policy request; unchanged5s request/authority bounds, native consent unchanged", samples: renewalSamples };
+    await checkpoint("single-held-policy-request-preserves-fresh-consent");
+  } finally { releaseHeld(); await seeder.unroute("**/delivery-policy.json", holdOne); }
   const beforeApply = await read(seeder);
   await seeder.locator("#start").click();
   const applied = await read(seeder);
@@ -136,9 +170,16 @@ try {
   assert.ok((await read(consumer)).loaderRestored);
   await checkpoint("remote-on-preserves-upload-opt-in-and-viewer-off");
 
+  // Give consent explicitly before the full outage so this checks revocation,
+  // rather than merely observing an already unchecked box.
+  await seeder.locator("#upload").check(); await seeder.locator("#start").click();
+  await seeder.waitForFunction(() => window.relaySwarmDemo.report().current.metrics.serving);
+  const outageStarted = Date.now();
   await seeder.route("**/delivery-policy.json", (route) => route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"test policy outage"}' }));
   await seeder.waitForFunction(() => { const report = window.relaySwarmDemo.report(); return report.deliveryPolicy.unavailable && report.current.mode === "off" && report.loaderRestored; });
   const beforeOutage = await read(seeder);
+  assert.ok(Date.now() - outageStarted <= 6500, "Authority expires within5s issuance bound plus observation margin");
+  assert.equal(beforeOutage.policyRenewal.fresh, false);
   await seeder.evaluate(() => { window.relaySwarmDemo.media.currentTime = 90; });
   await seeder.waitForFunction(() => window.relaySwarmDemo.report().player.currentTime > 91 && !window.relaySwarmDemo.media.paused);
   const duringOutage = await read(seeder);

@@ -33,9 +33,19 @@ while the player continues. Applying settings also stops the previous swarm
 before starting another. Uploading and cellular peer traffic require separate
 opt-ins. The engine's upload token bucket permits a burst of up to two seconds
 of the selected limit; it is not a strict per-second traffic shaper.
-Leaving the page stops its swarm. A page restored from the browser's back/forward
-cache uses origin until settings are applied again; physical background/resume
-behaviour is still a field gate.
+Hiding or leaving the page stops its swarm and clears upload and reporting
+consent. Returning uses origin until settings are applied again; physical
+background/resume playback remains a field gate.
+
+The player checks operator policy and publisher identity every two seconds,
+with at most three independent checks in flight. A stalled check cannot block
+a newer successful check. A fully validated check permits peer delivery for
+at most five seconds from its issuance, using both elapsed and wall time;
+delayed responses cannot extend that period. Expiry clears upload and reporting
+consent and restores origin delivery. A later successful check does not restore
+those opt-ins. An operator's origin-only policy stops uploading immediately.
+Local receipts retain failed control requests and bounded renewal observations;
+these timings do not identify the cause of a network timeout.
 
 ## Publish your own media
 

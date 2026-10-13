@@ -5,6 +5,7 @@ import { createMediaRecovery } from "./media-recovery.mjs";
 import { segmentMediaContext } from "../src/browser/segment-commitment.mjs";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 import { createFetchDiagnostics } from "./fetch-diagnostics.mjs";
+import { createPolicyRenewal } from "./policy-renewal.mjs";
 
 const fetchDiagnostics = createFetchDiagnostics();
 
@@ -23,9 +24,9 @@ const bytes = (amount) => amount < 1000 ? `${amount} B` : amount < 1e6 ? `${(amo
 const player = { engine: "pending", firstPlayingAtMs: null, startupMs: null, stalls: 0, stallMs: 0, seeks: 0, seekRecoveryMs: [], fatalErrors: 0, errors: {}, fragmentsLoaded: 0, fragments: [], levelChanges: [], errorRecords: [], nativeErrors: [] };
 const network = { originMediaRequests: 0, encodedOriginMediaBytes: 0, transferOriginMediaBytes: 0 };
 const sessions = [], snapshots = [];
-let deliveryPolicy = { mode: null, revision: 0, telemetry: false }, policyUnavailable = false, policyInFlight = false;
+let deliveryPolicy = { mode: null, revision: 0, telemetry: false }, policyUnavailable = true;
 const archivedTotals = { peerFirstBytes: 0, uploaded: 0, peerFirstLoads: 0, sessions: 0 };
-let session, hls, swarm, initialLoader, startRequestedAt = null, stallAt = null, seekAt = null, native = false, activeConfig;
+let session, hls, swarm, initialLoader, startRequestedAt = null, stallAt = null, seekAt = null, native = false, activeConfig, needsViewerApply = false, suspensionGeneration = 0;
 const status = (message) => { byId("status").textContent = message; };
 const mediaRecovery = createMediaRecovery({ media: video, getHls: () => hls, getSession: () => session, now: elapsed,
   revokeContribution() { stopSwarm(); byId("mode").value = "off"; byId("upload").checked = false; },
@@ -81,9 +82,11 @@ function stopSwarm() {
 }
 function configure() {
   if (mediaRecovery.active()) return;
+  policyRenewal.fresh();
   stopSwarm();
+  const configuredSession = session, configuredCredential = admissionCredential;
   const chosenMode = byId("mode").value;
-  const requestedMode = native || policyUnavailable || chosenMode === "off" ? "off" : deliveryPolicy.mode ?? chosenMode;
+  const requestedMode = native || policyUnavailable || needsViewerApply || chosenMode === "off" ? "off" : deliveryPolicy.mode ?? chosenMode;
   const mode = session.admission && !admissionCredential ? "off" : requestedMode;
   const budget = uploadBudget.snapshot(), allowance = budget.limit, remaining = budget.remaining;
   const admissionReady = !session.admission || admissionCredential && admissionCredential.epoch === session.admission.epoch && admissionCredential.expiresAt * 1000 > Date.now();
@@ -98,13 +101,14 @@ function configure() {
       return fetchDiagnostics.json("commitment", `${session.commitmentEndpoint}?${query}`, { signal });
     },
     secretKey: admissionKey,
-    ...(session.admission && admissionCredential ? { ticket: admissionCredential.ticket, admit: async (pubkey, ticket, { signal }) => {
+    ...(configuredSession.admission && configuredCredential ? { ticket: configuredCredential.ticket, admit: async (pubkey, ticket, { signal }) => {
       try {
-        const result = await fetchDiagnostics.json("admissionVerify", session.admission.verifyEndpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey, ticket }), signal });
-        return result.admitted === true && result.epoch === session.admission.epoch;
+        if (session !== configuredSession || !policyRenewal.fresh()) return false;
+        const result = await fetchDiagnostics.json("admissionVerify", configuredSession.admission.verifyEndpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey, ticket }), signal });
+        return session === configuredSession && !signal.aborted && policyRenewal.fresh() && result.admitted === true && result.epoch === configuredSession.admission.epoch;
       } catch { return false; }
     } } : {}),
-    reserveUploadBytes: (amount, options) => uploadBudget.reserve(amount, options),
+    reserveUploadBytes: async (amount, options) => policyRenewal.fresh() && await uploadBudget.reserve(amount, options) && policyRenewal.fresh(),
     serve: activeConfig.upload, maxUploadBytesPerSession: remaining, maxUploadBytesPerSecond: activeConfig.uploadLimit, serveOnCellular: activeConfig.cellular,
     ...(session.iceServers ? { iceServers: session.iceServers } : {}),
   });
@@ -127,6 +131,7 @@ function render() {
   byId("detail").textContent = `${total.peerFirstLoads} verified peer-first loads · ${player.stalls} playback stalls · ${player.fragmentsLoaded} media fragments loaded`;
 }
 function report() {
+  policyRenewal.fresh();
   return { v: 1, kind: "relayswarm-field-receipt", startedAt, recordedAt: new Date().toISOString(), durationMs: elapsed(),
     environment: { browser: navigator.userAgent, secureContext: isSecureContext, networkLabel: byId("network").value, deviceLabel: byId("device").value, automated: navigator.webdriver === true },
     stream: { eventId: session?.streamEvent.id, publisher: session?.streamEvent.pubkey, swarmId: session?.swarmId, experimental: true },
@@ -135,31 +140,43 @@ function report() {
       scope: "same-origin media resource timings; includes init segments and cache hits; encoded bytes exclude protocol overhead; native HLS requests are not measured" },
     totals: totals(), uploadBudget: uploadBudget.snapshot(), deliveryPolicy: { ...deliveryPolicy, unavailable: policyUnavailable }, current: swarm ? { ...activeConfig, metrics: swarm.metrics() } : null, sessions: [...sessions], snapshots: [...snapshots],
     retention: { fragments: "latest 256", snapshots: "latest 60, every five seconds", sessions: "latest 64", archivedSessions: archivedTotals.sessions, totals: "whole page session" },
-    loaderRestored: !hls || hls.config.fLoader === initialLoader, controlTimings: fetchDiagnostics.snapshot(), limits: ["Network and device labels are supplied by the viewer.", "No peer IP addresses or private signing keys are recorded.", "A receipt is evidence for this session only; it is not a production-readiness claim."],
+    loaderRestored: !hls || hls.config.fLoader === initialLoader, controlTimings: fetchDiagnostics.snapshot(), policyRenewal: policyRenewal.snapshot(), limits: ["Network and device labels are supplied by the viewer.", "No peer IP addresses or private signing keys are recorded.", "A receipt is evidence for this session only; it is not a production-readiness claim."],
   };
 }
 
-async function obtainAdmission() {
-  if (!session.admission) return;
-  if (admissionCredential?.epoch === session.admission.epoch && admissionCredential.expiresAt * 1000 - Date.now() > 20000) return;
-  const post = (label, endpoint, body) => fetchDiagnostics.json(label, endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
-  const challenge = await post("admissionChallenge", session.admission.challengeEndpoint, { pubkey: admissionPubkey });
-  if (challenge.issuer !== session.admission.issuer || challenge.epoch !== session.admission.epoch || challenge.swarmId !== session.swarmId || typeof challenge.challenge !== "string") throw new Error("Peer admission changed.");
-  const proof = finalizeEvent({ kind: 27235, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify({ challenge: challenge.challenge, swarmId: session.swarmId, epoch: challenge.epoch }) }, admissionKey);
-  const credential = await post("admissionTicket", session.admission.ticketEndpoint, { proof });
-  if (credential.issuer !== session.admission.issuer || credential.epoch !== session.admission.epoch || credential.swarmId !== session.swarmId || typeof credential.ticket !== "string" || credential.ticket.length > 2048 || !Number.isSafeInteger(credential.expiresAt) || credential.expiresAt * 1000 <= Date.now()) throw new Error("Invalid peer admission.");
-  admissionCredential = credential;
+function sameIdentity(a, b) {
+  return a?.swarmId === b?.swarmId && a?.streamEvent?.id === b?.streamEvent?.id && a?.admission?.epoch === b?.admission?.epoch && a?.admission?.issuer === b?.admission?.issuer;
+}
+async function obtainAdmission(candidateSession, existing, signal) {
+  if (!candidateSession.admission) return null;
+  const admission = candidateSession.admission;
+  if (existing?.epoch === admission.epoch && existing.issuer === admission.issuer && existing.swarmId === candidateSession.swarmId && existing.expiresAt * 1000 - Date.now() > 20000) return existing;
+  const post = (label, endpoint, body) => fetchDiagnostics.json(label, endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000) });
+  const challenge = await post("admissionChallenge", admission.challengeEndpoint, { pubkey: admissionPubkey });
+  if (challenge.issuer !== admission.issuer || challenge.epoch !== admission.epoch || challenge.swarmId !== candidateSession.swarmId || typeof challenge.challenge !== "string") throw new Error("Peer admission changed.");
+  const proof = finalizeEvent({ kind: 27235, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify({ challenge: challenge.challenge, swarmId: candidateSession.swarmId, epoch: challenge.epoch }) }, admissionKey);
+  const credential = await post("admissionTicket", admission.ticketEndpoint, { proof });
+  if (credential.issuer !== admission.issuer || credential.epoch !== admission.epoch || credential.swarmId !== candidateSession.swarmId || typeof credential.ticket !== "string" || credential.ticket.length > 2048 || !Number.isSafeInteger(credential.expiresAt) || credential.expiresAt * 1000 <= Date.now()) throw new Error("Invalid peer admission.");
+  return credential;
 }
 byId("settings").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!session || mediaRecovery.active()) return;
+  if (!session || mediaRecovery.active() || document.visibilityState !== "visible") return;
   byId("start").disabled = true;
+  const submittedSession = session, priorCredential = admissionCredential;
+  const submittedGeneration = suspensionGeneration;
+  const applyIsCurrent = () => submittedGeneration === suspensionGeneration && document.visibilityState === "visible";
   try {
     await uploadBudget.setLimit(Number(byId("allowance").value));
-    if (byId("mode").value !== "off" && !policyUnavailable && deliveryPolicy.mode !== "off") await obtainAdmission();
-  } catch { admissionCredential = null; status("Peer admission unavailable · origin playback remains available."); }
+    if (!applyIsCurrent()) return;
+    if (byId("mode").value !== "off" && policyRenewal.fresh() && deliveryPolicy.mode !== "off") {
+      const credential = await obtainAdmission(submittedSession, priorCredential);
+      if (applyIsCurrent() && session === submittedSession && admissionCredential === priorCredential && policyRenewal.fresh()) admissionCredential = credential;
+    }
+  } catch { if (applyIsCurrent() && session === submittedSession && admissionCredential === priorCredential) { admissionCredential = null; status("Peer admission unavailable · origin playback remains available."); } }
   finally { byId("start").disabled = mediaRecovery.active(); }
-  if (mediaRecovery.active()) return;
+  if (mediaRecovery.active() || !applyIsCurrent()) return;
+  needsViewerApply = false;
   if (startRequestedAt === null) {
     startRequestedAt = elapsed();
     if (Hls.isSupported()) {
@@ -208,41 +225,64 @@ byId("download").addEventListener("click", () => {
   const link = document.createElement("a"); link.href = url; link.download = `relayswarm-field-${new Date().toISOString().replace(/[:.]/gu, "-")}.json`; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
-window.addEventListener("pagehide", () => { mediaRecovery.cancel("page-hidden"); stopSwarm(); });
-window.addEventListener("pageshow", () => { if (startRequestedAt !== null && !swarm) { byId("kill").disabled = true; status("Peer delivery stopped while this page was inactive. Playback uses origin; apply settings to rejoin."); } });
+function suspendPeerAuthority() { suspensionGeneration++; needsViewerApply = true; policyRenewal.suspend(); stopSwarm(); }
+window.addEventListener("pagehide", () => { suspendPeerAuthority(); mediaRecovery.cancel("page-hidden"); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") suspendPeerAuthority(); else policyRenewal.resume(); });
+window.addEventListener("pageshow", () => { policyRenewal.resume(); if (startRequestedAt !== null && !swarm) { byId("kill").disabled = true; status("Peer delivery stopped while this page was inactive. Playback uses origin; apply settings to rejoin."); } });
 window.relaySwarmDemo = { report, stop: () => { mediaRecovery.cancel(); stopSwarm(); render(); }, ready: () => Boolean(session), media: video };
-async function refreshPolicy() {
-  if (policyInFlight || !session) return;
-  policyInFlight = true;
-  try {
-    const next = await fetchDiagnostics.json("policy", session?.deliveryPolicyEndpoint || "/delivery-policy.json", { signal: AbortSignal.timeout(5000) });
-    if (!next || ![null, "off", "shadow", "peer-first"].includes(next.mode)) throw new Error("Invalid policy.");
-    const current = await fetchDiagnostics.json("session", "/session.json", { signal: AbortSignal.timeout(5000) });
-    if (current.v !== 1 || typeof current.swarmId !== "string" || !current.streamEvent || !Array.isArray(current.relays) || current.manifest !== session.manifest) throw new Error("Publisher session changed incompatibly.");
-    const identityChanged = current.swarmId !== session.swarmId || current.streamEvent.id !== session.streamEvent.id || current.admission?.epoch !== session.admission?.epoch;
+function policyUnavailableNow(reason, policy) {
+  if (reason === "operator-off") {
+    deliveryPolicy = { ...deliveryPolicy, ...policy }; policyUnavailable = false;
+    byId("upload").checked = false;
+    if (!policy.telemetry) { byId("telemetry").checked = false; byId("telemetry").disabled = true; }
+    if (swarm && activeConfig.mode !== "off") configure();
+    byId("policy-status").textContent = "Operator delivery policy: origin only.";
+    return;
+  }
+  policyUnavailable = true;
+  byId("upload").checked = false;
+  byId("telemetry").disabled = true;
+  byId("telemetry-status").textContent = "Reporting is unavailable because the server policy could not be checked.";
+  byId("telemetry").checked = false;
+  if (reason === "publisher-session-changed") { mediaRecovery.cancel(reason); admissionCredential = null; }
+  if (swarm && activeConfig.mode !== "off") configure();
+  byId("policy-status").textContent = "Delivery policy unavailable · using origin until it returns.";
+}
+const policyRenewal = createPolicyRenewal({
+  async load({ signal, policy, invalidate }) {
+    const base = session, credential = admissionCredential;
+    const requestSignal = () => AbortSignal.any([signal, AbortSignal.timeout(5000)]);
+    const next = await fetchDiagnostics.json("policy", base.deliveryPolicyEndpoint || "/delivery-policy.json", { signal: requestSignal() });
+    if (!policy(next)) return null;
+    const current = await fetchDiagnostics.json("session", "/session.json", { signal: requestSignal() });
+    if (current?.v !== 1 || typeof current.swarmId !== "string" || !current.streamEvent || typeof current.streamEvent.id !== "string" || !Array.isArray(current.relays) || current.manifest !== base.manifest) {
+      invalidate("invalid-session"); throw new Error("Publisher session changed incompatibly.");
+    }
+    const identityChanged = !sameIdentity(current, base);
+    if (identityChanged) invalidate("publisher-session-changed");
+    const renewAdmission = Boolean(current.admission && startRequestedAt !== null && byId("mode").value !== "off" && next.mode !== "off" && (identityChanged || !credential || credential.expiresAt * 1000 - Date.now() <= 20000));
+    const candidateCredential = renewAdmission ? await obtainAdmission(current, identityChanged ? null : credential, signal) : identityChanged ? null : credential;
+    return { base, next, current, candidateCredential, priorCredential: credential, renewAdmission };
+  },
+  eligible: ({ base, current }) => sameIdentity(base, session) || sameIdentity(current, session),
+  commit({ next, current, candidateCredential, priorCredential, renewAdmission }) {
+    const identityChanged = !sameIdentity(current, session);
     const changed = policyUnavailable || next.mode !== deliveryPolicy.mode || identityChanged;
-    if (identityChanged) { mediaRecovery.cancel("publisher-session-changed"); stopSwarm(); admissionCredential = null; session = current; }
-    const renewAdmission = Boolean(current.admission && startRequestedAt !== null && byId("mode").value !== "off" && next.mode !== "off" && (!admissionCredential || admissionCredential.expiresAt * 1000 - Date.now() <= 20000));
-    if (renewAdmission) await obtainAdmission();
+    if (identityChanged) { mediaRecovery.cancel("publisher-session-changed"); stopSwarm(); session = current; }
+    if (identityChanged || admissionCredential === priorCredential) admissionCredential = candidateCredential;
     deliveryPolicy = next; policyUnavailable = false;
     if (next.mode === "off") byId("upload").checked = false;
     byId("telemetry").disabled = !next.telemetry;
     byId("telemetry-status").textContent = next.telemetry ? "Reporting is available. Tick the checkbox to share measurements." : "Reporting is switched off on this server. The checkbox is unavailable.";
     if (!next.telemetry) byId("telemetry").checked = false;
-    if ((changed || renewAdmission) && (swarm || startRequestedAt !== null)) configure();
+    if ((changed || renewAdmission) && (swarm || startRequestedAt !== null && !needsViewerApply)) configure();
     byId("policy-status").textContent = next.mode === null ? "Viewer chooses delivery mode." : `Operator delivery policy: ${next.mode === "off" ? "origin only" : next.mode}.`;
-  } catch {
-    policyUnavailable = true;
-    byId("upload").checked = false;
-    byId("telemetry").disabled = true;
-    byId("telemetry-status").textContent = "Reporting is unavailable because the server policy could not be checked.";
-    byId("telemetry").checked = false;
-    if (swarm && activeConfig.mode !== "off") configure();
-    byId("policy-status").textContent = "Delivery policy unavailable · using origin until it returns.";
-  } finally { policyInFlight = false; }
-}
+  },
+  revoke: policyUnavailableNow,
+});
+function refreshPolicy() { return session ? policyRenewal.renew() : Promise.resolve(false); }
 async function sendReport() {
-  if (!byId("telemetry").checked || !deliveryPolicy.telemetry || startRequestedAt === null) return;
+  if (!policyRenewal.fresh() || !byId("telemetry").checked || !deliveryPolicy.telemetry || startRequestedAt === null) return;
   const total = totals();
   const values = { durationMs: elapsed(), peerBytes: total.peerFirstBytes, uploadedBytes: total.uploaded, originMediaRequests: network.originMediaRequests, originMediaBytes: network.encodedOriginMediaBytes, stalls: player.stalls, stallMs: Math.round(player.stallMs), fatalErrors: player.fatalErrors };
   try { await fetchDiagnostics.json("report", "/reports", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ v: 1, reportId, sequence: ++reportSequence, values }) }); } catch { /* Playback does not depend on reporting. */ }

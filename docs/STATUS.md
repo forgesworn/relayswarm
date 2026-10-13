@@ -62,6 +62,32 @@ merged source do not establish production readiness.
 
 ## Current source acceptance on 13 October
 
+The earlier candidate checkpoint is source
+`cee92281b20aa5e60fc39d0e0cb2a368daa83747`. All nine required jobs passed in
+[CI run 38471147105](https://github.com/forgesworn/relayswarm/actions/runs/38471147105);
+the optional two-hour soak was skipped at this head. Fresh offline,
+production-only package consumption passed all ten documented imports including
+metadata, exact packaged demo/recovery bytes, the installed ICE CLI and actual
+separate-process native delivery of 131,097 verified bytes. Native delivery used
+zero HTTP origin requests; peer absence then produced one verified loopback
+origin fallback. Owned services and scratch were removed, and HEAD stayed clean.
+The tarball contains 186 files, is 823,201 bytes and has SHA-256
+`b847aa0d57f68975aa69bdc70589f1aa5066b757e748001ccb7bb967853a3d3a`.
+The standalone ESM candidate is 114,201 bytes, SHA-256
+`01de11837fbd08098bf98b6e8be945866ef766f76629030fec89de2318170d19`,
+with the expected five exports, no external imports and a successful local
+import/off-mode check. These are local candidate artifacts, not published or
+freshly downloaded release assets.
+
+At the cee checkpoint, all 48 runtime/package/lock inputs were unchanged from
+f999 and 6b2; the six browser inputs and resulting ESM bytes were identical. The preceding 6b2
+Ubuntu job's native suite passed 17 tests but its publisher fixture failed a
+server-relative body timing assertion. That original CI red is retained. The
+narrow test-only correction holds the real HTTP body after client header
+observation and preserves the timing assertions, including an 80 ms delayed
+client continuation. The cee checkpoint does not replace the deployed f999
+application or close its sustained public contribution/device/cost gates.
+
 The latest verified public pilot checkpoint used source
 `f9990b36956282f3d4e849b55bd64a79eb440151`, whose nine required jobs passed in
 [CI run 38449139246](https://github.com/forgesworn/relayswarm/actions/runs/38449139246).
@@ -82,8 +108,9 @@ checks passed for both protocols with the same client identity. The Caddyfile
 inode, app/router/proxy container identities and mounts remained unchanged; no
 UDP 443 listener remained and the rollback watchdog was reaped. This corrects an
 unavailable HTTP/3 advertisement; it does not establish the cause of previous
-policy timeouts. Final candidate CI, v0.2.0 assets and fresh downloaded-release
-consumer verification remain pending.
+policy timeouts. The cee candidate CI and local package/bundle gates above
+are green; v0.2.0 publication, fresh downloaded-release consumers and final
+exact-source deployment acceptance remain pending.
 
 The earlier `768a3a4f20d91bf2194513181354be70f6a8e5da` passed nine required jobs in
 [CI run 38439565770](https://github.com/forgesworn/relayswarm/actions/runs/38439565770).
@@ -155,6 +182,33 @@ were 1/2/0/1 across low/high/origin/receiver. The requested private NetLog captu
 was empty, so protocol and queue attribution remain unavailable. All owned
 browsers, readers and the finite source were stopped/removed. The independent
 proxy correction does not close sustained contribution or identify the cause.
+
+The subsequent passive CDP observation of f999 measured 60.015 s: playback
+passed, contribution and verified peer payload failed. Both contributors
+uploaded zero bytes, the receiver accepted zero peer bytes, fatal/native errors
+were zero and high recorded one stall. The first policy requests at
+22:05:38.226/22:05:38.230 UTC cancelled about five seconds later without a
+response or response-extra-info event, even after cleanup. Adjacent successful
+responses reused HTTP/2; the failed requests' protocol remains unknown.
+Nearby server windows recorded eight completed policy requests with at most
+2.2 ms app header work, without an individual request identity match. Browser,
+provider and source cleanup passed. The transport/queue cause remains unproved;
+the later renewal-resilience candidate is not deployed by this observation.
+
+The renewal-resilience implementation keeps unexpired policy
+and admission authority during one transient refresh cancellation. It stops
+serving when that authority expires; a later successful refresh leaves upload
+consent off. The maintained local Chrome operator regression recorded a
+5,000.8 ms policy cancellation while all 63 observations retained consent and
+serving, with 461,352 uploaded bytes and unchanged quota accounting. A full
+503 outage expired authority and stopped serving; later recovery did not
+restore consent. Eight operator checkpoints, 25 focused tests and syntax
+checks for 103 modules passed; the publisher suite passed 117 tests with one
+skip. This loopback fixture uses its existing fake WebRTC permission/media
+flags and does not prove public, physical or NAT behaviour. Normal exit followed
+all close awaits; no separate kernel process inventory was captured. The
+implementation requires a new committed-source CI, package and deployed
+browser gate; the public f999 failures remain open.
 
 A separate TCP TURN test accepted 224,096 signed, verified media bytes in two
 segments during 5.036 s. It used actual temporary browser credentials and a

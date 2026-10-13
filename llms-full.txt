@@ -1186,6 +1186,32 @@ merged source do not establish production readiness.
 
 ## Current source acceptance on 13 October
 
+The earlier candidate checkpoint is source
+`cee92281b20aa5e60fc39d0e0cb2a368daa83747`. All nine required jobs passed in
+[CI run 38471147105](https://github.com/forgesworn/relayswarm/actions/runs/38471147105);
+the optional two-hour soak was skipped at this head. Fresh offline,
+production-only package consumption passed all ten documented imports including
+metadata, exact packaged demo/recovery bytes, the installed ICE CLI and actual
+separate-process native delivery of 131,097 verified bytes. Native delivery used
+zero HTTP origin requests; peer absence then produced one verified loopback
+origin fallback. Owned services and scratch were removed, and HEAD stayed clean.
+The tarball contains 186 files, is 823,201 bytes and has SHA-256
+`b847aa0d57f68975aa69bdc70589f1aa5066b757e748001ccb7bb967853a3d3a`.
+The standalone ESM candidate is 114,201 bytes, SHA-256
+`01de11837fbd08098bf98b6e8be945866ef766f76629030fec89de2318170d19`,
+with the expected five exports, no external imports and a successful local
+import/off-mode check. These are local candidate artifacts, not published or
+freshly downloaded release assets.
+
+At the cee checkpoint, all 48 runtime/package/lock inputs were unchanged from
+f999 and 6b2; the six browser inputs and resulting ESM bytes were identical. The preceding 6b2
+Ubuntu job's native suite passed 17 tests but its publisher fixture failed a
+server-relative body timing assertion. That original CI red is retained. The
+narrow test-only correction holds the real HTTP body after client header
+observation and preserves the timing assertions, including an 80 ms delayed
+client continuation. The cee checkpoint does not replace the deployed f999
+application or close its sustained public contribution/device/cost gates.
+
 The latest verified public pilot checkpoint used source
 `f9990b36956282f3d4e849b55bd64a79eb440151`, whose nine required jobs passed in
 [CI run 38449139246](https://github.com/forgesworn/relayswarm/actions/runs/38449139246).
@@ -1206,8 +1232,9 @@ checks passed for both protocols with the same client identity. The Caddyfile
 inode, app/router/proxy container identities and mounts remained unchanged; no
 UDP 443 listener remained and the rollback watchdog was reaped. This corrects an
 unavailable HTTP/3 advertisement; it does not establish the cause of previous
-policy timeouts. Final candidate CI, v0.2.0 assets and fresh downloaded-release
-consumer verification remain pending.
+policy timeouts. The cee candidate CI and local package/bundle gates above
+are green; v0.2.0 publication, fresh downloaded-release consumers and final
+exact-source deployment acceptance remain pending.
 
 The earlier `768a3a4f20d91bf2194513181354be70f6a8e5da` passed nine required jobs in
 [CI run 38439565770](https://github.com/forgesworn/relayswarm/actions/runs/38439565770).
@@ -1279,6 +1306,33 @@ were 1/2/0/1 across low/high/origin/receiver. The requested private NetLog captu
 was empty, so protocol and queue attribution remain unavailable. All owned
 browsers, readers and the finite source were stopped/removed. The independent
 proxy correction does not close sustained contribution or identify the cause.
+
+The subsequent passive CDP observation of f999 measured 60.015 s: playback
+passed, contribution and verified peer payload failed. Both contributors
+uploaded zero bytes, the receiver accepted zero peer bytes, fatal/native errors
+were zero and high recorded one stall. The first policy requests at
+22:05:38.226/22:05:38.230 UTC cancelled about five seconds later without a
+response or response-extra-info event, even after cleanup. Adjacent successful
+responses reused HTTP/2; the failed requests' protocol remains unknown.
+Nearby server windows recorded eight completed policy requests with at most
+2.2 ms app header work, without an individual request identity match. Browser,
+provider and source cleanup passed. The transport/queue cause remains unproved;
+the later renewal-resilience candidate is not deployed by this observation.
+
+The renewal-resilience implementation keeps unexpired policy
+and admission authority during one transient refresh cancellation. It stops
+serving when that authority expires; a later successful refresh leaves upload
+consent off. The maintained local Chrome operator regression recorded a
+5,000.8 ms policy cancellation while all 63 observations retained consent and
+serving, with 461,352 uploaded bytes and unchanged quota accounting. A full
+503 outage expired authority and stopped serving; later recovery did not
+restore consent. Eight operator checkpoints, 25 focused tests and syntax
+checks for 103 modules passed; the publisher suite passed 117 tests with one
+skip. This loopback fixture uses its existing fake WebRTC permission/media
+flags and does not prove public, physical or NAT behaviour. Normal exit followed
+all close awaits; no separate kernel process inventory was captured. The
+implementation requires a new committed-source CI, package and deployed
+browser gate; the public f999 failures remain open.
 
 A separate TCP TURN test accepted 224,096 signed, verified media bytes in two
 segments during 5.036 s. It used actual temporary browser credentials and a
@@ -1655,9 +1709,19 @@ while the player continues. Applying settings also stops the previous swarm
 before starting another. Uploading and cellular peer traffic require separate
 opt-ins. The engine's upload token bucket permits a burst of up to two seconds
 of the selected limit; it is not a strict per-second traffic shaper.
-Leaving the page stops its swarm. A page restored from the browser's back/forward
-cache uses origin until settings are applied again; physical background/resume
-behaviour is still a field gate.
+Hiding or leaving the page stops its swarm and clears upload and reporting
+consent. Returning uses origin until settings are applied again; physical
+background/resume playback remains a field gate.
+
+The player checks operator policy and publisher identity every two seconds,
+with at most three independent checks in flight. A stalled check cannot block
+a newer successful check. A fully validated check permits peer delivery for
+at most five seconds from its issuance, using both elapsed and wall time;
+delayed responses cannot extend that period. Expiry clears upload and reporting
+consent and restores origin delivery. A later successful check does not restore
+those opt-ins. An operator's origin-only policy stops uploading immediately.
+Local receipts retain failed control requests and bounded renewal observations;
+these timings do not identify the cause of a network timeout.
 
 ## Publish your own media
 
@@ -3045,7 +3109,21 @@ The deployed checkpoint is source
 The earlier a023 two-hour load/churn run retains its separate source and scope.
 The later proxy-only protocol correction passed pinned-binary validation and
 a guarded live reload, while subsequent public contribution remained red.
-Final candidate changes require their own exact-source CI. The
+The earlier candidate checkpoint
+`cee92281b20aa5e60fc39d0e0cb2a368daa83747` passed all nine required jobs in
+[CI run 38471147105](https://github.com/forgesworn/relayswarm/actions/runs/38471147105).
+Its fresh offline production-only package/all ten documented imports, exact
+packaged demo/recovery, installed CLI separate-process verified native transfer
+and peer-absence origin fallback passed. The tarball is 823,201 bytes, SHA-256
+`b847aa0d57f68975aa69bdc70589f1aa5066b757e748001ccb7bb967853a3d3a`;
+the standalone ESM is 114,201 bytes, SHA-256
+`01de11837fbd08098bf98b6e8be945866ef766f76629030fec89de2318170d19`.
+These local artifacts are unpublished; the optional soak at this head was
+skipped. Its runtime/dependency inputs were unchanged from f999/6b2, whose original
+timed-fixture CI failure is retained separately. The passive f999 CDP
+observation retained a 60.015 s playback pass with
+contribution/peer failure and no proven transport cause; its owned-resource
+cleanup passed, and it does not close sustained acceptance. The
 [current acceptance summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/current-source-acceptance-summary-20261013.json)
 retains receipt identities and limits. v0.2.0 release and final downloaded-asset
 acceptance remain pending; passing CI does not close the full checklist.
@@ -3054,17 +3132,17 @@ records the later short/partial-long, TCP relay and Android checks separately.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Local Chrome and exact-source CI pass; deployed two-hour run completed red after policy timeouts withdrew contribution, so sustained peer delivery and matched field benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Local Chrome and earlier exact-source CI pass; new renewal regression preserves fresh authority across one cancelled refresh, expires fail-closed and leaves consent off after recovery (eight operator checkpoints, 25 focused tests, publisher 117 pass/one skip); deployed two-hour and later public short contribution remain red, so new exact-source gates, sustained delivery and matched field benefit remain open |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/Chrome and exact-source CI evidence pass within the documented threat/resource bounds; operational capacity is recorded under P12 |
-| P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Deployed 768 ordinary-Chrome trusted opt-in, real process restart, duplicate handling and natural five-minute expiry pass; reporting-off/policy/lease preservation and source cleanup pass; first deployed 219 timeout remains separately retained |
+| P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Deployed 768 ordinary-Chrome trusted opt-in, real process restart, duplicate handling and natural five-minute expiry pass; reporting-off/policy/lease preservation and source cleanup pass; first deployed 219 timeout remains separately retained; backend component evidence does not replace new-client opt-in/reporting validation |
 | P06 | Upload budgets across reloads and tabs | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; uploading still requires new consent | Chrome reload/tab and installed Firefox durable quota/fresh-consent evidence pass; complete physical upload journeys remain open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-f999 production-only package/all exports/bundle/installed directory-alias ICE CLI/separate-process transfer/fallback pass; final candidate and downloaded release assets require fresh verification; WAN success and timeout remain separately recorded |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-cee9228 offline production-only package/ten documented imports/standalone ESM/installed directory-alias ICE CLI/separate-process verified transfer and origin fallback pass; downloaded release assets remain open; WAN success and timeout retain their separate scope |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed f999 passed all nine required CI jobs, non-root runtime byte/entrypoint preflight and normal-TLS client/fresh-media checks; later proxy-only reload passed HTTP/1.1/2, inode/runtime preservation and cleanup checks; earlier image failure/rollback and guarded reporting restarts retained; final candidate CI, v0.2.0 assets, downloaded consumers and final release/deployment remain pending |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed f999 passed all nine required CI jobs, non-root runtime byte/entrypoint preflight and normal-TLS client/fresh-media checks; later proxy-only reload passed HTTP/1.1/2, inode/runtime preservation and cleanup checks; earlier image failure/rollback and guarded reporting restarts retained; earlier cee candidate has nine green required CI jobs and fresh local package/ESM gates; v0.2.0 immutable publication, downloaded consumers and final exact-source deployment remain pending |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Separate real OBS and private YouTube video/audio/end/deletion pass; installed Firefox ordinary-actor journey passes; deployed two-hour contribution gate red, Safari/Pixel peer gates red, iPhone origin owner pass but background owner red; partial network/resource counters do not prove billing, varied/hard NAT or full device acceptance |
 
 ## Evidence rules

@@ -1,14 +1,14 @@
 {
   "v": 1,
   "kind": "f999-public-field-acceptance-summary",
-  "recordedUTC": "2026-10-13T21:10:38.496856+00:00",
+  "recordedUTC": "2026-10-13T22:09:25.425787+00:00",
   "sourceSha": "f9990b36956282f3d4e849b55bd64a79eb440151",
   "publicClientSHA256": "b746f45216d3ac6e5d1bd21b5748f91c0115c71d00ee678c930070596bbef50d",
   "publicClientBytes": 723954,
   "deployedImageSHA256": "sha256:20199491827b9ea69ac560ac50be5eed5376aab30fbd0a07227544ce8898b243",
   "releaseClaim": false,
   "productionReadinessClaim": false,
-  "laterCandidateChanges": "A separately validated proxy-only h1/h2 and Alt-Svc clear change was reloaded in place; app/client identity remains f999. Final candidate CI and release acceptance remain pending.",
+  "laterCandidateChanges": "The independently validated proxy-only h1/h2 and Alt-Svc clear change was reloaded in place; application/client identity remains f999. Earlier candidate cee has nine green required CI jobs and fresh local package/ESM acceptance. A later runtime fix is being authored; its source, image and client hashes cannot inherit cee proof. Publication/downloaded-release/final-deployment and full field gates remain open.",
   "ci": {
     "runId": 38449139246,
     "headSha": "f9990b36956282f3d4e849b55bd64a79eb440151",
@@ -267,7 +267,7 @@
     "Actual native application/input and wider physical integration.",
     "Direct Internet TCP TURN and varied/hard-NAT acceptance.",
     "Matched total wire traffic, resource and provider-cost attribution.",
-    "Final source CI, package, downloaded-release validation and publication."
+    "Immutable release publication, fresh downloaded-release consumers and final exact-source deployment; later source changes require their own gates."
   ],
   "historicalRecordsPreserved": [
     "a023 deployed 7,205.094-second contribution red, including 34 zero-frame intervals and stalls.",
@@ -507,5 +507,197 @@
       "duringWarmup": true,
       "underlyingCauseProved": false
     }
+  },
+  "passiveControlPathInvestigation": {
+    "status": "completed-analysis-retained",
+    "sourceSha": "f9990b36956282f3d4e849b55bd64a79eb440151",
+    "analysisReceipt": "artifacts/public-cdp-f9990b3-analysis/analysis.json",
+    "analysisReceiptSHA256": "19bc46263319f42ecc55b3f6e27278e36e7289ba611a3d6a656bbd5a7c7a7678",
+    "measurementMs": 60015,
+    "gates": {
+      "playback": {
+        "status": "green",
+        "scope": "Actual frame/time plus native audio decoded-byte progress at each requested quality; zero fatal/native/page errors. Decode does not prove audible output."
+      },
+      "contribution": {
+        "status": "red",
+        "scope": "Both explicitly consented contributors remain serving and send media within100MB each; no reconsent/reset."
+      },
+      "verifiedPeerPayload": {
+        "status": "red",
+        "scope": "Receive-only actor records verified peer bytes/fragments at low and high qualities during the measured window; links alone do not pass."
+      }
+    },
+    "bothContributorsUploadedBytes": 0,
+    "receiverVerifiedPeerBytes": 0,
+    "fatalHighwater": 0,
+    "nativeHighwater": 0,
+    "highStalls": 1,
+    "firstFailures": [
+      {
+        "role": "contributor-low",
+        "route": "policy",
+        "startUTC": "2026-10-13T22:05:38.226000+00:00",
+        "cancelledUTC": "2026-10-13T22:05:43.231000+00:00",
+        "durationCDPMs": 5003.13,
+        "responseOrResponseExtraInfoObserved": false,
+        "failedRequestProtocol": "unknown"
+      },
+      {
+        "role": "contributor-high",
+        "route": "policy",
+        "startUTC": "2026-10-13T22:05:38.230000+00:00",
+        "cancelledUTC": "2026-10-13T22:05:43.232000+00:00",
+        "durationCDPMs": 5001.146,
+        "responseOrResponseExtraInfoObserved": false,
+        "failedRequestProtocol": "unknown"
+      }
+    ],
+    "adjacentSuccessfulResponsesReusedHTTP2": true,
+    "nearbyProviderPolicyCompleted": 8,
+    "nearbyProviderAppHeaderMaxMs": 2.2,
+    "individualFailedRequestReachedAppProved": false,
+    "underlyingTransportCauseProved": false,
+    "cleanup": {
+      "browserProved": true,
+      "providerProved": true,
+      "sourceProved": true
+    },
+    "scope": "Passive CDP numeric fixed-route events, unchanged public f999 browser path; completed short run remains red for contribution/peer. Later renewal-resilience runtime candidate requires new source/CI/image/browser gates."
+  },
+  "candidateCheckpoint": {
+    "sourceSha": "cee92281b20aa5e60fc39d0e0cb2a368daa83747",
+    "ci": {
+      "runId": 38471147105,
+      "successfulRequiredJobs": 9,
+      "requiredJobs": 9,
+      "conclusion": "success",
+      "optionalSoak": "skipped",
+      "receipt": "artifacts/candidate-cee9228-documentation-refresh/ci-exact-head.json",
+      "receiptSHA256": "a87243033be54eb068768e1e99b12048e6f575f581510ac62b094fffd03d8096"
+    },
+    "cleanConsumer": {
+      "receipt": "artifacts/clean-consumer-cee9228/receipt.json",
+      "receiptSHA256": "2296c23b22f5dea93e3afe118f3281fef290eeeaebb69323a319a98eb0bf27e6",
+      "ok": true,
+      "offlineProductionOnly": true,
+      "documentedImportsIncludingMetadata": 10,
+      "tarball": {
+        "bytes": 823201,
+        "files": 186,
+        "sha256": "b847aa0d57f68975aa69bdc70589f1aa5066b757e748001ccb7bb967853a3d3a"
+      },
+      "packagedDemoByteExact": true,
+      "recoveryModuleAndReportingStatusIncluded": true,
+      "installedIceCLIAndPrivateFileBoundaryPassed": true,
+      "nativeTransfer": {
+        "v": 1,
+        "ok": true,
+        "source": "hyperdht-v1",
+        "objectBytes": 131097,
+        "sha256": "61cee67392eb7e5e147db950bf37c1da0109d77c188847408f0976d44e4fa36d",
+        "sha256Verified": true,
+        "elapsedMs": 83,
+        "fallback": false
+      },
+      "fallbackTransfer": {
+        "v": 1,
+        "ok": true,
+        "source": "http-loopback-origin",
+        "objectBytes": 131097,
+        "sha256": "61cee67392eb7e5e147db950bf37c1da0109d77c188847408f0976d44e4fa36d",
+        "sha256Verified": true,
+        "elapsedMs": 373,
+        "fallback": true
+      },
+      "nativeHTTPRequests": 0,
+      "fallbackHTTPRequests": 1,
+      "separateSeederAndCLIProcesses": true,
+      "populatedLocalDhtBootstrapNodes": 4,
+      "servicesClosed": true,
+      "scratchRemoved": true,
+      "actualBrowserOrWANAcceptance": false
+    },
+    "standaloneESM": {
+      "receipt": "artifacts/standalone-esm-cee9228/receipt.json",
+      "receiptSHA256": "dc9de5b492066e84c1d21288d1f6be320b4f5782af85c7197f9fd8e2e5b812cf",
+      "bytes": 114201,
+      "sha256": "01de11837fbd08098bf98b6e8be945866ef766f76629030fec89de2318170d19",
+      "exports": [
+        "HLS_SWARM_METRICS_VERSION",
+        "createHlsSwarm",
+        "readRefusal",
+        "retryAfterFor",
+        "rotationCandidate"
+      ],
+      "externalImports": [],
+      "syntaxAndActualImportPassed": true,
+      "offModeConstructionStopPassed": true,
+      "networkCalls": 0,
+      "browserLaunched": false
+    },
+    "inputComparison": {
+      "receipt": "artifacts/clean-consumer-cee9228/runtime-input-comparison.json",
+      "receiptSHA256": "ee4c125f383fd2de3924987923b51eb098606d17c6c9aa218237229226690407",
+      "runtimePackageLockFiles": 48,
+      "allUnchangedFromF999And6b2": true,
+      "browserInputs": 6,
+      "bundleByteIdentical": true
+    },
+    "original6b2CIRed": {
+      "runId": 38468894653,
+      "job": "native (ubuntu-latest)",
+      "nativeTestsPassed": 17,
+      "failedTest": "real delayed headers/body separate application timing from fetch body duration",
+      "bodyThresholdMs": 30,
+      "testOnlyCausalFixtureCorrection": true,
+      "runtimeOrDependenciesChanged": false,
+      "originalLogPreserved": true
+    },
+    "publishedRelease": false,
+    "downloadedReleaseAssetAccepted": false,
+    "deployedApplicationSourceChanged": false,
+    "scope": "Earlier exact-source cee checkpoint; a later runtime fix is being authored and requires fresh exact-source gates."
+  },
+  "localRenewalResilienceRegression": {
+    "committedAtValidation": false,
+    "deployed": false,
+    "sourceInputHashes": {
+      "demo/client.mjs": "be9282ef5074c396b1e3d9ce7ee4665ca27959afeadafea017ffd3556a2fa0bd",
+      "demo/policy-renewal.mjs": "23d71e0f6fb647e13f0a7bec3d50b41b70fa830d0a1e65a731acc52cc72384aa"
+    },
+    "policyCancellationMs": 5000.8,
+    "observations": 63,
+    "allConsentAndServingTrue": true,
+    "uploadedBytes": 461352,
+    "remainingQuotaBytes": 9538648,
+    "fullOutage": {
+      "authorityFresh": false,
+      "policyUnavailable": true,
+      "serving": false,
+      "mode": "off"
+    },
+    "laterRecovery": {
+      "policyUnavailable": false,
+      "serving": false,
+      "uploadConsentRestored": false
+    },
+    "tests": {
+      "operatorCheckpoints": 8,
+      "focusedPassed": 25,
+      "syntaxModules": 103,
+      "publisherPassed": 117,
+      "publisherSkipped": 1
+    },
+    "cleanup": {
+      "normalExitCode": 0,
+      "allCloseAwaitsCompleted": true,
+      "separateKernelInventoryCaptured": false
+    },
+    "receipts": [
+      "artifacts/policy-renewal-browser-20261013-reviewed/validation.json",
+      "artifacts/policy-renewal-integration-20261013/receipt.json"
+    ],
+    "scope": "Maintained local loopback Chrome fixture with existing fake WebRTC permission/media flags. Not public, physical or NAT acceptance. Public f999 RED and unknown transport cause are retained. New committed-source CI/package/deployment/browser evidence remains pending."
   }
 }
