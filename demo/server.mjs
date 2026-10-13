@@ -2,7 +2,7 @@
 import { createServer as httpServer } from "node:http";
 import { createServer as httpsServer } from "node:https";
 import { readFile, open } from "node:fs/promises";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { parseArgs } from "node:util";
@@ -16,6 +16,7 @@ import { createMediaFixture } from "./media-fixture.mjs";
 import { RelayPool } from "../src/relay-session.mjs";
 import { readIceConfigFile } from "../src/ice-config.mjs";
 import { createRequestDiagnostics } from "./request-diagnostics.mjs";
+import { isCliEntry } from "../src/cli-entry.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -195,4 +196,4 @@ async function main() {
   } catch (error) { await demo?.close(); await fixture?.close(); throw error; }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch((error) => { console.error(error.message); process.exitCode = 1; });
+if (await isCliEntry(import.meta.url)) main().catch((error) => { console.error(error.message); process.exitCode = 1; });

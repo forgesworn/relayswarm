@@ -10,6 +10,7 @@ import { startBroadcastPipeline } from "../src/broadcast-pipeline.mjs";
 import { startDemoServer } from "../demo/server.mjs";
 import { startBroadcastWaitingServer } from "../demo/broadcast-waiting.mjs";
 import { readIceConfigFile } from "../src/ice-config.mjs";
+import { isCliEntry } from "../src/cli-entry.mjs";
 
 async function privateFile(path, create) {
   const parent = dirname(resolve(path));
@@ -107,4 +108,4 @@ async function main() {
   } finally { await stop(); process.removeListener("SIGINT", onSignal); process.removeListener("SIGTERM", onSignal); }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(() => { console.error("Broadcaster could not start. Check dependencies, private files, input and HTTPS configuration; no upstream credentials are logged."); process.exitCode = 1; });
+if (await isCliEntry(import.meta.url)) main().catch(() => { console.error("Broadcaster could not start. Check dependencies, private files, input and HTTPS configuration; no upstream credentials are logged."); process.exitCode = 1; });

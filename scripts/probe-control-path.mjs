@@ -3,8 +3,8 @@ import http from "node:http";
 import https from "node:https";
 import { performance } from "node:perf_hooks";
 import { parseArgs } from "node:util";
-import { pathToFileURL } from "node:url";
 import { appServerTiming } from "../demo/fetch-diagnostics.mjs";
+import { isCliEntry } from "../src/cli-entry.mjs";
 
 function origin(raw, local) {
   const url = new URL(raw);
@@ -71,4 +71,4 @@ async function main() {
     }
   } finally { clearTimeout(bound); process.off("SIGINT", stop); process.off("SIGTERM", stop); }
 }
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) main().catch(() => { console.error("Control probe failed; verify explicit origins and numeric bounds."); process.exitCode = 1; });
+if (await isCliEntry(import.meta.url)) main().catch(() => { console.error("Control probe failed; verify explicit origins and numeric bounds."); process.exitCode = 1; });
