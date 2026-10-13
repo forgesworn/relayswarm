@@ -16,13 +16,30 @@ async function server(t, handler) {
 function totals(snapshot, route) {
   return [...snapshot.windows, snapshot.current].reduce((out, window) => { for (const name of ["started", "finished", "cancelled", "expired", "dropped", "headersCount"]) out[name] = (out[name] ?? 0) + window.routes[route][name]; return out; }, {});
 }
-test("real delayed headers/body separate application timing from fetch body duration", async (t) => {
-  const diagnostics = createRequestDiagnostics({ intervalMs: 20, retainWindows: 20 }); t.after(() => diagnostics.close());
-  const base = await server(t, (request, response) => { diagnostics.observe(request, response); setTimeout(() => { response.writeHead(200, { "content-type": "application/json" }); response.write('{"ok":'); setTimeout(() => response.end('true}'), 40); }, 45); });
-  const fetches = createFetchDiagnostics(); assert.deepEqual(await fetches.json("session", `${base}/session.json?never-store-this-query`), { ok: true });
-  const sample = fetches.snapshot().records[0]; assert.ok(sample.appHeadersMs >= 35); assert.ok(sample.headerMs >= sample.appHeadersMs); assert.ok(sample.bodyMs >= 30);
-  assert.equal(totals(diagnostics.snapshot(), "session").finished, 1); assert.equal(diagnostics.snapshot().active, 0);
-  assert.ok(!JSON.stringify(diagnostics.snapshot()).includes("never-store-this-query")); fetches.close();
+test("real delayed headers/body separate application timing from fetch body duration", { timeout: 5000 }, async (t) => {
+  // Delaying the client continuation beyond the old server-relative body timer
+  // must still leave a real, independently held HTTP body to measure.
+  for (const continuationBlockMs of [0, 80]) {
+    const diagnostics = createRequestDiagnostics({ intervalMs: 20, retainWindows: 20 }); t.after(() => diagnostics.close());
+    let headerTimer, bodyTimer, finishBody;
+    t.after(() => { clearTimeout(headerTimer); clearTimeout(bodyTimer); });
+    const base = await server(t, (request, response) => {
+      diagnostics.observe(request, response); finishBody = () => response.end('true}');
+      headerTimer = setTimeout(() => { response.writeHead(200, { "content-type": "application/json" }); response.write('{"ok":'); }, 45);
+    });
+    const fetches = createFetchDiagnostics({ fetchImpl: async (...args) => {
+      const response = await fetch(...args), readJSON = response.json.bind(response);
+      const until = performance.now() + continuationBlockMs; while (performance.now() < until) {}
+      // The actual response has arrived. Hold its body from the client's read,
+      // after diagnostic header timing, rather than from the server write.
+      response.json = () => { bodyTimer = setTimeout(finishBody, 40); return readJSON(); };
+      return response;
+    } }); t.after(() => fetches.close());
+    assert.deepEqual(await fetches.json("session", `${base}/session.json?never-store-this-query`), { ok: true });
+    const sample = fetches.snapshot().records[0]; assert.ok(sample.appHeadersMs >= 35); assert.ok(sample.headerMs >= sample.appHeadersMs); assert.ok(sample.bodyMs >= 30);
+    assert.equal(totals(diagnostics.snapshot(), "session").finished, 1); assert.equal(diagnostics.snapshot().active, 0);
+    assert.ok(!JSON.stringify(diagnostics.snapshot()).includes("never-store-this-query")); fetches.close();
+  }
 });
 test("real disconnect counts once and keeps original HTTP headers/writeHead overloads", async (t) => {
   const diagnostics = createRequestDiagnostics(); t.after(() => diagnostics.close());
