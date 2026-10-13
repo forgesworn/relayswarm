@@ -231,6 +231,7 @@ async function refreshPolicy() {
     deliveryPolicy = next; policyUnavailable = false;
     if (next.mode === "off") byId("upload").checked = false;
     byId("telemetry").disabled = !next.telemetry;
+    byId("telemetry-status").textContent = next.telemetry ? "Reporting is available. Tick the checkbox to share measurements." : "Reporting is switched off on this server. The checkbox is unavailable.";
     if (!next.telemetry) byId("telemetry").checked = false;
     if ((changed || renewAdmission) && (swarm || startRequestedAt !== null)) configure();
     byId("policy-status").textContent = next.mode === null ? "Viewer chooses delivery mode." : `Operator delivery policy: ${next.mode === "off" ? "origin only" : next.mode}.`;
@@ -238,6 +239,7 @@ async function refreshPolicy() {
     policyUnavailable = true;
     byId("upload").checked = false;
     byId("telemetry").disabled = true;
+    byId("telemetry-status").textContent = "Reporting is unavailable because the server policy could not be checked.";
     byId("telemetry").checked = false;
     if (swarm && activeConfig.mode !== "off") configure();
     byId("policy-status").textContent = "Delivery policy unavailable · using origin until it returns.";

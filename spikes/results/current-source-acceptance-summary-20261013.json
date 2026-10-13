@@ -1,0 +1,413 @@
+{
+  "v": 1,
+  "kind": "current-source-acceptance-summary",
+  "recordedUTC": "2026-10-13T14:59:56.467306+00:00",
+  "sourceSha": "a0231aadcdd81fe67fe702ac7214042d196eb39f",
+  "publicClientSHA256": "76b1600b5692b31ed53687b217a538f4685644a68f6640e69c0ef0f5499afa28",
+  "publicTarget": "https://relayswarm.forgesworn.dev",
+  "releaseClaim": false,
+  "productionReadinessClaim": false,
+  "laterCandidateChanges": "Reporting-disabled UI explanation and field-harness changes are separate from exact-a023 CI/runtime evidence.",
+  "ci": {
+    "runId": 38392804791,
+    "runURL": "https://github.com/forgesworn/relayswarm/actions/runs/38392804791",
+    "headSha": "a0231aadcdd81fe67fe702ac7214042d196eb39f",
+    "successfulJobs": 10,
+    "conclusion": "success",
+    "soak": {
+      "configuredSeconds": 7200,
+      "measuredObservationMs": 7200366,
+      "honestRoles": 12,
+      "corruptPeers": 1,
+      "originOnlyBaselines": 1,
+      "departuresAndRejoins": 22,
+      "rolesChurned": [
+        "v4",
+        "v5",
+        "v8",
+        "v9",
+        "v6",
+        "v7",
+        "v10",
+        "v11"
+      ],
+      "twelveUninterruptedTwoHourSessions": false,
+      "finalIncarnationsPeerBytes": 8268934096,
+      "departedIncarnationsPeerBytesSeparate": 7396517088,
+      "corruptPeerBannedBy": 12,
+      "retainedFinalAndDepartedStalls": 0,
+      "retainedFatalHlsErrors": 0,
+      "nativeMediaErrorsSeparatelyInstrumented": false,
+      "departedNonfatalErrorsRetained": false,
+      "cleanupPassed": true,
+      "scope": "One Chrome process, isolated contexts, local origin/relay, fake microphone/permission flags, mDNS override, host/host candidates; no public network/device/NAT claim"
+    }
+  },
+  "deployedSoak": {
+    "completed": true,
+    "ok": false,
+    "elapsedPlaybackMs": 7205094,
+    "startedUTC": "2026-10-13T12:45:13.912Z",
+    "plannedEndUTC": "2026-10-13T14:45:13.912Z",
+    "scope": "Four headless contexts on one Mac with fixture permission flags, public HTTPS/WSS and finite host-owned synthetic source; no physical-device or NAT-diversity claim",
+    "identityAndClientHashStable": true,
+    "failedGate": "Both contributors withdrew after delivery-policy timeout while allowance remained; no automatic reconsent/reset",
+    "withdrawalAroundUTC": "2026-10-13T13:24:57Z",
+    "intervals": 2932,
+    "intervalsWithoutFrameProgress": 34,
+    "viewerResults": [
+      {
+        "name": "contributor-low",
+        "receivedPeerBytes": 252370636,
+        "uploadedBytes": 221207380,
+        "stallsHighwater": 23,
+        "stallMs": 43080,
+        "fatalHighwater": 0,
+        "nativeHighwater": 0,
+        "finalContribution": {
+          "checked": false,
+          "upload": false,
+          "serving": false
+        }
+      },
+      {
+        "name": "contributor-high",
+        "receivedPeerBytes": 206592824,
+        "uploadedBytes": 399751356,
+        "stallsHighwater": 20,
+        "stallMs": 30619,
+        "fatalHighwater": 0,
+        "nativeHighwater": 0,
+        "finalContribution": {
+          "checked": false,
+          "upload": false,
+          "serving": false
+        }
+      },
+      {
+        "name": "origin-baseline",
+        "receivedPeerBytes": 0,
+        "uploadedBytes": 0,
+        "stallsHighwater": 45,
+        "stallMs": 25299,
+        "fatalHighwater": 0,
+        "nativeHighwater": 0,
+        "finalContribution": {
+          "checked": false,
+          "upload": false,
+          "serving": false
+        }
+      },
+      {
+        "name": "receive-only",
+        "receivedPeerBytes": 572731284,
+        "uploadedBytes": 0,
+        "stallsHighwater": 15,
+        "stallMs": 43500,
+        "fatalHighwater": 0,
+        "nativeHighwater": 0,
+        "finalContribution": {
+          "checked": false,
+          "upload": false,
+          "serving": false
+        }
+      }
+    ],
+    "mediaRepairAttempts": 0,
+    "laterReceivingIncludesSeparateSupportActors": true,
+    "cleanupPassed": true
+  },
+  "installedFirefox": {
+    "browser": "Firefox152.0.6",
+    "ok": true,
+    "scope": "Ordinary separate Chrome contributors, installed desktop Firefox, public HTTPS/WSS; no fake media/permission overrides",
+    "verifiedReceiveBytesAtPreReloadCheckpoint": 2524652,
+    "uploadedBytesAtPreReloadCheckpoint": 219020,
+    "qualitySeekDurableQuotaFreshConsentOriginKillPassed": true,
+    "humanNativePickerUsabilityProved": false,
+    "cleanupPassed": true
+  },
+  "visibleSafari": {
+    "browser": "Safari26.6.2",
+    "ok": false,
+    "strictTLS": true,
+    "visibleOriginPlaybackObserved": true,
+    "rtcLinks": 5,
+    "peerBytesWithin45SecondGate": 0,
+    "completePeerJourneyPassed": false,
+    "earlierPeerPayloadAndPauseRecordPreserved": true,
+    "cleanupPassed": true
+  },
+  "physicalPixel": {
+    "browser": "Vanadium",
+    "defaultPeerJourneyPassed": false,
+    "temporaryPolicy": "public-interface-only; separately authorised diagnostic",
+    "temporaryPolicyPeerGatePassed": false,
+    "gateSeconds": 45,
+    "temporaryTestUTC": {
+      "start": "2026-10-13T14:36:14.048Z",
+      "end": "2026-10-13T14:37:07.321Z"
+    },
+    "originalRestrictivePolicyRestoredAndVerifiedUTC": "2026-10-13T14:37:34.106684Z",
+    "allRecordedLinksMatchedKnownNonServingFormalRoles": true,
+    "ordinaryServingSupportActorLinkMatches": 0,
+    "connectionsAloneProveTransfer": false,
+    "fixtureClosedUploadOff": true
+  },
+  "physicalIPhone": {
+    "ownerObservedOriginVideoAndAudibleTone": true,
+    "ownerBackgroundAndExplicitPlayResumePassed": false,
+    "diagnosis": "Engine/errors/buffer/decoded frames not captured; no cause inferred",
+    "completePeerInputBackgroundJourneyPassed": false,
+    "automatedNativeInputProved": false
+  },
+  "hostParentCrash": {
+    "ok": true,
+    "sourceSha": "a0231aadcdd81fe67fe702ac7214042d196eb39f",
+    "observerStartUTC": "2026-10-13T14:46:31.342Z",
+    "observerEndUTC": "2026-10-13T14:51:41.024Z",
+    "elapsedMs": 309682,
+    "guardedMainSIGKILLUTC": "2026-10-13T14:47:23.429Z",
+    "oldContainerNamespaceStopped": true,
+    "completeScopedWriterAbsenceAuditPassed": true,
+    "dirtyMarkerRetained": true,
+    "explicitOperatorRecoveryWhileBothExistingLeasesHeld": true,
+    "publisherStateUntouched": true,
+    "permanentLeaseInodesPreserved": true,
+    "identityAndClientHashUnchanged": true,
+    "sameImageRestarted": true,
+    "continuityBefore": 16,
+    "continuityAfter": 17,
+    "sameOriginOnlyPageBothQualitiesProgressed": true,
+    "decodedProgress": {
+      "16:0": {
+        "at": "2026-10-13T14:46:40.366Z",
+        "frames": 154,
+        "audioDecodedByteDelta": 82221,
+        "sequence": 11298
+      },
+      "16:1": {
+        "at": "2026-10-13T14:47:26.761Z",
+        "frames": 150,
+        "audioDecodedByteDelta": 82192,
+        "sequence": 11320
+      },
+      "17:0": {
+        "at": "2026-10-13T14:50:43.369Z",
+        "frames": 151,
+        "audioDecodedByteDelta": 82557,
+        "sequence": 11417
+      },
+      "17:1": {
+        "at": "2026-10-13T14:51:39.730Z",
+        "frames": 475,
+        "audioDecodedByteDelta": 258411,
+        "sequence": 11446
+      }
+    },
+    "final15SecondFrameDelta": 475,
+    "stallsHighwater": 1,
+    "stallMs": 285,
+    "fatalHighwater": 0,
+    "nativeHighwater": 0,
+    "http": {
+      "finished": 621,
+      "failed": 3,
+      "statuses": {
+        "200": 616,
+        "502": 2,
+        "503": 3
+      }
+    },
+    "cleanupPassed": true,
+    "classification": "Explicit audited recovery of retained dirty marker; not automatic guardian clean-drain; origin-only short observer"
+  },
+  "resourcesAndCost": {
+    "mainSamples": 111,
+    "mainFirstUTC": "2026-10-13T12:53:43.974754+00:00",
+    "mainLastUTC": "2026-10-13T14:43:44.678776+00:00",
+    "mainMissingPrefixSeconds": 510.062754,
+    "mainUnsampledTerminalTailSeconds": 89.233224,
+    "projectContainerResources": [
+      {
+        "role": "app",
+        "samples": 111,
+        "observedCPUSeconds": 4676.874695,
+        "sampledRawMemoryHighBytes": 308580352,
+        "interfaces": {
+          "eth0": {
+            "observedRxDelta": 106382825,
+            "observedTxDelta": 5894744162,
+            "resetObserved": false
+          },
+          "eth1": {
+            "observedRxDelta": 1920012803,
+            "observedTxDelta": 59487204,
+            "resetObserved": false
+          }
+        }
+      },
+      {
+        "role": "router",
+        "samples": 111,
+        "observedCPUSeconds": 160.202811,
+        "sampledRawMemoryHighBytes": 25026560,
+        "interfaces": {
+          "eth0": {
+            "observedRxDelta": 1898107066,
+            "observedTxDelta": 1985086099,
+            "resetObserved": false
+          },
+          "eth1": {
+            "observedRxDelta": 70,
+            "observedTxDelta": 0,
+            "resetObserved": false
+          }
+        }
+      },
+      {
+        "role": "https",
+        "samples": 111,
+        "observedCPUSeconds": 103.019969,
+        "sampledRawMemoryHighBytes": 29933568,
+        "interfaces": {
+          "eth0": {
+            "observedRxDelta": 5980460688,
+            "observedTxDelta": 6112216239,
+            "resetObserved": false
+          }
+        }
+      },
+      {
+        "role": "source",
+        "samples": 111,
+        "observedCPUSeconds": 2809.594798,
+        "sampledRawMemoryHighBytes": 57475072,
+        "interfaces": {
+          "eth0": {
+            "observedRxDelta": 65081158,
+            "observedTxDelta": 1838620204,
+            "resetObserved": false
+          }
+        }
+      }
+    ],
+    "httpsSocketSamples": 87,
+    "httpsFirstUTC": "2026-10-13T13:17:49.663470+00:00",
+    "httpsLastUTC": "2026-10-13T14:43:50.165548+00:00",
+    "observedAckedTCPDeltasBytes": 4509684301,
+    "observedReceivedTCPDeltasBytes": 14919513,
+    "browserNetworkUtilityCounterReset": true,
+    "allReadersCleanBeforeFormalEnd": true,
+    "fullWireOrPublicTLSLegAccounting": false,
+    "providerBillingMeasured": false,
+    "netCashSavingsProved": false,
+    "limits": [
+      "Container interfaces include internal bridge traffic; do not add as Internet egress",
+      "Active-socket counters miss closed/short flow terminal bytes and complete IP/link overhead",
+      "Server includes separately recorded diagnostic/public audiences; Chrome scope is formal owned tree only",
+      "Missing sampling prefixes/tail and browser live-socket resets prevent complete totals",
+      "No matched origin-only wire baseline or provider invoice/rate"
+    ]
+  },
+  "earlierResultsPreserved": [
+    "Hosted H264 MSE failure cause unresolved",
+    "Earlier laptop-ingest a023 run red after source/network change",
+    "Earlier Safari peer-byte then pause journey red",
+    "Native WAN one verified success and one pre-data timeout; no varied-NAT proof",
+    "Private YouTube external-platform and separate OBS origin ingest accepted without claiming one combined run"
+  ],
+  "remainingFullScope": [
+    "Historical MSE causation",
+    "Sustained contribution after field policy timeout",
+    "Complete Safari/Pixel/iPhone peer/input/background/resume/metered/battery journeys",
+    "Separate-network and hard-NAT acceptance",
+    "Complete attributable network/resource cost comparison and provider billing",
+    "Final new-candidate CI, release assets, downloaded-asset consumers and release/deployment acceptance"
+  ],
+  "namedLocalReceipts": [
+    {
+      "path": "artifacts/ci-a023-7200-soak/validation.json",
+      "sha256": "f410e5b59407f7acbb9279ed475ad888f902978783beba9cadfd16bdb17b986c"
+    },
+    {
+      "path": "artifacts/ci-a023-7200-soak/hls-swarm-peer-first-rotation-on-20261013T135114Z.json",
+      "sha256": "fbc9ed46138f6d2d788ce338839bb706076277ebeb63b9153a0b45b68260c84e"
+    },
+    {
+      "path": "artifacts/public-soak-a023-host-source/summary.json",
+      "sha256": "cae6a1daa58bafddef08ad3ea9f40a7ab8086c9e93f715cb46ff28c09f3d1a63"
+    },
+    {
+      "path": "artifacts/public-soak-a023-host-source/contribution-withdrawal.json",
+      "sha256": "8cbc9a1956ce8049301459c160088499ead732298cb738cf08c7a6fe7be4bb05"
+    },
+    {
+      "path": "artifacts/public-soak-a023-host-source/cleanup-verified.json",
+      "sha256": "f233e65527d57e7ebee159f560434d205b63c3c9442096670c2d1199647baeb9"
+    },
+    {
+      "path": "artifacts/webdriver-firefox-a023-default-actors/webdriver-browser.json",
+      "sha256": "67d32dadaeba393ac778aeb65d66a974e329e85f6571f11938b7bd9437a3f97f"
+    },
+    {
+      "path": "artifacts/webdriver-safari-m4-a023-visible/webdriver-browser.json",
+      "sha256": "71da087f604c83d41e25d0df03f1cb1e2b56a2d8edec6cde0867f0bf316f2a65"
+    },
+    {
+      "path": "artifacts/webdriver-safari-m4-a023-visible/validation.json",
+      "sha256": "ed8dd860c3ed5ac1350dc288312c5757a2e1d74851e08b3230330282c07f2523"
+    },
+    {
+      "path": "artifacts/physical-android-a023-temporary-policy/physical-browser.json",
+      "sha256": "8f3b5689acdce275103ecbdd5a8c00711fba47ce7bcb4fb2bc9a549584bdb0f2"
+    },
+    {
+      "path": "artifacts/physical-android-a023-temporary-policy/peer-role-analysis.json",
+      "sha256": "c93bb0182594a5f6d5a3ff35e1f9c6c96271c0d313de7a8b6956b90436c03b8d"
+    },
+    {
+      "path": "artifacts/physical-android-a023-ice-diagnostic/temporary-policy-restoration.json",
+      "sha256": "b1cdb0d03276c80a60de2cfa6b702e51f8f15db86079677e61616c25e5dcf6fc"
+    },
+    {
+      "path": "artifacts/physical-ios-a023-manual/owner-origin-playback.json",
+      "sha256": "48880b2703e77124cd1a00445f1fe7388a383412b2398928070c110acfd5a63d"
+    },
+    {
+      "path": "artifacts/physical-ios-a023-manual/background-resume.json",
+      "sha256": "5356de7169c395963431e26f3c373c4e7a20c0cae71072b92374ea59ec21fb3a"
+    },
+    {
+      "path": "artifacts/prepared-host-crash-a023/summary.json",
+      "sha256": "a79f365b713de24df398b0cb8b7833b2b1b30fed54d5affaa4e5d30929f63103"
+    },
+    {
+      "path": "artifacts/prepared-host-crash-a023/actual-writer-audit.json",
+      "sha256": "bc0c48a575e5daa9518383802cba6f0912f0fcd669ee4c93708c2389c047adb5"
+    },
+    {
+      "path": "artifacts/prepared-host-crash-a023/root-reported-host-outcome.json",
+      "sha256": "2f47cd421da802375325f83d0bdb00d204489707e40220888d6663b46d373f27"
+    },
+    {
+      "path": "artifacts/prepared-host-crash-a023/cleanup-verified.json",
+      "sha256": "f73822fe389c55bd510d5c749580ca2db240ec082876c1e76ad0edc00099c289"
+    },
+    {
+      "path": "artifacts/public-soak-a023-host-source/cost-resources-handover.json",
+      "sha256": "091e041f21f422365434e5b5177531c04d82dababce083ccdf4b2fc3352bdf81"
+    },
+    {
+      "path": "artifacts/clean-consumer-a0231aa/receipt.json",
+      "sha256": "c5a0a43cbb76ca5573f6cfaf6d2eb94f2032194d0e41e980ae0452d5ea2f405b"
+    }
+  ],
+  "privacy": {
+    "privateDeviceIdentifiersExcluded": true,
+    "credentialsAndPrivateKeysExcluded": true,
+    "personalFilesystemPathsExcluded": true,
+    "socketAddressesExcluded": true,
+    "rawReceiptsAreNamedNotRepublished": true
+  }
+}

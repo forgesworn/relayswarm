@@ -112,12 +112,19 @@ async function checkpoint(name) {
   log(name);
 }
 async function playbackSample(name) {
+  const layout = await visibleMedia();
   const state = () => evaluate(`(()=>{const v=window.relaySwarmDemo.media;return{currentTime:v.currentTime,paused:v.paused,readyState:v.readyState,videoWidth:v.videoWidth,videoHeight:v.videoHeight,visibility:document.visibilityState,totalFrames:v.getVideoPlaybackQuality?.().totalVideoFrames??v.webkitDecodedFrameCount??null};})()`);
   const before = await state(); await pause(1800); const after = await state();
+  receipt.playbackSamples.push({ name, layout, before, after });
+  await screenshot(`video-${name}`);
   assert.equal(after.paused, false); assert.equal(after.visibility, "visible");
   assert.ok(after.currentTime > before.currentTime + 0.5 && after.videoWidth > 0 && after.videoHeight > 0, "Real browser video did not advance.");
   assert.ok(Number.isFinite(after.totalFrames) && after.totalFrames > before.totalFrames, "Real browser decoded-frame counter did not advance.");
-  receipt.playbackSamples.push({ name, before, after }); await screenshot(`video-${name}`);
+}
+async function visibleMedia() {
+  const layout = await evaluate(`(()=>{const v=window.relaySwarmDemo.media;v.scrollIntoView({behavior:'instant',block:'center',inline:'center'});const r=v.getBoundingClientRect(),p=visualViewport;const left=Math.max(r.left,p?.offsetLeft??0),top=Math.max(r.top,p?.offsetTop??0),right=Math.min(r.right,(p?.offsetLeft??0)+(p?.width??innerWidth)),bottom=Math.min(r.bottom,(p?.offsetTop??0)+(p?.height??innerHeight));return{rect:{x:r.x,y:r.y,width:r.width,height:r.height},intersection:{left,top,right,bottom},visible:document.visibilityState==='visible'&&right>left&&bottom>top};})()`);
+  assert.ok(layout.visible, "Own video does not intersect the visible viewport.");
+  return layout;
 }
 async function freePort() {
   const server = createServer(); await new Promise((done, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", done); });
@@ -214,6 +221,7 @@ try {
   assert.equal(await evaluate("document.getElementById('upload').checked"), false);
   assert.equal(await evaluate("document.getElementById('telemetry').checked"), false);
   await checkpoint("isolated-public-tab-consent-off"); await screenshot("public-readiness");
+  await evaluate(`(()=>{const v=window.relaySwarmDemo.media;window.__relaySwarmHarnessMediaEvents=[];for(const type of ['play','playing','pause','seeking','seeked','ended'])v.addEventListener(type,event=>{const records=window.__relaySwarmHarnessMediaEvents;records.push({type:event.type,trusted:event.isTrusted,atMs:performance.now(),paused:v.paused,seeking:v.seeking,time:v.currentTime,visibility:document.visibilityState});if(records.length>64)records.shift();});})()`);
   if (values.probe) receipt.ok = true;
   else {
     const initialSpent = (await report()).uploadBudget.spent;
@@ -234,8 +242,11 @@ try {
         await until(async () => (await report()).player.fragments.some((f) => f.atMs > at && f.level === Number(quality) && ["video", "main"].includes(f.mediaType)), `No actual video fragment after selecting quality ${quality}.`, 20000);
       }
     }
-    await evaluate("(()=>{const v=window.relaySwarmDemo.media;if(v.buffered.length){v.currentTime=Math.max(v.buffered.start(0),Math.min(v.buffered.end(v.buffered.length-1)-1,v.currentTime-3));}})()");
-    await until(async () => (await report()).player.seekRecoveryMs.length > 0, "Real browser seek did not recover.");
+    await visibleMedia();
+    const seek = await evaluate("(()=>{const v=window.relaySwarmDemo.media,p=window.relaySwarmDemo.report().player;if(!v.buffered.length)throw Error('No buffered media for seek');const before=v.currentTime,target=Math.max(v.buffered.start(0),Math.min(v.buffered.end(v.buffered.length-1)-1,before-3));const state={before,target,seeks:p.seeks,recoveries:p.seekRecoveryMs.length};v.currentTime=target;return state;})()");
+    receipt.deliberateSeek = seek;
+    assert.ok(Math.abs(seek.before - seek.target) > 0.25, "Deliberate seek must change the playhead.");
+    await until(async () => { const p = (await report()).player; return p.seeks > seek.seeks && p.seekRecoveryMs.length > seek.recoveries && !p.paused; }, "New deliberate browser seek did not recover.");
     await playbackSample("receive-quality-seek"); await checkpoint("real-video-quality-and-seek");
     if (!native) {
       const beforeUpload = (await report()).totals.uploaded;
@@ -273,6 +284,7 @@ try {
   log(error.message);
 } finally {
   if (sessionId) {
+    receipt.mediaEvents = await evaluate("window.__relaySwarmHarnessMediaEvents ?? []").catch(() => []);
     if (journeyStarted) receipt.finalReport = await report().then(redacted).catch(() => null);
     try { if (journeyStarted) await evaluate("(()=>{const u=document.getElementById('upload');if(u)u.checked=false;window.relaySwarmDemo?.stop();})()"); } catch { /* Scope guard prevents inspection outside our tab. */ }
     try { await command("DELETE", `/session/${sessionId}`, undefined, 10000); receipt.cleanup.sessionDeleted = true; }

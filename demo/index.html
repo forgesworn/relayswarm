@@ -40,7 +40,8 @@
           <p class="hint">Counts media payload reserved for sending, including interrupted sends. Usage persists across reloads and tabs on this site; upload permission is requested again. Protocol traffic is additional.</p>
           <button id="reset-allowance" type="button">Reset upload allowance</button>
           <p id="policy-status" class="hint">Checking operator delivery policy…</p>
-          <label class="check"><input id="telemetry" type="checkbox" disabled>Share numeric measurements with this server</label>
+          <label class="check"><input id="telemetry" type="checkbox" disabled aria-describedby="telemetry-status">Share numeric measurements with this server</label>
+          <p id="telemetry-status" class="hint" role="status">Reporting is unavailable until the server policy is checked.</p>
           <p class="hint">Optional reports every 15 seconds contain playback counts, media totals and a temporary page report ID. No account, browser version, labels or peer address is included. Reporting starts only after you opt in.</p>
           <label class="check"><input id="cellular" type="checkbox">Allow peer media on cellular or data-saving connections</label>
           <p class="hint">Connection detection varies by browser. Choose origin only if you want to avoid all peer traffic.</p>

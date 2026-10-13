@@ -173,9 +173,11 @@ ABR scheduling is not established. Loopback tests grant a fake microphone
 permission to unlock interfaces; the demo itself does not.
 
 GitHub CI runs this regression alongside both live harness modes. A manual
-workflow dispatch with `soak=true` adds a twelve-viewer peer-first run with
-three arrival waves, a 180 s final measurement window and sampled resource
-bounds. This remains a short loopback soak, not evidence of hours of operation.
+workflow dispatch with `soak=true` adds twelve viewer roles in three arrival
+waves. `soak_duration` selects a 180 s or 7,200 s measurement window; the longer
+choice includes repeated departures/rejoins and sampled resource bounds. Both
+are loopback fixtures. The current two-hour result and its instrumentation
+limits are recorded below; they do not establish deployed or physical acceptance.
 The v0.1.0 [completed soak](STATUS.md#release-verification) recorded zero
 stalls/fatal errors and 68.7% peer-first fragment loads, with uneven per-viewer
 benefits. Its recorded receipt does not establish separate-network performance.
@@ -190,13 +192,39 @@ relay frames, so a relay cannot widen it into an all-audience signal feed.
 
 | Gate | Evidence required |
 |---|---|
-| Desktop Chrome and Firefox on real networks | Baseline/swarm receipts, quality switches, seeks and origin fallback |
+| Desktop Chrome and Firefox on real networks | Current installed Firefox journey passes; paired matched network/cost receipts and broader coverage remain open |
 | Physical Android and iPhone | Playback engine identified, consent respected, background/resume and metered-data behaviour |
 | Home broadband vs mobile carrier | Selected candidate types plus paired receipts from separate networks |
 | VPN or hard NAT | Playback continues from origin when direct peers cannot connect |
-| Longer sessions and audiences | Hours of resource/cost measurements, larger churn waves and reachability results |
-| Independent-client protocol interoperability | A second implementation verifying the experimental contract |
+| Longer sessions and audiences | Loopback two-hour churn passes; deployed two-hour sustained-contribution gate red; attributable wire/cost measurements remain open |
+| Independent-client protocol interoperability | Current public Swift SDK/browser journey passes; actual native application/input and wider physical integration remain open |
 
 These field gates remain outstanding until their actual receipts are recorded.
 No new physical-device or internet-network result is claimed by the automated
 Chrome tests.
+
+## Current field checkpoint: 13 October 2026
+
+Source `a0231aadcdd81fe67fe702ac7214042d196eb39f` and public client SHA-256
+`76b1600b5692b31ed53687b217a538f4685644a68f6640e69c0ef0f5499afa28` are
+bound to the [current acceptance summary](../spikes/results/current-source-acceptance-summary-20261013.json).
+Its named raw receipts remain local evidence; the summary excludes private
+device identifiers, credentials and personal filesystem paths.
+
+| Journey | Measured outcome | Remaining boundary |
+|---|---|---|
+| CI two-hour load/churn | Twelve honest roles, 22 replacements, zero retained stalls/fatal hls.js errors and clean resource stops | Loopback flags and host candidates; native media errors not separately instrumented |
+| Deployed 7,205 s four-context run | Completed but red: policy timeout withdrew contribution before quota exhaustion; 34 zero-frame intervals and stalls retained | Same Mac/headless contexts; separate support audiences prevent controlled traffic attribution |
+| Installed Firefox with ordinary contributors | Verified receive/upload, quality, seek, quota across reload, fresh consent and origin kill passed | One installed-browser journey; native-picker/human usability and hard NAT not proved |
+| Visible Safari with ordinary contributors | Origin video played; five RTC links but zero peer payload inside gate | Complete verified receive/upload/reload/kill journey remains red |
+| Physical Pixel/Vanadium | Origin video observation; default and temporary-policy peer gates red | Temporary policy restored; connections to non-serving roles do not prove peer transfer |
+| Physical iPhone/Safari | Owner observed moving origin video and audible tone | Owner background/Play return remained stopped; engine diagnosis, peer and complete input journey open |
+| Same-head host parent crash | Explicit audited dirty-marker recovery; same page progressed low/high at continuity 17, final 15 s frames and cleanup passed | One short origin-only observer, with stall and transient HTTP errors; no automatic clean-drain claim |
+| Resource/network supplement | Exact owned-process/container and partial isolated HTTPS TCP counters retained | Missing windows, resets and other audiences; total wire and billed cost unproved |
+
+Physical and separate-network tests require their own evidence for each control,
+engine, contribution policy, background/resume and metered/battery behaviour.
+Browser RTC links, SDK loopback interoperability, an origin video observation
+and a passing local soak are separate claims. The complete P01–P12 requirements
+remain in [PRODUCTION-READINESS.md](PRODUCTION-READINESS.md); these observations
+do not declare a release or close historical failed records.

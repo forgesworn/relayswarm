@@ -124,24 +124,33 @@ async function tap(id) {
 }
 async function playbackSample(name) {
   await assertOurTab();
+  const layout = await visibleMedia();
   const sample = await evaluate(`(async()=>{
-    const video=window.relaySwarmDemo.media;video.scrollIntoView({behavior:'instant',block:'center'});
+    const video=window.relaySwarmDemo.media;
+    const frameDeadline=performance.now()+6500;
     const state=()=>({currentTime:video.currentTime,paused:video.paused,readyState:video.readyState,videoWidth:video.videoWidth,videoHeight:video.videoHeight,
       visibility:document.visibilityState,decodedFrames:video.webkitDecodedFrameCount??null,totalFrames:video.getVideoPlaybackQuality?.().totalVideoFrames??null});
     const frame=()=>new Promise((done,reject)=>{
       if(!video.requestVideoFrameCallback){done({method:'playbackQuality',...state()});return;}
-      let callback;const timer=setTimeout(()=>{video.cancelVideoFrameCallback?.(callback);reject(Error('No presented video frame'));},5000);
+      let callback;const timer=setTimeout(()=>{video.cancelVideoFrameCallback?.(callback);reject(Error('No presented video frame'));},Math.max(0,Math.min(5000,frameDeadline-performance.now())));
       callback=video.requestVideoFrameCallback((_now,metadata)=>{clearTimeout(timer);done({method:'requestVideoFrameCallback',presentedFrames:metadata.presentedFrames,mediaTime:metadata.mediaTime,width:metadata.width,height:metadata.height,...state()});});
     });
-    const before=await frame();await new Promise(done=>setTimeout(done,1200));const after=await frame();return{before,after};
+    let before=state();try{before=await frame();await new Promise(done=>setTimeout(done,1200));const after=await frame();return{before,after};}catch(error){return{before,after:state(),error:String(error.message)};}
   })()`);
+  receipt.playbackSamples.push({ name, at: new Date().toISOString(), layout, ...sample });
+  await screenshot(`video-${name}`);
+  assert.ok(!sample.error, sample.error);
   assert.equal(sample.after.visibility, "visible"); assert.equal(sample.after.paused, false);
   assert.ok(sample.after.currentTime > sample.before.currentTime + 0.5, "Physical video clock did not progress.");
   if (sample.after.method === "requestVideoFrameCallback") assert.ok(sample.after.presentedFrames > sample.before.presentedFrames, "No new video frames were presented.");
   else assert.ok(sample.after.totalFrames > sample.before.totalFrames, "Video frame counter did not progress.");
-  receipt.playbackSamples.push({ name, at: new Date().toISOString(), ...sample });
-  await screenshot(`video-${name}`);
   return sample;
+}
+async function visibleMedia() {
+  await assertOurTab();
+  const layout = await evaluate(`(()=>{const v=window.relaySwarmDemo.media;v.scrollIntoView({behavior:'instant',block:'center',inline:'center'});const r=v.getBoundingClientRect(),p=visualViewport;const left=Math.max(r.left,p?.offsetLeft??0),top=Math.max(r.top,p?.offsetTop??0),right=Math.min(r.right,(p?.offsetLeft??0)+(p?.width??innerWidth)),bottom=Math.min(r.bottom,(p?.offsetTop??0)+(p?.height??innerHeight));return{rect:{x:r.x,y:r.y,width:r.width,height:r.height},intersection:{left,top,right,bottom},visible:document.visibilityState==='visible'&&right>left&&bottom>top};})()`);
+  assert.ok(layout.visible, "Own physical video does not intersect the visible viewport.");
+  return layout;
 }
 async function select(id, value) {
   await assertOurTab();
@@ -232,8 +241,11 @@ try {
       await select("quality", quality);
       await until(async () => (await report()).player.fragments.some((fragment) => fragment.atMs > atMs && fragment.level === Number(quality) && ["video", "main"].includes(fragment.mediaType)), `No physical video fragment was loaded after selecting quality ${quality}.`, 20000);
     }
-    await evaluate("(()=>{const v=window.relaySwarmDemo.media;if(v.buffered.length){const start=v.buffered.start(0),end=v.buffered.end(v.buffered.length-1);v.currentTime=Math.max(start,Math.min(end-1,v.currentTime-4));}})()");
-    await until(async () => (await report()).player.seekRecoveryMs.length > 0, "Physical seek did not recover.");
+    await visibleMedia();
+    const seek = await evaluate("(()=>{const v=window.relaySwarmDemo.media,p=window.relaySwarmDemo.report().player;if(!v.buffered.length)throw Error('No buffered media for seek');const before=v.currentTime,target=Math.max(v.buffered.start(0),Math.min(v.buffered.end(v.buffered.length-1)-1,before-4));const state={before,target,seeks:p.seeks,recoveries:p.seekRecoveryMs.length};v.currentTime=target;return state;})()");
+    receipt.deliberateSeek = seek;
+    assert.ok(Math.abs(seek.before - seek.target) > 0.25, "Deliberate physical seek must change the playhead.");
+    await until(async () => { const p = (await report()).player; return p.seeks > seek.seeks && p.seekRecoveryMs.length > seek.recoveries && !p.paused; }, "New deliberate physical seek did not recover.");
     await playbackSample("quality-and-seek");
     await checkpoint("physical-quality-and-seek");
     const beforeUpload = (await report()).totals.uploaded;

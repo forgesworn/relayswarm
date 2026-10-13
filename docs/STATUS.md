@@ -60,7 +60,89 @@ The **0.2.0 source broadcaster candidate** includes the additions below.
 These changes are absent from v0.1.0's immutable release assets. Release and
 merged source do not establish production readiness.
 
-## Production work on 13 October
+## Current source acceptance on 13 October
+
+Source `a0231aadcdd81fe67fe702ac7214042d196eb39f` passed all ten jobs in
+[CI run 38392804791](https://github.com/forgesworn/relayswarm/actions/runs/38392804791).
+The public pilot serves that source's client bundle, SHA-256
+`76b1600b5692b31ed53687b217a538f4685644a68f6640e69c0ef0f5499afa28`.
+This is acceptance evidence for the tested source. Subsequent reporting-UI and
+field-harness changes form a separate candidate and do not inherit its exact-head
+CI claim. v0.2.0 release assets and fresh downloaded-consumer verification remain
+pending.
+
+The CI soak measured 7,200.366 s after its final arrival wave, with twelve
+honest viewer roles, one corrupt peer and one origin-only baseline. Twenty-two
+departures/rejoins replaced eight roles; it was not twelve uninterrupted
+two-hour sessions. Final incarnations accepted 8,268,934,096 peer bytes, and
+departed incarnations separately recorded 7,396,517,088. All twelve honest
+roles banned the corrupt peer. Retained final/departed stall and fatal hls.js
+counts were zero, and resource/loader cleanup passed. Native media errors were
+not separately instrumented, so no independent zero-native-error claim follows.
+This was a single-Chrome loopback fixture with fake microphone/permission flags,
+an mDNS override and `host/host` candidates, not public-network acceptance.
+
+The deployed HTTPS/WSS four-context run completed 7,205.094 s but **failed
+sustained contribution**. After policy timeouts around 13:24:57 UTC, both
+contributors withdrew with allowance remaining. No automatic reconsent or
+quota reset was applied. The receipt retains 34 of 2,932 sampled intervals
+without decoded-frame progress, plus 23/20/45/15 stalls for low/high/baseline/
+receive-only roles. Fatal hls.js errors, separately observed native media errors
+and repair attempts stayed zero. The receive-only role accepted 572,731,284
+peer bytes with zero uploads, including receiving from separately recorded
+support actors after formal contribution stopped. The red result is not
+reclassified as a sustained peer or production-capacity pass.
+
+An installed Firefox 152.0.6 public journey with ordinary Chrome contributors
+passed verified receiving/uploading, quality and seek, durable quota across
+reload, fresh consent and origin-only kill. Its pre-reload checkpoint recorded
+2,524,652 received peer bytes and 219,020 uploaded bytes. No fake media or
+permission overrides were used. The corrected visible Safari 26.6.2 journey
+played video without reported media errors but received zero verified peer
+payload within 45 s despite five RTC links; its complete peer journey remains
+red. The earlier Safari journey's peer bytes and later pause are retained
+separately and do not close that gate.
+
+Physical Pixel/Vanadium peer acceptance remains red. A separately authorised
+temporary public-interface-only WebRTC policy test also missed its 45 s peer
+gate; the original restrictive policy was restored and verified by 14:37:34 UTC.
+All retained links in that diagnostic matched known non-serving formal roles,
+not the ordinary serving support actors. Connections alone are not peer transfer
+or proof that the device can reach every serving actor. The iPhone owner
+confirmed moving origin video and an audible tone, then reported that playback
+did not resume after backgrounding or an explicit Play action. Engine/error
+diagnosis, complete peer/background journeys and automated native
+input remain unproved.
+
+The same-head host parent-crash observer closed green over 309.682 s. A guarded
+main-process `SIGKILL` stopped the old container namespace. A complete scoped
+writer/volume/descriptor audit established absence before explicit operator
+recovery of the retained dirty marker while holding both permanent leases.
+Publisher identity, client hash and both lease inodes were preserved. The same
+origin-only page decoded low and high video/audio after continuity advanced
+from 16 to 17; its final 15 s check advanced 475 frames. One 285 ms stall,
+transient HTTP 502/503 responses and level-load errors remain recorded; fatal
+and native media errors were zero. The observer/profile cleanup passed. This
+proves the measured explicit recovery path, not automatic guardian clean-drain.
+
+Scoped resource observations collected 111 exact-container/owned-Chrome samples
+and 87 isolated HTTPS active-socket samples, with all readers stopped before
+the run deadline. The main counter prefix missed 8m30s; closed/short socket
+terminal bytes and browser counter resets leave further gaps. Sampled app raw
+memory peaked at 308,580,352 bytes. The observed HTTPS acknowledged TCP counter
+deltas sum to 4,509,684,301 bytes, covering all audiences and excluding complete
+IP/link overhead. Internal bridge counters are not summed as Internet egress.
+There is no matched origin-only network baseline or provider billing evidence:
+total wire reduction and net cash saving remain unproved.
+
+The [current acceptance summary](../spikes/results/current-source-acceptance-summary-20261013.json)
+names the receipts, source and scope. Historical MSE causation, sustained
+contribution, complete Safari/physical-device journeys, varied/hard NAT,
+resource/cost attribution and released-asset acceptance remain open. The
+[P01–P12 checklist](PRODUCTION-READINESS.md) retains the full requested scope.
+
+
+## Earlier production checkpoints on 13 October
 
 The [feature guide](PRODUCTION-FEATURES.md) describes the implemented changes;
 the [delivery checklist](PRODUCTION-READINESS.md) retains their full acceptance
