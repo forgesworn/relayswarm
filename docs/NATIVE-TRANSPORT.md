@@ -129,3 +129,15 @@ Still required before choosing this for production:
 - protocol interop with a genuinely independent implementation;
 - dependency and native-binary supply-chain review;
 - a signed content manifest and a durable storage/replication policy.
+
+## Installed client and verified HTTP fallback
+
+The current source additionally supplies `relayswarm-native` and the
+`relayswarm/native-client` API. It requires an independently trusted digest,
+size, seeder allowlist and explicit endpoint policy. A bounded native attempt
+precedes HTTPS fallback; redirects, excess bytes and wrong digests are refused.
+Cancellation stops rather than starting fallback. The executable creates a
+new verified output atomically and requires installed Node. The original PoC
+journey described above retains its original behaviour. See
+[production features](PRODUCTION-FEATURES.md#installed-native-client) and
+[API](API.md#installed-native-client).

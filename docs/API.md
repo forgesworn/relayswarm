@@ -3,10 +3,9 @@
 [Documentation](README.md) · [Installation](GETTING-STARTED.md) ·
 [hls.js integration](../INTEGRATION.md)
 
-This describes the experimental v0.2.0 release, including the broadcaster
-pilot. The immutable v0.1.0 assets do not include the new publisher
-state, discovery or broadcast entry points. Package version `0.2.0`,
-session wire version `3`, segment-commitment schema `1` and metrics snapshot
+This describes the current 0.2.0 source candidate. The published v0.1.0
+assets do not include the newer production feature work. Package version `0.2.0`,
+session wire version `3`, segment-commitment schemas `1`/`2` and metrics snapshot
 version `2` are different version numbers. Source exports and protocol fields
 are not a stable interoperability promise.
 
@@ -16,11 +15,13 @@ are not a stable interoperability promise.
 |---|---|---|
 | `relayswarm` | Node or a browser bundler | `RelayPool`, `RelaySwarmSession`, `validTicket`, `RELAYSWARM_VERSION`, `KIND_PRESENCE`, `KIND_SIGNAL`, `SWARM_TAG` |
 | `relayswarm/hls-swarm` | Browser with hls.js | `createHlsSwarm`, `HLS_SWARM_METRICS_VERSION`, `rotationCandidate`, `retryAfterFor`, `readRefusal` |
-| `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `validStreamAuthorisation`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT` |
+| `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `delegationContent`, `revocationContent`, `validStreamAuthorisation`, `verifyCommitmentDelegation`, `segmentMediaContext`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT`, `KIND_COMMITMENT_DELEGATION`, `KIND_COMMITMENT_REVOCATION` |
 | `relayswarm/hls-publisher` | Node only | `createHlsPublisher`, `PublisherError` |
-| `relayswarm/publisher-state` | Node only | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent` |
+| `relayswarm/publisher-state` | Node only | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent`, `createCommitmentDelegation`, `createCommitmentRevocation` |
 | `relayswarm/stream-discovery` | Browser or Node | `resolveTrustedStream`, `discoverTrustedStreams`, `StreamDiscoveryError` |
 | `relayswarm/broadcast-pipeline` | Node with FFmpeg | `startBroadcastPipeline`, `broadcastEncoderArgs`, `broadcastForwardArgs` |
+| `relayswarm/native-client` | Installed Node application | `validateNativeDescriptor`, `fetchNativeObject`, `createNativeObjectSeeder` |
+| `relayswarm/publisher-advertisement` | Node or a browser bundler | `createPublisherAdvertisement`, `verifyPublisherAdvertisement` |
 | `relayswarm/package.json` | Package metadata | Name, version and declared dependencies |
 
 The wildcard export also permits source subpaths such as
@@ -69,6 +70,17 @@ const publisher = await createHlsPublisher({
 | `now` | `Date.now` | Clock returning milliseconds; useful for deterministic tests |
 | `maxConcurrent` | `8` | Simultaneous signing work, configurable from 1 to 64 |
 | `maxCacheEntries` | `512` | Entries in each bounded hash/commitment cache, configurable from 1 to 4,096 |
+| `allowEncryptedMedia` | `false` | Explicit AES-128 ciphertext publication; local keys remain HTTP-only |
+| `commitmentSecretKey` / `delegation` | author key / none | Author-scoped delegated commitment signing; an externally authored event permits operation without the author secret |
+| `revokedDelegationIds` / `delegationRevocations` | empty arrays | Host-trusted current revocation view; no automatic global lookup |
+
+`commitment` accepts `playlist`, `mediaType` and `part` for schema 2 exact
+media identity. Use `segmentMediaContext(context)` to derive the playlist,
+type and encryption from hls.js. `advertisement({manifestUrl, relays, status,
+starts, previousEvent, allowLoopback})` creates full linked live metadata;
+delegate-only publishers must supply an externally author-signed `event`.
+See [production features](PRODUCTION-FEATURES.md) and the
+[protocol draft](NIP-DRAFT.md) for scope and compatibility.
 
 The returned object contains:
 
@@ -270,3 +282,25 @@ It is a test/CLI orchestration helper, not a long-lived native HLS scheduler.
 `DEFAULT_MAX_OBJECT_BYTES` (256 MiB). These Buffer/stream primitives enforce
 the supplied object identity and frame bounds; trusted digest discovery,
 durable storage and application origin fallback remain outside them.
+
+## Installed native client
+
+`fetchNativeObject(descriptor, options)` returns `{bytes, receipt}` only after
+independent size/digest verification. A version-1 descriptor requires
+`swarmId`, `sha256`, `size`, `relayUrls`, `trustedSeeders` and optionally
+`originUrl`. HTTPS/WSS are required; `allowLoopback: true` permits HTTP/WS
+solely for loopback tests. The host supplies `bootstrap`, optional cancellation,
+`peerTimeoutMs` (default 10,000), `timeoutMs` (30,000) and `maxObjectBytes`
+(at most 256 MiB). A failed peer attempt automatically uses the configured
+trusted origin; redirects and substituted content are refused.
+
+`createNativeObjectSeeder({bytes, swarmId, relayUrls, bootstrap, secretKey,
+originUrl, allowLoopback, timeoutMs})` returns `{descriptor, close}`. Serving
+requires an explicit application call. Descriptors from untrusted seeders
+cannot establish provenance. `validateNativeDescriptor` validates the same
+policy without opening network resources.
+
+The installed `relayswarm-native` executable accepts `--descriptor`,
+`--output`, repeated `--bootstrap`, `--peer-timeout` and `--allow-loopback`.
+It requires Node and atomically creates a new verified output without
+replacing an existing path. `npm run native:fetch -- --help` shows usage.

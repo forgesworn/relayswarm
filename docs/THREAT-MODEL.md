@@ -13,7 +13,8 @@ browser loader and native path have different trust assumptions.
 The browser peer-first loader verifies an author-signed, canonical and
 expiring segment commitment, including stream/rendition/sequence/discontinuity/
 part and object identity. It checks the experimental publisher redistribution
-tag; delegated signers are not supported. The original CLI PoC is unchanged.
+tag; current source also permits explicitly author-scoped delegated signers.
+The original CLI PoC is unchanged.
 
 Regression tests cover request floods, empty/excessive chunks, upload stalls,
 expired admission on retries, delayed admission during shutdown, relay startup
@@ -28,11 +29,12 @@ listed media rather than arbitrary directory files and rejects symlink escapes.
 Its key stays on the server; current source can persist a private identity
 in an owner-controlled 0600 file. This is an example publisher,
 not a trusted-stream discovery service: a real host must still establish which
-stream author it trusts. The demo's in-memory relay and HTTP signing endpoint
-have resource bounds, but no participant admission or Sybil defence. Receipts
+stream author it trusts. The demo's relay and HTTP endpoints have resource bounds. Current source
+adds key-possession tickets and live revocation; open issuance does not prove
+unique participants or complete Sybil resistance. Receipts
 stay in the browser until downloaded; optional reporting requires viewer
 opt-in and accepts only bounded numeric summaries, without a swarm public key.
-These controls do not establish participant admission or net cost.
+These controls do not establish unique participants or net cost.
 
 These are specific tested boundaries, not completion of the adversarial suite
 below. Sybil resistance, broad NAT/mobile coverage and independent-client
@@ -71,7 +73,9 @@ The verifier requires fixed field order and exact canonical JSON with the
 `relayswarm-segment-v1` domain and schema version 1. It rejects altered fields,
 other signers, expired/stale events and substituted media contexts. The precise
 contract is in [INTEGRATION.md](../INTEGRATION.md#authenticated-peer-first-loading).
-Delegated commitment keys are a possible future design, not implemented here.
+Current source implements author-scoped expiring commitment keys and a
+host-supplied revocation view; [production features](PRODUCTION-FEATURES.md)
+describes the trust and availability boundary.
 The host still establishes which publisher it trusts. A malicious authorised
 publisher can sign harmful bytes; cryptographic integrity is not moderation.
 

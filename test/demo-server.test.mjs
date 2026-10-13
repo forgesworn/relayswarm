@@ -5,7 +5,8 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import WebSocket from "ws";
-import { finalizeEvent, generateSecretKey } from "nostr-tools/pure";
+import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";
+import { resolveTrustedStream } from "../src/browser/stream-discovery.mjs";
 import { startDemoServer } from "../demo/server.mjs";
 import { startBroadcastWaitingServer } from "../demo/broadcast-waiting.mjs";
 
@@ -54,6 +55,11 @@ test("demo refuses insecure remote bindings and invalid external configuration",
 
 test("bounded demo relay delivers signed swarm events, honours CLOSE and recovers after an outage", async (t) => {
   const demo = await start(t);
+  const secretKey = generateSecretKey();
+  const post = (path, value) => fetch(`${demo.base}${path}`, { method: "POST", headers: { "content-type": "application/json", origin: demo.base }, body: JSON.stringify(value) }).then((response) => response.json());
+  const challenge = await post("/admission/challenge", { pubkey: getPublicKey(secretKey) });
+  const proof = finalizeEvent({ kind: 27235, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify({ challenge: challenge.challenge, swarmId: demo.publisher.swarmId, epoch: challenge.epoch }) }, secretKey);
+  const credential = await post("/admission/ticket", { proof });
   const connect = () => new Promise((resolve, reject) => {
     const socket = new WebSocket(`${demo.base.replace(/^http/u, "ws")}/relay`, { origin: demo.base });
     socket.once("open", () => resolve(socket)); socket.once("error", reject);
@@ -70,11 +76,11 @@ test("bounded demo relay delivers signed swarm events, honours CLOSE and recover
   });
   socket.send(JSON.stringify(["REQ", "s", { kinds: [24170], "#x": [demo.publisher.swarmId] }]));
   await received((frame) => frame[0] === "EOSE" && frame[1] === "s", "subscription readiness");
-  const event = finalizeEvent({ kind: 24170, created_at: Math.floor(Date.now() / 1000), tags: [["x", demo.publisher.swarmId]], content: "presence" }, generateSecretKey());
+  const event = finalizeEvent({ kind: 24170, created_at: Math.floor(Date.now() / 1000), tags: [["x", demo.publisher.swarmId]], content: JSON.stringify({ ticket: credential.ticket }) }, secretKey);
   socket.send(JSON.stringify(["EVENT", event]));
   await received((frame) => frame[0] === "EVENT" && frame[2].id === event.id, "the subscribed signed event");
   socket.send(JSON.stringify(["CLOSE", "s"]));
-  const other = finalizeEvent({ kind: 24170, created_at: Math.floor(Date.now() / 1000), tags: [["x", demo.publisher.swarmId]], content: "next" }, generateSecretKey());
+  const other = finalizeEvent({ kind: 24170, created_at: Math.floor(Date.now() / 1000), tags: [["x", demo.publisher.swarmId]], content: JSON.stringify({ ticket: credential.ticket, update: true }) }, secretKey);
   socket.send(JSON.stringify(["EVENT", other]));
   // The relay processes frames in order. EOSE on a new, non-matching
   // subscription is a barrier after CLOSE and publication, including outgoing
@@ -84,6 +90,22 @@ test("bounded demo relay delivers signed swarm events, honours CLOSE and recover
   assert.ok(!frames.some((frame) => frame[0] === "EVENT" && frame[2].id === other.id));
   const closed = new Promise((resolve) => socket.once("close", resolve)); demo.relay.pause(); await closed;
   demo.relay.resume(); const restarted = await connect(); restarted.terminate();
+});
+
+test("live advertisement links stable authorisation and is discoverable on the bounded relay", async (t) => {
+  const demo = await start(t), session = await fetch(`${demo.base}/session.json`).then((response) => response.json());
+  const event = await fetch(`${demo.base}${session.streamAdvertisementEndpoint}`).then((response) => response.json());
+  const result = resolveTrustedStream(event, { trustedAuthors: [session.streamEvent.pubkey], allowedMediaOrigins: [demo.base],
+    swarmId: session.swarmId, relays: session.relays, streamAuthorisations: [session.streamEvent], allowLoopback: true });
+  assert.equal(result.streamEvent.id, session.streamEvent.id); assert.equal(result.liveEvent.id, event.id);
+  assert.equal(result.manifestUrl, new URL(session.manifest, demo.base).href);
+  const socket = new WebSocket(session.relays[0], { origin: demo.base }), frames = [];
+  socket.on("message", (raw) => frames.push(JSON.parse(raw)));
+  await new Promise((resolve) => socket.once("open", resolve)); t.after(() => socket.terminate());
+  socket.send(JSON.stringify(["REQ", "live", { kinds: [30311], authors: [session.streamEvent.pubkey] }]));
+  const deadline = Date.now() + 3000;
+  while (!frames.some((frame) => frame[0] === "EOSE")) { assert.ok(Date.now() < deadline); await new Promise((resolve) => setTimeout(resolve, 10)); }
+  assert.ok(frames.some((frame) => frame[0] === "EVENT" && frame[2].id === event.id));
 });
 
 const operatorToken = "operator-test-token-with-at-least-32-characters";
@@ -124,39 +146,46 @@ test("operator and reporting are disabled by default", async (t) => {
 
 test("opted-in reports allow bounded numeric measurements only", async (t) => {
   const demo = await start(t, { operatorToken, telemetry: true, reportCapacity: 2 });
-  const input = { durationMs: 10, peerBytes: 4, uploadedBytes: 5, originMediaRequests: 1, originMediaBytes: 8, stalls: 0, stallMs: 0, fatalErrors: 0 };
+  const values = { durationMs: 10, peerBytes: 4, uploadedBytes: 5, originMediaRequests: 1, originMediaBytes: 8, stalls: 0, stallMs: 0, fatalErrors: 0 };
+  const input = { v: 1, reportId: "a".repeat(32), sequence: 1, values };
   const post = (value, origin = demo.base) => fetch(`${demo.base}/reports`, { method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify(value) });
   assert.equal((await post(input, "https://other.example")).status, 403);
   assert.equal((await fetch(`${demo.base}/reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) })).status, 403);
   assert.equal((await post({ ...input, identity: "private" })).status, 400);
-  assert.equal((await post({ ...input, peerBytes: -1 })).status, 400);
-  assert.equal((await post({ ...input, peerBytes: 1e13 })).status, 400);
+  assert.equal((await post({ ...input, values: { ...values, peerBytes: -1 } })).status, 400);
+  assert.equal((await post({ ...input, values: { ...values, peerBytes: 1e13 } })).status, 400);
   for (let i = 0; i < 3; i++) assert.equal((await post(input)).status, 200);
+  assert.equal((await post({ ...input, sequence: 2, values: { ...values, uploadedBytes: 7 } })).status, 200);
+  assert.equal((await post({ ...input, reportId: "b".repeat(32) })).status, 200);
+  assert.equal((await post({ ...input, reportId: "c".repeat(32) })).status, 429);
   const status = await fetch(`${demo.base}/operator/status`, { headers: { authorization: `Bearer ${operatorToken}` } }).then((r) => r.json());
-  assert.equal(status.reports.samples, 2); assert.equal(status.reports.totals.uploadedBytes, 10);
-  assert.ok(!JSON.stringify(status.reports).includes("identity"));
+  assert.equal(status.reports.samples, 2); assert.equal(status.reports.totals.uploadedBytes, 12);
+  assert.ok(!JSON.stringify(status.reports).includes(input.reportId));
 });
 
 
 test("aborting during media path lookup releases every request slot before streaming", { timeout: 15000 }, async (t) => {
   const demo = await start(t);
   const media = demo.publisher.media.bind(demo.publisher);
-  let entered, release;
+  let entered, rejectEntered, release;
   demo.publisher.media = async (path) => {
     entered();
     await new Promise((resolve) => { release = resolve; });
     return media(path);
   };
   for (let i = 0; i < 40; i++) {
-    const waiting = new Promise((resolve) => { entered = resolve; });
-    const request = httpGet(`${demo.base}/media/shared.ts`, (response) => {
+    const waiting = new Promise((resolve, reject) => { entered = resolve; rejectEntered = reject; });
+    let cancelling = false;
+    // Each case deliberately aborts its connection. A pooled socket racing
+    // the preceding abort can reset before the server's lookup is reached.
+    const request = httpGet(`${demo.base}/media/shared.ts`, { agent: false }, (response) => {
       response.resume();
       assert.notEqual(response.statusCode, 503, "Cancelled requests must not exhaust the media concurrency budget");
     });
-    request.on("error", () => {});
+    request.on("error", (error) => { if (!cancelling) rejectEntered(error); });
     await waiting;
     const closed = new Promise((resolve) => request.once("close", resolve));
-    request.destroy(); await closed;
+    cancelling = true; request.destroy(); await closed;
     // Let the server observe socket closure while its lookup is still pending.
     await new Promise((resolve) => setTimeout(resolve, 10));
     release();

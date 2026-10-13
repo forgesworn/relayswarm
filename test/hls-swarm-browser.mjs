@@ -39,6 +39,11 @@ const flag = (name, fallback) => {
 const MODE = flag("mode", "shadow");
 const VIEWERS = Number(flag("viewers", 12));
 const DURATION_S = Number(flag("duration", 90));
+const CHURN_EVERY_S = Number(flag("churnEvery", 0));
+const CHURN_COUNT = Number(flag("churnCount", 2));
+if (!Number.isSafeInteger(DURATION_S) || DURATION_S < 15 || DURATION_S > 7200
+  || !Number.isSafeInteger(CHURN_EVERY_S) || CHURN_EVERY_S !== 0 && (CHURN_EVERY_S < 30 || CHURN_EVERY_S > 1800)
+  || !Number.isSafeInteger(CHURN_COUNT) || CHURN_COUNT < 1 || CHURN_COUNT > 4) throw new Error("Invalid bounded soak duration or churn options.");
 const STAGGER_MS = Number(flag("stagger", 3000));
 const WAVES = Math.max(1, Number(flag("waves", 3)));
 const WAVE_GAP_MS = Number(flag("waveGap", 30000));
@@ -189,7 +194,7 @@ try {
     const network = { originSegmentRequests: 0 };
     tab.on("request", (request) => { if (/\/hls\/seg[0-9]+\.ts/.test(request.url())) network.originSegmentRequests++; });
     await tab.goto(`${base}/?${query}`);
-    pages.push({ role, tab, network });
+    pages.push({ role, tab, network, context, joinedAt: Date.now() });
     log(`joined ${role.viewer} (wave ${role.wave})`);
   };
 
@@ -216,10 +221,34 @@ try {
   }
 
   log(`running for ${DURATION_S}s`);
-  await sleep(DURATION_S * 1000);
+  const churn = [], observationAt = Date.now(), observationUntil = observationAt + DURATION_S * 1000;
+  let nextChurn = CHURN_EVERY_S ? observationAt + CHURN_EVERY_S * 1000 : Infinity, churnIndex = 0;
+  while (Date.now() < observationUntil) {
+    await sleep(Math.min(30000, observationUntil - Date.now(), nextChurn - Date.now()));
+    if (Date.now() >= nextChurn && nextChurn + 30000 <= observationUntil) {
+      // Keep v0/v1 and the corrupt seeder for deterministic integrity probes.
+      const eligible = pages.filter(({ role }) => role.swarm && !role.corrupt && role.wave > 0);
+      for (let i = 0; i < Math.min(CHURN_COUNT, eligible.length); i++) {
+        const leaving = eligible[(churnIndex + i) % eligible.length];
+        const final = await leaving.tab.evaluate(() => window.__viewer.report());
+        await leaving.tab.evaluate(() => window.__viewer.stop());
+        const stopped = await leaving.tab.evaluate(() => ({ metrics: window.__viewer.stoppedMetrics(), loaderRestored: window.__viewer.loaderRestored() }));
+        if (stopped.metrics.peers.connected || stopped.metrics.peers.dialling || stopped.metrics.relays.connected || stopped.metrics.bytes.held || !stopped.loaderRestored) throw new Error("Churn departure retained swarm resources.");
+        await leaving.context.close(); pages.splice(pages.indexOf(leaving), 1);
+        churn.push({ elapsedMs: Date.now() - observationAt, viewer: leaving.role.viewer,
+          player: { stalls: final.player.stalls, fatalErrors: final.player.fatalErrors, currentTime: final.player.currentTime },
+          resourceHighWater: final.resourceHighWater, bytes: final.swarm.bytes, originSegmentRequests: leaving.network.originSegmentRequests, cleanStop: true });
+        await joinViewer(leaving.role);
+      }
+      churnIndex += CHURN_COUNT;
+      log(`churn departures/rejoins: ${churn.length}`);
+      nextChurn += CHURN_EVERY_S * 1000;
+    } else if (Date.now() >= nextChurn) nextChurn = Infinity;
+  }
 
   const reports = [];
-  for (const { role, tab, network } of pages) reports.push({ ...role, network, ...(await tab.evaluate(() => window.__viewer.report())) });
+  for (const { role, tab, network, joinedAt } of pages) reports.push({ ...role, network,
+    observedSeconds: (Date.now() - joinedAt) / 1000, ...(await tab.evaluate(() => window.__viewer.report())) });
   const stopChecks = [];
   for (const { role, tab } of pages) {
     if (!role.swarm) continue;
@@ -276,6 +305,7 @@ try {
     rotation: process.env.RELAYSWARM_NO_ROTATION === "1" ? "off" : "on",
     shape: { liveSyncDurationCount: MODE === "peer-first" ? 4 : 3, ...(MODE === "peer-first" ? { maxBufferLength: 4, maxMaxBufferLength: 6 } : {}), viewers: VIEWERS, waves: WAVES, waveGapMs: WAVE_GAP_MS, maxPeers: MAX_PEERS, corruptPeer: CORRUPT_PEER, plusCorruptPeer: CORRUPT_PEER ? 1 : 0, plusBaselineWithoutSwarm: 1, durationS: DURATION_S, staggerMs: STAGGER_MS, segmentSeconds: 2, videoKbps: 1500, originFallbackMs: FALLBACK_MS },
     waves: waveRows,
+    churn: { intervalSeconds: CHURN_EVERY_S, countPerInterval: CHURN_COUNT, departures: churn, observationMs: Date.now() - observationAt },
     aggregate: {
       originLoaded: sum("originLoaded"),
       peerFirstLoaded: sum("peerFirstLoaded"),
@@ -302,7 +332,7 @@ try {
       corruptPeerBannedBy: honest.filter((r) => r.swarm.peers.banned > 0).length,
     },
     player: {
-      withSwarm: honest.map((r) => ({ viewer: r.viewer, stalls: r.player.stalls, fatalErrors: r.player.fatalErrors, currentTime: Number(r.player.currentTime.toFixed(1)) })),
+      withSwarm: honest.map((r) => ({ viewer: r.viewer, observedSeconds: r.observedSeconds, stalls: r.player.stalls, fatalErrors: r.player.fatalErrors, currentTime: Number(r.player.currentTime.toFixed(1)) })),
       baseline: { stalls: baseline.player.stalls, fatalErrors: baseline.player.fatalErrors, currentTime: Number(baseline.player.currentTime.toFixed(1)) },
     },
     stopChecks,
@@ -320,7 +350,7 @@ try {
     if (lastWave && lastWave.inTimeShare < 0.5) failures.push(`late-wave in-time share ${lastWave.inTimeShare} below 0.5`);
   }
   if (MODE === "shadow" && summary.aggregate.inTimeShare < 0.5) failures.push(`in-time share ${summary.aggregate.inTimeShare} below 0.5`);
-  if (honest.some((r) => r.player.fatalErrors > 0 || r.player.currentTime < DURATION_S * 0.5)) failures.push("a swarm viewer did not keep playing");
+  if (honest.some((r) => r.player.fatalErrors > 0 || r.player.currentTime < r.observedSeconds * 0.5)) failures.push("a swarm viewer did not keep playing");
   if (CORRUPT_PEER && summary.aggregate.corruptPeerBannedBy === 0) failures.push("the tampering peer was never detected and banned");
   if (honest.some((report) => report.player.stalls > baseline.player.stalls)) failures.push("a swarm viewer stalled more often than the baseline");
   if (baseline.player.fatalErrors > 0 || baseline.player.currentTime < DURATION_S * 0.5) failures.push("the baseline did not keep playing");
@@ -342,6 +372,9 @@ try {
   if (summary.aggregate.swarmErrors > 0) failures.push(`${summary.aggregate.swarmErrors} swarm error(s)`);
   if (reports.filter((report) => report.swarm).some((report) => report.resourceSamples.some((sample) => sample.connected + sample.dialling > MAX_PEERS
     || sample.heldBytes > 64 * 1024 * 1024 || sample.relays > 1))) failures.push("a sampled resource exceeded the configured limit");
+  if ([...reports.filter((report) => report.swarm), ...churn].some(({ resourceHighWater: sample }) => sample.activePeers > MAX_PEERS
+    || sample.heldBytes > 64 * 1024 * 1024 || sample.relays > 1)) failures.push("a whole-run resource high-water measurement exceeded the configured limit");
+  if (churn.some(({ player }) => player.fatalErrors > 0)) failures.push("a departed viewer had a fatal playback error");
   summary.ok = failures.length === 0;
   summary.failures = failures;
 

@@ -450,3 +450,54 @@ test("CLI stops cleanly while waiting for an encoder that supplies no HLS output
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
   assert.equal(await exists(join(state, "media", "master.m3u8")), false);
 });
+
+test("kernel lease excludes another process and recovers after SIGKILL without consulting PIDs", { timeout: 10000, skip: !["darwin", "linux"].includes(process.platform) }, async (t) => {
+  const directory = await fixture(t), mediaDir = join(directory, "media");
+  const moduleUrl = new URL("../src/broadcast-pipeline.mjs", import.meta.url).href;
+  const code = `import { startBroadcastPipeline } from ${JSON.stringify(moduleUrl)}; const p = await startBroadcastPipeline({mediaDir:process.argv[1],ffmpeg:process.argv[2],publicationIntervalMs:20}); process.stdout.write('owned\\n'); setInterval(()=>{},1000);`;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", code, mediaDir, join(directory, "absent-encoder")], { stdio: ["ignore", "pipe", "pipe"] });
+  let text = ""; child.stdout.on("data", (data) => { text += data; }); child.stderr.on("data", () => {});
+  const closed = new Promise((done) => child.once("close", done));
+  cleanups.get(t).push(async () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); await closed; });
+  await until(() => text.includes("owned"), 5000);
+  await until(() => exists(join(mediaDir, ".generation")));
+  const before = JSON.parse(await readFile(join(mediaDir, ".broadcast-lock"), "utf8"));
+  const firstGeneration = Number(await readFile(join(mediaDir, ".generation"), "utf8"));
+  await assert.rejects(startBroadcastPipeline({ mediaDir, ffmpeg: join(directory, "absent-encoder") }), /locked/u);
+  child.kill("SIGKILL"); await closed;
+  assert.equal(await exists(join(mediaDir, ".broadcast-lock")), true);
+  // A namespace PID is irrelevant. The kernel transaction on the same inode
+  // is the only proof that the previous publisher no longer owns the state.
+  await writeFile(join(mediaDir, ".broadcast-lock"), JSON.stringify({ ...before, pid: process.pid }), { mode: 0o600 });
+  const recovered = await pipeline(t, mediaDir);
+  await until(async () => Number(await readFile(join(mediaDir, ".generation"), "utf8")) > firstGeneration);
+  const after = JSON.parse(await readFile(join(mediaDir, ".broadcast-lock"), "utf8"));
+  assert.equal(after.leaseInode, before.leaseInode); assert.equal(after.leaseDevice, before.leaseDevice);
+  await recovered.close();
+  assert.equal(await exists(join(mediaDir, ".broadcast-lease.sqlite")), true, "the locked inode must never be unlinked between owners");
+});
+
+test("legacy ownership records cannot be automatically reclaimed", { skip: !["darwin", "linux"].includes(process.platform) }, async (t) => {
+  const directory = await fixture(t), original = JSON.stringify({ pid: 9999999, startedAt: "old" });
+  await writeFile(join(directory, ".broadcast-lock"), original, { mode: 0o600 });
+  await assert.rejects(startBroadcastPipeline({ mediaDir: directory, ffmpeg: join(directory, "absent-encoder") }), /Legacy/u);
+  assert.equal(await readFile(join(directory, ".broadcast-lock"), "utf8"), original);
+});
+
+test("parent SIGKILL stops encoder and forwarder before automatic ownership handoff", { timeout: 10000, skip: !["darwin", "linux"].includes(process.platform) }, async (t) => {
+  const directory = await fixture(t), mediaDir = join(directory, "media"), encoder = join(directory, "worker.mjs");
+  await writeFile(encoder, `#!${process.execPath}\nimport {writeFileSync} from 'node:fs'; const role=process.argv.includes('flv')?'forward':'hls'; writeFileSync(${JSON.stringify(directory)}+'/'+role+'.pid',String(process.pid)); process.on('SIGTERM',()=>{}); setInterval(()=>{},1000);\n`, { mode: 0o700 });
+  const moduleUrl = new URL("../src/broadcast-pipeline.mjs", import.meta.url).href;
+  const code = `import {startBroadcastPipeline} from ${JSON.stringify(moduleUrl)}; await startBroadcastPipeline({mediaDir:process.argv[1],ffmpeg:process.argv[2],forwardUrl:'rtmp://127.0.0.1:1935/output',allowInsecureLoopbackForward:true,publicationIntervalMs:20}); process.stdout.write('owned\\n');setInterval(()=>{},1000);`;
+  const parent = spawn(process.execPath, ["--input-type=module", "-e", code, mediaDir, encoder], { stdio: ["ignore", "pipe", "pipe"] });
+  parent.stdout.on("data", () => {}); parent.stderr.on("data", () => {});
+  const closed = new Promise((done) => parent.once("close", done));
+  cleanups.get(t).push(async () => { if (parent.exitCode === null && parent.signalCode === null) parent.kill("SIGKILL"); await closed; });
+  await until(async () => await exists(join(directory, "hls.pid")) && await exists(join(directory, "forward.pid")), 5000);
+  const pids = await Promise.all(["hls", "forward"].map(async (role) => Number(await readFile(join(directory, `${role}.pid`), "utf8"))));
+  parent.kill("SIGKILL"); await closed;
+  const recovered = await pipeline(t, mediaDir);
+  for (const pid of pids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, "old workers must be reaped before the new owner is ready");
+  await recovered.close();
+  assert.equal(await exists(join(mediaDir, ".broadcast-workers.sqlite.dirty")), false);
+});

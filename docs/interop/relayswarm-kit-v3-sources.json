@@ -1,0 +1,38 @@
+{
+  "baseKitRevision": "7eb042ee0fc0e960780c61d755a2ec50f1a8be40",
+  "patchSha256": "23c471a9dcbf528471146ff54caa6c430752eae160fd374c1ce769ad4e747d77",
+  "files": {
+    "Sources/RelaySwarmSignalling/RelayConnection.swift": {
+      "originalSha256": "fe2f64a98491601795ef5f4cbb692dbd3214899fd17fc3375fd1c601ed578bdc",
+      "proposedSha256": "9415a335e9d78233a6f5e2c298fbf4712b674837c57cb2f5df4597a5d58dac6a"
+    },
+    "Sources/RelaySwarmSignalling/RelayTransport.swift": {
+      "originalSha256": "2b9bdea065257bd97a4c59dd1da34c136340f3739072c72db8eadc13c6da4885",
+      "proposedSha256": "c458b9ca25da8eb0a1b23ed78f24a8062a7ecbed0a1b1e1e516e5c971c2a4fa7"
+    },
+    "Sources/RelaySwarmSignalling/Swarm.swift": {
+      "originalSha256": "a1f57956c8c79ac19b7df0761541ca73ed98c50f2883f25e6f2d1111d092b35c",
+      "proposedSha256": "496b78fb0d439077c71074e00d456016a7060194db8e477576521e9bd8174ddc"
+    },
+    "Sources/RelaySwarmTransport/SwarmHost.swift": {
+      "originalSha256": "56d9fa13ff80d88eb23197f932048128c3ede572696735ef1fafdc0ce8b4cf2a",
+      "proposedSha256": "b124dd78fc9379cb3990f5ba3fd3f9f4ce21ffd7db78c89c999f19f13bd2fc5a"
+    },
+    "Tests/RelaySwarmSignallingTests/LiveRelayTests.swift": {
+      "originalSha256": "06f51f41f75d9d9b7a013373027a6b0bd519e67e31099375ad3da87291fe8be1",
+      "proposedSha256": "2969c053d13f820657efc6f4b8d5ac3a836fff4c9d6fc5a4dc4b57d44d8e659f"
+    },
+    "Tests/RelaySwarmSignallingTests/SignallingJourneyTests.swift": {
+      "originalSha256": "d8be65303e980e5cd96d5d800267129c2295d1a01e2756925c60622bf2f7ecd6",
+      "proposedSha256": "3733e2c6f3619aaed23d43107e072b8f7d8b9c374d2cf35f22a233cec8399836"
+    },
+    "Tests/RelaySwarmSignallingTests/WireV3Tests.swift": {
+      "originalSha256": null,
+      "proposedSha256": "72252cef4e7a59808d487844993408ce97927382de17c949078f8e3286395fec"
+    },
+    "Tests/RelaySwarmTransportTests/TransportTests.swift": {
+      "originalSha256": "f7997550bcd055e28e1321f1e3d19623dbabbadee75377647cb94746f5dc9cdb",
+      "proposedSha256": "785574805026a7eabd431aeaefe684d40ef9b65b0bc4f192511c7a4337854e75"
+    }
+  }
+}

@@ -1,0 +1,586 @@
+diff --git a/Sources/RelaySwarmSignalling/RelayConnection.swift b/Sources/RelaySwarmSignalling/RelayConnection.swift
+--- a/Sources/RelaySwarmSignalling/RelayConnection.swift
++++ b/Sources/RelaySwarmSignalling/RelayConnection.swift
+@@ -27,6 +27,7 @@
+             for await signal in incoming {
+                 switch signal {
+                 case .text(let text):
++                    guard text.utf8.count <= 1024 * 1024 else { continue }
+                     self.handle(RelayMessage.decode(text))
+                 case .closed:
+                     self.handleClosed()
+diff --git a/Sources/RelaySwarmSignalling/RelayTransport.swift b/Sources/RelaySwarmSignalling/RelayTransport.swift
+--- a/Sources/RelaySwarmSignalling/RelayTransport.swift
++++ b/Sources/RelaySwarmSignalling/RelayTransport.swift
+@@ -30,6 +30,7 @@
+     public func open() async throws -> AsyncStream<TransportSignal> {
+         let task = URLSession.shared.webSocketTask(with: url)
+         self.task = task
++        task.maximumMessageSize = 1024 * 1024
+         task.resume()
+         return AsyncStream { continuation in
+             Task {
+diff --git a/Sources/RelaySwarmSignalling/Swarm.swift b/Sources/RelaySwarmSignalling/Swarm.swift
+--- a/Sources/RelaySwarmSignalling/Swarm.swift
++++ b/Sources/RelaySwarmSignalling/Swarm.swift
+@@ -1,155 +1,146 @@
+ import Foundation
++import CoreFoundation
+ 
+-/// The RelaySwarm wire format, matching the proof of concept in
+-/// forgesworn/relayswarm so implementations interoperate.
+-///
+-/// Kinds sit in the ephemeral range: relays fan them out to live
+-/// subscriptions and store nothing. Version 2 is this implementation's
+-/// addition: signal content is NIP-44 encrypted to the counterparty, so the
+-/// SDP - which names the sender's network addresses - never sits readable
+-/// on a public relay. Presence stays plain; it carries a role and nothing
+-/// else. The format is provisional until the NIP lands, which is why every
+-/// versioned event says so with a tag.
++/// Experimental version 3 session envelopes. NIP-44's encryption version (2)
++/// is independent of the session version. There is no plaintext fallback.
+ public enum SwarmWire {
+     public static let presenceKind = 24170
+     public static let signalKind = 24171
+     public static let swarmTag = "x"
+-    public static let versionTag = "v"
+-    public static let encryptedVersion = "2"
++    public static let version = 3
++    public static let maxPresenceBytes = 16 * 1024
++    public static let maxSignalBytes = 64 * 1024
++    public static let maxPlaintextBytes = 8 * 1024
++    static func token(_ value: String) -> Bool {
++        value.range(of: "^[a-z0-9][a-z0-9-]{0,31}$", options: .regularExpression) != nil
++    }
++    static func hex64(_ value: String) -> Bool {
++        value.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
++    }
++    static func requestID(_ value: String) -> Bool {
++        value.range(of: "^[a-zA-Z0-9_-]{8,64}$", options: .regularExpression) != nil
++    }
++    static func ticket(_ value: String) -> Bool { !value.isEmpty && value.utf8.count <= 2048 }
++    static func unique(_ event: NostrEvent, _ name: String) -> String? {
++        let found = event.tags.filter { $0.first == name }
++        return found.count == 1 && found[0].count == 2 ? found[0][1] : nil
++    }
++    static func fresh(_ event: NostrEvent) -> Bool {
++        let now = Int64(Date().timeIntervalSince1970)
++        return event.createdAt >= now - 120 && event.createdAt <= now + 30
++    }
+ }
++public struct SwarmTransportCapability: Sendable, Equatable, Codable {
++    public let type: String
++    public let publicKey: String
++    public init(type: String, publicKey: String) { self.type = type; self.publicKey = publicKey }
++}
++public struct SwarmPresence: Sendable, Equatable {
++    public let peer: String, role: String
++    public let transports: [SwarmTransportCapability], have: [String]
++    public let open: Bool?, ticket: String?
++    public var encrypted: Bool { true }
++}
++public struct SwarmSignal: Sendable, Equatable {
++    public let from: String, type: String, transport: String, requestID: String
++    public let sdp: String?, ticket: String?, rawJSON: String
++}
++public actor SwarmSignaller {
++    public enum Failure: Error { case invalidEnvelope, resourceLimit }
++    private let keys: NostrKeys, pool: RelayPool, swarmID: String
++    private var conversationKeys = [String: Data]()
++    public init(keys: NostrKeys, pool: RelayPool, swarmID: String) {
++        self.keys = keys; self.pool = pool; self.swarmID = swarmID
++    }
++    public var publicKey: String { keys.publicKey }
++    public private(set) var rejectedSignals = 0
+ 
+-/// Another peer announcing itself in the swarm.
+-public struct SwarmPresence: Sendable, Equatable {
+-    public let peer: String
+-    public let role: String
+-    /// True when the peer speaks version 2 and expects encrypted signals.
+-    public let encrypted: Bool
+-}
+-
+-/// A decrypted (or legacy plaintext) signal addressed to us.
+-public struct SwarmSignal: Sendable, Equatable {
+-    public let from: String
+-    public let type: String
+-    public let sdp: String?
+-    /// The full decrypted JSON payload, for fields beyond type and sdp.
+-    public let rawJSON: String
+-}
+-
+-/// Presence and SDP exchange for one swarm, over one relay pool.
+-///
+-/// This is deliberately the rendezvous layer only: who is here, and an
+-/// encrypted offer/answer channel to a chosen peer. What travels once the
+-/// data channel opens - and anything swarm-shaped like segment scheduling -
+-/// is the caller's business, or a later module's.
+-public actor SwarmSignaller {
+-    private let keys: NostrKeys
+-    private let pool: RelayPool
+-    private let swarmID: String
+-    private var conversationKeys = [String: Data]()
+-
+-    public init(keys: NostrKeys, pool: RelayPool, swarmID: String) {
+-        self.keys = keys
+-        self.pool = pool
+-        self.swarmID = swarmID
++    public func announcePresence(role: String, transports: [SwarmTransportCapability]? = nil,
++                                 have: [String] = [], open: Bool? = nil, ticket: String? = nil) async throws {
++        let capabilities = transports ?? [.init(type: "webrtc", publicKey: keys.publicKey)]
++        guard swarmID.count >= 8, swarmID.count <= 128, SwarmWire.token(role), capabilities.count <= 8,
++              capabilities.allSatisfy({ SwarmWire.token($0.type) && SwarmWire.hex64($0.publicKey) }),
++              have.count <= 32, have.allSatisfy(SwarmWire.hex64), ticket.map(SwarmWire.ticket) ?? true else { throw Failure.invalidEnvelope }
++        var value: [String: Any] = ["v": 3, "role": role, "transports": capabilities.map { ["type": $0.type, "publicKey": $0.publicKey] }, "have": Array(Set(have)).sorted()]
++        if let open { value["open"] = open }; if let ticket { value["ticket"] = ticket }
++        let data = try JSONSerialization.data(withJSONObject: value)
++        guard data.count <= SwarmWire.maxPresenceBytes else { throw Failure.resourceLimit }
++        try await pool.publish(NostrEvent.signed(kind: SwarmWire.presenceKind, tags: [["x", swarmID]], content: String(decoding: data, as: UTF8.self), keys: keys))
+     }
+-
+-    public var publicKey: String { keys.publicKey }
+-
+-    /// Announce this peer. Content is plain JSON on purpose: it holds the
+-    /// role and the format version, never an address.
+-    public func announcePresence(role: String) async throws {
+-        let content = "{\"role\":\"\(NostrEvent.escape(role))\",\"v\":2}"
+-        let event = try NostrEvent.signed(kind: SwarmWire.presenceKind,
+-                                          tags: [[SwarmWire.swarmTag, swarmID]],
+-                                          content: content,
+-                                          keys: keys)
+-        try await pool.publish(event)
+-    }
+-
+-    /// Other peers' presence in this swarm, self excluded.
+     public func presences() async -> AsyncStream<SwarmPresence> {
+-        let filter = NostrFilter(kinds: [SwarmWire.presenceKind],
+-                                 since: Int64(Date().timeIntervalSince1970) - 60,
+-                                 tags: [SwarmWire.swarmTag: [swarmID]])
+-        let events = await pool.subscribe([filter])
+-        let ownKey = keys.publicKey
+-        return AsyncStream { continuation in
++        let events = await pool.subscribe([NostrFilter(kinds: [24170], since: Int64(Date().timeIntervalSince1970) - 2, tags: ["x": [swarmID]])])
++        return AsyncStream(bufferingPolicy: .bufferingNewest(64)) { continuation in
+             let task = Task {
+-                for await event in events {
+-                    guard event.pubkey != ownKey,
+-                          let data = event.content.data(using: .utf8),
+-                          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+-                          let role = object["role"] as? String else { continue }
+-                    let version = (object["v"] as? NSNumber)?.intValue ?? 1
+-                    continuation.yield(SwarmPresence(peer: event.pubkey, role: role,
+-                                                     encrypted: version >= 2))
+-                }
++                for await event in events { if let value = self.decodePresence(event) { continuation.yield(value) } }
+                 continuation.finish()
+             }
+             continuation.onTermination = { _ in task.cancel() }
+         }
+     }
+-
+-    /// Signals addressed to this peer, decrypted when versioned, parsed
+-    /// plain when a legacy peer sent them.
+     public func signals() async -> AsyncStream<SwarmSignal> {
+-        let filter = NostrFilter(kinds: [SwarmWire.signalKind],
+-                                 since: Int64(Date().timeIntervalSince1970) - 60,
+-                                 tags: [SwarmWire.swarmTag: [swarmID], "p": [keys.publicKey]])
+-        let events = await pool.subscribe([filter])
+-        return AsyncStream { continuation in
++        let events = await pool.subscribe([NostrFilter(kinds: [24171], since: Int64(Date().timeIntervalSince1970) - 2, tags: ["x": [swarmID], "p": [keys.publicKey]])])
++        return AsyncStream(bufferingPolicy: .bufferingNewest(64)) { continuation in
+             let task = Task {
+-                for await event in events {
+-                    if let signal = self.decode(event) {
+-                        continuation.yield(signal)
+-                    }
+-                }
++                for await event in events { if let value = self.decodeSignal(event) { continuation.yield(value) } }
+                 continuation.finish()
+             }
+             continuation.onTermination = { _ in task.cancel() }
+         }
+     }
+-
+-    /// Send one signal - an offer, an answer - encrypted to the peer.
+-    public func send(type: String, sdp: String, to peer: String) async throws {
+-        let payload: [String: Any] = ["type": type, "sdp": sdp]
+-        let json = String(decoding: try JSONSerialization.data(withJSONObject: payload), as: UTF8.self)
+-        let ciphertext = try NIP44.encrypt(json, conversationKey: try conversationKey(with: peer))
+-        let event = try NostrEvent.signed(kind: SwarmWire.signalKind,
+-                                          tags: [[SwarmWire.swarmTag, swarmID],
+-                                                 ["p", peer],
+-                                                 [SwarmWire.versionTag, SwarmWire.encryptedVersion]],
+-                                          content: ciphertext,
+-                                          keys: keys)
+-        try await pool.publish(event)
++    /// An answer must reuse the offer's exact request ID and transport.
++    public func send(type: String, sdp: String, to peer: String, requestID: String, transport: String = "webrtc", ticket: String? = nil) async throws {
++        guard ticket.map(SwarmWire.ticket) ?? true else { throw Failure.invalidEnvelope }
++        var payload = ["sdp": sdp]; if let ticket { payload["ticket"] = ticket }
++        try await send(type: type, transport: transport, requestID: requestID,
++                       payloadJSON: String(decoding: JSONSerialization.data(withJSONObject: payload), as: UTF8.self), to: peer)
+     }
+-
+-    private func decode(_ event: NostrEvent) -> SwarmSignal? {
+-        let json: String
+-        if event.tagValue(SwarmWire.versionTag) == SwarmWire.encryptedVersion {
+-            guard let key = try? conversationKey(with: event.pubkey),
+-                  let decrypted = try? NIP44.decrypt(event.content, conversationKey: key) else {
+-                return nil
+-            }
+-            json = decrypted
+-        } else {
+-            // Legacy peer: the proof-of-concept wire format, plaintext JSON.
+-            json = event.content
++    public func send(type: String, transport: String, requestID: String, payloadJSON: String, to peer: String) async throws {
++        guard swarmID.count >= 8, swarmID.count <= 128, SwarmWire.hex64(peer), SwarmWire.token(type), SwarmWire.token(transport),
++              SwarmWire.requestID(requestID) else { throw Failure.invalidEnvelope }
++        guard payloadJSON.utf8.count <= SwarmWire.maxPlaintextBytes else { throw Failure.resourceLimit }
++        guard let payload = try JSONSerialization.jsonObject(with: Data(payloadJSON.utf8)) as? [String: Any] else { throw Failure.invalidEnvelope }
++        let data = try JSONSerialization.data(withJSONObject: ["v": 3, "type": type, "transport": transport, "requestId": requestID, "payload": payload])
++        guard data.count <= SwarmWire.maxPlaintextBytes else { throw Failure.resourceLimit }
++        let ciphertext = try NIP44.encrypt(String(decoding: data, as: UTF8.self), conversationKey: conversationKey(with: peer))
++        guard ciphertext.utf8.count <= SwarmWire.maxSignalBytes else { throw Failure.resourceLimit }
++        try await pool.publish(NostrEvent.signed(kind: 24171, tags: [["x", swarmID], ["p", peer]], content: ciphertext, keys: keys))
++    }
++    func decodePresence(_ event: NostrEvent) -> SwarmPresence? {
++        guard event.kind == 24170, event.pubkey != keys.publicKey, event.isValid, SwarmWire.fresh(event),
++              SwarmWire.unique(event, "x") == swarmID, !event.tags.contains(where: { $0.first == "p" }),
++              event.content.utf8.count <= SwarmWire.maxPresenceBytes,
++              let object = try? JSONSerialization.jsonObject(with: Data(event.content.utf8)) as? [String: Any], object["v"] as? Int == 3,
++              let role = object["role"] as? String, SwarmWire.token(role), let entries = object["transports"] as? [[String: Any]], entries.count <= 8,
++              let have = object["have"] as? [String], have.count <= 32, have.allSatisfy(SwarmWire.hex64) else { return nil }
++        var transports = [SwarmTransportCapability]()
++        for entry in entries {
++            guard let type = entry["type"] as? String, SwarmWire.token(type), let key = entry["publicKey"] as? String, SwarmWire.hex64(key) else { return nil }
++            transports.append(.init(type: type, publicKey: key))
+         }
+-        guard let data = json.data(using: .utf8),
+-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+-              let type = object["type"] as? String else {
+-            return nil
++        let ticket = object["ticket"] as? String
++        let advisory = object["open"] as? NSNumber
++        let open = advisory.flatMap { CFGetTypeID($0) == CFBooleanGetTypeID() ? $0.boolValue : nil }
++        return .init(peer: event.pubkey, role: role, transports: transports, have: have, open: open, ticket: ticket.flatMap { SwarmWire.ticket($0) ? $0 : nil })
++    }
++    func decodeSignal(_ event: NostrEvent) -> SwarmSignal? {
++        guard event.kind == 24171, event.pubkey != keys.publicKey, event.isValid, SwarmWire.fresh(event),
++              SwarmWire.unique(event, "x") == swarmID, SwarmWire.unique(event, "p") == keys.publicKey,
++              event.content.utf8.count <= SwarmWire.maxSignalBytes, let key = try? conversationKey(with: event.pubkey),
++              let plaintext = try? NIP44.decrypt(event.content, conversationKey: key), plaintext.utf8.count <= SwarmWire.maxPlaintextBytes,
++              let object = try? JSONSerialization.jsonObject(with: Data(plaintext.utf8)) as? [String: Any], object["v"] as? Int == 3,
++              let type = object["type"] as? String, SwarmWire.token(type), let transport = object["transport"] as? String, SwarmWire.token(transport),
++              let requestID = object["requestId"] as? String, SwarmWire.requestID(requestID), let payload = object["payload"] as? [String: Any] else {
++            rejectedSignals += 1; return nil
+         }
+-        return SwarmSignal(from: event.pubkey, type: type,
+-                           sdp: object["sdp"] as? String, rawJSON: json)
++        let ticket = payload["ticket"] as? String
++        return .init(from: event.pubkey, type: type, transport: transport, requestID: requestID, sdp: payload["sdp"] as? String,
++                     ticket: ticket.flatMap { SwarmWire.ticket($0) ? $0 : nil }, rawJSON: plaintext)
+     }
+-
+     private func conversationKey(with peer: String) throws -> Data {
+-        if let cached = conversationKeys[peer] { return cached }
+-        guard let peerBytes = Data(hex: peer) else { throw NIP44.Failure.invalidKey }
+-        let key = try NIP44.conversationKey(secretKey: keys.secretKey, peerXOnly: peerBytes)
+-        conversationKeys[peer] = key
+-        return key
++        if let key = conversationKeys[peer] { return key }
++        guard SwarmWire.hex64(peer), let bytes = Data(hex: peer) else { throw NIP44.Failure.invalidKey }
++        let key = try NIP44.conversationKey(secretKey: keys.secretKey, peerXOnly: bytes)
++        if conversationKeys.count >= 64 { conversationKeys.removeValue(forKey: conversationKeys.keys.sorted().first!) }
++        conversationKeys[peer] = key; return key
+     }
+ }
+diff --git a/Sources/RelaySwarmTransport/SwarmHost.swift b/Sources/RelaySwarmTransport/SwarmHost.swift
+--- a/Sources/RelaySwarmTransport/SwarmHost.swift
++++ b/Sources/RelaySwarmTransport/SwarmHost.swift
+@@ -16,6 +16,7 @@
+     private var channels = [ObjectIdentifier: DataChannel]()
+     private var tasks = [Task<Void, Never>]()
+     private var lastAnnounce = Date.distantPast
++    private let maxPeers = 16
+     private var guestText: (@Sendable (String) -> Void)?
+ 
+     public init(keys: NostrKeys = .generate(), relays: [URL], swarmID: String,
+@@ -41,9 +42,9 @@
+         let presences = await signaller.presences()
+ 
+         tasks.append(Task {
+-            for await signal in signals where signal.type == "offer" {
++            for await signal in signals where signal.type == "offer" && signal.transport == "webrtc" {
+                 guard let sdp = signal.sdp else { continue }
+-                self.answer(offerSDP: sdp, viewer: signal.from)
++                self.answer(offerSDP: sdp, viewer: signal.from, requestID: signal.requestID)
+             }
+         })
+         // A watcher arriving announces itself, and the origin answers with a
+@@ -95,17 +96,18 @@
+         guard force || Date().timeIntervalSince(lastAnnounce) > 2 else { return }
+         if force, Date().timeIntervalSince(lastAnnounce) < 1 { return }
+         lastAnnounce = Date()
+-        try? await signaller.announcePresence(role: "origin")
+-    }
+-
+-    private func answer(offerSDP: String, viewer: String) {
++        try? await signaller.announcePresence(role: "seeder", open: peers.count < maxPeers)
++    }
++
++    private func answer(offerSDP: String, viewer: String, requestID: String) {
++        guard peers.count < maxPeers, offerSDP.utf8.count <= SwarmWire.maxPlaintextBytes else { return }
+         let peer = PeerConnection(stunServers: stunServers)
+         let peerKey = ObjectIdentifier(peer)
+         peers[peerKey] = peer
+ 
+         peer.onGatheredDescription = { [weak self] sdp, type in
+             guard type == .answer, let self else { return }
+-            Task { await self.sendAnswer(sdp, to: viewer) }
++            Task { await self.sendAnswer(sdp, to: viewer, requestID: requestID) }
+         }
+         peer.onDataChannel = { [weak self] channel in
+             guard let self else { return }
+@@ -121,8 +123,8 @@
+         peer.setRemote(offerSDP, type: .offer)
+     }
+ 
+-    private func sendAnswer(_ sdp: String, to viewer: String) async {
+-        try? await signaller.send(type: "answer", sdp: sdp, to: viewer)
++    private func sendAnswer(_ sdp: String, to viewer: String, requestID: String) async {
++        try? await signaller.send(type: "answer", sdp: sdp, to: viewer, requestID: requestID)
+     }
+ 
+     private func adopt(channel: DataChannel, key: ObjectIdentifier) {
+@@ -143,7 +145,7 @@
+ /// The viewer side, for native apps: find the origin, offer, and hand back
+ /// the open channel. The browser page does the same in JavaScript.
+ public actor SwarmGuest {
+-    public enum Failure: Error { case timedOut }
++    public enum Failure: Error { case timedOut, invalidTimeout }
+ 
+     private let signaller: SwarmSignaller
+     private let pool: RelayPool
+@@ -168,6 +170,7 @@
+ 
+     /// Connect and return the channel once it is open.
+     public func connect(timeoutSeconds: Double = 60) async throws -> DataChannel {
++        guard timeoutSeconds.isFinite, timeoutSeconds > 0, timeoutSeconds <= 120 else { throw Failure.invalidTimeout }
+         try await pool.connect()
+         let signals = await signaller.signals()
+         let presences = await signaller.presences()
+@@ -177,7 +180,7 @@
+ 
+         return try await withThrowingTaskGroup(of: DataChannel?.self) { group in
+             group.addTask {
+-                for await presence in presences where presence.role == "origin" {
++                for await presence in presences where presence.role == "seeder" && presence.transports.contains(where: { $0.type == "webrtc" }) {
+                     return try await self.offer(to: presence.peer, signals: signals)
+                 }
+                 return nil
+@@ -204,11 +207,12 @@
+     private func offer(to origin: String, signals: AsyncStream<SwarmSignal>) async throws -> DataChannel {
+         let peer = PeerConnection(stunServers: stunServers)
+         self.peer = peer
++        let requestID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+         // Creating the first data channel starts offer gathering. Install
+         // the native callback first so a fast local gather cannot disappear.
+         peer.onGatheredDescription = { [signaller] sdp, type in
+             guard type == .offer else { return }
+-            Task { try? await signaller.send(type: "offer", sdp: sdp, to: origin) }
++            Task { try? await signaller.send(type: "offer", sdp: sdp, to: origin, requestID: requestID) }
+         }
+         let channel = peer.createDataChannel("watch")
+ 
+@@ -216,7 +220,7 @@
+             channel.onOpen = { continuation.yield(()); continuation.finish() }
+         }
+         let answers = Task {
+-            for await signal in signals where signal.type == "answer" && signal.from == origin {
++            for await signal in signals where signal.type == "answer" && signal.from == origin && signal.transport == "webrtc" && signal.requestID == requestID {
+                 guard let sdp = signal.sdp else { continue }
+                 peer.setRemote(sdp, type: .answer)
+                 break
+@@ -224,6 +228,7 @@
+         }
+         defer { answers.cancel() }
+         for await _ in opened { break }
++        try Task.checkCancellation()
+         return channel
+     }
+ }
+diff --git a/Tests/RelaySwarmSignallingTests/LiveRelayTests.swift b/Tests/RelaySwarmSignallingTests/LiveRelayTests.swift
+--- a/Tests/RelaySwarmSignallingTests/LiveRelayTests.swift
++++ b/Tests/RelaySwarmSignallingTests/LiveRelayTests.swift
+@@ -37,11 +37,11 @@
+         let presence = try await firstElement(of: joinerPresences, timeoutSeconds: 15)
+         XCTAssertEqual(presence.role, "seeder")
+ 
+-        try await joiner.send(type: "offer", sdp: "live-offer-sdp", to: presence.peer)
++        try await joiner.send(type: "offer", sdp: "live-offer-sdp", to: presence.peer, requestID: "live-request-123")
+         let offer = try await firstElement(of: originSignals, timeoutSeconds: 15)
+         XCTAssertEqual(offer.sdp, "live-offer-sdp")
+ 
+-        try await origin.send(type: "answer", sdp: "live-answer-sdp", to: offer.from)
++        try await origin.send(type: "answer", sdp: "live-answer-sdp", to: offer.from, requestID: offer.requestID)
+         let answer = try await firstElement(of: joinerSignals, timeoutSeconds: 15)
+         XCTAssertEqual(answer.sdp, "live-answer-sdp")
+ 
+diff --git a/Tests/RelaySwarmSignallingTests/SignallingJourneyTests.swift b/Tests/RelaySwarmSignallingTests/SignallingJourneyTests.swift
+--- a/Tests/RelaySwarmSignallingTests/SignallingJourneyTests.swift
++++ b/Tests/RelaySwarmSignallingTests/SignallingJourneyTests.swift
+@@ -13,8 +13,8 @@
+         try await originPool.connect()
+         try await joinerPool.connect()
+ 
+-        let origin = SwarmSignaller(keys: .generate(), pool: originPool, swarmID: "journey")
+-        let joiner = SwarmSignaller(keys: .generate(), pool: joinerPool, swarmID: "journey")
++        let origin = SwarmSignaller(keys: .generate(), pool: originPool, swarmID: "journey-v3")
++        let joiner = SwarmSignaller(keys: .generate(), pool: joinerPool, swarmID: "journey-v3")
+ 
+         // Ephemeral kinds are fan-out only, so every listener subscribes
+         // before anything is published.
+@@ -27,49 +27,36 @@
+         XCTAssertEqual(presence.role, "seeder")
+         XCTAssertTrue(presence.encrypted)
+ 
+-        try await joiner.send(type: "offer", sdp: "sdp:joiner-offer", to: presence.peer)
++        try await joiner.send(type: "offer", sdp: "sdp:joiner-offer", to: presence.peer, requestID: "journey-request-123")
+         let offer = try await firstElement(of: originSignals)
+         XCTAssertEqual(offer.type, "offer")
+         XCTAssertEqual(offer.sdp, "sdp:joiner-offer")
+ 
+-        try await origin.send(type: "answer", sdp: "sdp:origin-answer", to: offer.from)
++        try await origin.send(type: "answer", sdp: "sdp:origin-answer", to: offer.from, requestID: offer.requestID)
+         let answer = try await firstElement(of: joinerSignals)
+         XCTAssertEqual(answer.type, "answer")
+         XCTAssertEqual(answer.sdp, "sdp:origin-answer")
++        XCTAssertEqual(answer.requestID, offer.requestID)
++        XCTAssertEqual(answer.transport, "webrtc")
+ 
+-        // What the relay actually saw: version-tagged signal events whose
++        // What the relay actually saw: encrypted signal events whose
+         // content carries no SDP and no JSON structure in the clear.
+         let signalEvents = await relay.capturedEvents().filter { $0.kind == SwarmWire.signalKind }
+         XCTAssertEqual(signalEvents.count, 2)
+         for event in signalEvents {
+-            XCTAssertEqual(event.tagValue(SwarmWire.versionTag), SwarmWire.encryptedVersion)
++            XCTAssertNil(event.tagValue("v"))
+             XCTAssertFalse(event.content.contains("sdp"))
+             XCTAssertFalse(event.content.contains("{"))
+         }
+     }
+ 
+-    func testPlaintextLegacySignalStillParses() async throws {
+-        let relay = SimulatedRelay()
+-        let ourPool = RelayPool(connections: [RelayConnection(transport: relay.makeTransport())])
+-        try await ourPool.connect()
+-        let us = SwarmSignaller(keys: .generate(), pool: ourPool, swarmID: "legacy")
+-        let ourSignals = await us.signals()
+-
+-        // A proof-of-concept peer: plaintext JSON content, no version tag.
+-        let legacyKeys = NostrKeys.generate()
+-        let legacyConnection = RelayConnection(transport: relay.makeTransport())
+-        try await legacyConnection.connect()
+-        let event = try NostrEvent.signed(
+-            kind: SwarmWire.signalKind,
+-            tags: [[SwarmWire.swarmTag, "legacy"], ["p", await us.publicKey]],
+-            content: "{\"type\":\"offer\",\"sdp\":\"sdp:plain\"}",
+-            keys: legacyKeys)
+-        try await legacyConnection.publish(event)
+-
+-        let signal = try await firstElement(of: ourSignals)
+-        XCTAssertEqual(signal.type, "offer")
+-        XCTAssertEqual(signal.sdp, "sdp:plain")
+-        XCTAssertEqual(signal.from, legacyKeys.publicKey)
++    func testPlaintextLegacySignalIsRejected() async throws {
++        let keys = NostrKeys.generate(), sender = NostrKeys.generate()
++        let us = SwarmSignaller(keys: keys, pool: RelayPool(connections: []), swarmID: "legacy-v3")
++        let event = try NostrEvent.signed(kind: 24171, tags: [["x", "legacy-v3"], ["p", keys.publicKey]],
++            content: "{\"type\":\"offer\",\"sdp\":\"plain\"}", keys: sender)
++        let signal = await us.decodeSignal(event)
++        XCTAssertNil(signal)
+     }
+ 
+     func testPoolDeduplicatesAcrossRelays() async throws {
+diff --git a/Tests/RelaySwarmSignallingTests/WireV3Tests.swift b/Tests/RelaySwarmSignallingTests/WireV3Tests.swift
+new file mode 100644
+--- /dev/null
++++ b/Tests/RelaySwarmSignallingTests/WireV3Tests.swift
+@@ -0,0 +1,63 @@
++import XCTest
++@testable import RelaySwarmSignalling
++
++final class WireV3Tests: XCTestCase {
++    let swarm = "wire-v3-test-swarm"
++    func encrypted(_ sender: NostrKeys, to recipient: NostrKeys, plaintext: String,
++                   tags: [[String]]? = nil, createdAt: Int64 = Int64(Date().timeIntervalSince1970)) throws -> NostrEvent {
++        let key = try NIP44.conversationKey(secretKey: sender.secretKey, peerXOnly: Data(hex: recipient.publicKey)!)
++        return try NostrEvent.signed(kind: 24171, tags: tags ?? [["x", swarm], ["p", recipient.publicKey]],
++            content: NIP44.encrypt(plaintext, conversationKey: key), createdAt: createdAt, keys: sender)
++    }
++    func receiver(_ keys: NostrKeys) -> SwarmSignaller { .init(keys: keys, pool: .init(connections: []), swarmID: swarm) }
++    func testNestedV3EnvelopePreservesTransportAndRequestID() async throws {
++        let sender = NostrKeys.generate(), recipient = NostrKeys.generate(), us = receiver(recipient)
++        let event = try encrypted(sender, to: recipient, plaintext: "{\"v\":3,\"type\":\"offer\",\"transport\":\"webrtc\",\"requestId\":\"independent-request\",\"payload\":{\"sdp\":\"offer-sdp\",\"ticket\":\"host-ticket\"}}")
++        let signal = await us.decodeSignal(event)
++        XCTAssertEqual(signal?.type, "offer"); XCTAssertEqual(signal?.sdp, "offer-sdp")
++        XCTAssertEqual(signal?.requestID, "independent-request"); XCTAssertEqual(signal?.transport, "webrtc")
++        XCTAssertEqual(signal?.ticket, "host-ticket")
++    }
++    func testPlaintextAndV2NeverFallBack() async throws {
++        let sender = NostrKeys.generate(), recipient = NostrKeys.generate(), us = receiver(recipient)
++        let tags = [["x", swarm], ["p", recipient.publicKey]]
++        let plaintext = try NostrEvent.signed(kind: 24171, tags: tags, content: "{\"type\":\"offer\",\"sdp\":\"legacy\"}", keys: sender)
++        let first = await us.decodeSignal(plaintext); XCTAssertNil(first)
++        let v2 = try encrypted(sender, to: recipient, plaintext: "{\"v\":2,\"type\":\"offer\",\"sdp\":\"legacy\"}", tags: tags + [["v", "2"]])
++        let second = await us.decodeSignal(v2); XCTAssertNil(second)
++    }
++    func testDuplicateTagsReplayAndMalformedEnvelopesAreRejected() async throws {
++        let sender = NostrKeys.generate(), recipient = NostrKeys.generate(), us = receiver(recipient)
++        let good = "{\"v\":3,\"type\":\"offer\",\"transport\":\"webrtc\",\"requestId\":\"request-123\",\"payload\":{\"sdp\":\"offer\"}}"
++        let normal = [["x", swarm], ["p", recipient.publicKey]], now = Int64(Date().timeIntervalSince1970)
++        for tags in [normal + [["x", swarm]], normal + [["p", recipient.publicKey]], [["x", "other-swarm"], ["p", recipient.publicKey]]] {
++            let value = await us.decodeSignal(try encrypted(sender, to: recipient, plaintext: good, tags: tags)); XCTAssertNil(value)
++        }
++        for timestamp in [now - 121, now + 31] {
++            let value = await us.decodeSignal(try encrypted(sender, to: recipient, plaintext: good, createdAt: timestamp)); XCTAssertNil(value)
++        }
++        for malformed in [good.replacingOccurrences(of: "request-123", with: "bad!"), good.replacingOccurrences(of: "webrtc", with: "WebRTC"), good.replacingOccurrences(of: "\"v\":3", with: "\"v\":1"), good.replacingOccurrences(of: "{\"sdp\":\"offer\"}", with: "[]")] {
++            let value = await us.decodeSignal(try encrypted(sender, to: recipient, plaintext: malformed)); XCTAssertNil(value)
++        }
++    }
++    func testPresenceRequiresV3DescriptorsAndBoundsAdvisoryFields() async throws {
++        let sender = NostrKeys.generate(), recipient = NostrKeys.generate(), us = receiver(recipient)
++        func presence(_ value: [String: Any]) throws -> NostrEvent {
++            try NostrEvent.signed(kind: 24170, tags: [["x", swarm]], content: String(decoding: JSONSerialization.data(withJSONObject: value), as: UTF8.self), keys: sender)
++        }
++        let value: [String: Any] = ["v": 3, "role": "seeder", "transports": [["type": "webrtc", "publicKey": sender.publicKey]], "have": [String(repeating: "a", count: 64)], "open": true]
++        let good = await us.decodePresence(try presence(value)); XCTAssertEqual(good?.transports.count, 1); XCTAssertEqual(good?.open, true)
++        var v2 = value; v2["v"] = 2
++        let legacy = await us.decodePresence(try presence(v2)); XCTAssertNil(legacy)
++        var excessive = value; excessive["have"] = Array(repeating: String(repeating: "a", count: 64), count: 33)
++        let flood = await us.decodePresence(try presence(excessive)); XCTAssertNil(flood)
++        var advisory = value; advisory["open"] = 1; advisory["ticket"] = String(repeating: "x", count: 2049)
++        let optional = await us.decodePresence(try presence(advisory)); XCTAssertNil(optional?.open); XCTAssertNil(optional?.ticket)
++    }
++    func testOutboundEnvelopeAndResourceLimitsAreCheckedBeforePublishing() async throws {
++        let keys = NostrKeys.generate(), peer = NostrKeys.generate(), us = receiver(keys)
++        do { try await us.announcePresence(role: "invalid role"); XCTFail("Invalid role accepted") } catch SwarmSignaller.Failure.invalidEnvelope { }
++        do { try await us.send(type: "offer", sdp: "sdp", to: peer.publicKey, requestID: "bad!"); XCTFail("Invalid request accepted") } catch SwarmSignaller.Failure.invalidEnvelope { }
++        do { try await us.send(type: "offer", sdp: String(repeating: "x", count: 8192), to: peer.publicKey, requestID: "request-123"); XCTFail("Oversized signal accepted") } catch SwarmSignaller.Failure.resourceLimit { }
++    }
++}
+diff --git a/Tests/RelaySwarmTransportTests/TransportTests.swift b/Tests/RelaySwarmTransportTests/TransportTests.swift
+--- a/Tests/RelaySwarmTransportTests/TransportTests.swift
++++ b/Tests/RelaySwarmTransportTests/TransportTests.swift
+@@ -99,7 +99,7 @@
+         // Privacy on the wire, same assertion the signalling suite makes.
+         for event in await relay.capturedEvents() where event.kind == SwarmWire.signalKind {
+             XCTAssertFalse(event.content.contains("sdp"))
+-            XCTAssertEqual(event.tagValue(SwarmWire.versionTag), SwarmWire.encryptedVersion)
++            XCTAssertNil(event.tagValue("v"))
+         }
+ 
+         await guest.close()

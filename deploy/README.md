@@ -107,9 +107,9 @@ The overlay contains only the pathname and mounts its directory read-only. To st
 
 ## Exclusive volume ownership and crash recovery
 
-Run exactly one broadcaster against each named state volume. The pipeline owns a private `.broadcast-lock` in `/state/media`; normal shutdown releases it. An unclean exit can leave the lock behind, and the next start deliberately fails closed. Do not add a startup hook that deletes the lock, and do not infer safety from a container-local PID or PID 1: PID namespaces and another host/container using the volume invalidate that inference.
+Run exactly one broadcaster against each local state volume. Current source uses permanent private publication and worker SQLite lease inodes plus a worker guardian. After parent termination, the guardian kills and reaps encoders/forwarders before releasing ownership, allowing a new parent to recover. Lease databases must never be removed or replaced. Distributed filesystems are refused; Node 22.13+ and supported local POSIX storage are required.
 
-For recovery, stop this stack first and inspect every container, host process and external mount that could use this volume. Prove that none is running a broadcaster against it, retain a private backup, then have the operator remove only the stale `.broadcast-lock` from the stopped volume. Use a temporary maintenance container with the same named volume, no published ports and no network; identify the actual volume name through Compose rather than guessing. Never remove the lock while another broadcaster might hold it. Restart this stack and verify fresh publications and the retained publisher identity. If ownership cannot be established, leave the lock in place.
+If the guardian or host fails, its durable dirty marker closes automatic recovery. A legacy pre-lease `.broadcast-lock` also requires inspection. Stop this stack and inspect every possible process, container and mount using the volume; establish that no broadcaster or forwarding descendant remains and retain a private backup. Remove only the explicitly stale ownership marker identified by the source/runbook, retaining permanent lease databases and publisher state. A namespace-local PID is insufficient proof. Restart and verify fresh publication, retained identity and completed worker cleanup; uncertain ownership remains closed.
 
 ## Stop, upgrade and rollback
 

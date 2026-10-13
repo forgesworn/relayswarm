@@ -6,6 +6,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright-core";
+import { installMediaDiagnostics } from "./support/browser-media-diagnostics.mjs";
 
 const { values } = parseArgs({ options: {
   url: { type: "string", default: "https://relayswarm.forgesworn.dev" },
@@ -44,6 +45,7 @@ async function checkpoint(name, measurements = {}) {
 async function viewer(name, upload, level, mode = "peer-first") {
   const context = await browser.newContext(), page = await context.newPage();
   page.setDefaultTimeout(9000); page.setDefaultNavigationTimeout(12000);
+  await page.addInitScript(installMediaDiagnostics);
   const network = { mediaRequests: 0, mediaFailures: 0 };
   pages.push({ name, page, network });
   page.on("pageerror", (error) => { if (receipt.pageErrors.length < 50) receipt.pageErrors.push({ viewer: name, message: error.message.slice(0, 2000) }); });
@@ -96,11 +98,6 @@ try {
   const consumer = await viewer("receive-only", false, 0);
   await pause(Math.min(5000, remaining(5000)));
   await checkpoint("same-live-edge-unmodified-playlists");
-  if (!(await read(consumer)).player.fragments.some((fragment) => fragment.source === "peer" && fragment.level === 0)) {
-    receipt.scope.delayedConsumerPlaylistMs = 600;
-    await consumer.route("**/media/**/*.m3u8", async (route) => { await pause(600); await route.continue().catch(() => {}); });
-    log("consumer playlist delay600ms enabled; original same-edge snapshot retained");
-  }
   const lowPeer = await peerAtLevel(consumer, 0, 24000);
   await checkpoint("low-rendition-delivery", { verifiedPeerObserved: lowPeer });
   for (const page of [baseline, consumer]) await page.locator("#quality").selectOption("1");
@@ -130,7 +127,12 @@ try {
   assert.ok(highReport.player.fragments.some((fragment) => fragment.level === 1));
   assert.ok([0, 1].every((level) => baselineReport.player.fragments.some((fragment) => fragment.level === level)), "Origin baseline did not load both qualities");
   assert.equal(baselineReport.totals.uploaded, 0);
-  for (const { page } of pages) { const report = await read(page); assert.equal(report.player.fatalErrors, 0); assert.equal(report.environment.secureContext, true); }
+  for (const { page } of pages) {
+    const report = await read(page);
+    assert.equal(report.player.fatalErrors, 0); assert.equal(report.environment.secureContext, true);
+    assert.equal(await page.evaluate(() => window.relaySwarmDemo.media.error), null);
+    assert.deepEqual(await page.evaluate(() => window.relaySwarmMediaDiagnostics), []);
+  }
   assert.ok(receipt.websockets.some((socket) => new URL(socket.url).protocol === "wss:" && socket.framesReceived > 0), "No real WSS signalling frames observed");
   assert.ok(receipt.websockets.every((socket) => new URL(socket.url).protocol === "wss:"));
   assert.equal(receipt.requests.insecure.length, 0); assert.equal(receipt.requests.reportSubmissions, 0); assert.equal(receipt.pageErrors.length, 0);
@@ -138,7 +140,7 @@ try {
 } catch (error) { receipt.failures.push(error.stack || error.message); log(`failed: ${error.message}`); }
 finally {
   clearTimeout(timer); lifecycle.abort(); receipt.expired = expired;
-  receipt.viewers = await Promise.all(pages.map(async ({ name, page, network }) => ({ name, network, receipt: await Promise.race([read(page).catch(() => null), pause(1500).then(() => null)]) })));
+  receipt.viewers = await Promise.all(pages.map(async ({ name, page, network }) => ({ name, network, receipt: await Promise.race([read(page).catch(() => null), pause(1500).then(() => null)]), mediaDiagnostics: await Promise.race([page.evaluate(() => window.relaySwarmMediaDiagnostics).catch(() => null), pause(1500).then(() => null)]) })));
   if (browser) await Promise.race([browser.close().catch(() => {}), pause(8000)]);
   receipt.elapsedMs = Date.now() - started;
   const payload = `${JSON.stringify(receipt, null, 2)}\n`, file = join(values["results-dir"], `hosted-pilot-${receipt.at.replace(/\D/gu, "")}.json`);

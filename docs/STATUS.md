@@ -3,12 +3,13 @@
 [Documentation](README.md) · [Field-test guide](FIELD-TEST.md) ·
 [Changelog](../CHANGELOG.md)
 
-Checkpoint: 12 October 2026. The current experimental release is
-[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0), including
-the broadcaster pilot below. The previous release
-[v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0) points to
-`3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. Later documentation corrections
+Checkpoint: 13 October 2026. The published experimental release is
+[v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0), which points to
+`3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. The 0.2.0 production feature
+candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
+
+## Published v0.1.0 capabilities
 
 | Capability | Implementation and evidence | Remaining boundary |
 |---|---|---|
@@ -55,11 +56,50 @@ retain their own dates, topology, code and integrity assumptions.
 
 ## Outstanding gates
 
-The **experimental v0.2.0 broadcaster pilot** includes the additions below.
+The **0.2.0 source broadcaster candidate** includes the additions below.
 These changes are absent from v0.1.0's immutable release assets. Release and
 merged source do not establish production readiness.
 
-| Addition | Current local evidence | Remaining boundary |
+## Production work on 13 October
+
+The [feature guide](PRODUCTION-FEATURES.md) describes the implemented changes;
+the [delivery checklist](PRODUCTION-READINESS.md) retains their full acceptance
+scope. Local receipts record unmodified-playlist live peer delivery and actual
+fMP4 automatic quality changes under network shaping. Alternate-audio,
+authorised AES-128 and mixed HEVC/AVC journeys each have a passing current
+receipt. Low-latency playback includes verified one-second parts before and
+after warm delta playlists; the consumer received four peer parts (209,514
+bytes) with zero uploads, stalls or fatal/native errors and 3.704 s live lag
+against a 3 s target. These are desktop Chrome fixtures, not physical acceptance.
+
+New integrated adversarial tests cover malformed remote filters, admission
+and signed-presence churn, oversized frames, cancelled HTTP work, concurrent
+commitments, relay withholding and stalled native-origin bodies. Forced
+parent termination tests verify supervised worker groups are killed/reaped
+before a new broadcaster owns publication. Guardian failure leaves a durable
+fence for explicit recovery. The Windows cache race has a deterministic local
+regression; actual Windows CI must still verify the final source.
+
+A compiled Swift test adapter using pinned unchanged RelaySwarmKit components
+completed an encrypted session and a verified 262,181-byte WebRTC transfer.
+It also checked commitments independently. The stock v2 client remains
+incompatible with v3; the [protocol draft](NIP-DRAFT.md) explains this boundary.
+An adapter test does not establish compatibility of a released unchanged client.
+
+Physical Pixel preflight confirmed a Pixel 10 Pro XL on M4. Its connection was
+restored after a disconnection; no physical playback receipt exists yet. The private
+YouTube test is awaiting channel setup. The earlier hosted H.264 MSE failure,
+varied NAT, sustained audience/cost evidence and final deployment acceptance
+remain open. Initial wider-media failures and later passes are retained;
+corrected codec-fixture metadata and startup quality handling do not by
+themselves establish the cause of the earlier hosted failure.
+
+## Recorded broadcaster pilot evidence from 12 October
+
+The table and receipts below describe that earlier checkpoint; newer source
+changes and their acceptance are recorded above.
+
+| Addition | Recorded local evidence | Remaining boundary at that checkpoint |
 |---|---|---|
 | Live ingest and forwarding | Synthetic H.264/AAC over actual local RTMP/RTSP, two HLS encodes, separate forward loss/recovery, untrusted RTMPS certificate rejection | Actual OBS workstation and external platform acceptance |
 | Publisher persistence/cache | Private POSIX state, stable authorisation/swarm after orderly restart, deduplicated streamed hashes and bounded signatures | Windows ACL support; automatic recovery after unclean process termination |

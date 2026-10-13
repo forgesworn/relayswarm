@@ -33,14 +33,15 @@
           <p class="hint">Uploading redistributes this publisher’s media and uses your connection. It is off until you opt in.</p>
           <label for="limit">Upload rate limit</label>
           <select id="limit"><option value="128000">128 kB/s</option><option value="512000" selected>512 kB/s</option><option value="1250000">1.25 MB/s</option></select>
-          <label for="allowance">Upload media allowance for this page</label>
+          <label for="allowance">Upload media allowance for this browser</label>
           <select id="allowance"><option value="10000000">10 MB</option><option value="100000000" selected>100 MB</option><option value="1000000000">1 GB</option></select>
           <meter id="allowance-meter" min="0" max="100000000" value="0" aria-label="Upload media allowance used"></meter>
-          <p id="allowance-used" class="hint">0 B of 100 MB used on this page</p>
-          <p class="hint">Counts media payload reserved for sending, including interrupted sends. Applying settings or rejoining keeps this page’s usage. Protocol traffic is additional.</p>
+          <p id="allowance-used" class="hint">0 B of 100 MB used in this browser</p>
+          <p class="hint">Counts media payload reserved for sending, including interrupted sends. Usage persists across reloads and tabs on this site; upload permission is requested again. Protocol traffic is additional.</p>
+          <button id="reset-allowance" type="button">Reset upload allowance</button>
           <p id="policy-status" class="hint">Checking operator delivery policy…</p>
-          <label class="check"><input id="telemetry" type="checkbox" disabled>Share anonymous numeric measurements with this server</label>
-          <p class="hint">Optional reports every 15 seconds contain playback counts and media totals. No browser version, labels, identity or peer address is included. Reporting starts only after you opt in.</p>
+          <label class="check"><input id="telemetry" type="checkbox" disabled>Share numeric measurements with this server</label>
+          <p class="hint">Optional reports every 15 seconds contain playback counts, media totals and a temporary page report ID. No account, browser version, labels or peer address is included. Reporting starts only after you opt in.</p>
           <label class="check"><input id="cellular" type="checkbox">Allow peer media on cellular or data-saving connections</label>
           <p class="hint">Connection detection varies by browser. Choose origin only if you want to avoid all peer traffic.</p>
           <p class="notice">Peer modes share your network address with connected participants. Receipts remain in this browser until you download them.</p>

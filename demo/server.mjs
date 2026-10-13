@@ -9,9 +9,11 @@ import { parseArgs } from "node:util";
 import { build } from "esbuild";
 import { createHlsPublisher, PublisherError } from "../src/hls-publisher.mjs";
 import { createOperatorControls, readOperatorTokenFile } from "./operator.mjs";
+import { createAdmissionControls } from "./admission.mjs";
 import { loadPublisherState } from "../src/publisher-state.mjs";
 import { attachDemoRelay } from "./relay.mjs";
 import { createMediaFixture } from "./media-fixture.mjs";
+import { RelayPool } from "../src/relay-session.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -24,21 +26,26 @@ export function httpRange(header, size) {
   return { start, end: Math.min(end, size - 1) };
 }
 
-export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host = "127.0.0.1", port = 0, publicUrl, tlsKey, tlsCert, relays = [], iceServers, publisherState, operatorToken, operatorTokenFile, telemetry = false, reportCapacity, reportTtlMs, operatorExtraStatus, beforeListen } = {}) {
+export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host = "127.0.0.1", port = 0, publicUrl, tlsKey, tlsCert, relays = [], iceServers,
+  publisherState, operatorToken, operatorTokenFile, operatorState, telemetry = false, reportCapacity, reportTtlMs, operatorExtraStatus, beforeListen,
+  admissionOptions, mediaCapabilities = { parts: false }, allowEncryptedMedia = false, commitmentSecretKey, delegation, revokedDelegationIds = [], delegationRevocations = [] } = {}) {
   if (beforeListen !== undefined && typeof beforeListen !== "function") throw new Error("beforeListen must be a function.");
+  if (!mediaCapabilities || typeof mediaCapabilities.parts !== "boolean" || Object.keys(mediaCapabilities).some((key) => key !== "parts")) throw new Error("Invalid media capabilities.");
   if (Boolean(tlsKey) !== Boolean(tlsCert)) throw new Error("Supply both --tls-key and --tls-cert.");
   const publicBase = publicUrl ? new URL(publicUrl) : null;
   if (publicBase && (publicBase.protocol !== "https:" || publicBase.pathname !== "/" || publicBase.search || publicBase.hash || publicBase.username || publicBase.password)) throw new Error("--public-url must be an HTTPS origin, without credentials or a path.");
   if (!["localhost", "127.0.0.1", "::1"].includes(host) && !tlsKey && !publicBase) throw new Error("Remote browsers require HTTPS: configure TLS or --public-url behind an HTTPS proxy.");
   if (relays.length > 8 || relays.some((value) => { try { const url = new URL(value); return url.protocol !== "wss:" || Boolean(url.username || url.password); } catch { return true; } })) throw new Error("External relays must be 1-8 credential-free wss URLs.");
   if (operatorToken && operatorTokenFile) throw new Error("Supply only one operator token source.");
-  const controls = createOperatorControls({ token: operatorTokenFile ? await readOperatorTokenFile(operatorTokenFile) : operatorToken, telemetry, reportCapacity, reportTtlMs, operatorExtraStatus });
+  const token = operatorTokenFile ? await readOperatorTokenFile(operatorTokenFile) : operatorToken;
   const state = publisherState ? await loadPublisherState(publisherState, { manifest }) : {};
-  const publisher = await createHlsPublisher({ mediaDir, manifest, ...state });
+  const publisher = await createHlsPublisher({ mediaDir, manifest, ...state, allowEncryptedMedia, commitmentSecretKey, delegation, revokedDelegationIds, delegationRevocations });
   const [page, css, bundle] = await Promise.all([
     readFile(join(here, "index.html")), readFile(join(here, "style.css")),
     build({ entryPoints: [join(here, "client.mjs")], bundle: true, format: "esm", platform: "browser", write: false, minify: true, logLevel: "silent" }),
   ]);
+  const admission = createAdmissionControls({ ...admissionOptions, swarmId: publisher.swarmId });
+  const controls = createOperatorControls({ token, telemetry, reportCapacity, reportTtlMs, operatorExtraStatus, statePath: operatorState, admission });
   let base, activeMedia = 0;
   const signingBudget = { count: 0, since: Date.now() };
   const handler = async (request, response) => {
@@ -50,6 +57,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
     try {
       const url = new URL(request.url, "http://localhost");
       if (await controls.handle(request, response, url.pathname, base, publisher)) return;
+      if (await admission.handle(request, response, url.pathname, base)) return;
       if (request.method !== "GET" && request.method !== "HEAD") { response.writeHead(405, { allow: "GET, HEAD" }).end(); return; }
       const category = url.pathname === "/commitment" ? "commitment" : url.pathname.startsWith("/media/") ? "media" : null;
       if (category) {
@@ -63,14 +71,18 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
       if (url.pathname === "/") return send("text/html; charset=utf-8", page);
       if (url.pathname === "/style.css") return send("text/css; charset=utf-8", css);
       if (url.pathname === "/client.js") return send("text/javascript; charset=utf-8", bundle.outputFiles[0].contents);
+      if (url.pathname === "/stream.json") return send("application/json", JSON.stringify(advertisement));
       if (url.pathname === "/session.json") return send("application/json", JSON.stringify({ v: 1, swarmId: publisher.swarmId, streamEvent: publisher.streamEvent,
         manifest: publisher.manifestPath, relays: relays.length ? relays : [`${base.replace(/^http/u, "ws")}/relay`],
-        ...(iceServers ? { iceServers } : {}), commitmentEndpoint: "/commitment", deliveryPolicyEndpoint: "/delivery-policy.json", experimental: true }));
+        ...(iceServers ? { iceServers } : {}), ...(publisher.delegation ? { delegation: publisher.delegation } : {}),
+        ...(revokedDelegationIds.length ? { revokedDelegationIds } : {}), ...(delegationRevocations.length ? { delegationRevocations } : {}),
+        admission: admission.descriptor(), mediaCapabilities: { ...mediaCapabilities }, streamAdvertisementEndpoint: "/stream.json", commitmentEndpoint: "/commitment", deliveryPolicyEndpoint: "/delivery-policy.json", experimental: true }));
       if (url.pathname === "/commitment") {
         if (Date.now() - signingBudget.since >= 10000) { signingBudget.count = 0; signingBudget.since = Date.now(); }
         if (++signingBudget.count > 240) throw new PublisherError("Commitment request budget exceeded.", 429);
         const event = await publisher.commitment({ path: url.searchParams.get("path"), level: url.searchParams.get("level"), sequence: url.searchParams.get("sequence"),
-          discontinuity: url.searchParams.get("cc"), rangeStart: url.searchParams.get("start"), rangeEnd: url.searchParams.get("end"), part: url.searchParams.get("part") });
+          discontinuity: url.searchParams.get("cc"), rangeStart: url.searchParams.get("start"), rangeEnd: url.searchParams.get("end"), part: url.searchParams.get("part"),
+          playlist: url.searchParams.get("playlist"), mediaType: url.searchParams.get("mediaType") ?? "main" });
         return send("application/json", JSON.stringify(event));
       }
       if (!url.pathname.startsWith("/media/")) { response.writeHead(404).end(); return; }
@@ -114,19 +126,43 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
   const server = tlsKey ? httpsServer({ key: await readFile(tlsKey), cert: await readFile(tlsCert), maxHeaderSize: 8192 }, handler) : httpServer({ maxHeaderSize: 8192 }, handler);
   server.maxConnections = 128;
   server.requestTimeout = 10000; server.headersTimeout = 10000; server.keepAliveTimeout = 5000;
-  const relay = relays.length ? null : attachDemoRelay(server, { swarmId: publisher.swarmId, origin: () => base });
+  const relay = relays.length ? null : attachDemoRelay(server, { swarmId: publisher.swarmId, origin: () => base, publisherEvent: publisher.streamEvent, admit: admission.verify });
+  let advertisement, renewal, closing, advertisementPool;
+  const startedAt = Math.floor(Date.now() / 1000);
+  function advertise(status = "live") {
+    const relayUrls = relays.length ? relays : [`${base.replace(/^http/u, "ws")}/relay`];
+    advertisement = publisher.advertisement({ manifestUrl: new URL(publisher.manifestPath, base).href, relays: relayUrls, status,
+      starts: startedAt, previousEvent: advertisement, allowLoopback: !publicBase && !tlsKey });
+    relay?.publishStreamEvent(advertisement);
+    advertisementPool?.publish(advertisement);
+  }
   try {
+    await controls.ready();
     await beforeListen?.();
     await new Promise((done, reject) => { server.once("error", reject); server.listen(port, host, done); });
     const localHost = host === "127.0.0.1" ? "localhost" : host.includes(":") ? `[${host}]` : host === "0.0.0.0" ? "localhost" : host;
     base = publicBase?.origin || `${tlsKey ? "https" : "http"}://${localHost}:${server.address().port}`;
-    return { base, publisher, relay, async close() { await relay?.close(); server.closeAllConnections(); await new Promise((done) => server.close(done)); } };
-  } catch (error) { await relay?.close(); server.close(); throw error; }
+    relay?.publishStreamEvent(publisher.streamEvent);
+    advertise();
+    if (relays.length) {
+      advertisementPool = new RelayPool(relays, { connectTimeoutMs: 5000, reconnect: true });
+      advertisementPool.connect().then(() => { if (!closing) { advertisementPool.publish(publisher.streamEvent); advertisementPool.publish(advertisement); } }).catch(() => {});
+    }
+    renewal = setInterval(() => { try { advertise(); } catch { /* HTTP remains available if advertisement refresh fails. */ } }, 60000); renewal.unref();
+    return { base, publisher, relay, admission, advertisement: () => structuredClone(advertisement), close() {
+      if (closing) return closing;
+      closing = (async () => {
+        clearInterval(renewal); try { advertise("ended"); } catch {}
+        advertisementPool?.close(); await relay?.close(); server.closeAllConnections(); await new Promise((done) => server.close(done)); await controls.close();
+      })();
+      return closing;
+    } };
+  } catch (error) { clearInterval(renewal); advertisementPool?.close(); await relay?.close(); server.close(); await controls.close().catch(() => {}); throw error; }
 }
 
 async function main() {
   const { values } = parseArgs({ options: { "media-dir": { type: "string" }, manifest: { type: "string", default: "master.m3u8" }, host: { type: "string", default: "127.0.0.1" }, port: { type: "string", default: "8787" },
-    "public-url": { type: "string" }, "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "publisher-state": { type: "string" }, "operator-token-file": { type: "string" }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" } } });
+    "public-url": { type: "string" }, "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "publisher-state": { type: "string" }, "operator-token-file": { type: "string" }, "operator-state": { type: "string" }, "allow-encrypted-media": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" } } });
   if (values.help) { console.log("npm run demo -- [--media-dir DIR --manifest master.m3u8] [--host 127.0.0.1 --port 8787] [--public-url https://demo.example] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478] [--publisher-state FILE] [--operator-token-file FILE] [--telemetry]\nWithout --media-dir, ffmpeg generates a two-rendition live test stream. See docs/FIELD-TEST.md."); return; }
   const port = Number(values.port);
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new Error("Invalid port.");
@@ -136,6 +172,7 @@ async function main() {
   try {
     demo = await startDemoServer({ mediaDir: values["media-dir"] || fixture.directory, manifest: values.manifest, host: values.host, port,
       publisherState: values["publisher-state"], operatorTokenFile: values["operator-token-file"], operatorToken: values["operator-token-file"] ? undefined : process.env.RELAYSWARM_OPERATOR_TOKEN, telemetry: values.telemetry,
+      operatorState: values["operator-state"], allowEncryptedMedia: values["allow-encrypted-media"],
       publicUrl: values["public-url"], tlsKey: values["tls-key"], tlsCert: values["tls-cert"], relays: values.relay,
       ...(values.stun ? { iceServers: values.stun.map((urls) => ({ urls })) } : {}) });
     console.log(`RelaySwarm field-test player: ${demo.base}\n${values["publisher-state"] ? "Publisher identity is restored from the private server state file." : "Publisher key is ephemeral and stays on this server."} Press Ctrl-C to stop.`);

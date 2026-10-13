@@ -12,7 +12,7 @@ key stays on the server. v0.1.0 release assets retain their original behaviour.
 
 ## Run locally
 
-From the [v0.2.0 source checkout](GETTING-STARTED.md#run-the-source-demo) or a
+From the [current source candidate](GETTING-STARTED.md#run-the-source-demo) or a
 current main checkout:
 
 ```bash
@@ -73,19 +73,18 @@ signing operations. It caps playlists at 256 KiB, variants at eight, fragments
 at 4,096 per variant and signed segments at 16 MiB. hls.js level order is height
 then bitrate within the supported single codec/frame-rate family.
 
-This publisher supports a single media playlist or a simple SDR master with
-local URIs and full segments, including explicit/implicit byte ranges and
-discontinuities. Encrypted media, external/query-bearing URIs, alternate audio,
-iframe playlists, partial segments, delta playlists, HDCP and mixed codec or
-frame-rate families are rejected. It is a deliberately limited example, not
-a general HLS ingest service. Init maps are served over HTTP; fMP4 playback
-has not yet been exercised by the new regression fixture.
+The current publisher supports local full segments/ranges/discontinuities,
+fMP4, alternate audio, mixed variants, complete parts and warm delta playlists.
+AES-128 ciphertext requires explicit opt-in; keys and init maps stay on HTTP.
+Remote/query assets, DRM/SAMPLE-AES, subtitles, I-frame variants and cold delta
+reconstruction remain unsupported. See [production features](PRODUCTION-FEATURES.md)
+for exact schema 2 contexts and the scope of actual Chrome media tests.
 
 Keys are ephemeral by default and in v0.1.0's CLI. Current source optionally
 accepts `--publisher-state /private/path/publisher.json`; preserve this 0600
 file in an owner-controlled directory for a stable identity across restarts.
 Without it, restarting creates a new authorisation and swarm. Current viewers
-poll session identity and rejoin while retaining the page allowance. The demo
+poll session identity and rejoin while retaining the persistent browser allowance. The demo
 does not establish trust in external publishers.
 
 For live OBS ingest and optional independent RTMPS forwarding, use the
@@ -110,8 +109,9 @@ LAN address is insufficient for browser WebCrypto.
 
 Optional `--relay wss://relay.example` (repeatable, at most eight) chooses external
 relays instead of the embedded one. Optional `--stun stun:stun.example:3478`
-(repeatable) overrides STUN. No TURN or super-peer path is implemented. An
-unreachable peer should leave the viewer playing from origin.
+(repeatable) overrides STUN. The loader also accepts host-provided TURN
+credentials in `iceServers`; this demo CLI does not supply a TURN or super-peer
+service. An unreachable peer should leave the viewer playing from origin.
 
 The embedded relay is for a controlled trial: at most 64 connections, eight
 subscriptions per connection, 24 KiB frames, 80 incoming messages per 10 s per

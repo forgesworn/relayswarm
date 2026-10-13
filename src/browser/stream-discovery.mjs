@@ -1,3 +1,4 @@
+import { validStreamAuthorisation } from "./segment-commitment.mjs";
 import { verifyEvent } from "nostr-tools/pure";
 
 const HEX64 = /^[0-9a-f]{64}$/u;
@@ -65,7 +66,16 @@ function compilePolicy(policy) {
   if (typeof now !== "function") throw new TypeError("Invalid discovery clock.");
   const seconds = Math.floor(now() / 1000);
   if (!Number.isSafeInteger(seconds) || seconds < 0) throw new TypeError("Invalid discovery time.");
+  const authorisations = policy.streamAuthorisations ?? [];
+  if (!Array.isArray(authorisations) || authorisations.length > 64) throw new TypeError("Invalid discovery stream authorisations.");
+  const streamAuthorisations = new Map();
+  for (const authorisation of authorisations) {
+    // Host-provided identities must be signed afresh and explicitly trusted.
+    if (!validStreamAuthorisation(authorisation) || !authors.includes(authorisation.pubkey)) throw new TypeError("Invalid discovery stream authorisation.");
+    streamAuthorisations.set(authorisation.id, structuredClone(authorisation));
+  }
   return {
+    streamAuthorisations,
     authors: new Set(authors), origins: new Set(origins), relays, swarmId: policy.swarmId, iceServers: icePolicy(policy.iceServers), allowLoopback, seconds,
     maxAgeSeconds: boundedInteger(policy.maxAgeSeconds, 3600, 1, 86400, "age limit"),
     maxFutureSeconds: boundedInteger(policy.maxFutureSeconds, 30, 0, 300, "future tolerance"),
@@ -133,14 +143,25 @@ function resolveEvent(event, policy) {
   let manifest;
   try { manifest = safeUrl(streaming, ["https:"], policy.allowLoopback, "http:"); } catch { return null; }
   if (!policy.origins.has(manifest.origin)) return null;
-  const streamEvent = structuredClone(event), relays = [...policy.relays], iceServers = structuredClone(policy.iceServers);
-  return { manifestUrl: manifest.href, streamEvent, swarmId: policy.swarmId, relays, iceServers,
+  const links = event.tags.filter((tag) => tag[0] === "relayswarm-authorisation");
+  let authorisation = event;
+  if (!links.length && policy.streamAuthorisations.size) return null;
+  if (links.length) {
+    if (links.length !== 1 || links[0].length !== 2 || !HEX64.test(links[0][1])) return null;
+    authorisation = policy.streamAuthorisations.get(links[0][1]);
+    if (!authorisation || authorisation.pubkey !== event.pubkey || !validStreamAuthorisation(authorisation)
+      || single(event, "d")?.[1] !== `live-${authorisation.id}` || single(event, "relayswarm-swarm")?.[1] !== policy.swarmId
+      || starts === undefined || expiration === undefined || expiration > event.created_at + 300) return null;
+  }
+  const streamEvent = structuredClone(authorisation), liveEvent = structuredClone(event), relays = [...policy.relays], iceServers = structuredClone(policy.iceServers);
+  return { manifestUrl: manifest.href, streamEvent, liveEvent, swarmId: policy.swarmId, relays, iceServers,
     config: { swarmId: policy.swarmId, relays: [...relays], iceServers: structuredClone(iceServers), streamEvent: structuredClone(streamEvent), serve: false } };
 }
 
 /** Resolve signed NIP-53 metadata under explicit host trust and endpoint policy.
  * This requires full streaming/status metadata; the demo's minimal signed
- * authorisation remains a separate, valid commitment-authorisation contract.
+ * authorisation remains the stable commitment contract. Linked advertisements
+ * require an exact host-supplied streamAuthorisations entry from the same author.
  * No fetches, sockets, player or swarm are created. Redirects and playlist
  * asset URLs still require enforcement by the host's eventual HTTP loader. */
 export function resolveTrustedStream(value, policy) {

@@ -19,15 +19,16 @@ export class PeerSelection {
     return Math.max(value.latencyMs, transferMs);
   }
 
-  select(links, key, tried, size) {
-    const eligible = [...links].filter((link) => !link.closed && !link.busy && !tried.has(link.pubkey) && link.have.has(key));
+  select(links, key, tried, size, deadlineMs = Infinity) {
+    const eligible = [...links].filter((link) => !link.closed && !link.busy && !tried.has(link.pubkey) && link.have.has(key)
+      && (this.estimate(link, size) === null || this.estimate(link, size) * 1.25 + 25 <= deadlineMs));
     if (!eligible.length) return null;
     const cold = eligible.filter((link) => !this.observations.get(link)?.attempts);
     const measured = eligible.filter((link) => this.observations.get(link)?.attempts);
     const healthy = measured.filter((link) => this.summary(link).consecutiveFailures === 0);
     // One in four choices explores an unmeasured eligible link. Until any
     // observation exists, choose the least recently selected cold link.
-    const explore = cold.length && (!healthy.length || this.turn === 0);
+    const explore = cold.length && (!healthy.length || this.turn === 0 && deadlineMs >= 100);
     this.turn = (this.turn + 1) % 4;
     // A quick refusal is not evidence of quick media delivery. Failed links
     // can recover when healthy alternatives are busy or lack this object.

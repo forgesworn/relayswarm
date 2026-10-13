@@ -61,17 +61,17 @@ try {
   await seeder.locator("#start").click();
   const applied = await read(seeder);
   assert.ok(applied.totals.uploaded >= beforeApply.totals.uploaded);
-  assert.equal(applied.current.metrics.config.maxUploadBytesPerSession, 10000000 - (applied.totals.uploaded - applied.current.metrics.bytes.uploaded));
+  assert.equal(applied.current.metrics.config.maxUploadBytesPerSession, 10000000 - (applied.uploadBudget.spent - applied.current.metrics.bytes.uploaded));
   await seeder.locator("#kill").click();
   const killed = await read(seeder);
   assert.ok(killed.loaderRestored); assert.equal(killed.current.mode, "off");
   await seeder.locator("#mode").selectOption("peer-first"); await seeder.locator("#start").click();
   const rejoined = await read(seeder);
   assert.ok(rejoined.totals.uploaded >= killed.totals.uploaded);
-  assert.equal(rejoined.current.metrics.config.maxUploadBytesPerSession, 10000000 - (rejoined.totals.uploaded - rejoined.current.metrics.bytes.uploaded));
-  await seeder.waitForFunction(() => document.getElementById("allowance-meter").value === Math.min(window.relaySwarmDemo.report().totals.uploaded, 10000000));
+  assert.equal(rejoined.current.metrics.config.maxUploadBytesPerSession, 10000000 - (rejoined.uploadBudget.spent - rejoined.current.metrics.bytes.uploaded));
+  await seeder.waitForFunction(() => document.getElementById("allowance-meter").value === Math.min(window.relaySwarmDemo.report().uploadBudget.spent, 10000000));
   assert.equal(await seeder.locator("#allowance-meter").getAttribute("max"), "10000000");
-  assert.match(await seeder.locator("#allowance-used").innerText(), /of 10\.0 MB used on this page/u);
+  assert.match(await seeder.locator("#allowance-used").innerText(), /of 10\.0 MB reserved in this browser/u);
   await checkpoint("visible-cumulative-allowance-after-apply-kill-rejoin");
 
   // Wait through a complete real reporting interval without changing timers.
@@ -97,8 +97,10 @@ try {
   assert.ok(submitted.length > 0);
   for (const report of submitted) {
     assert.equal(report.viewer, "receive-only"); assert.equal(report.method, "POST");
-    assert.deepEqual(Object.keys(report.values).sort(), [...reportFields].sort());
-    assert.ok(Object.values(report.values).every((value) => Number.isSafeInteger(value) && value >= 0));
+    assert.deepEqual(Object.keys(report.values).sort(), ["reportId", "sequence", "v", "values"]);
+    assert.match(report.values.reportId, /^[a-f0-9]{32}$/u);
+    assert.deepEqual(Object.keys(report.values.values).sort(), [...reportFields].sort());
+    assert.ok(Object.values(report.values.values).every((value) => Number.isSafeInteger(value) && value >= 0));
     assert.ok(!JSON.stringify(report.values).includes("private-loopback-label"));
   }
   assert.ok((await status()).reports.samples > 0);
@@ -152,6 +154,23 @@ try {
   for (const { page } of pages) assert.equal((await read(page)).player.fatalErrors, 0);
   assert.equal(errors.length, 0);
   await checkpoint("policy-recovery-retains-consent-boundaries");
+  // A complete browser reload carries quota reservations, never consent.
+  const spentBeforeReload = (await read(seeder)).uploadBudget.spent;
+  await seeder.reload();
+  await seeder.waitForFunction(() => window.relaySwarmDemo?.ready() && !document.getElementById("start").disabled);
+  assert.equal(await seeder.locator("#upload").isChecked(), false);
+  assert.ok((await read(seeder)).uploadBudget.spent >= spentBeforeReload);
+  const secondTab = await seeder.context().newPage();
+  await secondTab.goto(demo.base);
+  await secondTab.waitForFunction(() => window.relaySwarmDemo?.ready());
+  assert.equal((await read(secondTab)).uploadBudget.spent, (await read(seeder)).uploadBudget.spent);
+  assert.equal(await secondTab.locator("#upload").isChecked(), false);
+  await secondTab.close();
+  await seeder.locator("#reset-allowance").click();
+  await seeder.waitForFunction(() => window.relaySwarmDemo.report().uploadBudget.spent === 0);
+  assert.equal((await read(seeder)).uploadBudget.spent, 0);
+  assert.equal(await seeder.locator("#upload").isChecked(), false);
+  await checkpoint("full-reload-cross-tab-budget-and-explicit-reset");
   receipt.reports = submitted;
   receipt.operatorStatus = await status();
   receipt.ok = true;

@@ -2,7 +2,7 @@
 
 [Documentation](README.md) · [Operations](OPERATIONS.md) · [Container deployment](../deploy/README.md) · [Evidence](STATUS.md)
 
-This guide describes the experimental v0.2.0 broadcaster workflow, persistent publisher state and operator/reporting controls. Use the [v0.2.0 source checkout or package](GETTING-STARTED.md); the immutable v0.1.0 assets do not include these additions. Publication of a guide does not establish deployed playback or platform acceptance.
+This guide describes the 0.2.0 source broadcaster workflow, persistent publisher state and operator/reporting controls. Use the [current source candidate](GETTING-STARTED.md); the immutable v0.1.0 assets do not include these additions. Publication of a guide does not establish deployed playback or platform acceptance.
 
 ## Local source and dependencies
 

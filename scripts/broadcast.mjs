@@ -88,7 +88,7 @@ async function main() {
     await pipeline.ready({ timeoutMs: 0 });
     if (stopping) return;
     const playerPort = waiting.port;
-    server = await startDemoServer({ mediaDir: pipeline.mediaDir, manifest: pipeline.manifest, publisherState: join(state, "publisher.json"), operatorTokenFile: tokenFile,
+    server = await startDemoServer({ mediaDir: pipeline.mediaDir, manifest: pipeline.manifest, publisherState: join(state, "publisher.json"), operatorTokenFile: tokenFile, operatorState: join(state, "operator.json"),
       host: values.host, port: playerPort, publicUrl: values["public-url"], tlsKey: values["tls-key"], tlsCert: values["tls-cert"], relays: values.relay, telemetry: values.telemetry,
       beforeListen: async () => {
         if (stopping) throw new Error("Broadcaster stopped during player preparation.");
@@ -98,7 +98,7 @@ async function main() {
       operatorExtraStatus: () => pipeline.metrics(), ...(values.stun ? { iceServers: values.stun.map((urls) => ({ urls })) } : {}) });
     if (stopping) { await server.close(); return; }
     console.log(`RelaySwarm broadcaster player: ${server.base}\nOperator token file: ${tokenFile}\nPublisher identity persists across restarts. Press Ctrl-C to stop.`);
-    await stopped;
+    await Promise.race([stopped, pipeline.failure.then((error) => { throw error; })]);
   } catch (error) {
     if (!stopping) throw error;
   } finally { await stop(); process.removeListener("SIGINT", onSignal); process.removeListener("SIGTERM", onSignal); }

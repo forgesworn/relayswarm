@@ -186,3 +186,52 @@ test("caller abort works before query and during an uncooperative async iterator
   assert.equal(querySignal.aborted, true);
   assert.equal(returned, true);
 });
+
+test("linked live advertisements resolve to a host-pinned stable authorisation while retaining current metadata", async () => {
+  const { publisherStreamEvent } = await import("../src/publisher-state.mjs");
+  const { createPublisherAdvertisement } = await import("../src/publisher-advertisement.mjs");
+  const stable = publisherStreamEvent(author, "/media/master.m3u8", () => (seconds - 10000) * 1000);
+  const live = createPublisherAdvertisement({ secretKey: author, streamEvent: stable, swarmId: "host-selected-swarm",
+    manifestUrl: "https://media.example/live/master.m3u8", relays: ["wss://event-relay.example"], now: () => seconds * 1000 });
+  const configured = policy({ streamAuthorisations: [stable] });
+  const resolved = resolveTrustedStream(live, configured);
+  assert.equal(resolved.streamEvent.id, stable.id);
+  assert.equal(resolved.liveEvent.id, live.id);
+  assert.equal(resolved.config.streamEvent.id, stable.id);
+  assert.deepEqual(resolved.relays, ["wss://relay.host.example/"]);
+  assert.equal(resolveTrustedStream(live, policy()), null);
+  assert.equal(resolveTrustedStream(event(), configured), null, "pinned authorisation policy does not downgrade to unlinked metadata");
+  assert.equal(resolveTrustedStream(live, policy({ streamAuthorisations: [stable], swarmId: "wrong-host-swarm" })), null);
+  const otherStable = publisherStreamEvent(author, "/media/other.m3u8", () => seconds * 1000);
+  assert.equal(resolveTrustedStream(live, policy({ streamAuthorisations: [otherStable] })), null);
+  resolved.streamEvent.tags[0][1] = "caller mutation";
+  assert.equal(resolveTrustedStream(live, configured).streamEvent.id, stable.id);
+  const malformed = structuredClone(stable); malformed.content += "mutation";
+  assert.throws(() => resolveTrustedStream(live, policy({ streamAuthorisations: [malformed] })), /authorisation/u);
+});
+
+test("latest linked ended, expired and withdrawn advertisements suppress earlier live updates without retiring stable identity", async () => {
+  const { publisherStreamEvent } = await import("../src/publisher-state.mjs");
+  const { createPublisherAdvertisement } = await import("../src/publisher-advertisement.mjs");
+  const stable = publisherStreamEvent(author, "/media/master.m3u8", () => (seconds - 10000) * 1000);
+  const base = { secretKey: author, streamEvent: stable, swarmId: "host-selected-swarm", manifestUrl: "https://media.example/live/master.m3u8", relays: ["wss://event-relay.example"] };
+  const live = createPublisherAdvertisement({ ...base, now: () => (seconds - 10) * 1000 });
+  const ended = createPublisherAdvertisement({ ...base, status: "ended", now: () => seconds * 1000 });
+  const expired = event({ created_at: seconds, tags: live.tags.map((tag) => tag[0] === "expiration" ? ["expiration", String(seconds)] : tag) });
+  const withdrawn = event({ created_at: seconds, tags: live.tags.filter((tag) => tag[0] !== "relayswarm") });
+  for (const latest of [ended, expired, withdrawn]) {
+    assert.deepEqual(await discoverTrustedStreams({ ...policy({ streamAuthorisations: [stable] }), query: async () => [live, latest, stable] }), []);
+  }
+});
+
+
+test("an immediate linked end supersedes live metadata in the same wall-clock second", async () => {
+  const { publisherStreamEvent } = await import("../src/publisher-state.mjs");
+  const { createPublisherAdvertisement } = await import("../src/publisher-advertisement.mjs");
+  const stable = publisherStreamEvent(author, "/media/master.m3u8", () => seconds * 1000);
+  const base = { secretKey: author, streamEvent: stable, swarmId: "host-selected-swarm", manifestUrl: "https://media.example/live/master.m3u8", relays: ["wss://event-relay.example"], now: () => seconds * 1000 };
+  const live = createPublisherAdvertisement(base);
+  const ended = createPublisherAdvertisement({ ...base, status: "ended", previousEvent: live });
+  assert.equal(ended.created_at, live.created_at + 1);
+  assert.deepEqual(await discoverTrustedStreams({ ...policy({ streamAuthorisations: [stable] }), query: async () => [live, ended] }), []);
+});

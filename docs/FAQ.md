@@ -113,8 +113,9 @@ relay and ICE policy.
 ## Does it use STUN, TURN or super-peers?
 
 The browser loader defaults to Google's public STUN endpoint and accepts host
-`iceServers`; the demo accepts `--stun`. It implements no TURN or super-peer
-strategy. Difficult NATs can fall back to origin. Native HyperDHT uses its own
+`iceServers`; the demo accepts `--stun`. Hosts can supply TURN credentials
+through `iceServers`; no managed TURN or super-peer service is supplied.
+Difficult NATs can fall back to origin. Native HyperDHT uses its own
 bootstrap/routing infrastructure rather than STUN/TURN and has no automatic
 origin fallback in its CLI journey. See [Native transport](NATIVE-TRANSPORT.md).
 
@@ -130,8 +131,8 @@ That has not been established. The separate
 [Swift project's README](https://github.com/forgesworn/relayswarm-kit) describes
 version-2 signalling; this repository uses version 3 for the shared session.
 Shared event kinds and successful NIP-44 vectors do not prove matching wire
-envelopes, native transport or signed HLS commitments. No RelaySwarm NIP is
-accepted yet.
+envelopes, native transport or signed HLS commitments. A RelaySwarm protocol draft and tested adapter exist, but no RelaySwarm NIP
+is accepted yet.
 
 ## Do the receipts measure money or data saved?
 
@@ -157,3 +158,11 @@ expresses the publisher's opt-in; it does not establish ownership of every
 right or settle a viewer's legal/contractual obligations. The demo should be
 used with media participants are authorised to redistribute. Host policy and
 explicit viewer consent remain application responsibilities.
+
+## What does the current production candidate add?
+
+[Production features](PRODUCTION-FEATURES.md) covers wider HLS, scoped delegation,
+full linked stream advertisements, bounded admission, persistent browser upload
+budgets, durable idempotent reports, worker supervision and native HTTP fallback.
+[Delivery requirements](PRODUCTION-READINESS.md) separates implementation from
+publication, physical devices, varied networks and sustained acceptance.

@@ -59,7 +59,7 @@ test("publisher removes retired live contexts and rejects unlisted files", async
 
 test("publisher rejects directory escapes, ambiguous ranges and unsupported manifests", async (t) => {
   const directory = await fixture(t);
-  for (const body of [media.replaceAll("shared.ts", "../private.ts"), media.replaceAll("shared.ts", "https://cdn.example/seg.ts"), media.replace("4@0", "4"), media.replace("#EXTINF:2,", '#EXT-X-KEY:METHOD=AES-128,URI="key"\n#EXTINF:2,'), media.replace("#EXTINF:2,", '#EXT-X-PART:DURATION=0.2,URI="part.ts"\n#EXTINF:2,')]) {
+  for (const body of [media.replaceAll("shared.ts", "../private.ts"), media.replaceAll("shared.ts", "https://cdn.example/seg.ts"), media.replace("4@0", "4"), media.replace("#EXTINF:2,", '#EXT-X-KEY:METHOD=AES-128,URI="key"\n#EXTINF:2,'), media.replace("#EXTINF:2,", '#EXT-X-PART:DURATION=0,URI="part.ts"\n#EXTINF:2,')]) {
     await writeFile(join(directory, "index.m3u8"), body);
     await assert.rejects(createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8" }));
   }
@@ -261,4 +261,31 @@ test("atomic playlist races retry fresh verified data once, evict old contexts a
   await assert.rejects(publisher.media("/media/fresh.ts"), { status: 400 });
   assert.equal(reads - ordinaryReadsBefore, 1); // Stable invalid data is never retried or served from cache.
   assert.equal(publisher.getMetrics().playlistRetries - retriesBefore, 1);
+});
+
+test("verified hashes remain deduplicated while an earlier caller waits on post-hash validation", async (t) => {
+  const { open } = await import("node:fs/promises");
+  const directory = await fixture(t), probe = await open(join(directory, "shared.ts"), "r");
+  const prototype = Object.getPrototypeOf(probe), originalStat = prototype.stat;
+  await probe.close();
+  let firstFd, calls = 0, release, reached;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const gap = new Promise((resolve) => { reached = resolve; });
+  t.mock.method(prototype, "stat", async function (...args) {
+    const value = await originalStat.apply(this, args);
+    if (value.size === 8n) {
+      firstFd ??= this.fd;
+      if (this.fd === firstFd && ++calls === 3) { reached(); await gate; }
+    }
+    return value;
+  });
+  const publisher = await createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8" });
+  const first = publisher.commitment(firstRange);
+  await gap;
+  try {
+    const late = await publisher.commitment(firstRange);
+    assert.equal(publisher.getMetrics().hashReads, 1);
+    release();
+    assert.equal((await first).id, late.id);
+  } finally { release(); }
 });

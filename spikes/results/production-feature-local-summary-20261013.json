@@ -1,0 +1,654 @@
+{
+  "v": 1,
+  "kind": "production-feature-local-evidence",
+  "recordedAt": "2026-10-13T08:02:11.188Z",
+  "sourceCheckpoint": "working source candidate before final CI and publication",
+  "scope": {
+    "network": "loopback unless explicitly marked hosted",
+    "physicalPlayback": false,
+    "OBS": false,
+    "YouTube": false,
+    "productionReadiness": false
+  },
+  "receipts": [
+    {
+      "file": "artifacts/browser-production-broadcast/broadcast-browser.json",
+      "sha256": "28a0cdabd87f5bd9827024a77c5cba37d08ea66dc9b75190c33ff29b4fc85a9c",
+      "at": "2026-10-13T06:30:31.116Z",
+      "ok": true,
+      "scope": {
+        "network": "loopback",
+        "producer": "FFmpeg synthetic real-time H.264/AAC",
+        "router": "MediaMTX",
+        "ingress": "RTMP",
+        "pipelineInput": "RTSP over TCP",
+        "output": "two-rendition live HLS",
+        "browser": "Chrome",
+        "OBS": false,
+        "YouTube": false,
+        "physicalDevices": false,
+        "routerBinarySha256": "72f67f718cfe5f75f081db5b2f31d1664008b6b8ff8627cb2a8acf5d7e5e61be",
+        "routerArchiveSha256": "7d0d0c5c11527cbd10bde1c3d728864eb0334a9b653566cd73c0259750cbf093",
+        "routerVerification": "owner-controlled installer cache receipt",
+        "browserVersion": "155.0.8059.40"
+      },
+      "checkpoints": [
+        "real-time-low-rendition-peer-playback",
+        "real-time-high-rendition-peer-playback",
+        "producer-reconnect-stable-manifest-and-identity"
+      ],
+      "viewers": [
+        {
+          "name": "contributor-low",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 219772,
+            "peerFirstLoads": 0
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 1,
+            "stallMs": 970,
+            "levels": [
+              0
+            ]
+          }
+        },
+        {
+          "name": "contributor-high",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 3427428,
+            "peerFirstLoads": 0
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 1,
+            "stallMs": 1285,
+            "levels": [
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "name": "baseline",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 0,
+            "peerFirstLoads": 0
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 1,
+            "stallMs": 85,
+            "levels": [
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "name": "consumer",
+          "totals": {
+            "peerFirstBytes": 3647200,
+            "uploaded": 0,
+            "peerFirstLoads": 6
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 0,
+            "stallMs": 0,
+            "levels": [
+              0,
+              1
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "file": "artifacts/browser-production-fmp4/fmp4-browser.json",
+      "sha256": "baa2637c4c35d1c2b93492e87971f39f402f96d7cc0c1648d84f49f155d0a61c",
+      "at": "2026-10-13T06:36:16.984Z",
+      "ok": true,
+      "scope": {
+        "browser": "Chrome",
+        "network": "loopback",
+        "media": "H.264/AAC fMP4 with EXT-X-MAP",
+        "playlistTimingChanged": false,
+        "physicalDevices": false,
+        "adaptivePlayback": "hls.js automatic levels, actual CDP network throttle; no manual quality selection on adaptive baseline",
+        "browserVersion": "155.0.8059.40"
+      },
+      "checkpoints": [
+        "verified-fmp4-both-qualities",
+        "native-hls-automatic-downshift",
+        "native-hls-automatic-upshift"
+      ],
+      "viewers": [
+        {
+          "name": "contributor-low",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 102157,
+            "peerFirstLoads": 0
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 0,
+            "stallMs": 0,
+            "levels": [
+              0
+            ]
+          },
+          "diagnostics": 0
+        },
+        {
+          "name": "contributor-high",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 4800039,
+            "peerFirstLoads": 0
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 0,
+            "stallMs": 0,
+            "levels": [
+              1
+            ]
+          },
+          "diagnostics": 0
+        },
+        {
+          "name": "receive-only",
+          "totals": {
+            "peerFirstBytes": 4902196,
+            "uploaded": 0,
+            "peerFirstLoads": 19
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 0,
+            "stallMs": 0,
+            "levels": [
+              0,
+              1
+            ]
+          },
+          "diagnostics": 0
+        },
+        {
+          "name": "automatic-origin-baseline",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 0,
+            "peerFirstLoads": 0
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 0,
+            "stallMs": 0,
+            "levels": [
+              0,
+              1
+            ]
+          },
+          "diagnostics": 0
+        }
+      ]
+    },
+    {
+      "file": "artifacts/browser-production-media-final/media-browser.json",
+      "sha256": "d2033d8433f9d26fad04fb94bbb8b21239dc15dfabaaaf99dc42bb6e5ab97ae6",
+      "at": "2026-10-13T06:52:36.552Z",
+      "ok": true,
+      "scope": {
+        "browser": "Chrome",
+        "network": "loopback",
+        "physicalDevices": false,
+        "playlistsChangedForPeerDelivery": false,
+        "browserVersion": "155.0.8059.40"
+      },
+      "journeys": [
+        {
+          "name": "alternate-audio",
+          "ok": true,
+          "viewers": [
+            {
+              "name": "contributor-low",
+              "totals": {
+                "peerFirstBytes": 33467,
+                "uploaded": 235797,
+                "peerFirstLoads": 2
+              },
+              "player": {
+                "fatalErrors": 0,
+                "stalls": 0,
+                "stallMs": 0,
+                "levels": [
+                  0
+                ]
+              },
+              "diagnostics": 0
+            },
+            {
+              "name": "contributor-high",
+              "totals": {
+                "peerFirstBytes": 100516,
+                "uploaded": 1352642,
+                "peerFirstLoads": 7
+              },
+              "player": {
+                "fatalErrors": 0,
+                "stalls": 0,
+                "stallMs": 0,
+                "levels": [
+                  0,
+                  1
+                ]
+              },
+              "diagnostics": 0
+            },
+            {
+              "name": "origin-baseline",
+              "totals": {
+                "peerFirstBytes": 0,
+                "uploaded": 0,
+                "peerFirstLoads": 0
+              },
+              "player": {
+                "fatalErrors": 0,
+                "stalls": 0,
+                "stallMs": 0,
+                "levels": [
+                  0,
+                  1
+                ]
+              },
+              "diagnostics": 0
+            },
+            {
+              "name": "receive-only",
+              "totals": {
+                "peerFirstBytes": 1454456,
+                "uploaded": 0,
+                "peerFirstLoads": 14
+              },
+              "player": {
+                "fatalErrors": 0,
+                "stalls": 0,
+                "stallMs": 0,
+                "levels": [
+                  0,
+                  1
+                ]
+              },
+              "diagnostics": 0
+            }
+          ]
+        },
+        {
+          "name": "AES-128-opt-in",
+          "ok": true,
+          "viewers": [
+            {
+              "name": "contributor-low",
+              "totals": {
+                "peerFirstBytes": 0,
+                "uploaded": 118080,
+                "peerFirstLoads": 0
+              },
+              "player": {
+                "fatalErrors": 0,
+                "stalls": 0,
+                "stallMs": 0,
+                "levels": [
+                  0
+                ]
+              },
+              "diagnostics": 0
+            },
+            {
+              "name": "contributor-high",
+              "totals": {
+                "peerFirstBytes": 0,
+                "uploaded": 1677008,
+                "peerFirstLoads": 0
+              },
+              "player": {
+                "fatalErrors": 0,
+                "stalls": 0,
+                "stallMs": 0,
+                "levels": [
+                  0,
+                  1
+                ]
+              },
+              "diagnostics": 0
+            },
+            {
+              "name": "origin-baseline",
+              "totals": {
+                "peerFirstBytes": 0,
+                "uploaded": 0,
+                "peerFirstLoads": 0
+              },
+              "player": {
+                "fatalErrors": 0,
+                "stalls": 0,
+                "stallMs": 0,
+                "levels": [
+                  0,
+                  1
+                ]
+              },
+              "diagnostics": 0
+            },
+            {
+              "name": "receive-only",
+              "totals": {
+                "peerFirstBytes": 1795088,
+                "uploaded": 0,
+                "peerFirstLoads": 7
+              },
+              "player": {
+                "fatalErrors": 0,
+                "stalls": 0,
+                "stallMs": 0,
+                "levels": [
+                  0,
+                  1
+                ]
+              },
+              "diagnostics": 0
+            }
+          ]
+        },
+        {
+          "name": "mixed-HEVC-AVC",
+          "ok": true,
+          "viewers": [
+            {
+              "name": "contributor-low",
+              "totals": {
+                "peerFirstBytes": 0,
+                "uploaded": 102237,
+                "peerFirstLoads": 0
+              },
+              "player": {
+                "fatalErrors": 0,
+                "stalls": 0,
+                "stallMs": 0,
+                "levels": [
+                  0,
+                  1
+                ]
+              },
+              "diagnostics": 0
+            },
+            {
+              "name": "contributor-high",
+              "totals": {
+                "peerFirstBytes": 0,
+                "uploaded": 2670604,
+                "peerFirstLoads": 0
+              },
+              "player": {
+                "fatalErrors": 0,
+                "stalls": 0,
+                "stallMs": 0,
+                "levels": [
+                  0,
+                  2
+                ]
+              },
+              "diagnostics": 0
+            },
+            {
+              "name": "origin-baseline",
+              "totals": {
+                "peerFirstBytes": 0,
+                "uploaded": 0,
+                "peerFirstLoads": 0
+              },
+              "player": {
+                "fatalErrors": 0,
+                "stalls": 0,
+                "stallMs": 0,
+                "levels": [
+                  0,
+                  1,
+                  2
+                ]
+              },
+              "diagnostics": 0
+            },
+            {
+              "name": "receive-only",
+              "totals": {
+                "peerFirstBytes": 2772841,
+                "uploaded": 0,
+                "peerFirstLoads": 11
+              },
+              "player": {
+                "fatalErrors": 0,
+                "stalls": 0,
+                "stallMs": 0,
+                "levels": [
+                  0,
+                  1,
+                  2
+                ]
+              },
+              "diagnostics": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "artifacts/browser-production-ll-configured/ll-browser.json",
+      "sha256": "22f32ed5fece5b99ab05856ac1ca5ee4af095a82aa52898c1954f534caf5a6d8",
+      "at": "2026-10-13T07:05:37.229Z",
+      "ok": true,
+      "scope": {
+        "browser": "Chrome",
+        "network": "loopback",
+        "physicalDevices": false,
+        "media": "real H.264/AAC fMP4 one-second parts and two-second concatenated media segments",
+        "peerParts": "explicit host opt-in",
+        "blockingReload": false,
+        "delta": "transition after publisher and viewers obtain full snapshots",
+        "playlistTimingChangedForPeerDelivery": false,
+        "browserVersion": "155.0.8059.40"
+      },
+      "checkpoints": [
+        "real-one-second-verified-peer-part",
+        "peer-part-playback-after-warm-delta"
+      ],
+      "viewers": [
+        {
+          "name": "contributor",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 209514,
+            "peerFirstLoads": 0
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 0,
+            "stallMs": 0,
+            "levels": [
+              0
+            ],
+            "liveLatencySeconds": 3.8104760000000013,
+            "targetLatencySeconds": 3
+          },
+          "diagnostics": 0
+        },
+        {
+          "name": "origin-baseline",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 0,
+            "peerFirstLoads": 0
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 0,
+            "stallMs": 0,
+            "levels": [
+              0
+            ],
+            "liveLatencySeconds": 3.3616610000000016,
+            "targetLatencySeconds": 3
+          },
+          "diagnostics": 0
+        },
+        {
+          "name": "receive-only",
+          "totals": {
+            "peerFirstBytes": 209514,
+            "uploaded": 0,
+            "peerFirstLoads": 4
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 0,
+            "stallMs": 0,
+            "levels": [
+              0
+            ],
+            "liveLatencySeconds": 3.704065,
+            "targetLatencySeconds": 3
+          },
+          "diagnostics": 0
+        }
+      ]
+    },
+    {
+      "file": "artifacts/operator-browser/operator-browser.json",
+      "sha256": "7b9918e95c22fd6ef287f5bde5e1288b22d39278e11d008b53d8b5a219da3c01",
+      "at": "2026-10-13T06:40:39.591Z",
+      "ok": true,
+      "scope": {
+        "network": "loopback",
+        "browser": "Chrome",
+        "physicalDevices": false,
+        "media": "synthetic two-rendition HLS byte ranges",
+        "allowance": "accepted media payload, including interrupted transfers; protocol traffic is additional",
+        "browserVersion": "155.0.8059.40"
+      },
+      "checkpoints": [
+        "visible-cumulative-allowance-after-apply-kill-rejoin",
+        "explicit-numeric-report-consent",
+        "authenticated-remote-off-restores-origin-playback",
+        "remote-on-preserves-upload-opt-in-and-viewer-off",
+        "policy-outage-origin-fallback",
+        "policy-recovery-retains-consent-boundaries",
+        "full-reload-cross-tab-budget-and-explicit-reset"
+      ],
+      "viewers": [
+        {
+          "name": "contributor",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 0,
+            "peerFirstLoads": 0
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 0,
+            "stallMs": 0,
+            "levels": []
+          }
+        },
+        {
+          "name": "receive-only",
+          "totals": {
+            "peerFirstBytes": 1380672,
+            "uploaded": 0,
+            "peerFirstLoads": 12
+          },
+          "player": {
+            "fatalErrors": 0,
+            "stalls": 0,
+            "stallMs": 0,
+            "levels": [
+              0,
+              1
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "file": "artifacts/clean-consumer/receipt.json",
+      "sha256": "9266ec3a307579f7f9d8a86cb30230c1a15a23bad2692873fdd377dffa83b7ab",
+      "at": "2026-10-13T07:57:05.980Z",
+      "ok": true,
+      "checks": [
+        "package excludes private and workspace files; native executable and example configuration included",
+        "all nine documented package exports load with production dependencies only",
+        "standalone browser bundle builds and exports createHlsSwarm",
+        "installed native executable entry point runs",
+        "fresh installed client receives 131097 verified bytes from separate-process native seeder without HTTP",
+        "fresh installed client automatically falls back to verified HTTP after peer absence"
+      ],
+      "package": {
+        "filename": "relayswarm-0.2.0.tgz",
+        "bytes": 630981,
+        "files": 156,
+        "sha256": "49ffa942db151f13845eb057d833ee34c16e66491031a0ce1976cc2822997150"
+      },
+      "bundle": {
+        "bytes": 114124,
+        "sha256": "c8a3cdd9695a6ba245d08bfe6450b27396ce4fdae15e9c86aafa3475f61e817b"
+      },
+      "nativeTransfer": {
+        "v": 1,
+        "ok": true,
+        "source": "hyperdht-v1",
+        "objectBytes": 131097,
+        "sha256": "2518929b330f538a33990c92306d33617256b7c1c2680f702eb90381bcdd5320",
+        "sha256Verified": true,
+        "elapsedMs": 292,
+        "fallback": false
+      },
+      "fallbackTransfer": {
+        "v": 1,
+        "ok": true,
+        "source": "http-loopback-origin",
+        "objectBytes": 131097,
+        "sha256": "2518929b330f538a33990c92306d33617256b7c1c2680f702eb90381bcdd5320",
+        "sha256Verified": true,
+        "elapsedMs": 322,
+        "fallback": true
+      }
+    }
+  ],
+  "sourceFiles": {
+    "src/browser/hls-swarm.mjs": "136569231d1067fa946e2abf7bfc4380f1d511a7b4cc183c0cd1fa46776bd1bb",
+    "src/browser/peer-link.mjs": "d9dcb5c5613c31827f059de5fde32c9979ee3b2ac2799e29bdf01491f7453db6",
+    "src/browser/segment-commitment.mjs": "91c7b2d3631fed7255146c59048050082203eae960300dfb86551f64606338c9",
+    "src/hls-publisher.mjs": "a3eb827533a3e394f9407add0c77a4819724e188002c8af66cc0128988736bc2",
+    "src/hls-media-catalogue.mjs": "814192f16b7bf5bc402137862c3db3f287ef12051530d6ac57ceda3b402f4638",
+    "src/native-client.mjs": "0705ce0eb6fc5908faee1708a442d1416d015ff725821fbeb8b9862f237bc81d",
+    "demo/client.mjs": "4f30013d3971d69bf6ebf47f3b8e42de945de72ea165a8671114c26b36bea112",
+    "demo/operator.mjs": "fe7ce44353fd94ce433e248de74c5a891b33d98bf6f78e4dee483b228908ff5c",
+    "demo/admission.mjs": "4ac4f73cc08c636bbe76b512e7bcc577a496ffd1fcde0f5b3ddff1e6152ddbb0",
+    "demo/upload-budget.mjs": "d3513e58b022c46fe691d8d518d6334cfb43bdb6c88c904f2c05059621091232"
+  },
+  "remaining": [
+    "Historical hosted fatal MSE cause",
+    "Final exact-head CI and immutable release assets",
+    "Current RelaySwarmKit API interoperability and release",
+    "Final hosted deployment/recovery/rollback",
+    "Physical mobile and actual Safari/Firefox journeys",
+    "Separate-network and hard-NAT behaviour",
+    "Hours of audience/churn/resource and wire-cost measurements",
+    "Authorised OBS/private YouTube playback and deletion"
+  ]
+}

@@ -1,9 +1,12 @@
-import { spawn, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { isIP } from "node:net";
 import { promisify } from "node:util";
 import { mkdir, readFile, writeFile, rename, readdir, lstat, realpath, rm } from "node:fs/promises";
 import { join, resolve, relative, isAbsolute } from "node:path";
+
+import { startBroadcastWorkerControl } from "./broadcast-worker-control.mjs";
+import { acquireExclusiveStateLease } from "./exclusive-state-lease.mjs";
 
 const RENDITIONS = Object.freeze([
   Object.freeze({ name: "low", width: 640, height: 360, bitrate: 700, bandwidth: 850000 }),
@@ -96,10 +99,21 @@ export async function startBroadcastPipeline({ input = "rtsp://127.0.0.1:8554/li
   await mkdir(root, { recursive: true, mode: 0o700 });
   const rootStat = await lstat(root);
   if (!rootStat.isDirectory() || await realpath(root) !== root || (rootStat.mode & 0o022) || (typeof process.getuid === "function" && rootStat.uid !== process.getuid())) throw new Error("Broadcast media directory must be owner-controlled without symlinks.");
-  const lock = join(root, ".broadcast-lock");
-  try { await writeFile(lock, `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`, { flag: "wx", mode: 0o600 }); }
-  catch (error) { if (error.code === "EEXIST") throw new Error("Broadcast media directory is locked; confirm its previous broadcaster has stopped before recovering the lock."); throw error; }
+  const lock = join(root, ".broadcast-lock"), leasePath = join(root, ".broadcast-lease.sqlite");
+  const lease = await acquireExclusiveStateLease(leasePath);
+  let recordedOwnership = false, workerControl, guardianLost = false, failureFencing = Promise.resolve();
   try {
+    try {
+      const previousStat = await lstat(lock);
+      if (!previousStat.isFile() || previousStat.nlink !== 1 || (previousStat.mode & 0o777) !== 0o600 || previousStat.size > 2048 || process.getuid && previousStat.uid !== process.getuid()) throw new Error("Unsafe broadcaster ownership record.");
+      const previous = JSON.parse(await readFile(lock, "utf8"));
+      if (previous.guardianLost === true) throw new Error("Worker guardian failed; operator recovery must prove all previous workers have stopped.");
+      if (previous.v !== 2 || previous.leaseDevice !== lease.device || previous.leaseInode !== lease.inode) throw new Error("Legacy broadcaster lock requires operator recovery; exclusive prior ownership cannot be proved.");
+    } catch (error) { if (error.code !== "ENOENT") throw error; }
+    // Metadata is recovered only while the permanent lease inode is locked.
+    await atomicText(lock, `${JSON.stringify({ v: 2, leaseDevice: lease.device, leaseInode: lease.inode, startedAt: new Date().toISOString() })}\n`);
+    recordedOwnership = true;
+    workerControl = await startBroadcastWorkerControl(join(root, ".broadcast-workers.sqlite"));
   for (const level of RENDITIONS) {
     const directory = join(root, level.name);
     await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -110,7 +124,7 @@ export async function startBroadcastPipeline({ input = "rtsp://127.0.0.1:8554/li
   catch (error) {
     if (error.code !== "ENOENT") throw error;
     const entries = await readdir(root);
-    if (entries.some((name) => name !== ".broadcast-lock" && !RENDITIONS.some((level) => level.name === name))) throw new Error("Use an empty, dedicated broadcast media directory.");
+    if (entries.some((name) => name !== ".broadcast-lock" && name !== ".broadcast-lease.sqlite" && name !== ".broadcast-lease.sqlite-journal" && name !== ".broadcast-workers.sqlite" && name !== ".broadcast-workers.sqlite-journal" && name !== ".broadcast-workers.sqlite.dirty" && !RENDITIONS.some((level) => level.name === name))) throw new Error("Use an empty, dedicated broadcast media directory.");
     for (const level of RENDITIONS) if ((await readdir(join(root, level.name))).length) throw new Error("Use an empty, dedicated broadcast media directory.");
     await writeFile(marker, "1\n", { mode: 0o600, flag: "wx" });
   }
@@ -179,7 +193,7 @@ export async function startBroadcastPipeline({ input = "rtsp://127.0.0.1:8554/li
       if (stopped) break;
       status.state = "connecting"; status.starts++; status.restarts = status.starts - 1;
       const launchedAt = Date.now();
-      const child = spawn(ffmpeg, args, { stdio: ["ignore", name === "hls" ? "pipe" : "ignore", "pipe"], windowsHide: true });
+      const child = workerControl.spawn(ffmpeg, args, { captureStdout: name === "hls" });
       children.add(child);
       if (name === "hls") {
         status.progress = null;
@@ -264,6 +278,14 @@ export async function startBroadcastPipeline({ input = "rtsp://127.0.0.1:8554/li
     }
   }
 
+  let fatalResolve;
+  const failure = new Promise((done) => { fatalResolve = done; });
+  workerControl.onFailure(() => {
+    guardianLost = true;
+    failureFencing = atomicText(lock, `${JSON.stringify({ v: 2, leaseDevice: lease.device, leaseInode: lease.inode, guardianLost: true })}\n`);
+    failureFencing.catch(() => {});
+    fatalResolve(new Error("Broadcast worker guardian stopped; operator recovery is required.")); control.close().catch(() => {});
+  });
   const workers = [runWorker("hls"), ...(forwardUrl ? [runWorker("forward")] : [])];
   const publisher = (async () => {
     let lastPrune = 0;
@@ -273,8 +295,8 @@ export async function startBroadcastPipeline({ input = "rtsp://127.0.0.1:8554/li
       await pause(publicationIntervalMs);
     }
   })();
-  return {
-    mediaDir: root, manifest: "master.m3u8",
+  const control = {
+    failure, mediaDir: root, manifest: "master.m3u8",
     metrics() { return { v: 1, hls: { ...counters.hls, progress: counters.hls.progress ? { ...counters.hls.progress } : null }, forward: { ...counters.forward }, publications: counters.publications, lastPublishedAt: counters.lastPublishedAt, generation: counters.generation,
       renditions: RENDITIONS.map((value) => ({ ...value })), scope: "process/publication status; forwarding connection acceptance and platform playback are not measured" }; },
     async ready({ timeoutMs = 120000 } = {}) {
@@ -295,14 +317,26 @@ export async function startBroadcastPipeline({ input = "rtsp://127.0.0.1:8554/li
       stopped = true;
       for (const finish of [...wakeups]) finish();
       stopPromise = (async () => {
-        const live = [...children];
-        for (const child of live) child.kill("SIGTERM");
-        const force = setTimeout(() => { for (const child of live) if (children.has(child)) child.kill("SIGKILL"); }, 3000);
-        try { await Promise.all([...workers, publisher]); } finally { clearTimeout(force); await rm(lock, { force: true }); }
+        // Start the guardian shutdown in the same transition as stopping
+        // publication, before waiting for individual worker close messages.
+        // A clean acknowledgement proves process groups and the dirty marker
+        // were cleared. An unexpected exit never becomes successful close.
+        const workerShutdown = workerControl.close();
+        try { await Promise.all([workerShutdown, ...workers, publisher]); }
+        catch (error) {
+          guardianLost = true;
+          failureFencing = atomicText(lock, `${JSON.stringify({ v: 2, leaseDevice: lease.device, leaseInode: lease.inode, guardianLost: true })}\n`);
+          failureFencing.catch(() => {});
+          throw error;
+        } finally {
+          try { await failureFencing; if (!guardianLost) await rm(lock, { force: true }); }
+          finally { lease.close(); }
+        }
         counters.hls.state = "stopped"; if (forwardUrl) counters.forward.state = "stopped";
       })();
       return stopPromise;
     },
   };
-  } catch (error) { await rm(lock, { force: true }); throw error; }
+  return control;
+  } catch (error) { try { await workerControl?.close(); if (recordedOwnership) await rm(lock, { force: true }); } finally { lease.close(); } throw error; }
 }

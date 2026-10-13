@@ -1,13 +1,22 @@
 import Hls from "hls.js";
+import { generateSecretKey, getPublicKey, finalizeEvent } from "nostr-tools/pure";
+import { createPersistentUploadBudget } from "./upload-budget.mjs";
+import { segmentMediaContext } from "../src/browser/segment-commitment.mjs";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 
+let persistentStorage; try { persistentStorage = globalThis.localStorage; } catch { /* Upload stays off when storage is blocked. */ }
+const uploadBudget = createPersistentUploadBudget({ storage: persistentStorage, locks: navigator.locks });
+const admissionKey = generateSecretKey(), admissionPubkey = getPublicKey(admissionKey);
+const reportId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+let reportSequence = 0, admissionCredential = null;
 const byId = (id) => document.getElementById(id);
+byId("upload").checked = false; byId("telemetry").checked = false;
 const video = document.querySelector("video");
 const startedAt = new Date().toISOString(), clockStart = performance.now();
 const elapsed = () => Math.round(performance.now() - clockStart);
 const push = (list, value, cap = 256) => { list.push(value); if (list.length > cap) list.shift(); };
 const bytes = (amount) => amount < 1000 ? `${amount} B` : amount < 1e6 ? `${(amount / 1000).toFixed(1)} kB` : `${(amount / 1e6).toFixed(1)} MB`;
-const player = { engine: "pending", firstPlayingAtMs: null, startupMs: null, stalls: 0, stallMs: 0, seeks: 0, seekRecoveryMs: [], fatalErrors: 0, errors: {}, fragmentsLoaded: 0, fragments: [], levelChanges: [] };
+const player = { engine: "pending", firstPlayingAtMs: null, startupMs: null, stalls: 0, stallMs: 0, seeks: 0, seekRecoveryMs: [], fatalErrors: 0, errors: {}, fragmentsLoaded: 0, fragments: [], levelChanges: [], errorRecords: [] };
 const network = { originMediaRequests: 0, encodedOriginMediaBytes: 0, transferOriginMediaBytes: 0 };
 const sessions = [], snapshots = [];
 let deliveryPolicy = { mode: null, revision: 0, telemetry: false }, policyUnavailable = false, policyInFlight = false;
@@ -57,18 +66,28 @@ function stopSwarm() {
 function configure() {
   stopSwarm();
   const chosenMode = byId("mode").value;
-  const mode = native || policyUnavailable || chosenMode === "off" ? "off" : deliveryPolicy.mode ?? chosenMode;
-  const allowance = Number(byId("allowance").value), remaining = Math.max(0, allowance - totals().uploaded);
-  activeConfig = { mode, upload: byId("upload").checked && mode !== "off", uploadAllowance: allowance, uploadLimit: Number(byId("limit").value), cellular: byId("cellular").checked, startedAtMs: elapsed() };
-  swarm = createHlsSwarm({ mode, swarmId: session.swarmId, relays: session.relays, streamEvent: session.streamEvent,
+  const requestedMode = native || policyUnavailable || chosenMode === "off" ? "off" : deliveryPolicy.mode ?? chosenMode;
+  const mode = session.admission && !admissionCredential ? "off" : requestedMode;
+  const budget = uploadBudget.snapshot(), allowance = budget.limit, remaining = budget.remaining;
+  const admissionReady = !session.admission || admissionCredential && admissionCredential.epoch === session.admission.epoch && admissionCredential.expiresAt * 1000 > Date.now();
+  activeConfig = { mode, upload: byId("upload").checked && mode !== "off" && budget.available && remaining > 0 && admissionReady, uploadAllowance: allowance, uploadLimit: Number(byId("limit").value), cellular: byId("cellular").checked, startedAtMs: elapsed() };
+  swarm = createHlsSwarm({ mode, swarmId: session.swarmId, relays: session.relays, streamEvent: session.streamEvent, delegation: session.delegation, revokedDelegationIds: session.revokedDelegationIds, delegationRevocations: session.delegationRevocations, swarmParts: session.mediaCapabilities?.parts === true, originReserveMs: session.mediaCapabilities?.parts === true ? 500 : 2000,
     getCommitment: async (context, { signal }) => {
       const query = new URLSearchParams({ path: new URL(context.url).pathname, level: String(context.frag.level), sequence: String(context.frag.sn), cc: String(context.frag.cc ?? 0) });
+      const mediaContext = segmentMediaContext(context);
+      if (mediaContext) { query.set("playlist", mediaContext.playlist); query.set("mediaType", mediaContext.mediaType); }
       if (context.rangeEnd) { query.set("start", String(context.rangeStart || 0)); query.set("end", String(context.rangeEnd)); }
       if (context.part) query.set("part", String(context.part.index));
       const response = await fetch(`${session.commitmentEndpoint}?${query}`, { signal });
       if (!response.ok) throw new Error("Publisher commitment unavailable.");
       return response.json();
     },
+    secretKey: admissionKey,
+    ...(session.admission && admissionCredential ? { ticket: admissionCredential.ticket, admit: async (pubkey, ticket, { signal }) => {
+      const response = await fetch(session.admission.verifyEndpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey, ticket }), signal });
+      if (!response.ok) return false; const result = await response.json(); return result.admitted === true && result.epoch === session.admission.epoch;
+    } } : {}),
+    reserveUploadBytes: (amount, options) => uploadBudget.reserve(amount, options),
     serve: activeConfig.upload, maxUploadBytesPerSession: remaining, maxUploadBytesPerSecond: activeConfig.uploadLimit, serveOnCellular: activeConfig.cellular,
     ...(session.iceServers ? { iceServers: session.iceServers } : {}),
   });
@@ -82,10 +101,11 @@ function render() {
   const total = totals(), metrics = swarm?.metrics();
   byId("saved").textContent = bytes(total.peerFirstBytes);
   byId("origin").textContent = native || !observer ? "Unavailable" : String(network.originMediaRequests);
-  byId("uploaded").textContent = bytes(total.uploaded);
-  const allowance = activeConfig?.uploadAllowance ?? Number(byId("allowance").value);
-  byId("allowance-meter").max = allowance; byId("allowance-meter").value = Math.min(total.uploaded, allowance);
-  byId("allowance-used").textContent = `${bytes(total.uploaded)} of ${bytes(allowance)} used on this page${total.uploaded >= allowance ? " · allowance exhausted; uploading stopped" : ""}`;
+  const budget = uploadBudget.snapshot();
+  byId("uploaded").textContent = bytes(budget.spent);
+  const allowance = budget.limit;
+  byId("allowance-meter").max = allowance; byId("allowance-meter").value = Math.min(budget.spent, allowance);
+  byId("allowance-used").textContent = `${bytes(budget.spent)} of ${bytes(allowance)} reserved in this browser${!budget.available ? " · persistent allowance unavailable; uploading disabled" : budget.spent >= allowance ? " · allowance exhausted; uploading stopped" : ""}`;
   byId("peers").textContent = String(metrics?.peers.connected || 0);
   byId("detail").textContent = `${total.peerFirstLoads} verified peer-first loads · ${player.stalls} playback stalls · ${player.fragmentsLoaded} media fragments loaded`;
 }
@@ -93,38 +113,58 @@ function report() {
   return { v: 1, kind: "relayswarm-field-receipt", startedAt, recordedAt: new Date().toISOString(), durationMs: elapsed(),
     environment: { browser: navigator.userAgent, secureContext: isSecureContext, networkLabel: byId("network").value, deviceLabel: byId("device").value, automated: navigator.webdriver === true },
     stream: { eventId: session?.streamEvent.id, publisher: session?.streamEvent.pubkey, swarmId: session?.swarmId, experimental: true },
-    player: { ...player, currentTime: video.currentTime, paused: video.paused, bufferedSeconds: hls?.mainForwardBufferInfo?.len ?? null, activeStallMs: stallAt === null ? 0 : elapsed() - stallAt },
+    player: { ...player, isLive: hls?.latestLevelDetails?.live === true, liveLatencySeconds: Number.isFinite(hls?.latency) ? hls.latency : null, targetLatencySeconds: Number.isFinite(hls?.targetLatency) ? hls.targetLatency : null, liveSyncPosition: Number.isFinite(hls?.liveSyncPosition) ? hls.liveSyncPosition : null, currentTime: video.currentTime, paused: video.paused, bufferedSeconds: hls?.mainForwardBufferInfo?.len ?? null, activeStallMs: stallAt === null ? 0 : elapsed() - stallAt },
     network: { ...network, ...(native ? { originMediaRequests: null, encodedOriginMediaBytes: null, transferOriginMediaBytes: null } : {}), supported: Boolean(observer) && !native,
       scope: "same-origin media resource timings; includes init segments and cache hits; encoded bytes exclude protocol overhead; native HLS requests are not measured" },
-    totals: totals(), deliveryPolicy: { ...deliveryPolicy, unavailable: policyUnavailable }, current: swarm ? { ...activeConfig, metrics: swarm.metrics() } : null, sessions: [...sessions], snapshots: [...snapshots],
+    totals: totals(), uploadBudget: uploadBudget.snapshot(), deliveryPolicy: { ...deliveryPolicy, unavailable: policyUnavailable }, current: swarm ? { ...activeConfig, metrics: swarm.metrics() } : null, sessions: [...sessions], snapshots: [...snapshots],
     retention: { fragments: "latest 256", snapshots: "latest 60, every five seconds", sessions: "latest 64", archivedSessions: archivedTotals.sessions, totals: "whole page session" },
     loaderRestored: !hls || hls.config.fLoader === initialLoader, limits: ["Network and device labels are supplied by the viewer.", "No peer IP addresses or private signing keys are recorded.", "A receipt is evidence for this session only; it is not a production-readiness claim."],
   };
 }
 
-byId("settings").addEventListener("submit", (event) => {
+async function obtainAdmission() {
+  if (!session.admission) return;
+  if (admissionCredential?.epoch === session.admission.epoch && admissionCredential.expiresAt * 1000 - Date.now() > 20000) return;
+  const post = async (endpoint, body) => {
+    const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error("Peer admission unavailable."); return response.json();
+  };
+  const challenge = await post(session.admission.challengeEndpoint, { pubkey: admissionPubkey });
+  if (challenge.issuer !== session.admission.issuer || challenge.epoch !== session.admission.epoch || challenge.swarmId !== session.swarmId || typeof challenge.challenge !== "string") throw new Error("Peer admission changed.");
+  const proof = finalizeEvent({ kind: 27235, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify({ challenge: challenge.challenge, swarmId: session.swarmId, epoch: challenge.epoch }) }, admissionKey);
+  const credential = await post(session.admission.ticketEndpoint, { proof });
+  if (credential.issuer !== session.admission.issuer || credential.epoch !== session.admission.epoch || credential.swarmId !== session.swarmId || typeof credential.ticket !== "string" || credential.ticket.length > 2048 || !Number.isSafeInteger(credential.expiresAt) || credential.expiresAt * 1000 <= Date.now()) throw new Error("Invalid peer admission.");
+  admissionCredential = credential;
+}
+byId("settings").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!session) return;
+  byId("start").disabled = true;
+  try {
+    await uploadBudget.setLimit(Number(byId("allowance").value));
+    if (byId("mode").value !== "off" && !policyUnavailable && deliveryPolicy.mode !== "off") await obtainAdmission();
+  } catch { admissionCredential = null; status("Peer admission unavailable · origin playback remains available."); }
+  finally { byId("start").disabled = false; }
   if (startRequestedAt === null) {
     startRequestedAt = elapsed();
     if (Hls.isSupported()) {
       player.engine = `hls.js ${Hls.version}`;
-      hls = new Hls({ liveSyncDurationCount: 4, maxBufferLength: 20, maxMaxBufferLength: 30 });
+      hls = new Hls({ ...(session.mediaCapabilities?.parts === true ? {} : { liveSyncDurationCount: 4 }), maxBufferLength: 20, maxMaxBufferLength: 30 });
       initialLoader = hls.config.fLoader;
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         hls.levels.forEach((level, index) => { const option = document.createElement("option"); option.value = String(index); option.textContent = `${level.height}p · ${Math.round(level.bitrate / 1000)} kbps`; byId("quality").append(option); });
         byId("quality").disabled = false;
       });
-      hls.on(Hls.Events.FRAG_LOADED, (_event, { frag, payload, networkDetails }) => {
+      hls.on(Hls.Events.FRAG_LOADED, (_event, { frag, part, payload, networkDetails }) => {
         if (frag.sn === "initSegment") return;
         player.fragmentsLoaded++;
-        push(player.fragments, { atMs: elapsed(), level: frag.level, sequence: frag.sn, discontinuity: frag.cc, rangeStart: frag.byteRangeStartOffset ?? null, rangeEnd: frag.byteRangeEndOffset ?? null, size: payload.byteLength,
+        push(player.fragments, { atMs: elapsed(), level: frag.level, sequence: frag.sn, part: part?.index ?? null, mediaType: frag.type ?? "video", playlist: segmentMediaContext({ frag, url: frag.url })?.playlist ?? null, discontinuity: frag.cc, rangeStart: frag.byteRangeStartOffset ?? null, rangeEnd: frag.byteRangeEndOffset ?? null, size: payload.byteLength,
           source: networkDetails ? "origin" : activeConfig.mode === "peer-first" ? "peer" : "unknown", statsLoaded: frag.stats.loaded,
           loadingMs: frag.stats.loading.end - frag.stats.loading.start });
         render();
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => push(player.levelChanges, { atMs: elapsed(), level: data.level }));
-      hls.on(Hls.Events.ERROR, (_event, data) => { player.errors[data.details] = (player.errors[data.details] || 0) + 1; if (data.fatal) { player.fatalErrors++; status("Playback stopped after a fatal error. Download a receipt to retain the measurements."); } });
+      hls.on(Hls.Events.ERROR, (_event, data) => { push(player.errorRecords, { atMs: elapsed(), details: data.details, fatal: Boolean(data.fatal), type: data.type, reason: String(data.reason ?? "").slice(0, 512), message: String(data.error?.message ?? "").slice(0, 512), mediaType: data.frag?.type ?? null, playlist: data.frag ? segmentMediaContext({ frag: data.frag, url: data.frag.url })?.playlist ?? null : null }, 64); player.errors[data.details] = (player.errors[data.details] || 0) + 1; if (data.fatal) { player.fatalErrors++; status("Playback stopped after a fatal error. Download a receipt to retain the measurements."); } });
       configure();
       hls.loadSource(session.manifest); hls.attachMedia(video);
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -134,7 +174,12 @@ byId("settings").addEventListener("submit", (event) => {
     video.play().catch(() => status("Press play on the video to begin."));
   } else configure();
 });
-byId("quality").addEventListener("change", () => { if (hls) hls.nextLevel = Number(byId("quality").value); });
+byId("reset-allowance")?.addEventListener("click", async () => {
+  stopSwarm(); byId("upload").checked = false;
+  await uploadBudget.reset(Number(byId("allowance").value));
+  if (startRequestedAt !== null) configure(); render();
+});
+byId("quality").addEventListener("change", () => { if (hls) { const level = Number(byId("quality").value); if (player.firstPlayingAtMs === null) hls.loadLevel = level; else hls.nextLevel = level; } });
 byId("kill").addEventListener("click", () => { byId("mode").value = "off"; configure(); });
 byId("download").addEventListener("click", () => {
   const url = URL.createObjectURL(new Blob([`${JSON.stringify(report(), null, 2)}\n`], { type: "application/json" }));
@@ -156,14 +201,16 @@ async function refreshPolicy() {
     if (!currentResponse.ok) throw new Error("Session unavailable.");
     const current = await currentResponse.json();
     if (current.v !== 1 || typeof current.swarmId !== "string" || !current.streamEvent || !Array.isArray(current.relays) || current.manifest !== session.manifest) throw new Error("Publisher session changed incompatibly.");
-    const identityChanged = current.swarmId !== session.swarmId || current.streamEvent.id !== session.streamEvent.id;
+    const identityChanged = current.swarmId !== session.swarmId || current.streamEvent.id !== session.streamEvent.id || current.admission?.epoch !== session.admission?.epoch;
     const changed = policyUnavailable || next.mode !== deliveryPolicy.mode || identityChanged;
-    if (identityChanged) { stopSwarm(); session = current; }
+    if (identityChanged) { stopSwarm(); admissionCredential = null; session = current; }
+    const renewAdmission = Boolean(current.admission && startRequestedAt !== null && byId("mode").value !== "off" && next.mode !== "off" && (!admissionCredential || admissionCredential.expiresAt * 1000 - Date.now() <= 20000));
+    if (renewAdmission) await obtainAdmission();
     deliveryPolicy = next; policyUnavailable = false;
     if (next.mode === "off") byId("upload").checked = false;
     byId("telemetry").disabled = !next.telemetry;
     if (!next.telemetry) byId("telemetry").checked = false;
-    if (changed && (swarm || identityChanged && startRequestedAt !== null)) configure();
+    if ((changed || renewAdmission) && (swarm || startRequestedAt !== null)) configure();
     byId("policy-status").textContent = next.mode === null ? "Viewer chooses delivery mode." : `Operator delivery policy: ${next.mode === "off" ? "origin only" : next.mode}.`;
   } catch {
     policyUnavailable = true;
@@ -178,7 +225,7 @@ async function sendReport() {
   if (!byId("telemetry").checked || !deliveryPolicy.telemetry || startRequestedAt === null) return;
   const total = totals();
   const values = { durationMs: elapsed(), peerBytes: total.peerFirstBytes, uploadedBytes: total.uploaded, originMediaRequests: network.originMediaRequests, originMediaBytes: network.encodedOriginMediaBytes, stalls: player.stalls, stallMs: Math.round(player.stallMs), fatalErrors: player.fatalErrors };
-  try { await fetch("/reports", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(values) }); } catch { /* Playback does not depend on reporting. */ }
+  try { await fetch("/reports", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ v: 1, reportId, sequence: ++reportSequence, values }) }); } catch { /* Playback does not depend on reporting. */ }
 }
 setInterval(refreshPolicy, 2000);
 setInterval(sendReport, 15000);
@@ -186,6 +233,6 @@ setInterval(render, 1000);
 setInterval(() => { if (swarm) push(snapshots, { atMs: elapsed(), metrics: swarm.metrics() }, 60); }, 5000);
 try {
   const response = await fetch("/session.json"); if (!response.ok) throw new Error("Session unavailable.");
-  session = await response.json(); await refreshPolicy(); byId("start").disabled = false;
+  session = await response.json(); byId("allowance").value = String(uploadBudget.snapshot().limit); await refreshPolicy(); byId("start").disabled = false;
   status(isSecureContext ? "Ready · choose a delivery mode and start playback." : "This address needs HTTPS for peer delivery. Origin playback is available.");
 } catch { status("The publisher is unavailable. Reload after it has started."); }

@@ -3,9 +3,9 @@
 > Experimental peer-assisted HLS video delivery with WebRTC data channels,
 > Nostr relay rendezvous, author-signed segment commitments and an hls.js
 > loader. A separate native Node path uses HyperDHT and Noise. MIT licensed;
-> v0.2.0 is a GitHub prerelease, not a production engine or an npm-registry release.
+> v0.1.0 is published; source package 0.2.0 remains a production candidate.
 
-The canonical repository is https://github.com/forgesworn/relayswarm. Node 22+
+The canonical repository is https://github.com/forgesworn/relayswarm. Node 22.13+
 is required; CI uses Node 24. Public distribution includes an installable
 GitHub tarball, a standalone browser ESM bundle and SHA-256 checksums. The
 source demo runs with `npm run demo`; synthetic media needs ffmpeg/libx264.
@@ -13,15 +13,15 @@ source demo runs with `npm run demo`; synthetic media needs ffmpeg/libx264.
 The original WebRTC CLI signs plaintext SDP and uses a digest supplied by its
 seeder. The browser loader and shared session wire version 3 use pairwise
 NIP-44-encrypted signals; the native path encrypts dial authorisation and uses
-Noise for transfer. Package version 0.2.0, session version 3, commitment schema
-1 and metrics version 2 are distinct. Related Swift RelaySwarmKit documentation
+Noise for transfer. Package version 0.2.0, session version 3, commitment schemas
+1/2 and metrics version 2 are distinct. Related Swift RelaySwarmKit documentation
 describes wire version 2; current interoperability is unverified.
 
 Browser modes are off (origin-only), shadow (origin playback plus extra sampled
 peer traffic) and peer-first (verified peer bytes within a deadline, then normal
 HTTP fallback). Uploading defaults to off and requires viewer opt-in. Peer-first
 also requires a trusted signed kind-30311 event with the experimental
-redistribution tag and a commitment signed by that same author. The host selects
+redistribution tag and an author or scoped-delegate signed commitment. The host selects
 the stream, relays and ICE policy. The trusted-event adapter in v0.2.0 queries
 through a bounded host callback with explicit author/origin/relay allowlists;
 it does not adopt event-selected services or establish publisher trust.
@@ -31,14 +31,16 @@ The publisher keeps its key in Node and signs only matching local full-segment
 playlist contexts, including exact byte ranges and discontinuities. The player
 has upload limits, an origin-only kill switch and locally downloaded receipts.
 Viewer keys are ephemeral; participation is pseudonymous, and peers can learn network
-addresses. Origin-only avoids swarm participation. No TURN/super-peer strategy,
-accepted RelaySwarm NIP, delegated signing or durable media storage is implemented.
+addresses. Origin-only avoids swarm participation. No managed TURN/super-peer service, accepted RelaySwarm NIP or durable media
+storage is supplied. Hosts can pass TURN credentials through explicit ICE policy.
 Current source optionally persists a private publisher identity, caches verified
 file hashes/signatures, limits cumulative media upload, measures peer choice and
-provides authenticated operator policy plus explicitly opted-in numeric reports.
+provides authenticated operator policy, bounded admission and durable idempotent
+opt-in numeric reports. Upload budgets persist across reloads/tabs without consent.
+Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The v0.2.0 supervised broadcast bridge creates two live HLS renditions and
 can forward H.264/AAC separately to RTMPS with explicit TLS verification.
-These additions first shipped in v0.2.0 and are absent from the immutable v0.1.0 downloads.
+These additions belong to the current candidate and are absent from v0.1.0 downloads.
 
 Desktop Chrome regressions and a short twelve-viewer loopback soak are recorded;
 they do not establish physical-phone, varied-NAT or sustained operation readiness.
@@ -47,6 +49,10 @@ upload counters measure quota consumption rather than acknowledged delivery.
 Documentation on main can include corrections after the immutable releases.
 
 ## Documentation
+
+- [Production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md): Implemented source features, trust boundaries and native fallback.
+- [Production delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md): Full implementation, publication, deployment and real-world acceptance scope.
+- [Protocol draft](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md): Session v3, commitments, delegation and independent-client compatibility evidence.
 
 - [Project overview](https://raw.githubusercontent.com/forgesworn/relayswarm/main/README.md): Scope, transport comparison, demo, release and commands.
 - [Documentation index](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md): Routes for installation, integration, security and evidence.
@@ -64,7 +70,7 @@ Documentation on main can include corrections after the immutable releases.
 ## Evidence and maintenance
 
 - [Evidence and remaining work](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md): Dated release, CI/soak measurements, distribution proof and unverified gates.
-- [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): Released v0.2.0 broadcaster pilot and earlier release history.
+- [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): Unreleased production/broadcaster work and published release history.
 - [Maintaining the docs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/MAINTAINING-DOCS.md): AI-context generation, link/freshness checks and public metadata.
 
 ## Optional

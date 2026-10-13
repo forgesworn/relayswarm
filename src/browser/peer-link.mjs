@@ -20,13 +20,17 @@ const LOW_WATER_BYTES = 256 * 1024;
 const MAX_HAVE_KEYS = 256;
 
 export class PeerLink {
-  constructor({ pubkey, pc, channel, maxSegmentBytes, onRequest, onHaveChange, onClose, maxQueuedRequests = 4, drainTimeoutMs = 3_000 }) {
+  constructor({ pubkey, pc, channel, maxSegmentBytes, onRequest, onHaveChange, onScheduleChange, onClose, maxQueuedRequests = 4, drainTimeoutMs = 3_000 }) {
     this.pubkey = pubkey;
     this.pc = pc;
     this.channel = channel;
     this.maxSegmentBytes = maxSegmentBytes;
     this.onRequest = onRequest;
     this.onHaveChange = onHaveChange;
+    this.onScheduleChange = onScheduleChange;
+    this.contribution = { serving: false, rendition: null, at: 0 };
+    this.fetching = new Map();
+    this.renditions = new Map();
     this.onClose = onClose;
     this.maxQueuedRequests = maxQueuedRequests;
     this.drainTimeoutMs = drainTimeoutMs;
@@ -79,6 +83,15 @@ export class PeerLink {
     if (add.length || del.length) this.#sendText({ t: "have", add, del });
   }
 
+  // Advisory coordination only; commitments still authenticate every payload.
+  sendContribution(serving, rendition) {
+    this.#sendText({ t: "contribution", serving, rendition });
+  }
+
+  sendFetching(key, leaseMs = 0) {
+    this.#sendText({ t: "fetching", k: key, ms: leaseMs });
+  }
+
   // Resolves with the bytes, or null when the peer does not serve them in time.
   request(key, timeoutMs, { signal, expectedSize } = {}) {
     if (this.closed || this.pending || signal?.aborted) return Promise.resolve(null);
@@ -104,6 +117,8 @@ export class PeerLink {
   close() {
     if (this.closed) return;
     this.closed = true;
+    this.fetching.clear();
+    this.renditions.clear();
     this.pending?.finish(null);
     try { this.channel.close(); } catch {}
     try { this.pc.close(); } catch {}
@@ -138,6 +153,25 @@ export class PeerLink {
     const message = JSON.parse(data);
     if (!message || typeof message !== "object") return;
     switch (message.t) {
+      case "contribution": {
+        if (typeof message.serving !== "boolean" || (message.rendition !== null && (typeof message.rendition !== "string" || message.rendition.length > 2048))) return;
+        this.contribution = { serving: message.serving, rendition: message.rendition, at: Date.now() };
+        if (!message.serving) { this.fetching.clear(); this.renditions.clear(); }
+        else if (message.rendition !== null) {
+          for (const [rendition, seen] of this.renditions) if (seen < Date.now() - 30_000) this.renditions.delete(rendition);
+          if (this.renditions.has(message.rendition) || this.renditions.size < 8) this.renditions.set(message.rendition, Date.now());
+        }
+        this.onScheduleChange?.(this);
+        return;
+      }
+      case "fetching": {
+        if (typeof message.k !== "string" || !HEX64.test(message.k) || !Number.isSafeInteger(message.ms) || message.ms < 0 || message.ms > 2000) return;
+        for (const [key, expires] of this.fetching) if (expires <= Date.now()) this.fetching.delete(key);
+        if (message.ms === 0) this.fetching.delete(message.k);
+        else if (this.contribution.serving && (this.fetching.has(message.k) || this.fetching.size < 24)) this.fetching.set(message.k, Date.now() + message.ms);
+        this.onScheduleChange?.(this);
+        return;
+      }
       case "have": return this.#onHave(message);
       case "want": return this.#onWant(message);
       case "meta": {
@@ -197,7 +231,7 @@ export class PeerLink {
   }
 
   async #serve(id, key) {
-    const bytes = this.closed ? null : this.onRequest?.(this, key);
+    const bytes = this.closed ? null : await this.onRequest?.(this, key);
     if (!bytes) return void this.#sendText({ t: "none", id });
     if (!this.#sendText({ t: "meta", id, size: bytes.byteLength })) return;
     for (let offset = 0; offset < bytes.byteLength; offset += CHUNK_BYTES) {

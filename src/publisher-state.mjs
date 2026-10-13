@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { lstat, open, realpath, link, unlink } from "node:fs/promises";
 import { dirname, basename, resolve, join } from "node:path";
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";
-import { validStreamAuthorisation } from "./browser/segment-commitment.mjs";
+import { validStreamAuthorisation, delegationContent, revocationContent, KIND_COMMITMENT_DELEGATION, KIND_COMMITMENT_REVOCATION, verifyCommitmentDelegation } from "./browser/segment-commitment.mjs";
 
 const MAX_STATE_BYTES = 32 * 1024;
 const digest = (value) => createHash("sha256").update(value).digest("hex");
@@ -24,12 +24,35 @@ export function publisherStreamEvent(secretKey, manifestPath, now = Date.now) {
   return finalizeEvent({ kind: 30311, created_at: Math.floor(now() / 1000), tags: [["d", digest(manifestPath).slice(0, 24)], ["relayswarm", "redistribute", "1"]], content: "RelaySwarm experimental publisher" }, secretKey);
 }
 
-export function validatePublisherStreamEvent(event, secretKey, manifestPath) {
-  if (!validStreamAuthorisation(event) || event.pubkey !== getPublicKey(secretKey)
+export function validatePublisherStreamEvent(event, secretKey, manifestPath, { allowExternalAuthor = false } = {}) {
+  if (!validStreamAuthorisation(event) || (!secretKey ? !allowExternalAuthor : event.pubkey !== getPublicKey(secretKey))
     || event.tags.filter((tag) => tag[0] === "d").length !== 1
     || event.tags.find((tag) => tag[0] === "d")?.[1] !== digest(manifestPath).slice(0, 24)) throw new Error("Publisher authorisation does not match its identity and manifest.");
   // No authorisation age limit: this signed stream identity must survive restarts.
   return structuredClone(event);
+}
+
+/** Create an author-signed, at-most-one-hour delegation. The signing key remains
+ * with the caller; publishing this event does not discover or deliver revocations. */
+export function createCommitmentDelegation({ secretKey, streamEvent, swarmId, delegatePubkey, notBefore,
+  expiresAt, renditions, mediaTypes = ["main"], allowParts = false, maxSegmentBytes = 16 * 1024 * 1024, now = Date.now } = {}) {
+  const created_at = Math.floor(now() / 1000);
+  if (!validStreamAuthorisation(streamEvent) || streamEvent.pubkey !== getPublicKey(secretKey)) throw new Error("Delegation requires the stream author's key.");
+  const event = finalizeEvent({ kind: KIND_COMMITMENT_DELEGATION, created_at, tags: [["x", swarmId], ["e", streamEvent.id]],
+    content: delegationContent({ streamEventId: streamEvent.id, swarmId, delegatePubkey, notBefore: notBefore ?? created_at,
+      expiresAt: expiresAt ?? created_at + 300, renditions, mediaTypes, allowParts, maxSegmentBytes }) }, secretKey);
+  // Validate all scopes before returning an authorisation. Future notBefore can
+  // be checked at its activation time, without changing the issuance timestamp.
+  if (!verifyCommitmentDelegation(event, { streamEvent, swarmId }, (notBefore ?? created_at) * 1000)) throw new Error("Invalid commitment delegation scope.");
+  return event;
+}
+export function createCommitmentRevocation({ secretKey, streamEvent, swarmId, delegation, now = Date.now } = {}) {
+  if (!validStreamAuthorisation(streamEvent) || streamEvent.pubkey !== getPublicKey(secretKey)
+    || !verifyCommitmentDelegation(delegation, { streamEvent, swarmId }, Math.max(delegation.created_at, JSON.parse(delegation.content).notBefore) * 1000)) throw new Error("Revocation requires a valid author delegation.");
+  const created_at = Math.floor(now() / 1000);
+  if (created_at < delegation.created_at) throw new Error("Revocation predates its delegation.");
+  return finalizeEvent({ kind: KIND_COMMITMENT_REVOCATION, created_at, tags: [["x", swarmId], ["e", delegation.id]],
+    content: revocationContent({ streamEventId: streamEvent.id, swarmId, delegationId: delegation.id }) }, secretKey);
 }
 
 function privateFile(stat) {

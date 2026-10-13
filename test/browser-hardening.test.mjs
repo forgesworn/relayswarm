@@ -52,19 +52,19 @@ class RecordedChannel extends Channel {
 
 // Exercise the real relay/session admission and PeerLink paths, with only the
 // browser connection replaced. No private swarm state is exposed to tests.
-async function linkedFixture(options = {}) {
+async function linkedFixture(options = {}, LoaderImpl = Loader) {
   const relay = await startLocalRelay();
   const connections = [], peers = [];
   class Connection extends PC { constructor() { super(); connections.push(this); } }
   const swarm = createHlsSwarm({ ...base, relays: [relay.url], RTCPeerConnectionImpl: Connection, shadowSampleRate: 0, ...options });
-  const hls = { config: { loader: Loader } };
+  const hls = { config: { loader: LoaderImpl } };
   swarm.attach(hls);
   const pool = new RelayPool([relay.url]); await pool.connect();
   await until(() => swarm.metrics().pubkey);
   const addPeer = async (channel = new RecordedChannel()) => {
     const peer = new RelaySwarmSession({ pool, swarmId: base.swarmId }); peer.start(); peers.push(peer);
     const count = connections.length, accepted = swarm.metrics().peers.offersAccepted;
-    peer.sendSignal(swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: `fixture-${count}`, payload: { sdp: "fixture-offer" } });
+    peer.sendSignal(swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: `fixture-${count}`, payload: { sdp: "fixture-offer", ...(options.admit ? { ticket: "fixture-ticket" } : {}) } });
     await until(() => connections.length > count && swarm.metrics().peers.offersAccepted > accepted);
     const event = new Event("datachannel"); event.channel = channel; connections[count].dispatchEvent(event);
     await until(() => swarm.metrics().peers.connected === peers.length);
@@ -532,4 +532,120 @@ test("session subscribes only to its own signals and cleans up partial subscript
   const partial = new RelaySwarmSession({ pool, swarmId: base.swarmId });
   assert.throws(() => partial.start(), /capacity/u);
   assert.deepEqual(closed, ["1"]); assert.equal(partial.started, false); assert.equal(handlerPresent, false);
+});
+
+
+test("fresh live-edge objects wait for a same-rendition contributor without delaying playlists", async () => {
+  const playback = peerPlaybackOptions(200), trace = [];
+  const fixture = await linkedFixture(playback.options);
+  try {
+    const peer = await fixture.addPeer(new ServingChannel(playback.bytes, 2, trace, "seeder"));
+    peer.receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:0" }));
+    const pending = fixture.load();
+    setTimeout(() => { peer.receive(JSON.stringify({ t: "fetching", k: playback.key, ms: 100 })); peer.receive(JSON.stringify({ t: "have", add: [playback.key] })); }, 30);
+    assert.deepEqual(new Uint8Array((await pending).data), playback.bytes);
+    assert.deepEqual(trace, ["seeder"]);
+    assert.equal(fixture.swarm.metrics().segments.coordinatedWaits, 1);
+    assert.equal(fixture.swarm.metrics().segments.coordinatedPeerLoads, 1);
+    assert.equal(fixture.swarm.metrics().segments.originFallbacks, 0);
+  } finally { await fixture.close(); }
+});
+
+test("later LL-HLS parts use their own playback position while retaining the HTTP reserve", async () => {
+  const playback = peerPlaybackOptions(1000), trace = [];
+  const signed = signedFixture({ key: playback.key, part: 1, sha256: createHash("sha256").update(playback.bytes).digest("hex") });
+  const fixture = await linkedFixture({ ...playback.options, swarmParts: true, streamEvent: signed.options.streamEvent, getCommitment: () => signed.event });
+  try {
+    fixture.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 13 } };
+    const peer = await fixture.addPeer(new ServingChannel(playback.bytes, 2, trace, "part-contributor"));
+    peer.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    const partContext = { ...context, frag: { ...context.frag, start: 12 }, part: { index: 1, start: 13 } };
+    await new Promise((resolve) => new fixture.hls.config.fLoader({}).load(partContext, {}, { onSuccess: resolve }));
+    assert.deepEqual(trace, ["part-contributor"]);
+    assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 1);
+    fixture.hls.media.currentTime = 11;
+    await new Promise((resolve) => new fixture.hls.config.fLoader({}).load(partContext, {}, { onSuccess: resolve }));
+    assert.equal(fixture.swarm.metrics().segments.originFallbacks, 1, "two seconds of remaining buffer are reserved for HTTP");
+    assert.deepEqual(trace, ["part-contributor"]);
+  } finally { await fixture.close(); }
+});
+
+test("measured slow HTTP raises a tuned low-latency reserve before any peer wait", async () => {
+  class SlowOrigin extends Loader {
+    load(context, config, callbacks) { setTimeout(() => super.load(context, config, callbacks), 500); }
+  }
+  const playback = peerPlaybackOptions(100), trace = [];
+  const fixture = await linkedFixture({ ...playback.options, originReserveMs: 500 }, SlowOrigin);
+  try {
+    fixture.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    await fixture.load();
+    const peer = await fixture.addPeer(new ServingChannel(playback.bytes, 2, trace, "available"));
+    peer.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    fixture.hls.media.buffered = { length: 1, start: () => 0, end: () => 0.6 };
+    await fixture.load();
+    assert.deepEqual(trace, [], "600ms of buffer exceeds the configured reserve but not measured HTTP recovery plus append reserve");
+    assert.equal(fixture.swarm.metrics().segments.originFallbacks, 2);
+    assert.ok(fixture.swarm.metrics().segments.originLatencyMedianMs >= 450);
+  } finally { await fixture.close(); }
+});
+
+test("fresh-object coordination is bounded for lying contributors and ignores unrelated ABR renditions", async () => {
+  for (const rendition of ["main:0", "main:1"]) {
+    const playback = peerPlaybackOptions(80), trace = [];
+    const fixture = await linkedFixture(playback.options);
+    try {
+      const peer = await fixture.addPeer(new ServingChannel(playback.bytes, 2, trace, "seeder"));
+      peer.receive(JSON.stringify({ t: "contribution", serving: true, rendition }));
+      const started = performance.now(); await fixture.load();
+      assert.ok(performance.now() - started < 160, "a malicious contributor cannot suppress HTTP recovery");
+      assert.equal(fixture.swarm.metrics().segments.coordinatedWaits, rendition === "main:0" ? 1 : 0);
+      assert.equal(fixture.swarm.metrics().segments.originFallbacks, 1);
+      assert.deepEqual(trace, []);
+    } finally { await fixture.close(); }
+  }
+});
+
+test("coordination frames cannot grow leases without bounds or override contribution consent", () => {
+  const channel = new RecordedChannel(), link = new PeerLink({ pubkey: "a".repeat(64), pc: new PC(), channel, maxSegmentBytes: 1024 });
+  const lease = (key, ms) => channel.receive(JSON.stringify({ t: "fetching", k: key, ms }));
+  lease("a".repeat(64), 2000);
+  assert.equal(link.fetching.size, 0, "receive-only peers cannot claim seeding");
+  channel.receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:0" }));
+  for (let i = 0; i < 50; i++) lease(i.toString(16).padStart(64, "0"), 2000);
+  assert.equal(link.fetching.size, 24);
+  lease("b".repeat(64), 2001); lease("c".repeat(64), -1);
+  assert.equal(link.fetching.size, 24);
+  channel.receive(JSON.stringify({ t: "contribution", serving: false, rendition: "main:0" }));
+  assert.equal(link.fetching.size, 0);
+  link.close();
+});
+
+test("persistent upload reservation refuses safely and concurrent reservations cannot overspend", async () => {
+  let reserved = 0;
+  const fixture = await linkedFixture({ serve: true, reserveUploadBytes: async (size) => { await sleep(15); if (reserved + size > 32) return false; reserved += size; return true; } });
+  try {
+    const peers = [await fixture.addPeer(), await fixture.addPeer()];
+    await fixture.load(); await until(() => fixture.swarm.metrics().bytes.held === 32);
+    const key = createHash("sha256").update(`${base.swarmId}\n/seg.ts`).digest("hex");
+    for (const peer of peers) peer.receive(JSON.stringify({ t: "want", id: 1, k: key }));
+    await until(() => peers.every((peer) => peer.sent.some((frame) => frame.t === "eof" || frame.t === "none")));
+    assert.equal(reserved, 32);
+    assert.equal(peers.flatMap((peer) => peer.sent).filter((frame) => frame.t === "eof").length, 1);
+    assert.equal(fixture.swarm.metrics().bytes.uploaded, 32);
+  } finally { await fixture.close(); }
+});
+
+
+test("a revoked connected peer loses media access before any new accepted upload", async () => {
+  let admitted = true;
+  const fixture = await linkedFixture({ serve: true, admit: async () => admitted });
+  try {
+    const peer = await fixture.addPeer(); await fixture.load();
+    await until(() => fixture.swarm.metrics().bytes.held === 32);
+    const key = peer.sent.find((frame) => frame.t === "have" && frame.add?.length).add[0];
+    admitted = false; peer.receive(JSON.stringify({ t: "want", id: 1, k: key }));
+    await until(() => peer.readyState === "closed");
+    assert.equal(fixture.swarm.metrics().bytes.uploaded, 0);
+    assert.equal(peer.sent.filter((frame) => frame.t === "meta").length, 0);
+  } finally { await fixture.close(); }
 });

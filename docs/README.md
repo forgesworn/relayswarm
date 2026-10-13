@@ -1,8 +1,8 @@
 # RelaySwarm documentation
 
 RelaySwarm is an experimental peer-assisted HLS library and transfer proof of
-concept. The [v0.2.0 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0)
-includes the broadcaster pilot, operator controls and documentation tooling.
+concept. The [published v0.1.0 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0)
+is separate from the current 0.2.0 source work on broadcaster and production features.
 The repository and GitHub release are the public distribution surfaces; the
 npm registry is unpublished. The operated
 [HTTPS pilot](https://relayswarm.forgesworn.dev) is a controlled trial, with
@@ -14,6 +14,8 @@ its measured scope and acceptance gaps in [Status](STATUS.md).
 | Install the package, browser bundle or source demo | [Getting started](GETTING-STARTED.md) |
 | Attach the loader, configure consent/admission, read metrics | [hls.js integration](../INTEGRATION.md) |
 | Find module exports and publisher/session methods | [API reference](API.md) |
+| Review current production implementation and acceptance | [Production features](PRODUCTION-FEATURES.md), [delivery checklist](PRODUCTION-READINESS.md) |
+| Implement compatible session and commitment messages | [Protocol draft](NIP-DRAFT.md) |
 | Run a trial on separate devices and interpret receipts | [Publisher/player field test](FIELD-TEST.md) |
 | Ingest a live broadcast or add optional RTMPS forwarding | [Broadcasting](BROADCASTING.md) |
 | Operate private state, remote policy and opt-in reports | [Operations](OPERATIONS.md) |

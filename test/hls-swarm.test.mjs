@@ -336,3 +336,14 @@ test("a gated viewer dials only peers whose ticket the host page admits", async 
     await relay.close();
   }
 });
+
+
+test("ABR-sized objects avoid measured peers that cannot meet the playback deadline", () => {
+  const policy = new PeerSelection();
+  const candidate = (pubkey) => ({ pubkey, have: new Set([KEY]), busy: false, closed: false });
+  const smallFast = candidate("small-fast"), largeFast = candidate("large-fast"), cold = candidate("cold");
+  policy.record(smallFast, 10, 1000); policy.record(largeFast, 40, 100_000);
+  assert.equal(policy.select([smallFast, largeFast], KEY, new Set(), 100_000, 100), largeFast);
+  assert.equal(policy.select([smallFast], KEY, new Set(), 100_000, 100), null);
+  assert.equal(policy.select([cold, largeFast], KEY, new Set(), 100_000, 90), largeFast, "short playback budgets prefer observed delivery over exploration");
+});

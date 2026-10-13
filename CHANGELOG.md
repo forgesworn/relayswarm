@@ -2,11 +2,22 @@
 
 ## Unreleased
 
-No unreleased changes.
+The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
-## v0.2.0 — 12 October 2026
+- Added fresh live-media coordination, measured fallback reserves and actual
+  fMP4/adaptive, audio, AES-128, mixed-codec and low-latency-part journeys.
+- Added exact schema 2 media commitments, scoped signing delegation/revocation
+  and linked signed NIP-53 advertisements without changing stable authorisation.
+- Added bounded admission, persistent cross-tab upload budgets, idempotent
+  durable reports and two-lease worker supervision with tested crash cleanup.
+- Added an installed native client with verified HTTP fallback and an
+  independent Swift adapter/conformance fixture; stock Kit compatibility is open.
+- Fixed Windows hash-cache deduplication, malformed relay-filter crashes,
+  discovery eviction, worker descendant cleanup and pending-write queue bounds.
 
-[Experimental broadcaster-pilot release](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0).
+## 0.2.0 source candidate — broadcaster work on 12 October 2026
+
+This source work has not yet been published as a release.
 The earlier intermittent hosted MSE failure and physical-device, separate-network,
 sustained-operation and external-platform acceptance remain open.
 

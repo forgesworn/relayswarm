@@ -1,6 +1,6 @@
 # RelaySwarm full documentation context
 
-> Generated from maintained Markdown. Package 0.2.0; experimental GitHub prerelease.
+> Generated from maintained Markdown. Source package 0.2.0; release and deployment evidence is recorded in docs/STATUS.md.
 
 Canonical repository: https://github.com/forgesworn/relayswarm. Main-branch documentation can correct released documentation. Historical spike evidence is indexed separately in llms.txt.
 
@@ -16,10 +16,10 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.2.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0),
-MIT licensed, Node 22+; CI uses Node 24. This is a proof of concept with a
-bounded hls.js loader and a runnable publisher/player, not a production engine.
-The npm registry is unpublished.
+**Status:** [v0.1.0 is the published GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0).
+The 0.2.0 source candidate includes further production feature work; its
+[delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) remain open. MIT licensed,
+Node 22.13+; CI uses Node 24. The npm registry is unpublished.
 
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Installation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) ·
 [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md) · [API reference](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) ·
@@ -31,7 +31,7 @@ The npm registry is unpublished.
 Install ffmpeg with libx264 for synthetic media, then:
 
 ```sh
-git clone --branch v0.2.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.1.0 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -53,12 +53,14 @@ See [the field-test guide](https://raw.githubusercontent.com/forgesworn/relayswa
 HTTPS access from separate devices and receipt interpretation. Synthetic
 media requires ffmpeg; serving an existing directory does not.
 
-The v0.2.0 release also includes a **broadcaster pilot**: live
+The current source candidate includes a **broadcaster**: live
 RTMP-to-HLS ingest, persistent publisher identity, cumulative viewer upload
 allowances, measured peer choice and authenticated operator controls.
 Optional RTMPS forwarding can send the source to an external platform
 independently of RelaySwarm delivery. These features are absent from the
-immutable v0.1.0 downloads. See [broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md),
+immutable v0.1.0 downloads. The [production feature guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md)
+also describes wider media, delegation, admission, durable budgets/reports and
+native fallback. See [broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md),
 [operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md) and [container setup](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md).
 
 ## Install the library
@@ -67,7 +69,7 @@ The release supplies an installable tarball, a standalone browser ESM bundle
 and SHA-256 checksums:
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/relayswarm-0.2.0.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.1.0/relayswarm-0.1.0.tgz
 ```
 
 ```js
@@ -76,7 +78,7 @@ import { createHlsPublisher } from 'relayswarm/hls-publisher'; // Node only
 ```
 
 The host supplies hls.js. Install it separately for a host-page integration;
-the source demo already lists it as a development dependency. The release
+the source demo includes it as a runtime dependency. The release
 bundle includes the browser loader's runtime dependencies. Pinned Git
 installation and bundle usage are in [Getting started](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md).
 
@@ -100,7 +102,7 @@ The browser loader has three modes:
 
 Peer-first requires a trusted signed kind-30311 stream event with the
 experimental `["relayswarm", "redistribute", "1"]` tag and an expiring
-commitment signed by that same author. Delegated signers are not supported.
+commitment signed by that author or a host-trusted, author-scoped delegate.
 Kinds 24170/24171/24172 and this authorisation tag are experimental assignments,
 not an accepted RelaySwarm NIP or a stable interoperability guarantee.
 
@@ -174,6 +176,8 @@ on physical phones or a broad range of internet networks.
 | `npm run test:broadcast` | Real ingest/reconnect/forwarding plus control guards; FFmpeg/OpenSSL |
 | `npm run test:broadcast:browser` | Real-time two-quality Chrome playback; installed router and FFmpeg |
 | `npm run test:operator` | Actual Chrome allowance, remote policy and reporting controls |
+| `npm run test:media-browser` | Actual fMP4/ABR, audio/AES/mixed-codec and low-latency-part Chrome journeys |
+| `npm run native:fetch -- --help` | Installed native client with verified HTTP fallback |
 | `npm run test:native` | Local relay and local HyperDHT bootstrap; no external network |
 | `npm run test:playback` | Two-rendition real Chrome regression; Chrome and ffmpeg |
 | `npm run test:browser -- --mode shadow` | Live HLS Chrome harness; Chrome and ffmpeg |
@@ -198,14 +202,16 @@ separate requirements.
 
 The browser defaults to Google's public STUN server unless the host supplies
 `iceServers`; the native path uses HyperDHT bootstrap/routing nodes instead.
-No TURN or super-peer path is implemented. For browser HLS, blocking peers or
+No managed TURN or super-peer service is supplied. Hosts can pass TURN ICE
+credentials through `iceServers`. For browser HLS, blocking peers or
 relays leaves the normal origin loader as fallback. The native CLI reports
-failure; its host must supply fallback. The swarm provides neither durable
+failure; the installed native client adds verified HTTP fallback. The swarm provides neither durable
 storage nor availability after every source disappears.
 
 Still outstanding: physical-phone and varied-NAT trials, sustained operation,
-broad adaptive bitrate scheduling, fMP4 playback coverage, a full Sybil suite,
-delegated commitment keys, an accepted NIP and independent-client interoperability.
+broad internet scheduling/cost evidence, a full Sybil suite, an accepted NIP
+and released independent-client interoperability. Actual fMP4/adaptive-quality
+and wider-media fixtures are recorded separately from physical acceptance.
 See [Threat model](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/THREAT-MODEL.md) and [the field gates](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md).
 
 ## Documentation and AI readers
@@ -215,9 +221,10 @@ The canonical public repository is
 [`llms.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms.txt)
 is a short index with direct Markdown links;
 [`llms-full.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms-full.txt)
-is generated from the maintained guides. Released code is pinned at `v0.2.0`;
+is generated from the maintained guides. Published code is pinned at `v0.1.0`;
 documentation on `main` can include later corrections. [Maintaining the docs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/MAINTAINING-DOCS.md)
-explains regeneration and publication checks. [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md) records
+explains regeneration and publication checks. The release assets remain v0.1.0
+until a new release is actually published. [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md) records
 release and documentation changes.
 
 [MIT licence](https://raw.githubusercontent.com/forgesworn/relayswarm/main/LICENSE).
@@ -237,10 +244,13 @@ comes from the origin, and the swarm only measures what peer delivery would
 have achieved. That is the mode to deploy first.
 
 The module is browser ESM with a direct runtime dependency on `nostr-tools`.
-The [v0.2.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0)
+The published [v0.1.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0)
 supplies an installable tarball and a standalone bundle containing the browser
 runtime dependencies. The host supplies hls.js. The npm registry is unpublished;
 [Getting started](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) gives exact asset and pinned-Git commands.
+The current 0.2.0 source adds the
+[production feature work](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md); those additions are
+absent from v0.1.0 assets and retain separate delivery/acceptance gates.
 
 The host selects a trusted stream event, shared swarm id, relay policy and ICE
 servers. This module does not perform Nostr stream discovery or automatically
@@ -303,12 +313,14 @@ connection and relay socket, drops held segments and emits one final
 | `maxUploadPeers` | `4` | Distinct peers served in any 30 s. |
 | `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. |
 | `maxUploadBytesPerSession` | unlimited | Optional non-negative safe integer, including zero. Reserves full accepted media payloads; interrupted transfers do not refund the allowance. |
+| `reserveUploadBytes` | none | Optional async `(bytes, {signal}) => boolean` host reservation before serving; refusal/error/timeout stops the send. Use for persistent cross-tab budgets. |
 | `serveOnCellular` | `false` | With `false`, detected cellular or `saveData` connections neither upload nor fetch peer media. Detection is advisory and does not identify every metered connection. |
 | `serve` | `false` | Set `true` only after the viewer opts into uploading. With `false`, the viewer is receive-only: it takes from peers but never uploads or advertises what it holds. Use it where the connection type cannot be read (Safari), so a phone on cellular is never asked to upload. |
 | `ticket` | none | An opaque string (up to 2 KB) this viewer presents in its presence and in every offer and answer, typically a short-lived credential the origin signed for this viewer's swarm key. |
 | `admit` | none | `(pubkey, ticket) => boolean \| Promise<boolean>`. With it set, a viewer never dials, answers or follows a referral to a peer it has not admitted, so its address (carried in the SDP) only reaches ticket holders. The host is called again before each dial and SDP publication, including retries and referrals; it must check expiry. A third argument provides an abort `signal`. At most 16 checks run concurrently and each has a 3 s deadline. |
 | `shadowSampleRate` | `0.25` | Share of fragments raced. |
 | `streamEvent` / `getCommitment` | required for peer-first | Signed kind-30311 stream event and `(context, { signal }) => signedCommitment`. See below. |
+| `delegation` / `revokedDelegationIds` / `delegationRevocations` | none / empty | Explicit author-signed scope and current host revocation view for delegated commitments. |
 | `maxConcurrentRaces` | `24` | Maximum retained shadow races. |
 | `admissionTimeoutMs` | `3000` | Deadline for a host admission check. |
 | `swarmParts` | `false` | Include low-latency HLS parts. Parts are small; leave off. |
@@ -389,16 +401,19 @@ connection data or acknowledged delivery.
 The session allowance is additive within metrics version 2. Exhaustion
 withdraws media availability and stops serving while receiving remains
 available. The library counts one swarm instance; a host recreating instances
-must pass the remaining page allowance and retain accepted totals. The demo
-does this across Apply, origin-only, rejoin and publisher refresh. Reloading
-the whole page starts a new allowance.
+must retain accepted totals. The demo uses an origin-wide Web Lock and
+storage reservation across Apply, rejoin, publisher refresh, reloads and tabs.
+Consent is never persisted. Storage failure disables uploading; an explicit
+viewer reset or increase can change the quota.
 
 Peer-first ranks eligible advertised media by measured completion time,
 payload rate and failure history. Healthy measured peers take priority over
 fast refusals; cold peers receive bounded exploration. A known delivery gets
 headroom within the original peer deadline, rather than an equal share of it.
-Attempts remain serial, with at most three peers and normal origin fallback.
-This is a bounded scheduler, not proof of optimal ABR or internet savings.
+Attempts remain serial and capped by `maxPeers` and the original deadline.
+Fresh-origin coordination is bounded by safe buffered playback and measured
+HTTP fallback time. hls.js owns quality selection. These mechanisms do not
+prove optimal internet scheduling or net savings.
 
 ## Authenticated peer-first loading
 
@@ -428,7 +443,7 @@ redistribution. These assignments are a RelaySwarm contract, not an accepted
 NIP or an interoperability claim.
 
 The commitment is a Nostr event of experimental kind 24172, signed by the
-same author, tagged `x` with the swarm id and `e` with the exact stream event
+same author or a trusted scoped delegate, tagged `x` with the swarm id and `e` with the exact stream event
 id. Its content is the exact output of `commitmentContent(fields)` exported
 by `relayswarm/segment-commitment`. Fixed field order and the
 `relayswarm-segment-v1` domain bind the signature to this use:
@@ -484,9 +499,9 @@ decide its own mode.
 - **Limited peer-first scheduling.** Each load asks one available peer at a
   time within a fixed deadline. Origin seeders can contribute substantially
   without receiving any peer-first segments themselves; per-viewer benefits
-  are uneven. Advanced ABR-aware scheduling, delegated
-  signing, independent-client interop and real mobile/NAT measurements remain
-  outstanding. There is no production-readiness claim.
+  are uneven. Fresh media coordination and measured deadlines are implemented;
+  internet-scale scheduling, released independent-client interop and physical
+  mobile/NAT measurements remain open. See the production delivery checklist.
 - **Bounded peer resources.** A link queues at most four uploads, rejects
   empty or excessive chunks and has a 3 s backpressure deadline. These bounds
   limit particular attacks; they do not prove resistance to every Sybil or
@@ -503,8 +518,9 @@ decide its own mode.
   is happening, and `segments.firstPeerSegmentAtMs` says how long a viewer
   waited before the swarm was any use to it.
 - **Hard NATs.** Symmetric NAT and some VPN egresses will not connect with
-  STUN alone, and no TURN or super-peer path exists yet. Those viewers simply
-  play from the origin.
+  STUN alone. A host can supply TURN credentials through `iceServers`; no
+  managed TURN or super-peer service is supplied. When peer connection fails,
+  viewers play from the origin.
 - **Relays.** Presence is one event per viewer per 20 s plus two events per
   connection. Point at a relay you control; a public relay may rate-limit.
   Sessions subscribe to swarm-wide presence and only their own recipient-tagged
@@ -519,11 +535,22 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 ## Unreleased
 
-No unreleased changes.
+The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
-## v0.2.0 — 12 October 2026
+- Added fresh live-media coordination, measured fallback reserves and actual
+  fMP4/adaptive, audio, AES-128, mixed-codec and low-latency-part journeys.
+- Added exact schema 2 media commitments, scoped signing delegation/revocation
+  and linked signed NIP-53 advertisements without changing stable authorisation.
+- Added bounded admission, persistent cross-tab upload budgets, idempotent
+  durable reports and two-lease worker supervision with tested crash cleanup.
+- Added an installed native client with verified HTTP fallback and an
+  independent Swift adapter/conformance fixture; stock Kit compatibility is open.
+- Fixed Windows hash-cache deduplication, malformed relay-filter crashes,
+  discovery eviction, worker descendant cleanup and pending-write queue bounds.
 
-[Experimental broadcaster-pilot release](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0).
+## 0.2.0 source candidate — broadcaster work on 12 October 2026
+
+This source work has not yet been published as a release.
 The earlier intermittent hosted MSE failure and physical-device, separate-network,
 sustained-operation and external-platform acceptance remain open.
 
@@ -570,8 +597,8 @@ Source: [docs/README.md](https://raw.githubusercontent.com/forgesworn/relayswarm
 # RelaySwarm documentation
 
 RelaySwarm is an experimental peer-assisted HLS library and transfer proof of
-concept. The [v0.2.0 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0)
-includes the broadcaster pilot, operator controls and documentation tooling.
+concept. The [published v0.1.0 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0)
+is separate from the current 0.2.0 source work on broadcaster and production features.
 The repository and GitHub release are the public distribution surfaces; the
 npm registry is unpublished. The operated
 [HTTPS pilot](https://relayswarm.forgesworn.dev) is a controlled trial, with
@@ -583,6 +610,8 @@ its measured scope and acceptance gaps in [Status](https://raw.githubusercontent
 | Install the package, browser bundle or source demo | [Getting started](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) |
 | Attach the loader, configure consent/admission, read metrics | [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md) |
 | Find module exports and publisher/session methods | [API reference](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) |
+| Review current production implementation and acceptance | [Production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md), [delivery checklist](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) |
+| Implement compatible session and commitment messages | [Protocol draft](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md) |
 | Run a trial on separate devices and interpret receipts | [Publisher/player field test](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md) |
 | Ingest a live broadcast or add optional RTMPS forwarding | [Broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md) |
 | Operate private state, remote policy and opt-in reports | [Operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md) |
@@ -611,14 +640,14 @@ Source: [docs/GETTING-STARTED.md](https://raw.githubusercontent.com/forgesworn/r
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [API](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) · [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md)
 
 The supported release is an experimental
-[v0.2.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0).
+[v0.1.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0).
 Node 22+ is required; CI runs Node 24. `npm install relayswarm` is not the
 documented distribution path: the npm registry is unpublished.
 
 ## Install for a host application
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/relayswarm-0.2.0.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.1.0/relayswarm-0.1.0.tgz
 npm install hls.js
 ```
 
@@ -637,17 +666,17 @@ this hls.js loader.
 A Git dependency can also be pinned to the immutable release tag:
 
 ```sh
-npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.2.0'
+npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.1.0'
 ```
 
 ## Use the standalone browser bundle
 
 Download
-[`relayswarm-hls-swarm-0.2.0.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/relayswarm-hls-swarm-0.2.0.mjs)
+[`relayswarm-hls-swarm-0.1.0.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.1.0/relayswarm-hls-swarm-0.1.0.mjs)
 and serve it from your own application:
 
 ```js
-import { createHlsSwarm } from './relayswarm-hls-swarm-0.2.0.mjs';
+import { createHlsSwarm } from './relayswarm-hls-swarm-0.1.0.mjs';
 ```
 
 The bundle contains the loader's runtime dependencies; hls.js remains the
@@ -655,7 +684,7 @@ host's dependency. Prefer vendoring the verified file to relying on GitHub
 release-download URLs as a JavaScript CDN. The separate publisher helper uses
 Node filesystem/crypto APIs and does not belong in a browser bundle.
 
-The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/SHA256SUMS)
+The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.1.0/SHA256SUMS)
 covers both assets. Download all three into one directory and verify:
 
 ```sh
@@ -665,7 +694,7 @@ shasum -a 256 -c SHA256SUMS
 ## Run the source demo
 
 ```sh
-git clone --branch v0.2.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.1.0 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -678,11 +707,11 @@ libx264. Existing media does not require ffmpeg:
 npm run demo -- --media-dir /path/to/hls --manifest master.m3u8
 ```
 
-Keep uploading off until a viewer opts in. The demo has no participant admission
-service and is intended for controlled trials. See [FIELD-TEST.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md)
+Keep uploading off until a viewer opts in. The published demo is intended for
+controlled trials; current source adds bounded ticket admission. See [FIELD-TEST.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md)
 for supported playlist features, TLS/reverse-proxy setup, relay/ICE choices and
-baseline/swarm receipts. The release includes the broadcaster workflow and
-documentation tooling. See [Broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md) for live input and
+baseline/swarm receipts. Current source adds the broadcaster workflow; it is
+absent from v0.1.0. See [Broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md) for live input and
 optional independent RTMPS forwarding.
 
 ## Run the transfer proofs
@@ -708,11 +737,39 @@ See [Native transport](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 | Synthetic demo fails to start | `ffmpeg -version`; build must include libx264, or supply existing media |
 | Remote page remains origin-only | Use device-trusted HTTPS; plain LAN HTTP lacks browser WebCrypto |
 | No peer-first fragments | Opted-in seeder availability, shared swarm/context, trusted signed event and a working commitment endpoint; startup uses origin |
-| No direct connection across networks | Relay/ICE policy and NAT reachability; TURN and super-peers are not implemented |
+| No direct connection across networks | Relay/ICE policy and NAT reachability; hosts may supply TURN credentials, but managed TURN and super-peers are absent |
 | `metrics().mode` is `off` | Inspect `disabledReason`; see integration options and validation |
 | Public-relay test fails | Re-run before treating policy/availability changes as a code regression |
 
 Current evidence and remaining device/network gates are in [STATUS.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md).
+
+## Current production source candidate
+
+The published commands above install v0.1.0. The current 0.2.0 candidate is
+tracked on [PR 8](https://github.com/forgesworn/relayswarm/pull/8); its
+[production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md) and
+[delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) have separate evidence.
+For its source preview, use the feature branch (a mutable development reference):
+
+```sh
+git clone --branch feat/broadcaster-pilot --depth 1 https://github.com/forgesworn/relayswarm.git
+cd relayswarm
+npm ci
+npm run demo
+```
+
+This source requires Node 22.13+ and adds the installed native executable,
+verified HTTP fallback and wider-media tests:
+
+```sh
+npm run native:fetch -- --help
+npm run test:media-browser
+npm run test:interop
+```
+
+The Swift interoperability fixture requires macOS arm64 and a GitHub token
+with read access to the pinned public dependency. It proves the local v3
+adapter; the released unchanged Swift client remains incompatible.
 
 ---
 
@@ -723,10 +780,9 @@ Source: [docs/API.md](https://raw.githubusercontent.com/forgesworn/relayswarm/ma
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Installation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) ·
 [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md)
 
-This describes the experimental v0.2.0 release, including the broadcaster
-pilot. The immutable v0.1.0 assets do not include the new publisher
-state, discovery or broadcast entry points. Package version `0.2.0`,
-session wire version `3`, segment-commitment schema `1` and metrics snapshot
+This describes the current 0.2.0 source candidate. The published v0.1.0
+assets do not include the newer production feature work. Package version `0.2.0`,
+session wire version `3`, segment-commitment schemas `1`/`2` and metrics snapshot
 version `2` are different version numbers. Source exports and protocol fields
 are not a stable interoperability promise.
 
@@ -736,11 +792,13 @@ are not a stable interoperability promise.
 |---|---|---|
 | `relayswarm` | Node or a browser bundler | `RelayPool`, `RelaySwarmSession`, `validTicket`, `RELAYSWARM_VERSION`, `KIND_PRESENCE`, `KIND_SIGNAL`, `SWARM_TAG` |
 | `relayswarm/hls-swarm` | Browser with hls.js | `createHlsSwarm`, `HLS_SWARM_METRICS_VERSION`, `rotationCandidate`, `retryAfterFor`, `readRefusal` |
-| `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `validStreamAuthorisation`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT` |
+| `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `delegationContent`, `revocationContent`, `validStreamAuthorisation`, `verifyCommitmentDelegation`, `segmentMediaContext`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT`, `KIND_COMMITMENT_DELEGATION`, `KIND_COMMITMENT_REVOCATION` |
 | `relayswarm/hls-publisher` | Node only | `createHlsPublisher`, `PublisherError` |
-| `relayswarm/publisher-state` | Node only | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent` |
+| `relayswarm/publisher-state` | Node only | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent`, `createCommitmentDelegation`, `createCommitmentRevocation` |
 | `relayswarm/stream-discovery` | Browser or Node | `resolveTrustedStream`, `discoverTrustedStreams`, `StreamDiscoveryError` |
 | `relayswarm/broadcast-pipeline` | Node with FFmpeg | `startBroadcastPipeline`, `broadcastEncoderArgs`, `broadcastForwardArgs` |
+| `relayswarm/native-client` | Installed Node application | `validateNativeDescriptor`, `fetchNativeObject`, `createNativeObjectSeeder` |
+| `relayswarm/publisher-advertisement` | Node or a browser bundler | `createPublisherAdvertisement`, `verifyPublisherAdvertisement` |
 | `relayswarm/package.json` | Package metadata | Name, version and declared dependencies |
 
 The wildcard export also permits source subpaths such as
@@ -789,6 +847,17 @@ const publisher = await createHlsPublisher({
 | `now` | `Date.now` | Clock returning milliseconds; useful for deterministic tests |
 | `maxConcurrent` | `8` | Simultaneous signing work, configurable from 1 to 64 |
 | `maxCacheEntries` | `512` | Entries in each bounded hash/commitment cache, configurable from 1 to 4,096 |
+| `allowEncryptedMedia` | `false` | Explicit AES-128 ciphertext publication; local keys remain HTTP-only |
+| `commitmentSecretKey` / `delegation` | author key / none | Author-scoped delegated commitment signing; an externally authored event permits operation without the author secret |
+| `revokedDelegationIds` / `delegationRevocations` | empty arrays | Host-trusted current revocation view; no automatic global lookup |
+
+`commitment` accepts `playlist`, `mediaType` and `part` for schema 2 exact
+media identity. Use `segmentMediaContext(context)` to derive the playlist,
+type and encryption from hls.js. `advertisement({manifestUrl, relays, status,
+starts, previousEvent, allowLoopback})` creates full linked live metadata;
+delegate-only publishers must supply an externally author-signed `event`.
+See [production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md) and the
+[protocol draft](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md) for scope and compatibility.
 
 The returned object contains:
 
@@ -991,6 +1060,28 @@ It is a test/CLI orchestration helper, not a long-lived native HLS scheduler.
 the supplied object identity and frame bounds; trusted digest discovery,
 durable storage and application origin fallback remain outside them.
 
+## Installed native client
+
+`fetchNativeObject(descriptor, options)` returns `{bytes, receipt}` only after
+independent size/digest verification. A version-1 descriptor requires
+`swarmId`, `sha256`, `size`, `relayUrls`, `trustedSeeders` and optionally
+`originUrl`. HTTPS/WSS are required; `allowLoopback: true` permits HTTP/WS
+solely for loopback tests. The host supplies `bootstrap`, optional cancellation,
+`peerTimeoutMs` (default 10,000), `timeoutMs` (30,000) and `maxObjectBytes`
+(at most 256 MiB). A failed peer attempt automatically uses the configured
+trusted origin; redirects and substituted content are refused.
+
+`createNativeObjectSeeder({bytes, swarmId, relayUrls, bootstrap, secretKey,
+originUrl, allowLoopback, timeoutMs})` returns `{descriptor, close}`. Serving
+requires an explicit application call. Descriptors from untrusted seeders
+cannot establish provenance. `validateNativeDescriptor` validates the same
+policy without opening network resources.
+
+The installed `relayswarm-native` executable accepts `--descriptor`,
+`--output`, repeated `--bootstrap`, `--peer-timeout` and `--allow-loopback`.
+It requires Node and atomically creates a new verified output without
+replacing an existing path. `npm run native:fetch -- --help` shows usage.
+
 ---
 
 Source: [docs/STATUS.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md)
@@ -1000,12 +1091,13 @@ Source: [docs/STATUS.md](https://raw.githubusercontent.com/forgesworn/relayswarm
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Field-test guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md) ·
 [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md)
 
-Checkpoint: 12 October 2026. The current experimental release is
-[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0), including
-the broadcaster pilot below. The previous release
-[v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0) points to
-`3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. Later documentation corrections
+Checkpoint: 13 October 2026. The published experimental release is
+[v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0), which points to
+`3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. The 0.2.0 production feature
+candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
+
+## Published v0.1.0 capabilities
 
 | Capability | Implementation and evidence | Remaining boundary |
 |---|---|---|
@@ -1052,11 +1144,50 @@ retain their own dates, topology, code and integrity assumptions.
 
 ## Outstanding gates
 
-The **experimental v0.2.0 broadcaster pilot** includes the additions below.
+The **0.2.0 source broadcaster candidate** includes the additions below.
 These changes are absent from v0.1.0's immutable release assets. Release and
 merged source do not establish production readiness.
 
-| Addition | Current local evidence | Remaining boundary |
+## Production work on 13 October
+
+The [feature guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md) describes the implemented changes;
+the [delivery checklist](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) retains their full acceptance
+scope. Local receipts record unmodified-playlist live peer delivery and actual
+fMP4 automatic quality changes under network shaping. Alternate-audio,
+authorised AES-128 and mixed HEVC/AVC journeys each have a passing current
+receipt. Low-latency playback includes verified one-second parts before and
+after warm delta playlists; the consumer received four peer parts (209,514
+bytes) with zero uploads, stalls or fatal/native errors and 3.704 s live lag
+against a 3 s target. These are desktop Chrome fixtures, not physical acceptance.
+
+New integrated adversarial tests cover malformed remote filters, admission
+and signed-presence churn, oversized frames, cancelled HTTP work, concurrent
+commitments, relay withholding and stalled native-origin bodies. Forced
+parent termination tests verify supervised worker groups are killed/reaped
+before a new broadcaster owns publication. Guardian failure leaves a durable
+fence for explicit recovery. The Windows cache race has a deterministic local
+regression; actual Windows CI must still verify the final source.
+
+A compiled Swift test adapter using pinned unchanged RelaySwarmKit components
+completed an encrypted session and a verified 262,181-byte WebRTC transfer.
+It also checked commitments independently. The stock v2 client remains
+incompatible with v3; the [protocol draft](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md) explains this boundary.
+An adapter test does not establish compatibility of a released unchanged client.
+
+Physical Pixel preflight confirmed a Pixel 10 Pro XL on M4. Its connection was
+restored after a disconnection; no physical playback receipt exists yet. The private
+YouTube test is awaiting channel setup. The earlier hosted H.264 MSE failure,
+varied NAT, sustained audience/cost evidence and final deployment acceptance
+remain open. Initial wider-media failures and later passes are retained;
+corrected codec-fixture metadata and startup quality handling do not by
+themselves establish the cause of the earlier hosted failure.
+
+## Recorded broadcaster pilot evidence from 12 October
+
+The table and receipts below describe that earlier checkpoint; newer source
+changes and their acceptance are recorded above.
+
+| Addition | Recorded local evidence | Remaining boundary at that checkpoint |
 |---|---|---|
 | Live ingest and forwarding | Synthetic H.264/AAC over actual local RTMP/RTSP, two HLS encodes, separate forward loss/recovery, untrusted RTMPS certificate rejection | Actual OBS workstation and external platform acceptance |
 | Publisher persistence/cache | Private POSIX state, stable authorisation/swarm after orderly restart, deduplicated streamed hashes and bounded signatures | Windows ACL support; automatic recovery after unclean process termination |
@@ -1185,7 +1316,7 @@ key stays on the server. v0.1.0 release assets retain their original behaviour.
 
 ## Run locally
 
-From the [v0.2.0 source checkout](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md#run-the-source-demo) or a
+From the [current source candidate](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md#run-the-source-demo) or a
 current main checkout:
 
 ```bash
@@ -1246,19 +1377,18 @@ signing operations. It caps playlists at 256 KiB, variants at eight, fragments
 at 4,096 per variant and signed segments at 16 MiB. hls.js level order is height
 then bitrate within the supported single codec/frame-rate family.
 
-This publisher supports a single media playlist or a simple SDR master with
-local URIs and full segments, including explicit/implicit byte ranges and
-discontinuities. Encrypted media, external/query-bearing URIs, alternate audio,
-iframe playlists, partial segments, delta playlists, HDCP and mixed codec or
-frame-rate families are rejected. It is a deliberately limited example, not
-a general HLS ingest service. Init maps are served over HTTP; fMP4 playback
-has not yet been exercised by the new regression fixture.
+The current publisher supports local full segments/ranges/discontinuities,
+fMP4, alternate audio, mixed variants, complete parts and warm delta playlists.
+AES-128 ciphertext requires explicit opt-in; keys and init maps stay on HTTP.
+Remote/query assets, DRM/SAMPLE-AES, subtitles, I-frame variants and cold delta
+reconstruction remain unsupported. See [production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md)
+for exact schema 2 contexts and the scope of actual Chrome media tests.
 
 Keys are ephemeral by default and in v0.1.0's CLI. Current source optionally
 accepts `--publisher-state /private/path/publisher.json`; preserve this 0600
 file in an owner-controlled directory for a stable identity across restarts.
 Without it, restarting creates a new authorisation and swarm. Current viewers
-poll session identity and rejoin while retaining the page allowance. The demo
+poll session identity and rejoin while retaining the persistent browser allowance. The demo
 does not establish trust in external publishers.
 
 For live OBS ingest and optional independent RTMPS forwarding, use the
@@ -1283,8 +1413,9 @@ LAN address is insufficient for browser WebCrypto.
 
 Optional `--relay wss://relay.example` (repeatable, at most eight) chooses external
 relays instead of the embedded one. Optional `--stun stun:stun.example:3478`
-(repeatable) overrides STUN. No TURN or super-peer path is implemented. An
-unreachable peer should leave the viewer playing from origin.
+(repeatable) overrides STUN. The loader also accepts host-provided TURN
+credentials in `iceServers`; this demo CLI does not supply a TURN or super-peer
+service. An unreachable peer should leave the viewer playing from origin.
 
 The embedded relay is for a controlled trial: at most 64 connections, eight
 subscriptions per connection, 24 KiB frames, 80 incoming messages per 10 s per
@@ -1510,6 +1641,18 @@ Still required before choosing this for production:
 - dependency and native-binary supply-chain review;
 - a signed content manifest and a durable storage/replication policy.
 
+## Installed client and verified HTTP fallback
+
+The current source additionally supplies `relayswarm-native` and the
+`relayswarm/native-client` API. It requires an independently trusted digest,
+size, seeder allowlist and explicit endpoint policy. A bounded native attempt
+precedes HTTPS fallback; redirects, excess bytes and wrong digests are refused.
+Cancellation stops rather than starting fallback. The executable creates a
+new verified output atomically and requires installed Node. The original PoC
+journey described above retains its original behaviour. See
+[production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md#installed-native-client) and
+[API](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md#installed-native-client).
+
 ---
 
 Source: [docs/THREAT-MODEL.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/THREAT-MODEL.md)
@@ -1529,7 +1672,8 @@ browser loader and native path have different trust assumptions.
 The browser peer-first loader verifies an author-signed, canonical and
 expiring segment commitment, including stream/rendition/sequence/discontinuity/
 part and object identity. It checks the experimental publisher redistribution
-tag; delegated signers are not supported. The original CLI PoC is unchanged.
+tag; current source also permits explicitly author-scoped delegated signers.
+The original CLI PoC is unchanged.
 
 Regression tests cover request floods, empty/excessive chunks, upload stalls,
 expired admission on retries, delayed admission during shutdown, relay startup
@@ -1544,11 +1688,12 @@ listed media rather than arbitrary directory files and rejects symlink escapes.
 Its key stays on the server; current source can persist a private identity
 in an owner-controlled 0600 file. This is an example publisher,
 not a trusted-stream discovery service: a real host must still establish which
-stream author it trusts. The demo's in-memory relay and HTTP signing endpoint
-have resource bounds, but no participant admission or Sybil defence. Receipts
+stream author it trusts. The demo's relay and HTTP endpoints have resource bounds. Current source
+adds key-possession tickets and live revocation; open issuance does not prove
+unique participants or complete Sybil resistance. Receipts
 stay in the browser until downloaded; optional reporting requires viewer
 opt-in and accepts only bounded numeric summaries, without a swarm public key.
-These controls do not establish participant admission or net cost.
+These controls do not establish unique participants or net cost.
 
 These are specific tested boundaries, not completion of the adversarial suite
 below. Sybil resistance, broad NAT/mobile coverage and independent-client
@@ -1587,7 +1732,9 @@ The verifier requires fixed field order and exact canonical JSON with the
 `relayswarm-segment-v1` domain and schema version 1. It rejects altered fields,
 other signers, expired/stale events and substituted media contexts. The precise
 contract is in [INTEGRATION.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md#authenticated-peer-first-loading).
-Delegated commitment keys are a possible future design, not implemented here.
+Current source implements author-scoped expiring commitment keys and a
+host-supplied revocation view; [production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md)
+describes the trust and availability boundary.
 The host still establishes which publisher it trusts. A malicious authorised
 publisher can sign harmful bytes; cryptographic integrity is not moderation.
 
@@ -1752,8 +1899,9 @@ relay and ICE policy.
 ## Does it use STUN, TURN or super-peers?
 
 The browser loader defaults to Google's public STUN endpoint and accepts host
-`iceServers`; the demo accepts `--stun`. It implements no TURN or super-peer
-strategy. Difficult NATs can fall back to origin. Native HyperDHT uses its own
+`iceServers`; the demo accepts `--stun`. Hosts can supply TURN credentials
+through `iceServers`; no managed TURN or super-peer service is supplied.
+Difficult NATs can fall back to origin. Native HyperDHT uses its own
 bootstrap/routing infrastructure rather than STUN/TURN and has no automatic
 origin fallback in its CLI journey. See [Native transport](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NATIVE-TRANSPORT.md).
 
@@ -1769,8 +1917,8 @@ That has not been established. The separate
 [Swift project's README](https://github.com/forgesworn/relayswarm-kit) describes
 version-2 signalling; this repository uses version 3 for the shared session.
 Shared event kinds and successful NIP-44 vectors do not prove matching wire
-envelopes, native transport or signed HLS commitments. No RelaySwarm NIP is
-accepted yet.
+envelopes, native transport or signed HLS commitments. A RelaySwarm protocol draft and tested adapter exist, but no RelaySwarm NIP
+is accepted yet.
 
 ## Do the receipts measure money or data saved?
 
@@ -1796,6 +1944,14 @@ expresses the publisher's opt-in; it does not establish ownership of every
 right or settle a viewer's legal/contractual obligations. The demo should be
 used with media participants are authorised to redistribute. Host policy and
 explicit viewer consent remain application responsibilities.
+
+## What does the current production candidate add?
+
+[Production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md) covers wider HLS, scoped delegation,
+full linked stream advertisements, bounded admission, persistent browser upload
+budgets, durable idempotent reports, worker supervision and native HTTP fallback.
+[Delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) separates implementation from
+publication, physical devices, varied networks and sustained acceptance.
 
 ---
 
@@ -1922,7 +2078,7 @@ Source: [docs/BROADCASTING.md](https://raw.githubusercontent.com/forgesworn/rela
 
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md) · [Container deployment](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md) · [Evidence](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md)
 
-This guide describes the experimental v0.2.0 broadcaster workflow, persistent publisher state and operator/reporting controls. Use the [v0.2.0 source checkout or package](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md); the immutable v0.1.0 assets do not include these additions. Publication of a guide does not establish deployed playback or platform acceptance.
+This guide describes the 0.2.0 source broadcaster workflow, persistent publisher state and operator/reporting controls. Use the [current source candidate](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md); the immutable v0.1.0 assets do not include these additions. Publication of a guide does not establish deployed playback or platform acceptance.
 
 ## Local source and dependencies
 
@@ -1993,13 +2149,242 @@ The release includes native process/publication tests and actual Chrome fixtures
 
 ---
 
+Source: [docs/NIP-DRAFT.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md)
+
+# RelaySwarm experimental protocol draft
+
+This is a local specification of the implemented RelaySwarm session and browser
+object contracts. It is **not an accepted Nostr NIP**. Session wire version 3,
+commitment schemas 1 and 2, the browser object framing and native object framing
+have separate version boundaries. The original `poc.mjs` uses older plaintext
+signalling and must not be described as this encrypted contract.
+
+## Session events
+
+Every event uses NIP-01 canonical serialisation and a valid BIP-340 signature.
+The swarm identifier is exactly one `x` tag. Signal events have exactly one `p`
+recipient tag. Presence events must not contain recipient tags. Senders use
+throwaway Nostr identities; presence does not establish a trusted media author.
+
+| Contract | Implemented value |
+|----------|-------------------|
+| Presence kind | `24170` |
+| Signal kind | `24171` |
+| Session version | JSON field `v: 3` |
+| Signal encryption | Pairwise NIP-44 v2; mandatory |
+| Sender event age | At most 120 seconds old; at most 30 seconds ahead |
+| Presence JSON limit | 16 KiB UTF-8 |
+| Signal ciphertext limit | 64 KiB UTF-8 |
+| Decrypted signal limit | 8 KiB UTF-8 |
+| Relay frame limit | 1 MiB |
+
+Presence content has this shape:
+
+```json
+{"v":3,"role":"watcher","transports":[{"type":"webrtc","publicKey":"<64 lowercase hex characters>"}],"have":[],"open":true}
+```
+
+`role` and transport `type` are lowercase tokens, up to 32 characters, matching
+`[a-z0-9][a-z0-9-]*`. `transports` is required and contains at most eight entries.
+`have` is required and contains at most 32 lowercase 64-character hexadecimal
+object keys. `open` is optional and advisory. An optional opaque `ticket` is a
+non-empty string of at most 2 KiB UTF-8; admission is the host's responsibility.
+A browser WebRTC capability uses the peer's Nostr public key. A native
+`hyperdht-v1` capability uses its DHT transport public key.
+
+Signal plaintext has this shape, then the whole JSON object is NIP-44 encrypted:
+
+```json
+{"v":3,"type":"offer","transport":"webrtc","requestId":"<request identifier>","payload":{"sdp":"<complete SDP>"}}
+```
+
+`type` and `transport` use the same token rule. `requestId` is 8–64 ASCII
+characters from `[a-zA-Z0-9_-]`. `payload` is an object. Browser offers, answers
+and rejects must match the pending counterparty, transport and request ID.
+SDP appears in `payload.sdp`. Browser admission is checked before revealing an
+answer and again after asynchronous negotiation. Native `dial` and `ready`
+payloads bind the transport public key, expected SHA-256 and exact object size;
+see [Native transport](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NATIVE-TRANSPORT.md).
+
+A peer must not reinterpret a missing version or an unsupported version as
+plaintext. RelaySwarm's current session rejects version 2. The NIP-44 encryption
+version is not the RelaySwarm session version.
+
+## Browser object exchange
+
+A WebRTC data channel carries JSON text controls and binary chunks. At most one
+response is in flight in each direction. A binary chunk is at most 16 KiB.
+
+| Message | Meaning |
+|---------|---------|
+| `{"t":"have","keys":["<key>"]}` | Complete advertised key set, capped at 256 |
+| `{"t":"have","add":["<key>"],"del":[]}` | Bounded key-set update |
+| `{"t":"want","id":1,"k":"<key>"}` | Request one object |
+| `{"t":"meta","id":1,"size":262181}` | Exact response size; chunks follow |
+| Binary messages | Response bytes, serialised between `meta` and `eof` |
+| `{"t":"eof","id":1}` | Response complete |
+| `{"t":"none","id":1}` | Object unavailable or serving declined |
+
+Control text is capped at 64 KiB. Object size is limited by the host's configured
+segment cap, at most 16 MiB. `meta` cannot override the independently verified
+commitment size. Repeated headers, excessive chunks, empty chunks and response
+size overflow fail the transfer. Timeout or cancellation closes a receiving
+link, because untagged late binary chunks cannot safely be reused by another
+request. Upload queues and backpressure have bounded capacities and deadlines.
+Optional `contribution` and `fetching` controls coordinate serving and short
+fetch leases; they are advisory and never authorise media or spend upload
+allowance.
+
+An object key identifies the host's canonical media URL/range within a swarm;
+it is **not** the content digest. The local publisher uses SHA-256 over
+`swarmId + "\n" + path`, appending `#start-end` for an exclusive-end byte range.
+Hosts with CDN aliases or query-bearing URLs must define their trust policy
+explicitly. A peer's `have` claim or `meta` message never establishes provenance.
+
+## Signed media commitments
+
+Commitments use kind `24172`, one `x` swarm tag and one `e` tag naming the stable
+stream authorisation event. That event is signed by the trusted media author,
+has kind `30311`, one `d` identifier and explicit
+`["relayswarm","redistribute","1"]` consent.
+
+Schema 1 uses domain `relayswarm-segment-v1` and binds the stream event ID, swarm,
+object key, numeric rendition, sequence, discontinuity, part index or `null`,
+SHA-256, exact size and expiry. Schema 2 uses `relayswarm-segment-v2` and adds
+`playlist`, `mediaType` and `encryption`; its `rendition` is the exact playlist
+identity. This avoids treating player level indices, which codec filtering can
+renumber, as trusted media identities. Content must equal the canonical field
+order emitted by `commitmentContent` in
+[segment-commitment.mjs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/src/browser/segment-commitment.mjs).
+
+The receiver independently matches every context field. Commitments are at
+most 120 seconds old, at most 30 seconds ahead and expire within 300 seconds of
+verification. The local publisher normally signs for 60 seconds. Size is
+positive and within the host's segment cap. The actual received bytes must
+match the signed size and SHA-256 before delivery to the player.
+
+Schema 2 permits alternate audio and complete LL-HLS parts. Delta playlists
+require a bounded previously verified catalogue; a cold delta cannot establish
+omitted contexts. Init maps remain HTTP assets. Identity AES-128 requires an
+explicit publication policy and signs ciphertext plus exact key URI/IV
+metadata. Content keys stay on the HTTP path and are never peer objects.
+SAMPLE-AES, DRM, subtitle and I-frame rendition publication are unsupported.
+
+## Scoped commitment delegation
+
+Kind `24173`, domain `relayswarm-commitment-delegation-v1`, authorises one
+commitment public key under the trusted author's signature. Its canonical
+content binds `streamEventId`, `swarmId`, `delegatePubkey`, `notBefore`,
+`expiresAt`, `renditions`, `mediaTypes`, `allowParts` and `maxSegmentBytes`.
+Scopes contain at most 40 exact rendition identifiers. Delegation expires no
+later than one hour after issuance. A delegated commitment includes
+`["delegation","<delegation event ID>"]`, matches every scope restriction and
+cannot outlive the delegation.
+
+Kind `24174`, domain `relayswarm-commitment-revocation-v1`, revokes an exact
+delegation ID under the same author's signature, stream and swarm. Hosts supply
+a bounded current revocation view or explicit revoked IDs. Verifiers do not
+query relays and absence from a supplied view does not prove global absence of
+revocation. Replacing the trusted stream authorisation also invalidates scopes
+bound to its old event ID. A delegate is not authorised to sign live metadata.
+
+## Live metadata and stable authorisation
+
+The local publisher keeps the minimal commitment authorisation stable across
+restarts. A separate full NIP-53 kind `30311` advertisement uses address
+`live-<stable authorisation event ID>`, so renewing live status does not replace
+the event to which commitments and delegations bind. Its signed tags include
+`streaming`, `status`, `starts`, `expiration`, `relays`,
+`relayswarm-authorisation` and `relayswarm-swarm`. Ended advertisements include
+`ends`. The RelaySwarm-specific linking tags are experimental extensions.
+
+Advertisements expire within five minutes and require HTTPS/WSS endpoints.
+Loopback HTTP/WS requires explicit test opt-in. Discovery pins the linked
+stable authorisation using `streamAuthorisations`, checks the same author and
+host-selected swarm, and preserves the host's allowed origins, relay and ICE
+policies. Event-suggested endpoints cannot expand those policies. The latest
+ended, withdrawn or unsafe update suppresses older live metadata. The host
+must obtain current metadata; a stable signature alone does not prove that a
+stream is still live. `previousEvent` gives immediate lifecycle updates a later
+creation timestamp within the allowed clock tolerance, avoiding an addressable
+event ID tie. Standard NIP-53 fields are described in the
+[upstream draft](https://github.com/nostr-protocol/nips/blob/master/53.md).
+
+## Measured Swift interoperability boundary
+
+On 13 October 2026, `test/interop-swift.mjs` tested public RelaySwarmKit revision
+[`7eb042ee0fc0e960780c61d755a2ec50f1a8be40`](https://github.com/forgesworn/relayswarm-kit/tree/7eb042ee0fc0e960780c61d755a2ec50f1a8be40)
+with its pinned secp256k1 dependency and macOS arm64 libdatachannel binary.
+
+| Gate | Measured result |
+|------|-----------------|
+| Unmodified Kit `SwarmSignaller` ↔ RelaySwarm v3 | Incompatible in both directions |
+| Kit NIP-44/signatures ↔ JavaScript | Compatible in the exercised encrypted session |
+| Explicit Swift v3 fixture adapter ↔ JavaScript session | Encrypted presence/offer/answer journey passed |
+| Kit libdatachannel ↔ JavaScript werift/production `PeerLink` | 262,181-byte transfer in 17 chunks passed |
+| Independent Swift commitment verification | 12 schema/context/signature/expiry cases passed |
+| Corrupted bytes over the real WebRTC channel | Rejected against the signed commitment |
+| Plaintext and malformed encrypted session probes | Rejected by the fixture adapter |
+| Published Swift v3 client, physical devices, NAT variety | Not proved |
+| Kit ↔ HyperDHT native transport | Unsupported by the inspected Kit |
+
+The test adapter uses unchanged pinned toolkit crypto, relay and WebRTC
+components, but adds a separate strict v3 envelope parser and browser object
+receiver inside this repository. Its passing journey **does not establish
+compatibility of the unmodified or released Kit client**. The stock Kit uses
+presence version 2, signal version tags and top-level `type`/`sdp`, and retains a
+plaintext fallback. Current RelaySwarm accepts none of those as v3 sessions.
+
+Run `node test/interop-swift.mjs --evidence artifacts/relayswarm-swift-interop-current.json`
+on macOS arm64 with Swift and authenticated read-only `gh` access. It fetches
+exact public component sources into an owned scratch package, compiles with four
+jobs, records source hashes and results, then removes its downloads/build and
+fixture services after success. The named receipt is retained. A failed build
+keeps owned scratch for diagnosis and reuse; remove it once its evidence is
+recorded. No external repository is edited.
+
+### Concrete Kit migration proposal
+
+Changes are required in the separate RelaySwarmKit repository before claiming
+stock cross-client compatibility:
+
+1. Update `Sources/RelaySwarmSignalling/Swarm.swift` to emit/require `v:3`,
+   transport, request ID and nested payloads; require NIP-44 for every signal.
+   Remove automatic plaintext fallback from the default API. If legacy support
+   remains, expose it through a separately named opt-in API and never negotiate
+   down from v3.
+2. Extend presence with bounded transport capabilities, object keys, optional
+   upload availability and opaque host admission tickets. Apply the v3 age,
+   recipient uniqueness, payload and byte limits before dispatch.
+3. Update `Sources/RelaySwarmTransport/SwarmHost.swift` so answers preserve the
+   pending request ID and transport, with admission before disclosing SDP.
+   Supply bounded `have`/`want`/`meta`/binary/`eof` framing rather than assuming
+   arbitrary host broadcasts are authenticated HLS objects.
+4. Add an independent signed commitment module covering schemas 1 and 2,
+   current author/delegation/revocation trust, exact fragment context and byte
+   verification. Preserve receive-only/upload-consent semantics in the consuming
+   application; a verified commitment is not viewer consent to serve.
+5. Run this real interop journey against the updated public APIs, without the
+   fixture adapter, and add Swift negative tests for version downgrade,
+   misrouted/replayed events, context confusion, chunk floods and cancellation.
+   Release and pin that tested Kit revision before publishing compatibility
+   claims. HyperDHT support would be a separate transport implementation.
+
+
+The concrete [Kit review proposal](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/interop/README.md) includes an exact-source
+patch and SHA-256 manifest. Its full local SDK suite passed 25 tests with one
+public-relay test skipped. That proposal is unapplied to the external repository;
+merging/releasing it and proving a published HLS consumer remain separate gates.
+
+---
+
 Source: [docs/OPERATIONS.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md)
 
 # Pilot operator controls
 
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Broadcaster](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md) · [Container deployment](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md) · [API](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) · [Evidence](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md)
 
-These controls are included in the **experimental v0.2.0 release** and are absent from the immutable v0.1.0 assets. They support a bounded pilot; they do not establish production readiness or a hosted admission service. Public playback evidence and its limits are recorded in [Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md).
+These controls belong to the **0.2.0 source candidate** and are absent from v0.1.0 assets. The candidate adds bounded admission, durable reporting and crash supervision; final production acceptance remains open. See [production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md) and [Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md).
 
 Before the first broadcast is ready, the root returns an HTTP 200 waiting page with a three-second refresh. Other endpoints return HTTP 503 with `Retry-After: 3`, including the authenticated status route; the waiting listener exposes no session, relay or operator API. The launcher replaces it with the player on the same port when both renditions publish. Waiting-page reachability does not establish fresh media, successful decoding or a verified public deployment.
 
@@ -2015,6 +2400,8 @@ The token is never in the player page, `/session.json`, public policy or operato
 | `/operator/policy` | POST, bearer token, `application/json` | Accepts only `{"mode":null}`, `{"mode":"off"}`, `{"mode":"shadow"}` or `{"mode":"peer-first"}`; returns incremented policy revision |
 | `/delivery-policy.json` | GET, public | Mode, revision and reporting availability; no token or publisher secret |
 | `/reports` | POST, explicit server enablement and same-origin browser request | Accepts only bounded numeric measurement fields |
+| `/operator/admission` | POST, bearer token | Revokes a key or rotates the ticket epoch |
+| `/admission/challenge`, `/admission/ticket`, `/admission/verify` | POST, same-origin | Bounded key-possession challenge, short-lived ticket and live verification |
 
 Unconfigured operator controls return 503; absent/incorrect credentials return 401. Cross-site Origin/Fetch-Metadata requests are rejected. Operator bodies are capped at 2,048 bytes and reject unknown fields/invalid modes; wrong methods and content types are rejected. Authentication is not a replacement for HTTPS, host protection or restricting administrative exposure at the reverse proxy. The bearer token grants policy/status access, not media-source credentials or shell access.
 
@@ -2026,7 +2413,7 @@ The page polls policy and the publisher session every two seconds, with a single
 
 ## Upload and measurement limits
 
-The page offers 10 MB, 100 MB (default) or 1 GB of cumulative **media payload** allowance, plus a separate upload rate choice. Applying settings, using the kill switch or rejoining retains the page's consumed allowance. Each new swarm receives only the remaining budget. Accepted sends reserve their complete payload before transport; interrupted sends are not refunded. An oversized next segment is refused without consuming the smaller remaining allowance. Exact exhaustion stops serving and withdraws held availability, while receiving/playback can continue. Reloading the page starts a new page allowance; this is not an account-wide or device-wide cap. A viewer can deliberately raise the selected allowance.
+The page offers 10 MB, 100 MB (default) or 1 GB of cumulative **media payload** allowance, plus a separate upload rate choice. Web Locks and origin storage reserve payloads atomically across settings, rejoining, reloads and tabs. Interrupted sends are not refunded; oversized next segments do not spend the smaller balance. Exhaustion stops contribution while playback continues. Storage failure disables uploading. Consent is requested anew after reload; the viewer can explicitly raise or reset the allowance. It is not an account-wide or physical wire-traffic cap.
 
 The library option is `maxUploadBytesPerSession`; omission means unlimited and zero means no media uploads. Its metrics expose configured cap, remaining allowance and exhaustion. Host applications that recreate a swarm must carry their own cumulative allowance forward, as the page does. Rate limits use a token bucket with up to a two-second burst. Signalling, transport overhead, commitment fetches and shadow downloads are additional traffic; an upload media cap is not a wire-traffic limit.
 
@@ -2038,9 +2425,9 @@ Publisher metrics include signing/hashing/cache activity, concurrent work and re
 
 Reporting is **off by default**. Enable it server-side using `--telemetry` or `startDemoServer({telemetry:true})`; each viewer must then check the separate reporting opt-in. The page sends cumulative numeric snapshots every fifteen seconds after playback starts. Downloadable field receipts remain separate and are not submitted.
 
-Reports contain exactly `durationMs`, `peerBytes`, `uploadedBytes`, `originMediaRequests`, `originMediaBytes`, `stalls`, `stallMs` and `fatalErrors`, each a non-negative safe integer no greater than 10¹². Browser version, device/network labels, identities and peer IP addresses are not accepted. There is no third-party report endpoint. HTTP transport/proxy infrastructure necessarily sees request addresses; the report collector does not retain them as sample fields. Review any independent reverse-proxy access-log policy separately.
+Reports use `{v:1, reportId, sequence, values}`. The temporary page ID is 32 hex characters; sequence increases for new cumulative snapshots. Values contain exactly `durationMs`, `peerBytes`, `uploadedBytes`, `originMediaRequests`, `originMediaBytes`, `stalls`, `stallMs` and `fatalErrors`, non-negative safe integers up to 10¹². No account, browser version, device/network labels or peer IP addresses are accepted. Infrastructure still sees connection addresses; there is no third-party report endpoint.
 
-The collector permits 240 requests per ten seconds, caps each body at 2,048 bytes, requires the configured same-origin Origin and rejects cross-site Fetch Metadata. Default memory retention is at most 256 snapshots for five minutes. JavaScript options `reportCapacity` (1–4,096) and `reportTtlMs` (1,000–3,600,000) adjust those bounds. Expired entries are removed on collection/status; process restart clears memory. Reports are untrusted viewer-supplied observations. Repeated cumulative snapshots are **not deduplicated** and aggregate sums are not unique-viewer totals, additive bandwidth savings or billing evidence.
+The collector permits 240 requests per ten seconds, caps bodies at 2,048 bytes and requires same-origin requests. Retention defaults to 256 page IDs for five minutes; `reportCapacity` and `reportTtlMs` bound it. With `operatorState` (CLI `--operator-state`) enabled, private state survives restart and expiry is applied after reopening. Retries are idempotent, stale sequences do not add traffic again, and decreased counters are refused. The pending durable write queue defaults to 64; overload returns 503. Reports remain untrusted observations, not unique-viewer totals or billing evidence. Broadcasters enable private operational persistence automatically.
 
 ## Resources and admission boundary
 
@@ -2048,12 +2435,158 @@ The HTTP example caps active media responses at 32, connections at 128, header s
 
 The [container package](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md) sets CPU, memory, process and log limits, loopback ingest/player mappings and private network boundaries. Its healthcheck requires a recent publication and publishing worker state; it becomes unhealthy without input or during a prolonged source outage. Compose restart policies recover container exits, not unhealthy status alone. Measure actual host capacity before broadening a pilot.
 
-Browser peer caps and optional admission callbacks do not themselves provide a deployed ticket issuer or Sybil resistance. The demo has no integrated admission service. Fake signed presence floods and real-network participation remain separate acceptance gates; signatures establish key possession, not a unique human or trusted subscriber.
+The candidate demo supplies a bounded ticket issuer and live revocation checks. The embedded relay rejects unadmitted presence/signals and caps aggregate messages. Open issuance establishes bounded keys, not unique people or paid subscriptions; broader Sybil and real-network acceptance remain separate gates.
 
 ## Restart and recovery
 
 Preserve the dedicated state directory/volume to retain publisher identity and operator credentials. Shut down normally so workers, file handles and the exclusive `.broadcast-lock` are released. Do not run two pipelines against one media directory, mount the state into unrelated services, or delete private state during an upgrade.
 
-After an unclean exit, a retained lock deliberately prevents a new writer. Stop this stack, inspect every possible process/container/mount using its volume, establish that no broadcaster still uses it, keep a private consistent backup, then remove only the stale lock. A namespace-local PID is insufficient evidence. If exclusive ownership cannot be established, leave the lock in place. The [deployment guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md#exclusive-volume-ownership-and-crash-recovery) gives the container recovery boundary and rollback procedure.
+On supported local POSIX storage, permanent publication/worker lease inodes and a guardian permit automatic parent-crash recovery after all worker groups are reaped. A dirty guardian marker or legacy pre-lease lock requires explicit operator inspection. Never delete lease database files to force acquisition. A namespace-local PID is insufficient evidence; retain private backups and leave uncertain ownership closed. The [deployment guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md#exclusive-volume-ownership-and-crash-recovery) describes the recovery boundary.
 
 Publisher state contains the signing secret; a whole-volume backup can also contain generated media. Use access-controlled encrypted backups. Forwarding credentials live in a separate private file and are read at launch; trusted process administrators can inspect ffmpeg's full URL arguments. Never put these secrets in a browser receipt, repository, public status response or issue attachment.
+
+---
+
+Source: [docs/PRODUCTION-FEATURES.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md)
+
+# Production feature work
+
+[Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) ·
+[Evidence](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md) · [Protocol draft](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md)
+
+These changes belong to the current 0.2.0 source candidate. They are absent
+from the published v0.1.0 assets. Publication and production acceptance remain
+separate gates; consult the delivery checklist for their current state.
+
+## Browser delivery and media
+
+Connected viewers exchange bounded contributor/rendition interests and short
+origin-fetch leases. A contributor fetches fresh live media from HTTP while
+other interested viewers may wait for verified peer availability within their
+playback deadline. Peer claims are advisory: lack of availability, expiry,
+invalid signatures or insufficient playback buffer use the HTTP loader.
+Measured HTTP latency raises the origin reserve; peer transfer estimates
+cannot spend the time retained for fallback. hls.js retains bitrate selection.
+
+The publisher supports exact local playlist identities for mixed codec and
+frame-rate variants, alternate audio, fMP4 maps, complete low-latency parts and
+warm delta playlists. Schema 1 remains valid for its original contexts.
+Schema 2 binds the exact playlist, media type and encryption context rather
+than relying on a player's filtered level number. Init maps and keys remain
+on HTTP. A part-capable host explicitly enables `swarmParts`; the demo exposes
+that choice through `mediaCapabilities.parts`. Its 500 ms part reserve is
+specific to the tested one-second-part/three-second-hold-back configuration;
+the library default remains 2,000 ms and measured HTTP latency can raise it.
+
+AES-128 ciphertext publication requires `allowEncryptedMedia: true`. A
+commitment binds the local key path and IV; it neither publishes the key to
+peers nor grants rights to redistribute protected media. DRM/SAMPLE-AES,
+subtitles, I-frame variants, remote/query-bearing publisher assets and cold
+delta reconstruction remain unsupported. Preload hints do not authorise
+incomplete bytes for peer delivery.
+
+## Signing and discovery
+
+An author can sign a short-lived commitment delegation scoped to a stream,
+swarm, delegate, rendition/media types, parts and maximum size. The signing
+server can then operate with the delegate secret and the signed authorisation
+without retaining the author's secret. Clients enforce scope, expiry and the
+host's current revocation view. They do not infer that an offline revocation
+list proves the absence of a newer revocation.
+
+Full signed NIP-53 advertisements use a separate addressable identifier and
+link the persistent commitment authorisation. Live/ended updates carry an
+explicit streaming URL, relays, start time and bounded expiry. They do not
+change the stable commitment identity. Discovery can require host-pinned
+authorisations; event-selected relays and ICE servers do not replace host
+endpoint policy. `/stream.json` exposes the current signed advertisement.
+
+## Admission and upload allowance
+
+The demo issues short-lived swarm/key-bound tickets after a signed one-use
+possession challenge. Issuance, challenges and verification have separate
+bounds. Revocation and epoch rotation are authenticated operator actions;
+browser admission is checked again before connections, signalling and media
+uploads. The embedded relay refuses unadmitted presence and signals and has
+both connection and aggregate message bounds. These controls constrain work
+and participating keys; they do not establish unique people or make an open
+ticket endpoint a subscription service. Proxy headers do not establish a
+trusted client address.
+
+The browser saves media reservations under an origin-wide Web Lock and
+origin storage record. Reloads and concurrent tabs share spent bytes;
+upload consent and signing keys are never saved. Blocked, corrupt or
+unavailable storage disables contribution. Viewers may deliberately increase
+or reset the allowance. The quota covers reserved media payload, including
+interrupted sends, rather than complete connection traffic.
+
+## Operations and recovery
+
+Opt-in reports carry a temporary page report identifier and sequence alongside
+numeric cumulative values. Retries are idempotent, older snapshots do not
+double-count, and decreasing counters are rejected. Private bounded state
+retains policy, origin counters and the latest reports across orderly restart.
+Origin counters use a short write debounce; they are observations rather than
+an exact crash-proof billing ledger. Retention limits apply after reopening.
+
+Broadcaster publication and worker supervision use two permanent SQLite lease
+inodes on supported local POSIX filesystems. A worker guardian owns encoder
+and forwarder process groups. On parent termination it kills and waits for
+those workers before releasing its lease. An independent dirty marker is
+written before launch and cleared only after cleanup. A killed guardian or
+host catastrophe leaves recovery closed for explicit operator inspection;
+PID namespace guesses and timed stale-lock deletion are not used. Distributed
+volumes and Windows private-state ACLs are unsupported. Node 22.13+ is required.
+
+## Installed native client
+
+The installable package supplies `relayswarm-native` and the
+`relayswarm/native-client` API. An application supplies a trusted descriptor
+with digest, size, swarm, relay endpoints, allowed seeders and an optional HTTPS
+origin. A bounded HyperDHT/Noise attempt precedes automatic verified HTTP
+fallback. Redirects are refused. Exact size and SHA-256 are checked before
+bytes are returned or a new output file is published. Cancellation does not
+start fallback, and existing output files are never replaced.
+
+This entry point requires installed Node; it is not a self-contained binary.
+The original `native-poc.mjs` remains a separate two-peer proof, with its
+original failure-reporting behaviour. Neither client is durable media storage.
+
+---
+
+Source: [docs/PRODUCTION-READINESS.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md)
+
+# Production delivery requirements
+
+This checklist tracks the production work requested on 13 October 2026. It
+retains the full scope of the feature review. Implementation, automated tests,
+publication, deployment and physical acceptance are separate requirements.
+An entry remains open until the evidence described below exists.
+
+| ID | Requirement | Evidence required | Current state |
+|---|---|---|---|
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Local Chrome evidence passes; final CI/deployment pending |
+| P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Open |
+| P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Local Chrome evidence passes; final CI/deployment pending |
+| P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/Chrome evidence passes; final CI pending |
+| P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Local restart/Chrome/queue evidence passes; deployment pending |
+| P06 | Upload budgets across reloads and tabs | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; uploading still requires new consent | Actual Chrome reload/tab evidence passes; physical/deployment pending |
+| P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Local forced-parent/guardian/descendant tests pass; host acceptance pending |
+| P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Local scope/revocation/discovery evidence passes; final CI pending |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Clean production package/export/bundle/installed transfer/fallback evidence passes; final release asset verification pending |
+| P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Adapter/independent verifier pass; user-approved Kit upgrade underway |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Open; PR 8 is open and Windows CI fails |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Open |
+
+## Evidence rules
+
+The existing pilot is a useful deployment starting point. A waiting page or a
+running encoder does not prove media playback. Emulator and loopback receipts
+do not prove physical-device or difficult-NAT behaviour. Peer media bytes are
+not net wire-data or financial savings. A NIP draft and related codebase are
+not proof of external standards acceptance or protocol interoperability.
+
+Record the exact source, browser/device, topology, measurement window and
+receipt path for each acceptance result. Preserve failing results until their
+cause and regression are established. Update this table as evidence arrives;
+do not mark the overall work complete while a required entry remains open.

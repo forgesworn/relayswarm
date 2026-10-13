@@ -9,10 +9,13 @@ comes from the origin, and the swarm only measures what peer delivery would
 have achieved. That is the mode to deploy first.
 
 The module is browser ESM with a direct runtime dependency on `nostr-tools`.
-The [v0.2.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0)
+The published [v0.1.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0)
 supplies an installable tarball and a standalone bundle containing the browser
 runtime dependencies. The host supplies hls.js. The npm registry is unpublished;
 [Getting started](docs/GETTING-STARTED.md) gives exact asset and pinned-Git commands.
+The current 0.2.0 source adds the
+[production feature work](docs/PRODUCTION-FEATURES.md); those additions are
+absent from v0.1.0 assets and retain separate delivery/acceptance gates.
 
 The host selects a trusted stream event, shared swarm id, relay policy and ICE
 servers. This module does not perform Nostr stream discovery or automatically
@@ -75,12 +78,14 @@ connection and relay socket, drops held segments and emits one final
 | `maxUploadPeers` | `4` | Distinct peers served in any 30 s. |
 | `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. |
 | `maxUploadBytesPerSession` | unlimited | Optional non-negative safe integer, including zero. Reserves full accepted media payloads; interrupted transfers do not refund the allowance. |
+| `reserveUploadBytes` | none | Optional async `(bytes, {signal}) => boolean` host reservation before serving; refusal/error/timeout stops the send. Use for persistent cross-tab budgets. |
 | `serveOnCellular` | `false` | With `false`, detected cellular or `saveData` connections neither upload nor fetch peer media. Detection is advisory and does not identify every metered connection. |
 | `serve` | `false` | Set `true` only after the viewer opts into uploading. With `false`, the viewer is receive-only: it takes from peers but never uploads or advertises what it holds. Use it where the connection type cannot be read (Safari), so a phone on cellular is never asked to upload. |
 | `ticket` | none | An opaque string (up to 2 KB) this viewer presents in its presence and in every offer and answer, typically a short-lived credential the origin signed for this viewer's swarm key. |
 | `admit` | none | `(pubkey, ticket) => boolean \| Promise<boolean>`. With it set, a viewer never dials, answers or follows a referral to a peer it has not admitted, so its address (carried in the SDP) only reaches ticket holders. The host is called again before each dial and SDP publication, including retries and referrals; it must check expiry. A third argument provides an abort `signal`. At most 16 checks run concurrently and each has a 3 s deadline. |
 | `shadowSampleRate` | `0.25` | Share of fragments raced. |
 | `streamEvent` / `getCommitment` | required for peer-first | Signed kind-30311 stream event and `(context, { signal }) => signedCommitment`. See below. |
+| `delegation` / `revokedDelegationIds` / `delegationRevocations` | none / empty | Explicit author-signed scope and current host revocation view for delegated commitments. |
 | `maxConcurrentRaces` | `24` | Maximum retained shadow races. |
 | `admissionTimeoutMs` | `3000` | Deadline for a host admission check. |
 | `swarmParts` | `false` | Include low-latency HLS parts. Parts are small; leave off. |
@@ -161,16 +166,19 @@ connection data or acknowledged delivery.
 The session allowance is additive within metrics version 2. Exhaustion
 withdraws media availability and stops serving while receiving remains
 available. The library counts one swarm instance; a host recreating instances
-must pass the remaining page allowance and retain accepted totals. The demo
-does this across Apply, origin-only, rejoin and publisher refresh. Reloading
-the whole page starts a new allowance.
+must retain accepted totals. The demo uses an origin-wide Web Lock and
+storage reservation across Apply, rejoin, publisher refresh, reloads and tabs.
+Consent is never persisted. Storage failure disables uploading; an explicit
+viewer reset or increase can change the quota.
 
 Peer-first ranks eligible advertised media by measured completion time,
 payload rate and failure history. Healthy measured peers take priority over
 fast refusals; cold peers receive bounded exploration. A known delivery gets
 headroom within the original peer deadline, rather than an equal share of it.
-Attempts remain serial, with at most three peers and normal origin fallback.
-This is a bounded scheduler, not proof of optimal ABR or internet savings.
+Attempts remain serial and capped by `maxPeers` and the original deadline.
+Fresh-origin coordination is bounded by safe buffered playback and measured
+HTTP fallback time. hls.js owns quality selection. These mechanisms do not
+prove optimal internet scheduling or net savings.
 
 ## Authenticated peer-first loading
 
@@ -200,7 +208,7 @@ redistribution. These assignments are a RelaySwarm contract, not an accepted
 NIP or an interoperability claim.
 
 The commitment is a Nostr event of experimental kind 24172, signed by the
-same author, tagged `x` with the swarm id and `e` with the exact stream event
+same author or a trusted scoped delegate, tagged `x` with the swarm id and `e` with the exact stream event
 id. Its content is the exact output of `commitmentContent(fields)` exported
 by `relayswarm/segment-commitment`. Fixed field order and the
 `relayswarm-segment-v1` domain bind the signature to this use:
@@ -256,9 +264,9 @@ decide its own mode.
 - **Limited peer-first scheduling.** Each load asks one available peer at a
   time within a fixed deadline. Origin seeders can contribute substantially
   without receiving any peer-first segments themselves; per-viewer benefits
-  are uneven. Advanced ABR-aware scheduling, delegated
-  signing, independent-client interop and real mobile/NAT measurements remain
-  outstanding. There is no production-readiness claim.
+  are uneven. Fresh media coordination and measured deadlines are implemented;
+  internet-scale scheduling, released independent-client interop and physical
+  mobile/NAT measurements remain open. See the production delivery checklist.
 - **Bounded peer resources.** A link queues at most four uploads, rejects
   empty or excessive chunks and has a 3 s backpressure deadline. These bounds
   limit particular attacks; they do not prove resistance to every Sybil or
@@ -275,8 +283,9 @@ decide its own mode.
   is happening, and `segments.firstPeerSegmentAtMs` says how long a viewer
   waited before the swarm was any use to it.
 - **Hard NATs.** Symmetric NAT and some VPN egresses will not connect with
-  STUN alone, and no TURN or super-peer path exists yet. Those viewers simply
-  play from the origin.
+  STUN alone. A host can supply TURN credentials through `iceServers`; no
+  managed TURN or super-peer service is supplied. When peer connection fails,
+  viewers play from the origin.
 - **Relays.** Presence is one event per viewer per 20 s plus two events per
   connection. Point at a relay you control; a public relay may rate-limit.
   Sessions subscribe to swarm-wide presence and only their own recipient-tagged

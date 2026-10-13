@@ -1,3 +1,20 @@
+# Global instructions
+
+## Rust builds
+
+Rust builds reuse the worktree's own `target/`. Never create a fresh
+`CARGO_TARGET_DIR` per task or subagent. Do not override `CARGO_INCREMENTAL=0`.
+
+## Clean up after your own work
+
+Disk and RAM are nearly full. Remove only task-created resources once work is
+safely merged and its evidence is retained. Remove clean, fully pushed merged
+worktrees with `git worktree remove` and `git worktree prune`, never `rm -rf`.
+Delete task-owned scratch/tarballs after recording results; retain named release
+evidence. Stop own emulators and delete own AVDs, fixture/services processes and
+long-running servers even after failure. Preserve unrelated/pre-existing resources.
+Report anything intentionally left running and why.
+
 # RelaySwarm
 
 Nostr-rendezvoused, hash-verified peer transfer for HLS video: browsers use
@@ -32,7 +49,7 @@ bounded peer-first mode using author-signed segment commitments.
 | `npm run check:docs` | Links, AI-index format and generated-context freshness |
 | `npm run docs:generate` | Regenerate `llms-full.txt` from maintained Markdown |
 
-Node 22+ is required (the global `WebSocket`); CI runs on Node 24. `npm test`
+Node 22.13+ is required (the global `WebSocket`); CI runs on Node 24. `npm test`
 and `npm run poc` need an internet connection: they signal against real
 public Nostr relays and exit non-zero if a transfer fails hash verification.
 The native tests do not need the network; they bootstrap a local DHT.
@@ -88,7 +105,8 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 
 - `npm test` hits live public relays; a red run can mean relay weather, not
   a code fault. Re-run before concluding anything.
-- v0.2.0 is a GitHub prerelease with a tarball and standalone browser bundle.
+- v0.1.0 is the published GitHub prerelease. Source package 0.2.0 is
+  a candidate; confirm publication before referring to its release assets.
   The npm registry is unpublished; use the exact asset or pinned commit from
   `docs/GETTING-STARTED.md`. Do not move any release tag or replace its artifacts
   when correcting main-branch documentation.
@@ -96,15 +114,17 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 - The demo keeps its author key on the server and receipts in the browser.
   Preserve playlist-bound signing and explicit upload consent. Chrome fixture
   tests are loopback; do not describe them as physical-device/NAT validation.
-- Package version 0.2.0, session wire version 3, commitment schema 1 and metrics
+- Package version 0.2.0, session wire version 3, commitment schemas 1/2 and metrics
   version 2 are distinct. RelaySwarmKit's README describes wire version 2;
   current cross-client interoperability has not been proved.
 - Update authored Markdown and `llms.txt`, then run `npm run docs:generate`
   and `npm run check:docs`. Do not hand-edit generated `llms-full.txt`.
 - Keep AI material factual: published links do not prove search indexing or
   recommendations. The public surface is GitHub, not a configured docs website.
-- Broadcaster additions are included in v0.2.0, absent from v0.1.0 assets.
+- Broadcaster/production additions are in the 0.2.0 source candidate and
+  absent from v0.1.0 assets.
   Live-source sequence numbers continue across published generations; the
   attempt counter is distinct from visible HLS discontinuity.
-- Private publisher state and tokens require POSIX file permissions. An
-  unclean broadcaster exit preserves its exclusive lock for operator recovery.
+- Private publisher state and tokens require POSIX file permissions. Permanent
+  publication/worker leases supervise parent-crash recovery; a dirty guardian
+  marker or legacy lock requires operator inspection. Never delete lease inodes.
