@@ -8,7 +8,7 @@ import { NativeDhtTransport } from "../src/native-dht-transport.mjs";
 import { decodeFrames, encodeFrame, FRAME, requestObject, serveAuthorizedObject, sha256Hex } from "../src/object-transfer.mjs";
 import { KIND_SIGNAL } from "../src/relay-session.mjs";
 import { startLocalDht } from "./support/local-dht.mjs";
-import { startLocalRelay } from "./support/local-relay.mjs";
+import { startNativeTestInfrastructure } from "./support/native-fixture.mjs";
 
 test("native connect waits for acknowledged live readiness within one deadline", { timeout: 5000 }, async () => {
   const key = "a".repeat(64);
@@ -38,8 +38,7 @@ test("native connect waits for acknowledged live readiness within one deadline",
 });
 
 test("Nostr authorizes a STUN-free native transfer whose bytes are independently verified", { timeout: 20_000 }, async () => {
-  const relay = await startLocalRelay();
-  const dht = await startLocalDht();
+  const { relay, dht } = await startNativeTestInfrastructure();
   try {
     const bytes = Buffer.alloc(1024 * 1024, 0x5a);
     const result = await runNativeJourney({
