@@ -1,0 +1,354 @@
+{
+  "v": 1,
+  "checkpointDate": "2026-10-14",
+  "runtimeSourceSha": "2dd156e64f86e6f18b616e7d87159aee1c43eac2",
+  "documentationCommitIsNotRuntimeSource": true,
+  "ci": {
+    "databaseId": 38525990386,
+    "attempt": 1,
+    "requiredJobsSuccessful": 9,
+    "optionalSoakIsNotNewPass": true
+  },
+  "deployment": {
+    "image": "sha256:200807d127f0e8cac781b1d9bd36ddfb0541285cc3eae2db96590d5410dc189c",
+    "client": {
+      "sha256": "34259c97f1317c3ae4668c2634df6d57287ca8a40b4c8a249088c0400f3c1a61",
+      "bytes": 734604
+    },
+    "normalTLSAttestation": true,
+    "publisherIdentityPreserved": true,
+    "independentProxySourceSha": "ee1510d429ac85f3738c03f10a09b753ec4eb037",
+    "proxyProtocols": [
+      "h1"
+    ]
+  },
+  "localUnpublishedAssets": {
+    "package": {
+      "bytes": 924153,
+      "files": 197,
+      "sha256": "b1b35376140af23aedb021598f33dbd4d1da69568405853b1d257a9549804ae3"
+    },
+    "archive": {
+      "bytes": 3358720,
+      "sha256": "bdb50144f30d089a6fee2baa9ffe6aa98005e1b76b45d282951a6a988a335d04"
+    },
+    "standaloneESM": {
+      "bytes": 119525,
+      "sha256": "c3df43a8d16bb1a4bd7e6fb2373b9f5e70e9c70871b6763c079136beed4e5a24"
+    },
+    "productionOnlyConsumer": true,
+    "documentedImports": 10,
+    "installedCLI": true,
+    "separateProcessNativeAndHTTPFallback": true,
+    "published": false
+  },
+  "ordinaryFourRoleShort": {
+    "result": "RED",
+    "measurementMs": 60049,
+    "gates": {
+      "playback": "green",
+      "contribution": "red",
+      "verifiedPeerPayload": "red"
+    },
+    "receiver": {
+      "lowVerifiedLoads": 15,
+      "lowVerifiedBytes": 3169304,
+      "highVerifiedLoads": 0,
+      "highVerifiedBytes": 0
+    },
+    "contributors": {
+      "lowAcceptedReservedBytes": 3169304,
+      "lowServed": 15,
+      "highAcceptedReservedBytes": 0,
+      "highServed": 0,
+      "bothConsentAndServingRetained": true,
+      "bothRefused": 0
+    },
+    "controls": {
+      "fixedRouteRequests": 358,
+      "status200": 358,
+      "finished": 358,
+      "failed": 0,
+      "H1Responses": 358,
+      "pending": 0,
+      "droppedOrUnknown": 0,
+      "perRoute": {
+        "session": 150,
+        "policy": 146,
+        "admissionChallenge": 3,
+        "admissionTicket": 3,
+        "admissionVerify": 41,
+        "commitment": 15
+      },
+      "status200DoesNotProveAdmittedBody": true
+    },
+    "playback": {
+      "requestedVideoAndNativeAudioDecodeProgress": true,
+      "fatalNativePageErrors": 0,
+      "zeroFrameIntervals": 0,
+      "highDonorPremeasurementStalls": 1,
+      "highDonorRecordedStallMs": 1247,
+      "newMeasuredStalls": 0,
+      "allOtherStalls": 0,
+      "audibleOutputProved": false
+    },
+    "cleanup": {
+      "browserEndpointsControllerProviderOuterOwnershipProved": true,
+      "sourceCleanupV2Removed": true,
+      "sourceExitCode": 255,
+      "outerScenarioOKRemainsFalse": true,
+      "observerSourceCleanupPerformed": false
+    },
+    "scope": {
+      "installedHeadlessChrome": true,
+      "M1Version": "155.0.8059.41",
+      "M4Version": "155.0.8059.40",
+      "normalTLS": true,
+      "noNetworkRTCMediaPermissionOverrides": true,
+      "trustedDOMStartUpload": true,
+      "dropdownsProgrammatic": true,
+      "physicalNativeMenuNATCostReleaseProof": false,
+      "noCauseEstablished": true,
+      "qualifierOrLongPassed": false
+    }
+  },
+  "fourteenRoleChecks": {
+    "r7": {
+      "result": "RED",
+      "measurementMs": 52501,
+      "plannedMeasurementMs": 300000,
+      "outerElapsedSeconds": 119.38190399995074,
+      "resource": {
+        "failure": "TimeoutExpired",
+        "stage": "descendant-probe",
+        "attemptedDescendants": 39,
+        "processLimit": 96,
+        "lastAcceptedRSSBytes": 8375910400,
+        "lastAcceptedProcesses": 47,
+        "RSSHighwaterBytes": 8375910400,
+        "processHighwater": 48,
+        "minimumReportedFreePercent": 78,
+        "failedProbeRSSOrUnsampledPeakProved": false,
+        "M1CompleteOwnedRSSHighwater": 2907521024,
+        "M1CompleteOwnedProcessHighwater": 31,
+        "observedCapCrossing": false
+      },
+      "cleanup": {
+        "browserCDPAll56OperationsAcknowledged": true,
+        "bothEndpointsAll10AggregateFlags": true,
+        "all3ProfilesSevenFlags": true,
+        "controllerMainBirthStageProof": true,
+        "outerGroupAbsent": true,
+        "providerForwardReaped": true,
+        "sourceCleanupV2Removed": true,
+        "sourceExitCode": 255,
+        "M4ResourceScenarioOK": false,
+        "outerBrowserScenarioOK": false
+      }
+    },
+    "r9": {
+      "result": "RED",
+      "measurementMs": 6453,
+      "plannedMeasurementMs": 300000,
+      "outerElapsedSeconds": 65.72473195800558,
+      "resource": {
+        "trigger": "M1process-limit",
+        "rejectedOwnedProcesses": 33,
+        "processLimit": 32,
+        "rejectedProbeLaunchedAndReaped": true,
+        "lastAcceptedM1RSSBytes": 2325479424,
+        "acceptedM1RSSHighwaterBytes": 2588000256,
+        "lastAcceptedM1Processes": 23,
+        "rejectedInstantRSSProved": false,
+        "M1MinimumReportedFreePercent": 30,
+        "M1OuterAcceptedRSSHighwaterBytes": 2750529536,
+        "M1OuterAcceptedProcessHighwater": 32,
+        "M4ResourceOK": true,
+        "M4AcceptedRSSHighwaterBytes": 7885340672,
+        "M4ProcessHighwater": 49,
+        "M4MinimumReportedFreePercent": 79,
+        "M4LastProbeDurationMs": 28.705
+      },
+      "cleanup": {
+        "browserExplicitContextCloseAcknowledged": false,
+        "M1ExplicitContextCloseAcknowledged": false,
+        "M4ExplicitContextCloseAcknowledged": true,
+        "CDPDetachAcknowledged": true,
+        "independentEndpointAll10FlagsProfileSevenFlagsMainBirthStageGone": true,
+        "providerForwardOuterOwnershipProved": true,
+        "sourceCleanupV2Removed": true,
+        "sourceExitCode": 255,
+        "M1ResourceScenarioOK": false,
+        "M4ResourceScenarioOK": true,
+        "browserControllerOuterScenarioOK": false,
+        "browserCleanupProved": false
+      }
+    },
+    "r10": {
+      "result": "RED",
+      "measurementMs": null,
+      "plannedMeasurementMs": 300000,
+      "measurementStarted": false,
+      "outerElapsedSeconds": 47.990629917010665,
+      "resource": {
+        "triggerScope": "M1 complete owned outer orchestration tree",
+        "rejectedProcesses": 41,
+        "processLimit": 40,
+        "probeLaunchedAndReaped": true,
+        "rejectedInstantRSSKnown": false,
+        "outerLastAcceptedRSSBytes": 2477785088,
+        "outerAcceptedRSSHighwaterBytes": 2688712704,
+        "outerAcceptedProcessHighwater": 32,
+        "outerLastReportedFreePercent": 31,
+        "M1EndpointOnlyResourceOK": true,
+        "M1EndpointOnlyAcceptedProcessHighwater": 33,
+        "M1EndpointOnlyAcceptedRSSHighwaterBytes": 2548170752,
+        "M4ResourceOK": true,
+        "M4AcceptedRSSHighwaterBytes": 6579175424,
+        "M4ProcessHighwater": 51,
+        "M4MinimumReportedFreePercent": 77
+      },
+      "cleanup": {
+        "originalBrowserReceiptFinalised": false,
+        "browserAPICleanupAcknowledgements": "unobserved-in-unfinished-receipt",
+        "originalControllerM4ReceiptReadFailed": true,
+        "independentEndpointTenAndProfileSevenFlagsTrue": true,
+        "supplementalM4ExactFiveBirthsGroupsProfilesAbsentAndStageRemoved": true,
+        "M1ControllerMainBirthStageRemoved": true,
+        "providerForwardWorkerOuterGroupGone": true,
+        "sourceCleanupV2Removed": true,
+        "sourceExitCode": 255
+      }
+    },
+    "r11": {
+      "result": "RED",
+      "measurementMs": 0,
+      "plannedMeasurementMs": 300000,
+      "measurementStarted": false,
+      "outerElapsedSeconds": 91.45357654197142,
+      "resources": {
+        "M1CompleteOuterAcceptedRSSHighwaterBytes": 2590523392,
+        "M1CompleteOuterProcessHighwater": 46,
+        "M1CompleteOuterProcessLimit": 64,
+        "M1RSSLimitBytes": 3221225472,
+        "M1EndpointOnlyAcceptedRSSHighwaterBytes": 2422915072,
+        "M1EndpointOnlyProcessHighwater": 30,
+        "M1EndpointMinimumFreePercent": 29,
+        "M4AcceptedRSSHighwaterBytes": 8060862464,
+        "M4ProcessHighwater": 52,
+        "M4MinimumFreePercent": 77,
+        "resourceScenarioOK": true
+      },
+      "failure": {
+        "stage": "peer-readiness-preflight",
+        "errorClass": "AssertionError",
+        "atUTC": "2026-10-14T08:51:18.685Z",
+        "connectedLinksAtReadiness": 0,
+        "verifiedPeerBytesAtReadiness": 0,
+        "reachabilityCauseProved": false
+      },
+      "cleanup": {
+        "allOriginalBrowserAPIFlagsTrue": true,
+        "bothEndpointTenAggregateFlagsTrue": true,
+        "allThreeProfileSevenFlagsTrue": true,
+        "bothControllerRunnerMainBirthStageGone": true,
+        "providerForwardOuterWorkerGroupGone": true,
+        "sourceV2Removed": true,
+        "sourceExitCode": 255
+      },
+      "transport": {
+        "observedPCs": 133,
+        "timeoutPCs": 120,
+        "timeoutWithRemoteInstalled": 120,
+        "timeoutWithChecking": 120,
+        "timeoutNativeFailureObserved": 0
+      },
+      "control": {
+        "statuses200": 1211,
+        "cdpFinished": 1210,
+        "observedCDPFailed": 0,
+        "pendingAfter200AtClose": 1
+      },
+      "admission": {
+        "observed": 483,
+        "refusals": 0,
+        "unknown": 0,
+        "pending": 0,
+        "retainedDetailEvictions": 227,
+        "bodyReads": 0
+      },
+      "reachabilityCauseProved": false
+    }
+  },
+  "safariBootstrap": {
+    "r2": {
+      "result": "RED",
+      "measurementMs": 0,
+      "outerElapsedSeconds": 16.59040845790878,
+      "noStartMediaUploadJourney": true,
+      "nativeInputOrPhoneAcceptance": false,
+      "allOwnCleanupProved": true,
+      "case": "Readiness retained hidden/unfocused; local fractional-timeout defect reproduced, not exact historical cause."
+    },
+    "r4": {
+      "result": "RED",
+      "measurementMs": 0,
+      "outerElapsedSeconds": 4.9389447080902755,
+      "noStartMediaUploadJourney": true,
+      "nativeInputOrPhoneAcceptance": false,
+      "allOwnCleanupProved": true,
+      "case": "Own-window-focus stopped before readiness: exact worker route allowlist refused maximise; no Safari support/cause inference."
+    },
+    "r5": {
+      "result": "RED",
+      "measurementMs": 0,
+      "outerElapsedSeconds": 24.39336808398366,
+      "noStartMediaUploadJourney": true,
+      "nativeInputOrPhoneAcceptance": false,
+      "allOwnCleanupProved": true,
+      "case": "Readiness deadline; last15 retained hidden/unfocused,50 evicted predicates unknown; late authority withdrawal retained."
+    }
+  },
+  "usbReadOnlyProbeR2": {
+    "result": "RED",
+    "elapsedSeconds": 2.4635963749606162,
+    "stage": "usb-lockdown",
+    "evaluations": 0,
+    "samples": 0,
+    "failure": "cleanup-incomplete",
+    "originalOperationFailureRecovered": false,
+    "lockdownClosed": false,
+    "parentCleanup": {
+      "workerReaped": true,
+      "workerGroupAbsent": true,
+      "sdkScratchRemoved": true,
+      "withinTotalDeadline": true,
+      "pairingCacheEmpty": true,
+      "pairingCacheRemoved": true
+    },
+    "physicalPlaybackOrInputProof": false
+  },
+  "openScope": {
+    "fullP01toP12And37ItemReview": true,
+    "sameTopology300sQualification": true,
+    "7200sAnd22Churn": true,
+    "physicalAndroidIPhoneFullJourneys": true,
+    "SafariFullJourney": true,
+    "hardNAT": true,
+    "matchedTotalWireAndActualCost": true,
+    "immutableReleaseAssets": true,
+    "productionReady": false
+  },
+  "scope": {
+    "headlessChrome": true,
+    "M1Version": "155.0.8059.41",
+    "M4Version": "155.0.8059.40",
+    "fourM1TenM4ThreeProfiles": true,
+    "trustedDOMStartAndUpload": true,
+    "dropdownsProgrammatic": true,
+    "noRTCNetworkPermissionOverrides": true,
+    "uploadCountersAreAcceptedReservedNotWireACK": true,
+    "noHistoricalCauseOrFixClaim": true,
+    "previousF393ShortPassesNotCurrent2ddFieldPass": true
+  }
+}

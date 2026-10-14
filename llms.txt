@@ -48,6 +48,11 @@ they do not establish physical-phone, varied-NAT or sustained operation readines
 Peer-first media loads/bytes avoided are not net connection-data savings, and
 upload counters measure quota consumption rather than acknowledged delivery.
 Documentation on main can include corrections after the immutable releases.
+Current deployed source checkpoint 2dd156e passed nine required CI jobs and local
+package/deployment checks; its ordinary sharing and fourteen-role qualification
+remain RED. Safari bootstrap and no-evaluation iPhone USB checks do not close
+physical acceptance. Full P01–P12/37-item, long-run/churn, NAT, cost and release
+gates remain open; consult dated STATUS evidence rather than borrowing older passes.
 
 ## Documentation
 

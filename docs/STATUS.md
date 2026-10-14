@@ -60,9 +60,96 @@ The **0.2.0 source broadcaster candidate** includes the additions below.
 These changes are absent from v0.1.0's immutable release assets. Release and
 merged source do not establish production readiness.
 
-## Current source acceptance on 14 October
+## Current deployed checkpoint: 2dd on 14 October 2026
 
-The actual deployed application is `f393abf3d55215bdf58241a4a2af74245d646117`.
+The deployed application checkpoint is `2dd156e64f86e6f18b616e7d87159aee1c43eac2`. All nine required
+jobs passed on attempt 1 of [CI run 38525990386](https://github.com/forgesworn/relayswarm/actions/runs/38525990386).
+The optional CI soak was skipped; it is not a new sustained pass. The normal-TLS public client
+is 734,604 bytes, SHA-256
+`34259c97f1317c3ae4668c2634df6d57287ca8a40b4c8a249088c0400f3c1a61`; the image is
+`sha256:200807d127f0e8cac781b1d9bd36ddfb0541285cc3eae2db96590d5410dc189c`. Guarded deployment preserved publisher identity and private
+state. The permanent HTTP/1.1 proxy retains independent EE provenance; a later
+documentation commit does not change the recorded application source.
+
+The fresh offline production-only consumer passed ten documented imports,
+byte-exact packaged demo/browser modules, installed CLI configuration and
+separate-process verified native transfer/HTTP fallback. The local tarball is
+924,153 bytes/197 files, SHA-256
+`b1b35376140af23aedb021598f33dbd4d1da69568405853b1d257a9549804ae3`. The exact source archive is
+3,358,720 bytes, SHA-256
+`bdb50144f30d089a6fee2baa9ffe6aa98005e1b76b45d282951a6a988a335d04`. The rebuilt standalone ESM is
+119,525 bytes, SHA-256
+`c3df43a8d16bb1a4bd7e6fb2373b9f5e70e9c70871b6763c079136beed4e5a24`. These assets remain unpublished;
+local checks do not prove downloaded immutable-release acceptance.
+
+The ordinary four-role public check remains **RED** over 60.049 s: playback
+passed, but contribution and both-quality verified payload failed. The receiver
+accepted 15 low-quality loads/3,169,304 bytes and no high-quality peer payload;
+both contributors retained consent/serving, while the high donor uploaded zero.
+All 358 fixed-route controls finished HTTP 200/H1; HTTP 200 does not prove
+an admitted response body. There were no new measured stalls, fatal/native/page errors
+or zero-frame intervals. The high donor's earlier 1,247 ms stall remains recorded.
+Actor/provider/controller/outer and actual source-cleanup-v2 proofs passed;
+source exit 255 is retained. No connectivity cause or fix was established.
+
+The same-source distributed checks used fourteen total roles: four M1
+contributors in one Chrome process, and ten M4 roles in two Chrome processes
+(four contributors, four receivers and two origin baselines). They used installed
+headless Chrome, trusted DOM Start/upload and programmatic dropdowns, without
+extra RTC/network/permission flags. Their outcomes remain separate:
+
+| Case | Actual stopping condition | Result and retained limitation |
+|---|---|---|
+| R7 | M4 descendant-resource probe timed out after 52.501 s of measurement | RED; last accepted RSS 8,375,910,400 bytes, process highwater 48/96 and reported free memory 78%; no observed cap crossing or rejected-probe RSS proof; all actor/source cleanup passed |
+| R9 | M1 process count 33 exceeded the declared 32 after 6.453 s | RED; rejected instant RSS unknown; original explicit browser context-close acknowledgements were false, separately proved endpoint/profile/process/stage/source removal retained |
+| R10 | Complete M1 orchestration tree count 41 exceeded 40 during setup | RED before measurement; endpoint-only process highwater 33 is a different scope; original unfinished browser cleanup and failed M4 receipt read remain unknown/false, with later exact-identity M4 recovery/removal and source cleanup separately proved |
+| R11 | Peer-readiness preflight found zero links and zero verified payload | RED before measurement; all fourteen decoded video/native audio in setup, but 300 s/both-quality/two-renewal gates never ran; resource and all original actor/source cleanup proofs passed |
+
+R11's separately declared M1 process cap was 64 with the same 3 GiB limit;
+its complete-tree sampled highwaters were 46 processes/2,590,523,392 bytes.
+M4 remained at 12 GiB/96 processes, with sampled highwaters 8,060,862,464 bytes/
+52 processes. Reported free-memory minima were 29%/77%. Summed sampled RSS is
+neither unique physical RAM nor an unsampled peak. Earlier resource REDs remain
+RED; changing a declared later limit does not retroactively qualify them.
+
+R11 retained 133 local peer-connection IDs: 120 timed out after remote SDP was
+installed and ICE checking observed, with zero opened channels or observed
+native failure before the engine timeout. These are local endpoints, not unique
+cross-page peer pairs. All 1,211 fixed-route statuses were 200; 1,210 had terminal
+CDP completion, with one post-200 policy request still unobserved at shutdown.
+All 483 admission observations finished without refusal/unknown status; 227
+accounted detail evictions do not provide a complete timeline or admitted-body
+proof. The underlying reachability cause remains unresolved; neither a timeout
+increase nor a production connectivity fix is supported by these records.
+
+Installed M1 Safari 17.6 R2/R4/R5 were **bootstrap-only REDs**, with zero media
+measurement and no Start/upload action. R2 retained hidden/unfocused readiness
+snapshots; a fractional-timeout harness defect was reproduced separately without
+proving the exact terminal cause. R4 refused a maximise route in its own worker
+allowlist before readiness; that is not proof Safari lacks maximise support.
+R5 reached its readiness deadline: the last 15 snapshots were hidden/unfocused,
+50 earlier predicates were evicted, and late authority withdrawal remains
+recorded. Exact owned sessions, drivers, workers, stages and outer processes were
+cleaned; these checks do not establish Safari playback, input or phone acceptance.
+
+The actual physical-iPhone read-only USB R2 attempt stopped RED at usb-lockdown
+in 2.464 s, before any Runtime.evaluate or numeric sample. Its original operation
+error was not retained separately from cleanup-incomplete; lockdown closure
+remains unknown. The exact worker/group, private SDK scratch and empty pairing
+cache were removed. This is no phone playback/gesture/peer acceptance. A prepared
+diagnostic successor is not an executed test. No further phone result is claimed.
+
+See the [current 2dd evidence summary](../spikes/results/2dd156e-current-checkpoint-20261014.json). Earlier f393 short passes and older dated Kit, OBS and
+private-YouTube results below retain their source, date and scope; none is a
+current 2dd field pass. The full P01–P12 and 37-review-item scope remains open,
+including a completed same-topology 300 s qualifier, 7,200 s/22-churn operation,
+complete physical/native-input journeys, Safari, hard NAT, matched total-wire/
+actual-cost evidence and immutable-release acceptance. No production-ready or
+new publication claim is made; completed finite sources are not a live-ingest claim.
+
+## Previous f393 checkpoint on 14 October
+
+The previous deployed application checkpoint was `f393abf3d55215bdf58241a4a2af74245d646117`.
 All nine required jobs passed on their first attempt in
 [CI run 38511479806](https://github.com/forgesworn/relayswarm/actions/runs/38511479806).
 The optional twelve-viewer CI soak was skipped, not a new sustained pass.
@@ -214,7 +301,7 @@ wire workers, both endpoint stages, provider, outer group and source removal
 passed. It does not close the earlier M4 Safari 26 unknown-session result or
 establish Safari media/input acceptance.
 
-The current source candidate starts the policy and publisher-session GETs
+The subsequent 2dd deployed checkpoint above starts the policy and publisher-session GETs
 concurrently, retaining no-store reads, two-second polling, five-second authority
 from issuance and at most three pending checks. Eligible operator OFF is applied
 before waiting for the session result; session/identity/admission validation and
@@ -226,7 +313,7 @@ regression passed; four HTTP races were independently rerun. Held-session OFF,
 early session failure before OFF, cancellation, real-outage withdrawal and
 recovery without restored consent passed. This component evidence does not
 establish the cause or resolution of the public fourteen-role failures, and the
-deployed runtime above remains f393 until a separate guarded deployment.
+older f393 field records remain separate from the later 2dd deployment and RED checks above.
 
 Earlier deployed `0e688470b6746b3a9afe80e1192ac4d46fa6aaea` passed all nine
 required jobs on its first attempt in
@@ -334,7 +421,7 @@ All owned browsers, readers, test services and finite sources for these complete
 checks are closed. Renewal source cleanup-v2 matched actual source identity,
 helper/input pins and before/after journal digest claims; an independent audit
 passed 29 checks. Raw remote journal bodies were not independently rehashed.
-The installed pilot awaits another ingest; no current live source is claimed.
+At that checkpoint the installed pilot awaited another ingest; no live source was claimed.
 The earlier public reds, local fourteen-viewer admission reds and original
 physical/Safari/hard-NAT/cost/7,200-second/release gates remain open.
 
@@ -373,7 +460,7 @@ resources were removed, including a separately audited scratch-directory recover
 
 The subsequent 0e source adds in-place opaque-ticket renewal and early outgoing-
 capacity checks. Host identity/expiry checks, remote online admission, consent,
-limits and five-second authority remain enforced. Its current CI/package/public
+limits and five-second authority remain enforced. Its dated CI/package/public
 renewal evidence is recorded above; fourteen-role capacity and sustained acceptance
 remain open. M4 peer connectivity and the earlier admission demand failure are
 not established as resolved.
@@ -847,7 +934,7 @@ records the separate source and scope of these results; the earlier
 [investigation summary](../spikes/results/control-path-media-investigation-summary-20261013.json)
 remains unchanged.
 
-The [current acceptance summary](../spikes/results/current-source-acceptance-summary-20261013.json)
+The [13 October acceptance summary](../spikes/results/current-source-acceptance-summary-20261013.json)
 names the receipts, source and scope. Historical MSE causation, sustained
 contribution, complete Safari/physical-device journeys, varied/hard NAT,
 resource/cost attribution and released-asset acceptance remain open. The

@@ -9,6 +9,12 @@ The 0.2.0 source candidate includes further production feature work; its
 [delivery requirements](docs/PRODUCTION-READINESS.md) remain open. MIT licensed,
 Node 22.13+; CI uses Node 24. The npm registry is unpublished.
 
+The [current deployed checkpoint](docs/STATUS.md#current-deployed-checkpoint-2dd-on-14-october-2026)
+is source `2dd156e`: all nine required CI jobs and exact local package/deployment
+checks passed, while ordinary sharing, fourteen-role qualification and physical/
+long-run acceptance remain open. The full P01–P12 and 37-item delivery scope is
+not a production-readiness or new release claim.
+
 [Documentation](docs/README.md) · [Installation](docs/GETTING-STARTED.md) ·
 [hls.js integration](INTEGRATION.md) · [API reference](docs/API.md) ·
 [Evidence and remaining work](docs/STATUS.md) · [FAQ](docs/FAQ.md) ·

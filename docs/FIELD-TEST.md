@@ -213,7 +213,7 @@ GitHub CI runs this regression alongside both live harness modes. A manual
 workflow dispatch with `soak=true` adds twelve viewer roles in three arrival
 waves. `soak_duration` selects a 180 s or 7,200 s measurement window; the longer
 choice includes repeated departures/rejoins and sampled resource bounds. Both
-are loopback fixtures. The current two-hour result and its instrumentation
+are loopback fixtures. The 13 October two-hour result and its instrumentation
 limits are recorded below; they do not establish deployed or physical acceptance.
 The v0.1.0 [completed soak](STATUS.md#release-verification) recorded zero
 stalls/fatal errors and 68.7% peer-first fragment loads, with uneven per-viewer
@@ -240,9 +240,85 @@ These field gates remain outstanding until their actual receipts are recorded.
 No new physical-device or internet-network result is claimed by the automated
 Chrome tests.
 
-## Current field checkpoint: 14 October 2026
+## Current field checkpoint: 2dd on 14 October 2026
 
-The actual deployed application is `f393abf3d55215bdf58241a4a2af74245d646117`.
+The deployed application checkpoint is `2dd156e64f86e6f18b616e7d87159aee1c43eac2`. All nine required
+jobs passed on attempt 1 of [CI run 38525990386](https://github.com/forgesworn/relayswarm/actions/runs/38525990386).
+The optional CI soak was skipped; it is not a new sustained pass. The normal-TLS public client
+is 734,604 bytes, SHA-256
+`34259c97f1317c3ae4668c2634df6d57287ca8a40b4c8a249088c0400f3c1a61`; the image is
+`sha256:200807d127f0e8cac781b1d9bd36ddfb0541285cc3eae2db96590d5410dc189c`. Guarded deployment preserved publisher identity and private
+state. The permanent HTTP/1.1 proxy retains independent EE provenance; a later
+documentation commit does not change the recorded application source.
+
+The ordinary four-role public check remains **RED** over 60.049 s: playback
+passed, but contribution and both-quality verified payload failed. The receiver
+accepted 15 low-quality loads/3,169,304 bytes and no high-quality peer payload;
+both contributors retained consent/serving, while the high donor uploaded zero.
+All 358 fixed-route controls finished HTTP 200/H1; HTTP 200 does not prove
+an admitted response body. There were no new measured stalls, fatal/native/page errors
+or zero-frame intervals. The high donor's earlier 1,247 ms stall remains recorded.
+Actor/provider/controller/outer and actual source-cleanup-v2 proofs passed;
+source exit 255 is retained. No connectivity cause or fix was established.
+
+The same-source distributed checks used fourteen total roles: four M1
+contributors in one Chrome process, and ten M4 roles in two Chrome processes
+(four contributors, four receivers and two origin baselines). They used installed
+headless Chrome, trusted DOM Start/upload and programmatic dropdowns, without
+extra RTC/network/permission flags. Their outcomes remain separate:
+
+| Case | Actual stopping condition | Result and retained limitation |
+|---|---|---|
+| R7 | M4 descendant-resource probe timed out after 52.501 s of measurement | RED; last accepted RSS 8,375,910,400 bytes, process highwater 48/96 and reported free memory 78%; no observed cap crossing or rejected-probe RSS proof; all actor/source cleanup passed |
+| R9 | M1 process count 33 exceeded the declared 32 after 6.453 s | RED; rejected instant RSS unknown; original explicit browser context-close acknowledgements were false, separately proved endpoint/profile/process/stage/source removal retained |
+| R10 | Complete M1 orchestration tree count 41 exceeded 40 during setup | RED before measurement; endpoint-only process highwater 33 is a different scope; original unfinished browser cleanup and failed M4 receipt read remain unknown/false, with later exact-identity M4 recovery/removal and source cleanup separately proved |
+| R11 | Peer-readiness preflight found zero links and zero verified payload | RED before measurement; all fourteen decoded video/native audio in setup, but 300 s/both-quality/two-renewal gates never ran; resource and all original actor/source cleanup proofs passed |
+
+R11's separately declared M1 process cap was 64 with the same 3 GiB limit;
+its complete-tree sampled highwaters were 46 processes/2,590,523,392 bytes.
+M4 remained at 12 GiB/96 processes, with sampled highwaters 8,060,862,464 bytes/
+52 processes. Reported free-memory minima were 29%/77%. Summed sampled RSS is
+neither unique physical RAM nor an unsampled peak. Earlier resource REDs remain
+RED; changing a declared later limit does not retroactively qualify them.
+
+R11 retained 133 local peer-connection IDs: 120 timed out after remote SDP was
+installed and ICE checking observed, with zero opened channels or observed
+native failure before the engine timeout. These are local endpoints, not unique
+cross-page peer pairs. All 1,211 fixed-route statuses were 200; 1,210 had terminal
+CDP completion, with one post-200 policy request still unobserved at shutdown.
+All 483 admission observations finished without refusal/unknown status; 227
+accounted detail evictions do not provide a complete timeline or admitted-body
+proof. The underlying reachability cause remains unresolved; neither a timeout
+increase nor a production connectivity fix is supported by these records.
+
+Installed M1 Safari 17.6 R2/R4/R5 were **bootstrap-only REDs**, with zero media
+measurement and no Start/upload action. R2 retained hidden/unfocused readiness
+snapshots; a fractional-timeout harness defect was reproduced separately without
+proving the exact terminal cause. R4 refused a maximise route in its own worker
+allowlist before readiness; that is not proof Safari lacks maximise support.
+R5 reached its readiness deadline: the last 15 snapshots were hidden/unfocused,
+50 earlier predicates were evicted, and late authority withdrawal remains
+recorded. Exact owned sessions, drivers, workers, stages and outer processes were
+cleaned; these checks do not establish Safari playback, input or phone acceptance.
+
+The actual physical-iPhone read-only USB R2 attempt stopped RED at usb-lockdown
+in 2.464 s, before any Runtime.evaluate or numeric sample. Its original operation
+error was not retained separately from cleanup-incomplete; lockdown closure
+remains unknown. The exact worker/group, private SDK scratch and empty pairing
+cache were removed. This is no phone playback/gesture/peer acceptance. A prepared
+diagnostic successor is not an executed test. No further phone result is claimed.
+
+See the [current 2dd evidence summary](../spikes/results/2dd156e-current-checkpoint-20261014.json). Earlier f393 short passes and older dated Kit, OBS and
+private-YouTube results below retain their source, date and scope; none is a
+current 2dd field pass. The full P01–P12 and 37-review-item scope remains open,
+including a completed same-topology 300 s qualifier, 7,200 s/22-churn operation,
+complete physical/native-input journeys, Safari, hard NAT, matched total-wire/
+actual-cost evidence and immutable-release acceptance. No production-ready or
+new publication claim is made; completed finite sources are not a live-ingest claim.
+
+### Previous f393 field checkpoint
+
+The previous deployed application checkpoint was `f393abf3d55215bdf58241a4a2af74245d646117`.
 All nine required jobs passed on their first attempt in
 [CI run 38511479806](https://github.com/forgesworn/relayswarm/actions/runs/38511479806).
 The optional twelve-viewer CI soak was skipped, not a new sustained pass.
@@ -354,7 +430,7 @@ peer links; raw two-context RTC also failed. The later 0e renewal evidence is
 recorded above; fourteen-role, sustained, device/network/cost and release gates
 remain open; see [status](STATUS.md).
 
-The preceding deployed checkpoint is `ee1510d429ac85f3738c03f10a09b753ec4eb037`,
+The preceding deployed checkpoint was `ee1510d429ac85f3738c03f10a09b753ec4eb037`,
 with permanently committed HTTP/1.1 and all nine required jobs green in
 [CI run 38492003110](https://github.com/forgesworn/relayswarm/actions/runs/38492003110)
 after one failed-job retry. The [fresh ordinary short check](../spikes/results/ee1510d-permanent-public-short-20261014.json)
@@ -507,7 +583,7 @@ A later proxy-only h1/h2 and `Alt-Svc: clear` configuration passed pinned-binary
 validation and a guarded in-place reload, with fresh HTTP/1.1 and HTTP/2 checks
 and unchanged application identity. It does not establish the cause of the
 recorded policy timeout. The [f999 public field summary](../spikes/results/f999-public-field-summary-20261013.json) records the later measurements. These receipts describe past test windows, not a final release.
-The [current acceptance summary](../spikes/results/current-source-acceptance-summary-20261013.json)
+The [13 October acceptance summary](../spikes/results/current-source-acceptance-summary-20261013.json)
 retains the earlier a023 load/churn and field results with their original identity.
 Its named raw receipts remain local evidence; the summary excludes private
 device identifiers, credentials and personal filesystem paths.
