@@ -62,40 +62,72 @@ merged source do not establish production readiness.
 
 ## Current source acceptance on 14 October
 
-The actual deployed application is `0e688470b6746b3a9afe80e1192ac4d46fa6aaea`.
+The actual deployed application is `f393abf3d55215bdf58241a4a2af74245d646117`.
 All nine required jobs passed on their first attempt in
+[CI run 38511479806](https://github.com/forgesworn/relayswarm/actions/runs/38511479806).
+The optional twelve-viewer CI soak was skipped, not a new sustained pass.
+The permanent HTTP/1.1 proxy retains independent EE provenance. The normal-TLS
+served client is 734,441 bytes, SHA-256
+`4fdb2861b08f42e4c82788a5940e0b2b436be52af84bc264998d41cf81938fcb`.
+The exact image is
+`sha256:d3bba4a8e8c991cf38d89a3d3a619868851842cda4187c2c0e58c58d4ca5a626`.
+Its 51-file non-root preflight and actual guarded deployment/public-client
+attestation passed, preserving publisher identity and private state.
+
+The fresh offline production-only consumer passed ten documented imports,
+byte-exact packaged demo/browser modules, actual installed CLI configuration,
+independent-process verified native transfer and verified HTTP fallback.
+The unpublished package is 902,933 bytes/193 files, SHA-256
+`f978dcb53dfa7a6e2db9d6c9af23f95e805a75d92a71a1644220853be8b22294`.
+The exact Git archive is 3,276,800 bytes, SHA-256
+`ccf46b011da5fad21a518f4ee8ade29a160bfc8ad4d8dea4fdf22ad006ca6646`.
+The rebuilt standalone ESM is 119,525 bytes, SHA-256
+`c3df43a8d16bb1a4bd7e6fb2373b9f5e70e9c70871b6763c079136beed4e5a24`.
+Six repository inputs and 20 locked dependency input files, expected exports,
+absence of external imports, actual import and retained 64-record diagnostics
+were checked. These local assets remain unpublished and do not prove downloaded-
+release acceptance. Named receipts are `clean-consumer-f393abf-20261014` and
+`standalone-esm-f393abf-20261014`; public-client attestation is separate.
+
+[Both ordinary cross-machine short checks](../spikes/results/f393abf-ordinary-cross-machine-20261014.json)
+passed playback, contribution and both-quality verified payload. Forward M1
+contributors → M4 receiver measured 60.050 s: 28 loads/12,763,132 bytes
+(13 low/2,732,956; 15 high/10,030,176), with zero link closures and one outgoing
+dial superseded by a crossed offer. Reverse M4 contributors → M1 receiver
+measured 60.023 s: 17 loads/8,179,316 bytes (seven low/1,476,364;
+ten high/6,702,952). It retained two initial donor dial timeouts after admitted
+remote SDP installation/ICE checking, two receiver request-timeout link closures
+followed by replacement connections, and two donor channel-error closures.
+Numeric PC IDs do not identify remote roles; these records do not establish the
+underlying routing or request-budget cause. No connectivity fix is claimed.
+
+All roles recorded zero stalls/fatal/native/page errors or frame-freeze intervals,
+and both contributors retained consent/serving in each run. Forward controls:
+383 HTTP/1.1 responses, 382 finished and one commitment GET cancelled after
+HTTP 200 headers. Reverse controls: 387 HTTP/1.1 responses, 386 finished and one
+admission verification still pending after HTTP 200 in the final observer
+snapshot; its terminal result is unknown. HTTP 200 does not prove an admitted
+response body. Each run retained a pre-measurement media abort. Start/upload
+consent was trusted; dropdowns were programmatic, with no native-menu claim.
+No extra RTC/media/permission flags or whole-heap inspection were used.
+
+All actor/provider/controller cleanup passed. Source cleanup v2 matched stable
+identity, helper/input pins and start/cleanup journal receipt hashes; the reverse
+review did not independently reread the raw remote journal. VPN Connected was
+observed before and after each run only, not continuously. Bounded local transport
+metrics are now deployed; they add observation without changing transport policy.
+The earlier ordinary sharing reds below remain unexplained. Fourteen-role
+preparation remains unlaunched/unqualified; sustained 7,200-second/22-churn,
+physical/native-input, hard-NAT, matched field-benefit, cost and immutable-release
+gates remain open across the full P01–P12 and 37-review-item scope.
+
+Earlier deployed `0e688470b6746b3a9afe80e1192ac4d46fa6aaea` passed all nine
+required jobs on its first attempt in
 [CI run 38500343145](https://github.com/forgesworn/relayswarm/actions/runs/38500343145).
-The permanent HTTP/1.1 proxy retains its independent
-`ee1510d429ac85f3738c03f10a09b753ec4eb037` attestation. The image passed the
-51-file non-root preflight, clean writer drain, stable publisher identity/private
-state/lease checks and normal-TLS public-client/fresh-playlist attestation. The
-served client is 729,998 bytes, SHA-256
-`9daf8749141d4282cdb4b5198a6b03e5495abdec2261eff186787d441a43ee4b`.
-These results bind the deployed 0e source; a subsequent documentation commit does
-not change its runtime identity or inherit its exact-source CI proof.
-
-The later documentation checkpoint `8c09478830e80f781dd01779181174e2cf8693be`
-passed all nine required jobs in
-[CI run 38506350320](https://github.com/forgesworn/relayswarm/actions/runs/38506350320).
-It did not replace deployed 0e. The next diagnostic candidate adds
-local bounded transport-state/close-reason metrics; it is not deployed and makes
-no connectivity-fix claim. Its contract is described in
-[integration metrics](../INTEGRATION.md#metrics).
-
-Deployed 0e’s fresh offline production-only consumer passed all ten documented imports,
-exact packaged demo modules, installed CLI help, independent-process verified
-native transfer and verified HTTP fallback. The unpublished package is 877,977
-bytes/192 files, SHA-256
-`23ca68947576e38e3203a118d6c3c75851ebd24c834ac681959ef355425b1971`.
-The exact-source archive is 3,184,640 bytes, SHA-256
-`4045c676a06a3b824e51dc7d23e931d4da4558ab675d30682166c25d3b58552c`.
-The rebuilt standalone ESM is 115,084 bytes, SHA-256
-`77f9da297a6ad6218e10a7836ecfd7d161f8679b0fdb760d7197a0ab3bfa4784`;
-its six repository inputs, locked dependencies, expected exports and absence of
-external imports were checked. Named local receipts are
-`clean-consumer-0e68847-20261014/receipt.json` and
-`standalone-esm-0e68847-20261014/receipt.json`. These are local candidate assets,
-not published or downloaded-release acceptance.
+Documentation checkpoint `8c09478830e80f781dd01779181174e2cf8693be` subsequently
+passed [CI run 38506350320](https://github.com/forgesworn/relayswarm/actions/runs/38506350320)
+without changing that deployed runtime. The following 0e observations retain their
+original scope and results; f393 diagnostics do not retroactively explain them.
 
 The ordinary four-role public short check passed playback, contribution and
 verified peer payload over 60.013 s: 19 peer loads/6,285,968 bytes across both

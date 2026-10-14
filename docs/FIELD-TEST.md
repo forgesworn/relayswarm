@@ -242,15 +242,52 @@ Chrome tests.
 
 ## Current field checkpoint: 14 October 2026
 
-The actual deployed application is `0e688470b6746b3a9afe80e1192ac4d46fa6aaea`,
-with independent EE permanent HTTP/1.1 proxy provenance and all nine required jobs
-green on their first attempt in
-[CI run 38500343145](https://github.com/forgesworn/relayswarm/actions/runs/38500343145).
-Fresh offline production-only consumption, ten documented exports, installed
-independent-process native transfer/verified fallback and rebuilt standalone ESM
-passed. Package/source/client hashes are recorded in [status](STATUS.md); local
-candidate assets remain unpublished. This checkpoint binds actual 0e, not the
-upcoming documentation revision.
+The actual deployed application is `f393abf3d55215bdf58241a4a2af74245d646117`.
+All nine required jobs passed on their first attempt in
+[CI run 38511479806](https://github.com/forgesworn/relayswarm/actions/runs/38511479806).
+The optional twelve-viewer CI soak was skipped, not a new sustained pass.
+The permanent HTTP/1.1 proxy retains independent EE provenance. The normal-TLS
+served client is 734,441 bytes, SHA-256
+`4fdb2861b08f42e4c82788a5940e0b2b436be52af84bc264998d41cf81938fcb`.
+Fresh production-only package and standalone ESM checks passed; exact image,
+package and source hashes are recorded in [status](STATUS.md). These local assets
+remain unpublished and do not prove downloaded-release acceptance.
+
+[Both ordinary cross-machine short checks](../spikes/results/f393abf-ordinary-cross-machine-20261014.json)
+passed playback, contribution and both-quality verified payload. Forward M1
+contributors → M4 receiver measured 60.050 s: 28 loads/12,763,132 bytes
+(13 low/2,732,956; 15 high/10,030,176), with zero link closures and one outgoing
+dial superseded by a crossed offer. Reverse M4 contributors → M1 receiver
+measured 60.023 s: 17 loads/8,179,316 bytes (seven low/1,476,364;
+ten high/6,702,952). It retained two initial donor dial timeouts after admitted
+remote SDP installation/ICE checking, two receiver request-timeout link closures
+followed by replacement connections, and two donor channel-error closures.
+Numeric PC IDs do not identify remote roles; these records do not establish the
+underlying routing or request-budget cause. No connectivity fix is claimed.
+
+All roles recorded zero stalls/fatal/native/page errors or frame-freeze intervals,
+and both contributors retained consent/serving in each run. Forward controls:
+383 HTTP/1.1 responses, 382 finished and one commitment GET cancelled after
+HTTP 200 headers. Reverse controls: 387 HTTP/1.1 responses, 386 finished and one
+admission verification still pending after HTTP 200 in the final observer
+snapshot; its terminal result is unknown. HTTP 200 does not prove an admitted
+response body. Each run retained a pre-measurement media abort. Start/upload
+consent was trusted; dropdowns were programmatic, with no native-menu claim.
+No extra RTC/media/permission flags or whole-heap inspection were used.
+
+All actor/provider/controller cleanup passed. Source cleanup v2 matched stable
+identity, helper/input pins and start/cleanup journal receipt hashes; the reverse
+review did not independently reread the raw remote journal. VPN Connected was
+observed before and after each run only, not continuously. Bounded local transport
+metrics are now deployed; they add observation without changing transport policy.
+The earlier ordinary sharing reds below remain unexplained. Fourteen-role
+preparation remains unlaunched/unqualified; sustained 7,200-second/22-churn,
+physical/native-input, hard-NAT, matched field-benefit, cost and immutable-release
+gates remain open across the full P01–P12 and 37-review-item scope.
+
+The previous deployed 0e checkpoint passed its own nine-job first-attempt
+[CI run 38500343145](https://github.com/forgesworn/relayswarm/actions/runs/38500343145),
+production-only package and standalone checks.
 
 The ordinary 60.013 s public check passed all three playback/contribution/verified-
 peer gates with 19 loads/6,285,968 peer bytes across both qualities and zero
@@ -287,7 +324,7 @@ its failure cause; investigation continues. All owned completed-run browsers/rea
 installed app awaits ingest. Fourteen-role/7,200-second/22-churn, complete
 physical journeys, hard NAT, cost and immutable release/download gates remain open.
 
-The latest ordinary restored-VPN cross-machine HLS check remained sharing-red
+The earlier 0e ordinary restored-VPN cross-machine HLS check remained sharing-red
 for 60.020 s: four high-only verified loads/2,697,988 bytes, low zero, despite
 both contributors retaining consent/serving; playback and all recorded error/
 stall/withdrawal counts passed. High's 4,038,428 accepted/reserved bytes are not
@@ -301,8 +338,8 @@ cleanup passed. Named receipts and precise counters are in [status](STATUS.md).
 
 Documentation checkpoint `8c09478` passed all nine required CI jobs in
 [run 38506350320](https://github.com/forgesworn/relayswarm/actions/runs/38506350320);
-actual deployed application remains 0e. Next-candidate bounded local transport
-metrics are diagnostic code, not deployed or a connectivity fix; see
+that documentation-only checkpoint did not change the then-deployed 0e runtime.
+The later f393 deployment above includes bounded local transport metrics; see
 [integration](../INTEGRATION.md#metrics). All earlier reds and full scope remain.
 
 The earlier deployed application was `fa79c2260431cf7901921fab4eaca251c4988f4b`,
@@ -477,6 +514,8 @@ device identifiers, credentials and personal filesystem paths.
 | Journey | Measured outcome | Remaining boundary |
 |---|---|---|
 | 0e ordinary public 60.013 s | Playback, contribution and both-quality verified peers green; 19 loads/6,285,968 bytes, recorded stalls/fatal/native/page errors zero; 369 completed controls HTTP 200/H1 | Four commitment aborts retained; programmatic dropdowns/trusted Start/upload; one-browser short scope; owned cleanup passed |
+| f393 ordinary forward M1 donors → M4 receiver, 60.050 s | All three gates green; 28 verified loads/12,763,132 bytes across low/high; zero link closures, one superseded dial; no stalls/fatal/native/page errors or consent loss | 383 H1 controls: one cancelled commitment after HTTP 200, 382 finished; finite VPN observations only; all actor/source-v2 cleanup passed; [summary](../spikes/results/f393abf-ordinary-cross-machine-20261014.json) |
+| f393 ordinary reverse M4 donors → M1 receiver, 60.023 s | All three gates green; 17 verified loads/8,179,316 bytes across low/high; two request-timeout closures then replacement connections, two initial post-SDP dial timeouts, two donor channel errors | 387 H1 responses: 386 finished, one post-200 admission verification terminal unknown; no stalls/fatal/native/page errors or consent loss; all cleanup passed; no underlying cause, fourteen-role or sustained claim |
 | 0e ordinary public renewal 180.015 s | All four gates green; 90 peer loads/39,608,780 bytes (45 low/9,488,548; 45 high/30,120,232); three peer actors retained sampled session/peer-set/link counters and consent through own-ticket renewal; 1,009 controls HTTP 200/H1 | One completed pre-measurement stall per contributor, none added during measurement; 89 unique segment contexts, one completed twice; passive equality is not PC-object identity; all owned cleanup/source-v2 audit passed; [summary](../spikes/results/0e68847-public-renewal-180-20261014.json) |
 | 0e cross-machine public HLS 60.060 s | Playback/video/native-audio decode green, recorded stalls/fatal/native/page errors zero; contributors consented/serving but uploaded zero; receiver two timeouts/zero opened links/zero peer bytes | Sharing red; 323 controls ultimately HTTP 200/H1 does not prove every admission accepted; ICE/SDP phase and cause unproved; both-machine browser/provider/source cleanup passed |
 | 0e public-origin raw RTC M1-offer → M4-answer | One verified 8,192-byte message each way in 7.972 s; exact deployed client loaded at both endpoints, complete gathering, each SDP one mDNS-form/one IPv4-form candidate; owned cleanup passed | Apps unstarted, no media/Nostr/admission/upload consent; VPN still connected/no settings changed; does not resolve cross-HLS red or prove a named cause |

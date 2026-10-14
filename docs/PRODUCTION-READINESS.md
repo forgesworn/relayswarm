@@ -5,15 +5,52 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
-The actual deployed application is `0e688470b6746b3a9afe80e1192ac4d46fa6aaea`,
-with independent EE permanent HTTP/1.1 proxy provenance and all nine required jobs
-green on their first attempt in
-[CI run 38500343145](https://github.com/forgesworn/relayswarm/actions/runs/38500343145).
-Fresh offline production-only consumption, ten documented exports, installed
-independent-process native transfer/verified fallback and rebuilt standalone ESM
-passed. Package/source/client hashes are recorded in [status](STATUS.md); local
-candidate assets remain unpublished. This checkpoint binds actual 0e, not the
-upcoming documentation revision.
+The actual deployed application is `f393abf3d55215bdf58241a4a2af74245d646117`.
+All nine required jobs passed on their first attempt in
+[CI run 38511479806](https://github.com/forgesworn/relayswarm/actions/runs/38511479806).
+The optional twelve-viewer CI soak was skipped, not a new sustained pass.
+The permanent HTTP/1.1 proxy retains independent EE provenance. The normal-TLS
+served client is 734,441 bytes, SHA-256
+`4fdb2861b08f42e4c82788a5940e0b2b436be52af84bc264998d41cf81938fcb`.
+Fresh production-only package and standalone ESM checks passed; exact image,
+package and source hashes are recorded in [status](STATUS.md). These local assets
+remain unpublished and do not prove downloaded-release acceptance.
+
+[Both ordinary cross-machine short checks](../spikes/results/f393abf-ordinary-cross-machine-20261014.json)
+passed playback, contribution and both-quality verified payload. Forward M1
+contributors → M4 receiver measured 60.050 s: 28 loads/12,763,132 bytes
+(13 low/2,732,956; 15 high/10,030,176), with zero link closures and one outgoing
+dial superseded by a crossed offer. Reverse M4 contributors → M1 receiver
+measured 60.023 s: 17 loads/8,179,316 bytes (seven low/1,476,364;
+ten high/6,702,952). It retained two initial donor dial timeouts after admitted
+remote SDP installation/ICE checking, two receiver request-timeout link closures
+followed by replacement connections, and two donor channel-error closures.
+Numeric PC IDs do not identify remote roles; these records do not establish the
+underlying routing or request-budget cause. No connectivity fix is claimed.
+
+All roles recorded zero stalls/fatal/native/page errors or frame-freeze intervals,
+and both contributors retained consent/serving in each run. Forward controls:
+383 HTTP/1.1 responses, 382 finished and one commitment GET cancelled after
+HTTP 200 headers. Reverse controls: 387 HTTP/1.1 responses, 386 finished and one
+admission verification still pending after HTTP 200 in the final observer
+snapshot; its terminal result is unknown. HTTP 200 does not prove an admitted
+response body. Each run retained a pre-measurement media abort. Start/upload
+consent was trusted; dropdowns were programmatic, with no native-menu claim.
+No extra RTC/media/permission flags or whole-heap inspection were used.
+
+All actor/provider/controller cleanup passed. Source cleanup v2 matched stable
+identity, helper/input pins and start/cleanup journal receipt hashes; the reverse
+review did not independently reread the raw remote journal. VPN Connected was
+observed before and after each run only, not continuously. Bounded local transport
+metrics are now deployed; they add observation without changing transport policy.
+The earlier ordinary sharing reds below remain unexplained. Fourteen-role
+preparation remains unlaunched/unqualified; sustained 7,200-second/22-churn,
+physical/native-input, hard-NAT, matched field-benefit, cost and immutable-release
+gates remain open across the full P01–P12 and 37-review-item scope.
+
+The previous deployed 0e checkpoint passed its own nine-job first-attempt
+[CI run 38500343145](https://github.com/forgesworn/relayswarm/actions/runs/38500343145),
+production-only package and standalone checks.
 
 The ordinary 60.013 s public check passed all three playback/contribution/verified-
 peer gates with 19 loads/6,285,968 peer bytes across both qualities and zero
@@ -50,7 +87,7 @@ its failure cause; investigation continues. All owned completed-run browsers/rea
 installed app awaits ingest. Fourteen-role/7,200-second/22-churn, complete
 physical journeys, hard NAT, cost and immutable release/download gates remain open.
 
-The latest ordinary restored-VPN cross-machine HLS check remained sharing-red
+The earlier 0e ordinary restored-VPN cross-machine HLS check remained sharing-red
 for 60.020 s: four high-only verified loads/2,697,988 bytes, low zero, despite
 both contributors retaining consent/serving; playback and all recorded error/
 stall/withdrawal counts passed. High's 4,038,428 accepted/reserved bytes are not
@@ -64,8 +101,8 @@ cleanup passed. Named receipts and precise counters are in [status](STATUS.md).
 
 Documentation checkpoint `8c09478` passed all nine required CI jobs in
 [run 38506350320](https://github.com/forgesworn/relayswarm/actions/runs/38506350320);
-actual deployed application remains 0e. Next-candidate bounded local transport
-metrics are diagnostic code, not deployed or a connectivity fix; see
+that documentation-only checkpoint did not change the then-deployed 0e runtime.
+The later f393 deployment above includes bounded local transport metrics; see
 [integration](../INTEGRATION.md#metrics). All earlier reds and full scope remain.
 
 The earlier deployed application was `fa79c2260431cf7901921fab4eaca251c4988f4b`,
@@ -210,7 +247,7 @@ records the later short/partial-long, TCP relay and Android checks separately.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Deployed 0e/independent EE permanent H1, ordinary 60.013 s all-three-gate and 180.015 s all-four-gate renewal checks pass; latter delivered 39,608,780 verified peer bytes across both qualities with pre-measurement stalls retained; later cross-machine 60.060 s and ordinary restored-VPN 60.020 s sharing failed (latest high-only 2,697,988 verified bytes); separate instrumented pass does not establish cause; fourteen-role/two-hour stability and matched field benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Deployed f393/independent EE permanent H1: ordinary forward 60.050 s and reverse 60.023 s pass all three gates (12,763,132 / 8,179,316 verified peer bytes, both qualities); reverse retains two request-timeout closures/replacements and initial post-SDP dial timeouts; older 0e 180.015 s renewal passes while historical sharing reds remain unexplained; fourteen-role/two-hour stability and matched field benefit remain open |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/exact-source CI and 0e in-place own-ticket renewal pass with unchanged expiry, authority, admission and quota limits; all three peer actors retained sampled session/link/consent state across renewal; prior fourteen-viewer address-limit 429/authority-expiry reds remain unresolved operational capacity evidence under P12 |
@@ -218,10 +255,10 @@ records the later short/partial-long, TCP relay and Android checks separately.
 | P06 | Upload budgets across reloads and tabs | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; uploading still requires new consent | Chrome reload/tab and installed Firefox durable quota/fresh-consent evidence pass; complete physical upload journeys remain open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-0e offline production-only package, ten documented exports, rebuilt standalone ESM, installed CLI and independent-process verified native transfer/HTTP fallback pass; downloaded immutable release assets remain open; WAN success and timeout retain separate scope |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-f393 offline production-only package, ten documented exports, rebuilt standalone ESM, installed CLI and independent-process verified native transfer/HTTP fallback pass; downloaded immutable release assets remain open; WAN success and timeout retain separate scope |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Actual deployed 0e passed all nine required CI jobs first attempt, fresh local consumer/rebuilt ESM, non-root image preflight, clean app drain and normal-TLS client/fresh playlists; EE permanent H1 provenance remains independent; 60.013 s short and 180.015 s renewal pass with full owned cleanup; local assets remain unpublished and downloaded-release/full production acceptance pending |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Separate real OBS/private YouTube and installed Firefox journeys pass; 0e same-browser renewal passes but later cross-machine HLS sharing is red; raw loopback-origin cross-machine RTC pass is not public-HLS/physical/NAT proof; earlier two-hour contribution, Safari/Pixel peer and iPhone background reds remain; complete physical/native application/input, hard NAT, sustained churn and billed-cost gates remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Actual deployed f393 passed all nine required CI jobs first attempt, fresh local consumer/rebuilt ESM, non-root image preflight and normal-TLS client/fresh-media attestation; EE permanent H1 provenance remains independent; both ordinary cross-machine short checks and owned cleanup/source-v2 checks pass; local assets remain unpublished and downloaded-release/full production acceptance pending |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Separate real OBS/private YouTube and installed Firefox journeys pass; f393 ordinary cross-machine short checks pass in both role directions with recorded request/dial failures retained; prior 0e sharing, two-hour contribution, Safari/Pixel peer and iPhone background reds remain; fourteen-role preparation is unlaunched/unqualified; complete physical/native application/input, hard NAT, sustained churn and billed-cost gates remain open |
 
 ## Evidence rules
 

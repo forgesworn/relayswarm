@@ -158,8 +158,8 @@ Keep receipts local unless the viewer explicitly agrees to reporting. The
 current demo's optional reporting endpoint accepts a numeric summary rather
 than this full snapshot; see [operations](docs/OPERATIONS.md).
 
-The next diagnostic candidate adds `transportDiagnostics` within metrics version
-2; it is absent from the currently deployed 0e client. It contains fixed-enum
+Deployed source `f393abf` includes `transportDiagnostics` within metrics version
+2. It contains fixed-enum
 `counters`, a ring of at most 64 `records`, `capacity` and an eviction `dropped`
 count. Records contain a page-local, per-swarm numeric connection `id` (0 when
 no PC is allocated/correlated), elapsed milliseconds in `atMs`, and fixed `event`/
@@ -171,7 +171,14 @@ Local-description records may add `candidates` (count only, capped at 256) and
 receipt. The ring and counters remain readable after `stop()`; native listeners
 are detached when their dial/link ends. No automatic reporting, signalling change
 or connectivity fix is implied. Keep this diagnostic receipt local under the same
-reporting-consent boundary as other metrics.
+reporting-consent boundary as other metrics. The two ordinary cross-machine
+short checks retained actual supersession, post-SDP dial timeout and established-
+link request-timeout stages; their [public summary](spikes/results/f393abf-ordinary-cross-machine-20261014.json)
+is evidence of observation, not a connectivity repair. Numeric IDs do not identify
+the remote role. Union sampled records by `(id, atMs, event, detail)` within each
+swarm instance; never sum repeated ring snapshots as new events. A request-timeout
+close identifies the branch, not the request start, available budget or reason
+bytes missed it.
 
 `inTimeShare` remains conditional on having peers. `sampledInTimeShare`
 includes sampled fragments with no peers; its byte equivalent weights by
