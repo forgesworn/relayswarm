@@ -17,6 +17,29 @@ request timings confirm matched donor requests started after receiver completion
 the [summary](../spikes/results/d283071-ci-observations-20261014.json) separates
 that result from its macOS cancellation-test precondition correction.
 
+## Latest source checks: 426
+
+[Exact 426 CI](https://github.com/forgesworn/relayswarm/actions/runs/38607468217)
+finished with eight required jobs passing and the media job RED at its 30 s
+first low-quality peer-load gate. Fresh production-only package/ESM, eleven
+imports, durable ledger replay and installed native/fallback checks pass at
+that exact source. The next candidate maintains bounded queued/accepted HAVE
+test observations; it has no new exact-head CI result or playback repair claim.
+
+A separate injected Mac diagnostic passed in 33.759 s: six total peer loads/
+3,107,076 bytes, with only the last high object observed after restart and
+366.123 ms deadline spare. Its Chrome/platform/injection differ from failed CI.
+One existing shared-service TLS-relay check passed 90.005 s measured/105.150 s
+whole, with 34 complete verified peer fragments/3,956,272 receiver bytes.
+Both pages had positive selected TLS pairs in 67/91 samples, constructed four
+PCs in total, and had no active PC in the final seven samples. Video/time
+continued; this is not continuous TLS, both-quality, physical, hard-NAT, server
+quota or matched-cost acceptance. Client cleanup and separate issued-credential
+removal passed; the shared service and network rules were unchanged. See
+[status](STATUS.md#latest-source-checkpoint-426-on-14-october-2026) and the
+[scope summary](../spikes/results/42608f7-source-and-tls-checkpoint-20261014.json).
+The deployed pilot remains 8f; all P01–P12 and release gates remain open.
+
 ## Current deployed checkpoint: 8f
 
 The deployed application is `8f482b4528a671acfe9f1afc336cce5743aaaefd`. All nine
@@ -37,8 +60,9 @@ separate. A further interpreter capture refused before workload because its
 remote clock was 68 ms ahead; no clock or freshness limit changed.
 
 The temporary SSH TURN fixture was removed after its scoped test. Fresh Till
-metadata found no known running TURN service while the image remains cached;
-public Internet TURN, provider policy and actual browser egress remain unproved.
+metadata found no known running TURN service on that host while the image
+remains cached. The later existing shared-service TLS check above is separate;
+hard-NAT, provider-policy and full field acceptance remain open.
 No current same-topology 300 s qualifier, two-hour/churn, complete physical/Safari,
 hard-NAT, matched wire/cost or immutable-release/download pass exists. Full
 P01–P12 remains open, PR 8 is open and v0.1.0 remains published. Documentation
@@ -354,10 +378,10 @@ records the later short/partial-long, TCP relay and Android checks separately.
 | P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Private durable ledger supports both Nostr and host website authentication. Controlled 55.780 s Chrome acceptance, 177 local publisher cases, 92 swarm cases, exact-source CI and 8f pilot deployment pass. Pilot Nostr is offered; website resolver is unconfigured. Real owner authentication and complete physical upload journeys remain open. Charges are reserved media payload, not an OS-wide meter |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-8f offline production-only package, eleven documented imports, durable account-ledger replay, rebuilt standalone ESM, installed CLI and separate-process verified native transfer/HTTP fallback pass; unpublished local assets do not close downloaded immutable-release acceptance |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-426 offline production-only package (226 members), eleven documented imports, durable account-ledger replay, rebuilt standalone ESM, installed CLI and separate-process verified native transfer/HTTP fallback pass; these unpublished exact-source assets do not close downloaded immutable-release acceptance |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Actual 8f passed all nine required CI jobs attempt 1 (38578315372), fresh local consumer/ESM, guarded deployment and normal-TLS exact client/media attestation; independent EE permanent H1 retained. Ordinary sharing and earlier fourteen-role qualification remain RED; local assets unpublished and final release/production acceptance open |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Earlier Kit/OBS/private YouTube/Firefox evidence retained. Current 8f ordinary sharing and earlier fourteen-role qualification remain RED. Original cleanup failures and later absence remain separate. SSH TURN is not public Internet/hard-NAT proof; no permanent public TURN is deployed. Complete physical/Safari, 7200 s/22 churn, matched wire/billed cost and release gates remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed 8f retains its nine-job CI/deployment/normal-TLS proofs and independent EE H1. Later source 426 has fresh consumer/ESM PASS but CI 38607468217 is eight required PASS/one media FAIL; next diagnostic candidate CI is pending. Ordinary sharing/fourteen-role REDs remain; assets unpublished and final release/production acceptance open |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Earlier Kit/OBS/private YouTube/Firefox evidence retained. Current 8f ordinary sharing and earlier fourteen-role qualification remain RED. Original cleanup failures and later absence remain separate. Existing shared-service TLS diagnostic passes within its declared scope: 34 verified fragments, positive TLS pairs 67/91 samples, four PCs and final seven samples without an active PC. It does not close continuous TLS, physical/hard-NAT or server-quota proof. Complete physical/Safari, 7200 s/22 churn, matched wire/billed cost and release gates remain open |
 
 ## Evidence rules
 

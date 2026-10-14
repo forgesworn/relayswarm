@@ -1,3 +1,6 @@
+import { createObservation, publicTimeline } from "./support/broadcast-availability-observer.mjs";
+import { transform } from "./support/broadcast-availability-transform.mjs";
+import { extractFinal } from "./support/broadcast-final-extraction.mjs";
 import { readFile } from "node:fs/promises";
 import { installFmp4StartupObserver } from "./support/fmp4-startup-observer.mjs";
 import { observedFmp4Client } from "./support/fmp4-observed-demo.mjs";
@@ -542,3 +545,77 @@ test('fMP4 observer: observations never invoke computed Hls level getters or acc
  Object.defineProperty(f.hls.levelController,'manualLevelIndex',{get(){calls++;return -1}});
  const y=f.observer.snapshot();assert.equal(y.state.loadLevel,null);assert.equal(y.state.autoLevel,null);assert.equal(calls,0);
 });
+
+// Pure availability observation regressions; included by test:publisher.
+{
+const ROOT = new URL("../", import.meta.url), key = "a".repeat(64);
+test("broadcast availability: current-source seams are unique and inverse recovers all three sources exactly", async () => {
+  for (const [kind, path] of [["client", "demo/client.mjs"], ["swarm", "src/browser/hls-swarm.mjs"], ["peer", "src/browser/peer-link.mjs"]]) {
+    const original = await readFile(new URL(path, ROOT), "utf8"), changed = transform(kind, original);
+    assert.equal(changed.undo(changed.source), original); assert.equal(changed.undo(changed.source), original);
+    assert.throws(() => transform(kind, original + original)); assert.throws(() => transform(kind, ""));
+    const amended = "// legitimate future source edit\n" + original;
+    const next = transform(kind, amended); assert.equal(next.undo(next.source), amended);
+  }
+});
+test("broadcast availability: existing PeerLink sends original once and only successful sends record queued HAVE", async () => {
+  const original = await readFile(new URL("src/browser/peer-link.mjs", ROOT), "utf8");
+  const source = transform("peer", original).source.replace(/^import[^\n]+\n/u, "").replace("export class PeerLink", "class PeerLink");
+  let tick = 0, throws = false, sends = 0, closed = 0;
+  const observation = createObservation(() => tick++, 1000), PeerLink = new Function("availabilityObservation", source + "\nreturn PeerLink;")(observation);
+  const callbacks = new Map(), channel = { readyState: "open", addEventListener(n, cb) { callbacks.set(n, cb); }, send(value) { sends++; assert.equal(typeof value, "string"); if (throws) throw Error("original-failure"); }, close() {} };
+  const link = new PeerLink({ pubkey: "PRIVATE", pc: { addEventListener() {}, close() {} }, channel, maxSegmentBytes: 1e6, onHaveChange(_link, added) { assert.deepEqual(added, [key]); }, onClose() { closed++; } });
+  link.sendHave([key]); assert.equal(sends, 1);
+  callbacks.get("message")({ data: JSON.stringify({ t: "have", add: [key, "bad"] }) }); assert.ok(link.have.has(key));
+  throws = true; link.sendHave([key]); assert.equal(sends, 2); assert.equal(closed, 1); assert.equal(link.closed, true);
+  const out = publicTimeline([{ role: "consumer", value: observation.takePrivate() }]);
+  assert.equal(out.pages[0].rows.filter(r => r.phase === "have-full-queued").length, 1);
+  assert.equal(out.pages[0].rows.filter(r => r.phase === "have-key-accepted").length, 1);
+  assert.ok(!JSON.stringify(out).includes(key)); assert.ok(!JSON.stringify(out).includes("PRIVATE"));
+});
+test("broadcast availability: Hls events and exact supplied deadline join shared objects without reading context getters", () => {
+  let tick = 0, getterCalls = 0; const a = createObservation(() => tick++, 1000), b = createObservation(() => tick++, 1000), callbacks = new Map();
+  const frag = { sn: 1, cc: 0, level: 0 }, context = { frag }; Object.defineProperty(frag, "url", { get() { getterCalls++; throw Error(); } });
+  a.attach({ on(name, cb) { callbacks.set(name, cb); } }, { FRAG_LOADING: "loading", FRAG_LOADED: "loaded" });
+  callbacks.get("loading")("", { frag }); a.key(context, key, 1501.25, 1500); callbacks.get("loaded")("", { frag });
+  b.key(context, key); b.queued({}, { t: "have", add: [key], del: [] });
+  const out = publicTimeline([{ role: "consumer", value: a.takePrivate() }, { role: "contributor-low", value: b.takePrivate() }]);
+  assert.equal(getterCalls, 0); assert.equal(out.pages[0].rows[0].object, out.pages[1].rows[0].object);
+  assert.equal(out.pages[0].rows[1].deadlineMs, 1501.25); assert.equal(out.pages[0].rows[1].budgetMs, 1500);
+});
+test("broadcast availability: bounded memory, drops and unknowns remain explicit; public output excludes extra properties", () => {
+  const o = createObservation(() => 1, 1000);
+  for (let i = 0; i < 600; i++) o.key({ frag: {} }, i.toString(16).padStart(64, "0"), 10, 0);
+  const value = o.takePrivate(); assert.equal(value.rows.length, 512); assert.equal(value.keys.length, 512); assert.ok(value.dropped > 0); assert.ok(value.unknown > 0);
+  value.rows[0].secret = "PRIVATE"; const out = publicTimeline([{ role: "consumer", value }]); assert.ok(!JSON.stringify(out).includes("PRIVATE"));
+  assert.throws(() => publicTimeline(Array(5).fill({}))); assert.throws(() => publicTimeline([{ role: "private-role", value }]));
+  const accessor = createObservation(() => 1, 1000); accessor.key(Object.defineProperty({}, "frag", { get() { throw Error(); } }), key, 1, 1); assert.equal(accessor.takePrivate().rows[0].fragment, null);
+});
+
+const secret = "private-error-" + key;
+const bound = operation => operation();
+test("broadcast availability: final extraction evaluates once per page and joins private keys before serialisation", async () => {
+  let calls = 0; const raw = [];
+  const pages = ["contributor-low", "consumer"].map(name => {
+    const observation = createObservation(() => 1, 10); observation.key({ frag: {} }, key, 1501, 1500);
+    const result = { receipt: { v: 1 }, appendFailures: [], mediaDiagnostics: [], privateAvailability: observation.takePrivate() }; raw.push(result);
+    return { name, network: {}, page: { evaluate() { calls++; return result; } } };
+  });
+  const result = await extractFinal(pages, bound);
+  assert.equal(calls, 2); assert.equal(result.extraction.ok, true);
+  assert.equal(result.availability.pages[0].rows[0].object, result.availability.pages[1].rows[0].object);
+  assert.ok(raw.every(value => !("privateAvailability" in value)));
+  assert.equal(JSON.stringify(result).includes(key), false);
+});
+test("broadcast availability: private extraction and conversion failures never export raw error or private values", async () => {
+  const raw = { receipt: { v: 1 }, privateAvailability: { keys: [key], rows: [{ phase: secret }], fragmentKeys: [] } };
+  const result = await extractFinal([
+    { name: "consumer", page: { evaluate() { throw Error(secret); } } },
+    { name: "contributor-low", page: { evaluate() { return raw; } } },
+  ], bound);
+  assert.equal(result.extraction.ok, false); assert.equal(result.availability, null);
+  assert.equal(result.extraction.failureClass, "TimelineInvalid");
+  assert.equal(result.extraction.pages[0].failureClass, "ExtractionUnavailable");
+  assert.equal(JSON.stringify(result).includes(key), false); assert.equal("privateAvailability" in raw, false);
+});
+}

@@ -250,6 +250,37 @@ These field gates remain outstanding until their actual receipts are recorded.
 No new physical-device or internet-network result is claimed by the automated
 Chrome tests.
 
+## Latest controlled checks: 426 on 14 October 2026
+
+The deployed pilot remains 8f. Later exact source 426 passed fresh offline
+package/ESM and installed native/fallback checks, but
+[CI 38607468217](https://github.com/forgesworn/relayswarm/actions/runs/38607468217)
+finished eight required PASS/one media FAIL at the first low-quality peer gate.
+A separate 33.759 s local injected diagnostic passed with six total peer loads/
+3,107,076 bytes across both qualities; only the last high object was observed
+post-restart, completing 366.123 ms before its recorded deadline. Its Mac Chrome
+155.0.8059.41 differs from CI Linux 155.0.8059.79. Maintained queued/accepted HAVE
+test observations add evidence; they do not repair playback or replace that RED.
+
+One controlled test used an existing shared Internet TLS TURN service, two
+headless pages, local synthetic HLS/Nostr, injected relay policy and trusted
+Start/upload. In 90.005 s measured/105.150 s whole, the receiver recorded
+34 complete verified peer fragments/3,956,272 bytes and the contributor recorded
+4,175,104 uploaded bytes. Both pages reported positive selected TLS pairs in
+67 of 91 samples. Each constructed two PCs; the final seven samples had no
+active PC while video/time continued. Recorded stall/fatal/native projections
+were zero, with missing-field zero defaults retained as a limitation. The
+fixed low-quality control did not retain per-fragment level identifiers; this
+is not both-rendition or continuous 90 s TLS evidence.
+
+Client/group/scratch cleanup and separate issued private ICE file/directory
+removal passed. The shared service, firewall and provider settings were not
+changed. Its actual server quotas/allocation absence, physical devices, difficult
+NAT, wider networks, sustained cohorts/churn and matched wire/cost remain
+unproved. This result is separate from the earlier SSH-only simulation and Till
+inventory. See the [sanitised checkpoint](../spikes/results/42608f7-source-and-tls-checkpoint-20261014.json).
+A new exact-head CI result and the full P01–P12/release gates remain pending.
+
 ## Current field checkpoint: 8f on 14 October 2026
 
 The deployed source is `8f482b4528a671acfe9f1afc336cce5743aaaefd`; all nine required
@@ -266,8 +297,9 @@ A further prelaunch interpreter capture refused a remote timestamp 68 ms ahead;
 no workload, clock change, timeout extension or repair is claimed by that result.
 
 The earlier TURN test used an SSH tunnel and its temporary server was removed.
-Fresh Till metadata confirms no known running TURN service; public Internet TURN
-and hard-NAT acceptance remain open. Physical/Safari, same-topology 300 s,
+Fresh Till metadata confirmed no known running TURN service on that host; the
+later existing shared-service TLS result is recorded separately above. Hard-NAT
+and complete field acceptance remain open. Physical/Safari, same-topology 300 s,
 7,200 s/22 churn, matched wire/cost and release/download gates also remain open.
 
 ## Previous field checkpoint: df51 on 14 October 2026

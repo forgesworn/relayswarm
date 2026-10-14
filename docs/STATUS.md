@@ -9,6 +9,55 @@ Checkpoint: 14 October 2026. The published experimental release is
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
 
+## Latest source checkpoint: 426 on 14 October 2026
+
+Exact source `42608f758919628dfa86dee667f6c7f3050fbcc4` completed
+[CI run 38607468217](https://github.com/forgesworn/relayswarm/actions/runs/38607468217)
+with eight required jobs passing and one media job failing its first low-quality
+peer-load gate after 30 s. That RED remains. The following test-only diagnostic
+candidate has no new exact-head CI result yet; it changes observation, not
+playback policy, peer deadlines, origin reserve or upload consent.
+
+The separate local injected HAVE/deadline diagnostic passed in 33.759 s with
+six total verified peer loads/3,107,076 bytes across both qualities. Only the
+last observed high-quality object was post-restart. Its load completed
+366.123 ms before the recorded deadline. All 277 observation rows were retained
+without drops. This used Mac Chrome 155.0.8059.41 and an injected diagnostic
+bundle; the failed Linux CI used 155.0.8059.79 without that injection. It neither
+reproduces the CI failure nor establishes a repair. The queued/accepted HAVE
+observations are now maintained test instrumentation only.
+
+Fresh exact-426 offline production-only consumption passed eleven documented
+imports, sequential durable ledger replay, installed CLI and separate-process
+verified native transfer/HTTP fallback. All 226 package member paths, modes and
+bytes match committed source, including the new Darwin filesystem verifier.
+The unpublished tarball is 1,044,255 bytes, SHA-256
+`78edf82d98481e0a4452f4f9c1aaa06f162adf3c6ce2c001328de4ee4c9c9935`;
+the rebuilt ESM is 121,478 bytes, SHA-256
+`612f5f502964462d8eba8909e5041db1030da96edbaea7dd5caa1088d1eac171`.
+Both workers, their groups, sampler children and scratch cleanup passed. These
+proofs belong to 426, not an upcoming documentation/test commit or release.
+
+An existing shared TURN service was then confirmed separately from the earlier
+Till inventory. One controlled RelaySwarm TLS-relay check passed over 90.005 s
+of measurement (105.150 s whole): the receiver recorded 34 complete verified
+peer fragments/3,956,272 bytes; the contributor recorded 4,175,104 uploaded bytes.
+Both pages showed positive selected TLS-relay pairs in 67 of 91 samples. Each
+constructed two peer connections; the final seven samples had no active peer
+connection while video/time continued. This is not continuous 90 s TLS, one
+stable connection, both-rendition, physical-device or hard-NAT proof. Recorded
+stall/fatal/native projections were zero; unavailable fields can project to zero.
+The run used two headless pages, local synthetic HLS/Nostr and injected relay
+policy, with trusted Start/upload and programmatic dropdowns. Server quotas,
+shared allocation absence and matched wire/billing remain unproved.
+
+Client/worker/group/scratch cleanup passed, and the issued private ICE file and
+directory were removed separately. The existing service and network rules were
+unchanged; no new infrastructure or Till/provider exposure was created. The
+[426 evidence summary](../spikes/results/42608f7-source-and-tls-checkpoint-20261014.json)
+retains the exact scopes. The deployed pilot remains 8f, with reporting and
+forwarding off; PR 8, P01–P12 and final release acceptance remain open.
+
 ## Current source: shared account allowance
 
 The current branch adds both requested account methods: explicit Nostr sign-in
@@ -161,9 +210,10 @@ No system clock or freshness limit changed.
 The earlier temporary coturn fixture passed two verified segments through an
 owned SSH tunnel, then its service and credentials were removed. A fresh
 read-only Till observation found no known TURN service or standard TURN
-listeners, while the pinned image remains cached. This is not public Internet
-TURN or hard-NAT proof. Provider firewall inventory, actual browser egress and
-public exposure approval remain unverified; no new public TURN service started.
+listeners, while the pinned image remains cached. That scoped Till inventory
+did not cover the separate existing shared service tested in the latest
+checkpoint above. The SSH result remains separate from direct Internet TLS
+evidence and hard-NAT acceptance; no new public TURN service started.
 
 The [8f checkpoint summary](../spikes/results/8f482b4-current-checkpoint-20261014.json)
 records exact artifacts, separate cleanup results and retained local receipt
