@@ -266,20 +266,31 @@ function policyUnavailableNow(reason, policy) {
 const policyRenewal = createPolicyRenewal({
   async load({ signal, policy, invalidate }) {
     const base = session, credential = admissionCredential;
-    const requestSignal = () => AbortSignal.any([signal, AbortSignal.timeout(5000)]);
-    // Same-URL cache locking can queue a renewal behind a stuck earlier check,
-    // even before the server's no-store response headers have arrived.
-    const next = await fetchDiagnostics.json("policy", base.deliveryPolicyEndpoint || "/delivery-policy.json", { cache: "no-store", signal: requestSignal() });
-    if (!policy(next)) return null;
-    const current = await fetchDiagnostics.json("session", "/session.json", { cache: "no-store", signal: requestSignal() });
-    if (current?.v !== 1 || typeof current.swarmId !== "string" || !current.streamEvent || typeof current.streamEvent.id !== "string" || !Array.isArray(current.relays) || current.manifest !== base.manifest) {
-      invalidate("invalid-session"); throw new Error("Publisher session changed incompatibly.");
+    const pair = new AbortController();
+    const requestSignal = () => AbortSignal.any([signal, pair.signal, AbortSignal.timeout(5000)]);
+    // Both reads use no-store so an earlier request cannot cache-lock a renewal.
+    // Catch session failure immediately, but process eligible OFF before consuming it.
+    const nextPolicy = fetchDiagnostics.json("policy", base.deliveryPolicyEndpoint || "/delivery-policy.json", { cache: "no-store", signal: requestSignal() });
+    const sessionResult = fetchDiagnostics.json("session", "/session.json", { cache: "no-store", signal: requestSignal() }).then(
+      current => ({ ok: true, current }), error => ({ ok: false, error }));
+    try {
+      const next = await nextPolicy;
+      if (!policy(next)) return null;
+      const result = await sessionResult;
+      if (!result.ok) throw result.error;
+      const current = result.current;
+      if (current?.v !== 1 || typeof current.swarmId !== "string" || !current.streamEvent || typeof current.streamEvent.id !== "string" || !Array.isArray(current.relays) || current.manifest !== base.manifest) {
+        invalidate("invalid-session"); throw new Error("Publisher session changed incompatibly.");
+      }
+      const identityChanged = !sameIdentity(current, base);
+      if (identityChanged) invalidate("publisher-session-changed");
+      const renewAdmission = Boolean(current.admission && startRequestedAt !== null && byId("mode").value !== "off" && next.mode !== "off" && (identityChanged || !credential || credential.expiresAt * 1000 - Date.now() <= 20000));
+      const candidateCredential = renewAdmission ? await obtainAdmission(current, identityChanged ? null : credential, signal) : identityChanged ? null : credential;
+      return { base, next, current, candidateCredential, priorCredential: credential, renewAdmission };
+    } finally {
+      pair.abort();
+      await sessionResult;
     }
-    const identityChanged = !sameIdentity(current, base);
-    if (identityChanged) invalidate("publisher-session-changed");
-    const renewAdmission = Boolean(current.admission && startRequestedAt !== null && byId("mode").value !== "off" && next.mode !== "off" && (identityChanged || !credential || credential.expiresAt * 1000 - Date.now() <= 20000));
-    const candidateCredential = renewAdmission ? await obtainAdmission(current, identityChanged ? null : credential, signal) : identityChanged ? null : credential;
-    return { base, next, current, candidateCredential, priorCredential: credential, renewAdmission };
   },
   eligible: ({ base, current }) => sameIdentity(base, session) || sameIdentity(current, session),
   commit({ next, current, candidateCredential, priorCredential, renewAdmission }) {

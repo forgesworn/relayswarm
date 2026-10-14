@@ -3,25 +3,28 @@ import assert from "node:assert/strict";
 import { build } from "esbuild";
 import vm from "node:vm";
 import { webcrypto } from "node:crypto";
+import http from "node:http";
+import { setTimeout as delay } from "node:timers/promises";
 
 const bundle = await build({ entryPoints: ["demo/client.mjs"], bundle: true, write: false, format: "esm", plugins: [{ name: "fixture", setup(builder) {
   builder.onResolve({ filter: /^(hls\.js|\.\.\/src\/browser\/hls-swarm\.mjs)$/ }, (args) => ({ path: args.path, namespace: "fixture" }));
   builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={}; static isSupported(){return true;} constructor(){this.config={};} on(){} loadSource(){globalThis.fixture.sourceLoads++;} attachMedia(){} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0, tickets:[]}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;}, updateTicket(ticket){if(record.stopped||globalThis.fixture.rejectTicketUpdates||globalThis.fixture.disabledSwarm)return false; options.ticket=ticket; record.tickets.push(ticket); return true;}, attach(hls){if(globalThis.fixture.disabledSwarm)return;hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, metrics(){return {mode:globalThis.fixture.disabledSwarm?'off':options.mode, disabledReason:globalThis.fixture.disabledSwarm?'no-webrtc':null, serving:!globalThis.fixture.disabledSwarm&&options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
 } }] });
-async function page(storage = new Map()) {
+async function page(storage = new Map(), { realClock = false, fetchImpl } = {}) {
   const elements = new Map(), intervals = [], timers = new Map(), windowEvents = new Map(), documentEvents = new Map();
-  let clock = 0; const wallStart = Date.now();
-  class ClockDate extends Date { constructor(...args) { super(...(args.length ? args : [ClockDate.now()])); } static now() { return wallStart + clock; } }
+  let clock = 0; const wallStart = Date.now(), performanceStart = performance.now();
+  const now = () => realClock ? performance.now() - performanceStart : clock;
+  class ClockDate extends Date { constructor(...args) { super(...(args.length ? args : [ClockDate.now()])); } static now() { return wallStart + now(); } }
   const element = (id) => { if (!elements.has(id)) elements.set(id, { value: "", checked: false, disabled: false, addEventListener(name, callback) { this[name] = callback; }, append() {} }); return elements.get(id); };
   element("mode").value = "off"; element("limit").value = "512000"; element("allowance").value = "100000000";
   const video = { addEventListener() {}, play: async () => {}, canPlayType: () => false };
   const fixture = { swarms: [], sourceLoads: 0, policy: { mode: null, revision: 0, telemetry: false }, session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment" } };
-  const context = { Date: ClockDate, fixture, document: { visibilityState: "visible", addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now: () => clock }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, TextDecoder, TextEncoder, console,
-    fetch: async (url, init) => { const value = fixture.fetch ? await fixture.fetch(url, init) : url === "/session.json" ? fixture.session : fixture.policy; return { ok: true, json: async () => structuredClone(value) }; },
-    setTimeout(callback, ms) { const id = Symbol(); timers.set(id, { callback, ms }); return id; }, clearTimeout(id) { timers.delete(id); },
+  const context = { Date: ClockDate, fixture, document: { visibilityState: "visible", addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, TextDecoder, TextEncoder, console,
+    fetch: async (url, init) => { if (fetchImpl) return fetchImpl(url, init); const value = fixture.fetch ? await fixture.fetch(url, init) : url === "/session.json" ? fixture.session : fixture.policy; return { ok: true, json: async () => structuredClone(value) }; },
+    setTimeout(callback, ms) { const id = realClock ? setTimeout(() => { timers.delete(id); callback(); }, ms) : Symbol(); timers.set(id, { callback, ms }); return id; }, clearTimeout(id) { if (realClock) clearTimeout(id); timers.delete(id); },
     setInterval(callback, ms) { intervals.push({ callback, ms }); }, window: { addEventListener(name, callback) { windowEvents.set(name, callback); } } };
   await vm.runInNewContext(`(async()=>{${bundle.outputFiles[0].text}})()`, context);
-  return { fixture, element, context, jumpWithoutTimers(ms) { clock += ms; }, windowEvent: (name) => windowEvents.get(name)?.(), visibility(state) { context.document.visibilityState = state; documentEvents.get("visibilitychange")?.(); }, submit: () => element("settings").submit({ preventDefault() {} }), poll: () => intervals.find((entry) => entry.ms === 2000).callback() };
+  return { fixture, element, context, close() { windowEvents.get("pagehide")?.(); if (realClock) for (const id of timers.keys()) clearTimeout(id); timers.clear(); }, jumpWithoutTimers(ms) { clock += ms; }, windowEvent: (name) => windowEvents.get(name)?.(), visibility(state) { context.document.visibilityState = state; documentEvents.get("visibilitychange")?.(); }, submit: () => element("settings").submit({ preventDefault() {} }), poll: () => intervals.find((entry) => entry.ms === 2000).callback() };
 }
 
 test("operator mode cannot defeat viewer origin kill or grant upload consent", async () => {
@@ -281,4 +284,102 @@ test("OFF followed by failed session validation remains off and marks authority 
   p.fixture.policy.mode = "off"; p.fixture.policy.revision++;
   p.fixture.fetch = async (url) => { if (url === "/session.json") throw Error("Session withheld"); return p.fixture.policy; };
   await p.poll(); const r = p.context.window.relaySwarmDemo.report(); assert.equal(r.deliveryPolicy.unavailable, true); assert.equal(r.policyRenewal.fresh, false); assert.equal(r.current.mode, "off"); assert.equal(p.element("upload").checked, false); assert.equal(p.element("telemetry").checked, false);
+});
+
+// Only the policy/session transport is real here. The maintained bundled client
+// runs with fixture media/swarm, real issuance clocks and no browser process.
+async function policyHTTP(t) {
+  const state = { phase: "bootstrap", policyDelay: 0, sessionDelay: 0, holdSession: false, sessionStatus: 200,
+    policy: { mode: null, revision: 0, telemetry: false },
+    session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment" } };
+  const records = [], open = new Set(), timers = new Set(); let p;
+  const server = http.createServer((request, response) => {
+    const route = request.url === "/delivery-policy.json" ? "policy" : request.url === "/session.json" ? "session" : null;
+    if (!route) { response.writeHead(404).end(); return; }
+    const record = { route, phase: state.phase, arrived: performance.now(), ended: null, closed: null };
+    records.push(record); open.add(response); let timer;
+    response.once("close", () => { open.delete(response); record.closed = performance.now(); clearTimeout(timer); timers.delete(timer); });
+    if (route === "session" && state.holdSession) return;
+    const send = () => {
+      timers.delete(timer); if (response.destroyed) return;
+      record.ended = performance.now(); response.writeHead(route === "session" ? state.sessionStatus : 200, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify(state[route]));
+    };
+    const wait = route === "policy" ? state.policyDelay : state.sessionDelay;
+    if (wait) { timer = setTimeout(send, wait); timers.add(timer); } else send();
+  });
+  t.after(async () => {
+    p?.close(); for (const timer of timers) clearTimeout(timer); for (const response of open) response.destroy();
+    server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+  });
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  p = await page(new Map(), { realClock: true, fetchImpl: (url, init) => fetch(new URL(url, origin), init) });
+  return { p, state, records, open };
+}
+async function waitForHTTP(predicate, ms = 1500) {
+  const deadline = performance.now() + ms;
+  while (!predicate() && performance.now() < deadline) await delay(5);
+  assert(predicate(), "Required owned HTTP observation did not arrive within fixture bound");
+}
+
+test("real HTTP pair completes within the existing issuance overlap", { timeout: 12000 }, async t => {
+  const f = await policyHTTP(t), { p, state, records } = f;
+  p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+  const active = p.fixture.swarms.at(-1), count = p.fixture.swarms.length;
+  assert(await active.options.reserveUploadBytes(1234)); active.uploaded = 1234;
+  const report = p.context.window.relaySwarmDemo.report();
+  const issuance = report.policyRenewal.records.filter(x => x.outcome === "accepted").at(-1).issuedAtMs;
+  state.phase = "delayed"; state.policyDelay = state.sessionDelay = 2000;
+  const polls = new Set(), interval = setInterval(() => { const pending = p.poll(); polls.add(pending); pending.then(() => polls.delete(pending), () => polls.delete(pending)); }, 2000);
+  try {
+    await delay(Math.max(0, issuance + 5300 - p.context.performance.now()));
+    const current = p.context.window.relaySwarmDemo.report();
+    assert.equal(current.policyRenewal.fresh, true, "Sequential policy+session latency must not exhaust the unchanged5s issuance authority");
+    assert.equal(p.element("upload").checked, true); assert.equal(p.fixture.swarms.length, count); assert.equal(active.stopped, undefined);
+    assert.equal(current.uploadBudget.spent, 1234);
+    const firstPolicy = records.find(x => x.phase === "delayed" && x.route === "policy");
+    const firstSession = records.find(x => x.phase === "delayed" && x.route === "session");
+    assert(firstPolicy && firstSession && firstSession.arrived < firstPolicy.ended, "Session must reach actual HTTP while its paired policy is still withheld");
+  } finally {
+    clearInterval(interval); p.close(); await Promise.allSettled([...polls]); await waitForHTTP(() => f.open.size === 0);
+  }
+});
+
+test("real HTTP OFF revokes immediately while its session is withheld", { timeout: 6000 }, async t => {
+  const f = await policyHTTP(t), { p, state, records } = f;
+  p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+  state.phase = "off"; state.policy = { mode: "off", revision: 1, telemetry: false }; state.holdSession = true; state.policyDelay = 50;
+  const pending = p.poll();
+  try {
+    await waitForHTTP(() => !p.element("upload").checked);
+    assert.equal(p.context.window.relaySwarmDemo.report().current.mode, "off");
+    assert(records.some(x => x.phase === "off" && x.route === "session" && x.ended === null));
+    assert.equal(p.context.window.relaySwarmDemo.report().policyRenewal.fresh, false);
+  } finally { p.close(); await pending; await waitForHTTP(() => f.open.size === 0); }
+});
+
+test("real HTTP early session503 cannot suppress delayed eligible OFF", { timeout: 6000 }, async t => {
+  const f = await policyHTTP(t), { p, state, records } = f;
+  p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+  state.phase = "off-after-session-failure"; state.policy = { mode: "off", revision: 1, telemetry: false }; state.policyDelay = 100; state.sessionStatus = 503;
+  await p.poll();
+  assert.equal(p.element("upload").checked, false); assert.equal(p.context.window.relaySwarmDemo.report().current.mode, "off");
+  const requests = records.filter(x => x.phase === state.phase);
+  assert(requests.find(x => x.route === "session").ended < requests.find(x => x.route === "policy").ended, "Failure must precede policy response in the real HTTP transport");
+  p.close(); await waitForHTTP(() => f.open.size === 0);
+});
+
+test("real HTTP invalid policy and hidden page cancel both owned pair requests", { timeout: 6000 }, async t => {
+  const f = await policyHTTP(t), { p, state, records } = f;
+  state.phase = "invalid-policy"; state.policy = { mode: "invalid", revision: 1, telemetry: false }; state.holdSession = true;
+  await p.poll();
+  await waitForHTTP(() => f.open.size === 0);
+  assert(records.some(x => x.phase === "invalid-policy" && x.route === "session" && x.ended === null), "Unused session must have started and then been cancelled");
+  state.phase = "hidden"; state.policy = { mode: null, revision: 2, telemetry: false }; state.policyDelay = 4000;
+  const pending = p.poll();
+  await waitForHTTP(() => records.filter(x => x.phase === "hidden").length === 2);
+  p.visibility("hidden"); await pending; await waitForHTTP(() => f.open.size === 0);
+  assert.equal(p.context.window.relaySwarmDemo.report().policyRenewal.fresh, false);
+  assert(records.filter(x => x.phase === "hidden").every(x => x.ended === null));
 });

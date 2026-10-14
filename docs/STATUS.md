@@ -129,6 +129,10 @@ RSS rejection of 2,318,106,624 bytes against 2 GiB, at 20 processes and reported
 free memory 35%. This summed RSS is neither unique RAM nor a simultaneous outer
 tree peak, and does not retroactively explain R2. R3 actor/source cleanup passed.
 
+These distributed checks use installed Chrome in headless mode with loopback
+remote debugging. They retain trusted DOM Start/upload input and programmatic
+dropdowns; they do not establish physical input or native-menu acceptance.
+
 A separately reviewed R4 changed only M1's complete-tree RSS cap to 3 GiB,
 keeping the 25% headroom guard, process limits and all admission/authority/deadline
 gates. All fourteen players started and decoded; measurement stopped RED after
@@ -161,6 +165,68 @@ headers had not arrived, and whether all seven cancellations share that source,
 remain unproved. Resources and all owned/source-v2 cleanup passed; exit 255 is
 retained. The original conservative audit and separate code-inference addendum
 remain distinct. No long or production-readiness pass is claimed.
+
+R6 stopped RED after 26.930 measured seconds with twelve status-unknown
+verification failures and zero observed HTTP refusals. Passive browser-network
+events retained request creation and cancelled terminal events for those calls,
+with no request-extra or response metadata. All ten M4 roles also retained a
+failed policy or session poll, including both origin-only baselines; all four
+M1 roles retained later successful policy/session polls. Separate M1 commitment
+cancellations remain recorded. This broadens the observed completion gap beyond
+admission but establishes no browser, queue, VPN, network or server cause. The
+first later snapshot was already origin-only, so R5's timer inference cannot be
+reused. All 56 diagnostic lifecycle operations acknowledged; 24 requests still
+pending when observation stopped have unknown terminal results. Resource and
+all owned/source-v2 cleanup passed. The linked distributed summary retains these
+limits and the earlier failures.
+
+R7 tested the same fourteen roles with M4's ten contexts split between two
+independently owned Chrome profiles, five each. The combined 12 GiB/96-process
+M4 cap, M1 cap, consent, authority and timing gates stayed unchanged. It stopped
+RED after 13.539 measured seconds with four status-unknown verifications, all in
+M4-B; M4-A had none. Both origin baselines retained late successful policy/session
+polls without control failures. This establishes neither a shared failure across
+both profiles nor a successful mitigation. Two failed verifications had browser
+request-extra metadata, none had response metadata; wire/server arrival remains
+unproved. The first later snapshot was already origin-only, leaving lifecycle
+cancellation possible. Three admission observations remained pending at shutdown
+(two with HTTP 200, one without status). All three profiles, resources, coordinated
+actor/provider/controller/outer cleanup and separate source-v2 removal passed.
+The existing long-run proposal rejects this new topology; no sustained pass follows.
+
+The separate [desktop Safari 26.6.2 attempt](../spikes/results/f393abf-safari26-session-creation-20261014.json)
+failed before application navigation: session creation reached its 14.5 s I/O
+deadline, and the outer attempt ended after 18.810 s. Both HTTP workers were
+reaped and the exact owned driver exited. No session ID returned, so allocation
+and session deletion remain unknown. Later guarded checks proved the old
+processes/socket absent; the nine-file owned scratch stage was archived, verified
+and removed. No shared Safari process was signalled. The separate source cleanup
+passed; a single bounded exact-driver log read found no matching events. This
+does not establish a playback, codec, peer or physical-device result.
+
+The separate [desktop Safari 17.6 attempt](../spikes/results/f393abf-safari17-startup-20261014.json)
+created its session and passed resource checks, then stopped before its first
+mode selection or Start command. The 32.973 s outer attempt completed no media
+measurement; the individual failed readiness predicate was not retained. This
+case used a separately reviewed 48-process M1 aggregate limit, retaining the
+3 GiB memory cap and 25% headroom guard. Exact-session deletion, owned driver,
+wire workers, both endpoint stages, provider, outer group and source removal
+passed. It does not close the earlier M4 Safari 26 unknown-session result or
+establish Safari media/input acceptance.
+
+The current source candidate starts the policy and publisher-session GETs
+concurrently, retaining no-store reads, two-second polling, five-second authority
+from issuance and at most three pending checks. Eligible operator OFF is applied
+before waiting for the session result; session/identity/admission validation and
+consent rules remain unchanged. A regression using the actual compiled client,
+fixture media/swarm and real loopback HTTP reproduced expiry with sequential
+two-second policy plus two-second session responses, then passed with concurrent
+reads. All 37 focused client/renewal/fetch tests and the maintained Chrome cache
+regression passed; four HTTP races were independently rerun. Held-session OFF,
+early session failure before OFF, cancellation, real-outage withdrawal and
+recovery without restored consent passed. This component evidence does not
+establish the cause or resolution of the public fourteen-role failures, and the
+deployed runtime above remains f393 until a separate guarded deployment.
 
 Earlier deployed `0e688470b6746b3a9afe80e1192ac4d46fa6aaea` passed all nine
 required jobs on its first attempt in
