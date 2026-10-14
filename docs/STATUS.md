@@ -19,7 +19,24 @@ observed-change reauthorisation and response-slot retention until transmission
 finishes. All 49 focused tests pass, including five actual loopback HTTP cases;
 worker reaping and group/birth absence passed. This focused guard has no resource
 sampler. The [source-check summary](../spikes/results/blocking-playlist-reload-source-checks-20261014.json)
-records exact file hashes and scope. Paired real broadcast acceptance is pending.
+records exact file hashes and scope.
+
+Exact `dd953eeffb36f16674b8afaa01d29cbe2a7f0deb` then passed one fully serial
+[paired browser journey](../spikes/results/blocking-playlist-reload-paired-browser-20261014.json)
+with blocking reload enabled and disabled. Both passed low/high peer delivery
+and producer-restart sharing under the original guards. Candidate: six verified
+loads/3,245,444 bytes in 29.285 s; control: six loads/3,079,252 bytes in 28.715 s.
+The candidate served 17 blocked reloads, with no blocked requests or watchers
+left after actual server close. All seven worker and six supervisor cleanup
+flags passed; the original resource bounds held.
+
+Each donor stalled once in both runs; baseline/consumer had no stalls and all
+fatal/native errors were zero. Candidate players each recovered from one HTTP
+503 playlist error during restart; control players had none. Its cause remains
+unproved and is retained as a transient restart risk. This single injected,
+headless loopback pair does not establish a reliability improvement, causality,
+ordinary public/physical acceptance or sustained benefit. Required hosted CI
+and the remaining field gates are separate from these local results.
 
 The preceding exact `fc39e32` check passed eight of nine required jobs in
 [CI 38640084885](https://github.com/forgesworn/relayswarm/actions/runs/38640084885).

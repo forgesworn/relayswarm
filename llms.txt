@@ -47,8 +47,10 @@ devices; account changes leave uploading off until fresh consent. The deployed
 Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The example origin adds bounded blocking reload for compatible complete live
 playlists across all renditions, with 24 waiters inside 32 media requests.
-Raw media, peer deadlines and playback holdback are unchanged; separate browser
-acceptance remains required.
+Raw media, peer deadlines and playback holdback are unchanged. One injected
+loopback pair passed both qualities and restart with the option on and off;
+recoverable playlist 503s occurred only with it on. Reliability improvement and
+ordinary public/physical acceptance remain unproved.
 The v0.2.0 supervised broadcast bridge creates two live HLS renditions and
 can forward H.264/AAC separately to RTMPS with explicit TLS verification.
 These additions belong to the current candidate and are absent from v0.1.0 downloads.

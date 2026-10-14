@@ -4,6 +4,10 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Added complete live-playlist blocking reload across compatible renditions,
+  with bounded waits, disconnect/shutdown cleanup, directory replacement
+  revalidation and snapshot-consistent HEAD/range responses.
+
 - Added an optional durable account upload allowance supporting Nostr sign-in,
   host website accounts, explicit linking and short-lived page authority.
   Account actions preserve cumulative charges and require fresh upload consent.

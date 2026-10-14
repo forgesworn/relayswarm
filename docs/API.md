@@ -194,8 +194,11 @@ change the loader's peer budget, origin reserve, segment durations or playback h
 See the [HLS blocking-reload draft contract](https://datatracker.ietf.org/doc/html/draft-pantos-hls-rfc8216bis-22#section-6.2.5.2).
 
 The focused suite includes actual HTTP publication, capacity, timeout, abort
-and shutdown checks. Paired browser acceptance remains pending; these checks
-do not relabel retained initial-peer or restart-sharing failures.
+and shutdown checks. One injected headless Chrome loopback pair passed both
+qualities and producer-restart sharing with this option enabled and disabled.
+The [paired results](../spikes/results/blocking-playlist-reload-paired-browser-20261014.json)
+retain recoverable 503 errors seen only with the option enabled; reliability
+improvement, ordinary public and physical acceptance remain unproved.
 
 `demo.playlistReloadMetrics()` exposes the policy, waiter limit, current blocked
 requests/watchers and numeric start, release, abort, timeout, watcher-error and
