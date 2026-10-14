@@ -65,12 +65,18 @@ freshness change is claimed. Earlier a2c99a9/d283071 restart-sharing failures
 remain separate from the 8f loopback fixture pass. The temporary SSH coturn
 fixture was removed. An existing shared service on Stall separately carried
 verified Internet TLS-relay media in a scoped short test; continuous TLS,
-natural expiry, physical devices and hard NAT remain unproved. Exact da9 CI
-passed eight required jobs and failed its post-restart peer gate: all 31 later
-loads had zero peer budget under the two-second origin reserve. Its mock-issuer
-browser renewal and 237-member package/native/fallback checks passed. A later
-cached-credential correction passes eleven lifecycle/four VM cases; its fresh
-CI/package/Internet checks remain pending. See STATUS for source-bound limits.
+natural expiry, physical devices and hard NAT remain unproved. Exact 7a CI
+passed all nine required jobs and fresh 239-member package/native/fallback/ESM
+checks. Its injected loopback broadcast passed both qualities and restart
+sharing; TURN renewal was off, so no cache-fix causal repair is claimed.
+Mock-issuer browser rollover passes separately. Actual existing-service forced
+renewal R3/R4 remain RED: R4 accepted a new lease but hit its original lifetime
+PC cap after glare; post-renewal TLS/media remains unproved. Da9's zero-budget
+restart RED and cache reproduction are retained. The last-attested pilot stays
+8f; no new deployment or release is implied. See STATUS for exact scope.
+Latest Safari 26 tooling returned driver ready but session creation timed out
+before a page/application test. Owned process/scratch cleanup passed; exact
+session destruction remains unknown.
 Earlier fourteen-role REDs, Safari bootstrap and
 no-evaluation iPhone USB checks do not close acceptance. Full P01–P12, long/churn,
 physical/NAT, cost and release gates remain open. No separate 37-row ledger was

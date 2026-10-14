@@ -1,0 +1,262 @@
+{
+  "v": 1,
+  "kind": "source-bound-ci-consumer-and-forced-renewal-checkpoint",
+  "sourceSha": "7a5de06a97baf14c00e3a420944b75a730042c85",
+  "ci": {
+    "runId": 38625083620,
+    "attempt": 1,
+    "conclusion": "success",
+    "requiredPassed": 9,
+    "optionalSoak": "skipped"
+  },
+  "broadcast": {
+    "scope": "injected diagnostic headless Linux Chrome155.0.8059.79; loopback synthetic HLS/Nostr; declared fake-media/permission/mDNS/autoplay flags",
+    "checkpointsPassed": 4,
+    "verifiedPeerLoads": 6,
+    "verifiedPeerBytes": 3240180,
+    "lowUploadedAcceptedPayloadBytes": 221464,
+    "highUploadedAcceptedPayloadBytes": 3018716,
+    "postRestart": {
+      "verifiedPeerLoads": 1,
+      "verifiedPeerBytes": 791856,
+      "level": 1,
+      "discontinuity": 1,
+      "sequence": 8,
+      "peerBudgetMs": 1500,
+      "originReserveMs": 2000,
+      "playableAheadMs": 3623.694,
+      "haveAcceptedAfterEntryMs": 134.5,
+      "loadedAfterEntryMs": 208.8,
+      "deadlineSpareMs": 1291.1
+    },
+    "stalls": {
+      "low": 1,
+      "high": 1,
+      "baseline": 0,
+      "consumer": 0
+    },
+    "fatalNativeAppendFailures": 0,
+    "observationRows": 246,
+    "dropped": 0,
+    "unknown": 0,
+    "unlabelled": 0,
+    "extractionsPassed": 4,
+    "optionalTurnAdapterEnabled": false,
+    "cacheFixCausallyExplainsBroadcastPass": false,
+    "cleanup": {
+      "requestObserverReleased": true,
+      "fullActorApiOsCleanupProved": false
+    },
+    "diagnosticBundle": {
+      "bytes": 755513,
+      "sha256": "609c40c554a0b52ee62d56e8c898314559385b0bd43d23293f8aa5dfb48a029b",
+      "digestSource": "recorded receipt, not rebuilt by audit"
+    }
+  },
+  "consumer": {
+    "archive": {
+      "filename": "candidate-source.tar",
+      "bytes": 4003840,
+      "sha256": "7ba1bbd42a785b83744c4310ff530c81c0752e886a5be0042589a46097151355"
+    },
+    "package": {
+      "bytes": 1088342,
+      "files": 239,
+      "sha256": "10e2c0e972ecc176754d12db3ca1bbe31cec2489efe300a80b1c9e17d12816d3",
+      "allRegularSafeMembersExactGitArchive": true,
+      "verifiedMemberCount": 239
+    },
+    "standalone": {
+      "file": "relayswarm-hls-swarm-0.2.0.mjs",
+      "bytes": 121478,
+      "sha256": "612f5f502964462d8eba8909e5041db1030da96edbaea7dd5caa1088d1eac171"
+    },
+    "productionOnly": true,
+    "offlineCacheOnly": true,
+    "documentedNamedImports": 11,
+    "installedCli": true,
+    "ledger": {
+      "spent": 61,
+      "remaining": 39,
+      "overCapRefused": true,
+      "reopenReplayIdempotent": true,
+      "scope": "sequential two-page-key trusted core; not simultaneous HTTP account authentication"
+    },
+    "native": {
+      "bytes": 131097,
+      "verified": true,
+      "httpRequests": 0
+    },
+    "fallback": {
+      "bytes": 131097,
+      "verified": true,
+      "httpRequests": 1
+    },
+    "optionalRenewalDisabledSmoke": true,
+    "elapsedMs": 6703,
+    "cleanup": {
+      "consumerAndStandaloneReapedAndGroupsAbsent": true,
+      "allSampledPsDirectChildrenReaped": true,
+      "noRejectedOrUnknownProbe": true,
+      "oneObservedOwnedScratchAbsent": true,
+      "servicesClosed": true,
+      "sourceCleanAfter": true,
+      "groupSignalsSent": false,
+      "scope": "Direct sampler child reaping separately recorded from the two Node phase groups; no new host observation by this audit"
+    },
+    "earlierDa9R1RedR2PassPreserved": true
+  },
+  "mockRenewal": {
+    "scope": "owned fake issuer15s credentials, unavailable loopback TURN port9, real host-path WebRTC media",
+    "hostedElapsedMs": 50904,
+    "supervisorElapsedMs": 51386,
+    "fiveCheckpointsPassed": true,
+    "receiverVerifiedLoadsAtRollover": 10,
+    "receiverVerifiedBytesAtRollover": 2670164,
+    "newSwarmVerifiedLoadsAtRollover": 1,
+    "newSwarmVerifiedBytesAtRollover": 283692,
+    "rolloverCredentialRefreshCounts": [
+      4,
+      3,
+      4
+    ],
+    "accountGrantRenewals": [
+      3,
+      3
+    ],
+    "consentAndSpendRetained": true,
+    "apiWorkerGroupChromeScratchCleanup": true,
+    "actualInternetTurnProof": false
+  },
+  "existingServiceForcedRenewal": {
+    "sourceSha": "7a5de06a97baf14c00e3a420944b75a730042c85",
+    "scope": "TLS-only configured existing shared relay test; own headless Mac Chrome155.0.8059.41, local HLS/Nostr, injected relay-only policy, no fake-media/mDNS/autoplay overrides",
+    "issuerOriginalTtlSeconds": 3600,
+    "firstContributorLeaseClampedSeconds": 60,
+    "naturalExpiryProved": false,
+    "R3": {
+      "verdict": "RED",
+      "outerElapsedMs": 61552,
+      "retainedSamples": 39,
+      "failedSampleRetained": false,
+      "exactTerminalAssertion": "unknown",
+      "postRenewalTlsMediaProved": false
+    },
+    "R4": {
+      "verdict": "RED",
+      "outerElapsedMs": 56918,
+      "retainedSamples": 38,
+      "passedSamples": 37,
+      "failedSamples": 1,
+      "failedSampleElapsedMs": 38937,
+      "failedGate": "sample-safety",
+      "constructorRefused": 3,
+      "constructorRefusedAllowed": 0,
+      "donorLifetimePcLimit": 2,
+      "donorLifetimePcsConstructed": 2,
+      "initialSupersededPcConsumedSlot": true,
+      "servingUsedSecondPc": true,
+      "acceptedContributorRefreshes": 2,
+      "newContributorLeaseSeconds": 3600,
+      "consentRetained": true,
+      "localSpendBytes": 1861388,
+      "localSpendNondecreasing": true,
+      "verifiedPeerFragmentsBeforeTransition": 16,
+      "verifiedPeerBytesBeforeTransition": 1861388,
+      "strictBothSelectedPositiveTlsSamples": 0,
+      "postRenewalTlsMediaProved": false,
+      "workerCleanupFlagsTrue": 7,
+      "supervisorCleanupFlagsTrue": 6,
+      "sampledResourceHighwaters": {
+        "rssBytes": 1643053056,
+        "processes": 16,
+        "minimumFreePercent": 28
+      }
+    },
+    "runtimeFailureDiagnosed": false,
+    "serverQuotaRefusalDiagnosed": false,
+    "earlierClosureCauseDiagnosed": false,
+    "sharedServicesOrFirewallChanged": false,
+    "sharedAllocationAbsenceInspected": false,
+    "credentialsLoggedOrHashed": false
+  },
+  "safariToolingReadiness": {
+    "verdict": "RED",
+    "applicationTested": false,
+    "physicalDevice": false,
+    "installedDriverVersion": "26.6.2",
+    "driverStatusReady": true,
+    "sessionCreateOutcome": "whole-call-deadline",
+    "sessionCreateElapsedMs": 14506.1,
+    "sessionCreateHttpStatus": null,
+    "sessionIdReturned": false,
+    "pageNavigated": false,
+    "nativeButtonClicked": false,
+    "outerElapsedSeconds": 17.35252216598019,
+    "driverReaped": true,
+    "wireWorkersStarted": 2,
+    "wireWorkersReaped": 2,
+    "runnerReaped": true,
+    "guardianBirthAbsent": true,
+    "rootOwnedGroupAbsent": true,
+    "ownedScratchRemoved": true,
+    "sessionCreationKnown": false,
+    "sessionDeleted": false,
+    "sharedSafariOrWebKitSignalled": false,
+    "exceptionClassCaptured": false,
+    "m1SampledOwnedTree": {
+      "samples": 14,
+      "rssHighwater": 61046784,
+      "processHighwater": 3,
+      "lastFreePercent": 54
+    },
+    "m4PreSessionObservation": {
+      "rssBytes": 746717184,
+      "processes": 8,
+      "freePercent": 78,
+      "includesSharedSafariAndWebKit": true,
+      "duringBlockedRequestMonitoringProved": false
+    }
+  },
+  "history": {
+    "da9PostRestartMediaRedPreserved": true,
+    "deterministicCachedLeaseRedPreserved": true,
+    "earlierOrdinaryAndFourteenRoleRedsPreserved": true,
+    "laterPassRetroactivelyRepairsEarlierFailures": false
+  },
+  "deployment": {
+    "lastAttestedSourceSha": "8f482b4528a671acfe9f1afc336cce5743aaaefd",
+    "freshHostOrDeployClaim": false,
+    "reportingEnabled": false,
+    "forwardingEnabled": false
+  },
+  "release": {
+    "published": "v0.1.0",
+    "candidateAssetsPublished": false,
+    "pr8Open": true,
+    "allP01ThroughP12Complete": false
+  },
+  "remainingGates": [
+    "ordinary public sharing and same-topology sustained capacity",
+    "complete Safari and physical devices",
+    "continuous relay/natural expiry/reconnection and server quota acceptance",
+    "7200seconds and22churn",
+    "matched total-wire and billed cost",
+    "immutable downloaded release assets and full production acceptance"
+  ],
+  "proofDigests": {
+    "artifacts/clean-consumer-7a5de06-preparation-20261014/analysis/analysis.json": "f82a1740100f74e0ff5b7aa25a3ffa00ee118b2538b2d5f1938d5a94a295d26c",
+    "artifacts/clean-consumer-7a5de06-preparation-20261014/analysis/EVIDENCE-MANIFEST.json": "fda4815b7db55aee66b4fcba02d1e054a4490cd3acdeeb9a5352908b123e3333",
+    "artifacts/candidate-7a5de06-ci-analysis-20261014/analysis.json": "7869684cce9108242b4bba0e2592731bc70efb8e94b754f0d9d390787632b464",
+    "artifacts/candidate-7a5de06-ci-analysis-20261014/EVIDENCE-MANIFEST.json": "b732a9860a6047b1a86d6b59c3c19cf68d193baf917ce6708e6c6a364e3a9fee",
+    "artifacts/candidate-7a5de06-root-delivery-20261014/ci-observation-20261014T205754Z.json": "588d0e65a13aebdb1e5eee7c2d65577f09e3efcb0bda6ddb259276f319ab1d01",
+    "artifacts/existing-turn-renewal-7a5de06-r3-run-20261014/analysis/summary.json": "68200dc6b19d9dc7ae04de7a8bfb8675b6091b6b30194e92218224af542736d1",
+    "artifacts/existing-turn-renewal-7a5de06-r3-run-20261014/analysis/EVIDENCE-MANIFEST.json": "a66a4d188435430a6fc7a35d8c4807551a2b576cbd22bf1564c4af780a58c035",
+    "artifacts/existing-turn-renewal-7a5de06-r4-run-20261014/analysis/summary.json": "0a5d39b9f65cdb0c357759adb6d81f4337e0dfc89c46f38f3e414b9ecc0581db",
+    "artifacts/existing-turn-renewal-7a5de06-r4-run-20261014/analysis/EVIDENCE-MANIFEST.json": "d6d3506fa704b15f6c735a4245e2cf1e56df7f7e4cc7528787d916807553823b",
+    "artifacts/turn-cached-lease-review-20261014/receipt.json": "722a3ae9d57e9dc5dcc8acd5022efc7e007928869a8c81a689aa283d41020ded",
+    "artifacts/safari26-readiness-run-20261014/analysis/summary.json": "c3b7cc84435b9bf23d81cfd03f3d314d430162a063a407fcfd6ffb0b0a031356",
+    "artifacts/safari26-readiness-run-20261014/analysis/EVIDENCE-MANIFEST.json": "a8f509fcd32d665fae40fa5510e3800bd5058e45b13fe5504ecc6a33b80400f0",
+    "artifacts/existing-turn-renewal-7a5de06-r4-api-assessment-20261014/EVIDENCE-MANIFEST.json": "0095ad5971ddbba93b8bdfc989894c29e221757271f95c00b4df75c7046e9dca"
+  }
+}

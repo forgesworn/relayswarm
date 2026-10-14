@@ -9,6 +9,64 @@ Checkpoint: 14 October 2026. The published experimental release is
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
 
+## Current source checkpoint: 7a on 14 October 2026
+
+Exact `7a5de06a97baf14c00e3a420944b75a730042c85` passed all nine required
+jobs on attempt 1 of
+[CI 38625083620](https://github.com/forgesworn/relayswarm/actions/runs/38625083620);
+the optional soak was skipped. The injected loopback broadcast passed both
+qualities and producer-restart sharing: six verified loads/3,240,180 bytes,
+including one post-restart high fragment/791,856 bytes. That fragment finished
+1,291.1 ms before its original deadline with the unchanged 2,000 ms reserve.
+Each donor recorded one stall; baseline/consumer recorded none. Fatal, native
+and append failures were zero. All 246 observation rows and four extractions
+were retained without drops/unknowns/unlabelled objects. Recorder release does
+not prove missing actor/API or OS reaping. TURN renewal was off in this fixture;
+its PASS does not establish that the cache correction repaired broadcast recovery.
+The da9 media RED and deterministic cache reproduction remain unchanged.
+
+Fresh exact-7a offline production-only consumption passes all 239 package
+members against committed paths/modes/bytes, eleven documented imports,
+installed CLI, sequential durable ledger replay, separate-process verified
+native transfer/HTTP fallback and rebuilt ESM. The unpublished tarball is
+1,088,342 bytes, SHA-256
+`10e2c0e972ecc176754d12db3ca1bbe31cec2489efe300a80b1c9e17d12816d3`;
+the fresh ESM is 121,478 bytes, SHA-256
+`612f5f502964462d8eba8909e5041db1030da96edbaea7dd5caa1088d1eac171`.
+Owned phase groups, sampled direct-child probes and scratch cleanup pass.
+Earlier da9 consumer R1 RED/R2 PASS remain separate.
+
+The hosted mock-issuer renewal fixture passed in 50.904 s, retaining consent
+and spend through new-swarm peer delivery, account linking, restart and reset.
+It uses 15 s fake credentials and loopback host WebRTC, not an Internet relay.
+Actual existing-service forced-renewal attempts R3 and R4 remain **RED**. R3
+omitted its failed sample, so the exact terminal assertion remains unknown.
+R4 retained the failure: three constructor refusals under its unchanged
+maximum of two lifetime PCs per page, after legitimate initial glare consumed
+the donor's first PC and serving used its second. The client accepted refresh 2
+and a new 3,600 s lease, retaining checked consent and nondecreasing spend;
+no new PC or post-renewal TLS/media was proved. R4 recorded 16 prior verified
+fragments/1,861,388 bytes but no strictly selected positive TLS-pair sample.
+All owned worker/fixture/group/scratch cleanup flags passed; shared allocation
+absence was not inspected. These attempts do not diagnose a product renewal
+failure, server quota refusal or the earlier connection-closure cause.
+
+A separate installed Safari 26.6.2 tooling check on M4 remains **RED**. Driver
+status returned ready, but POST/session reached its 14,506.1 ms whole-call
+deadline without a response or session ID. No page navigation, button click or
+RelaySwarm test ran. The owned driver and two wire workers were reaped; runner,
+guardian and group absence and inert scratch removal passed. Session destruction
+remains unknown. M4's resource observation preceded the blocked call and does
+not prove continuous monitoring during it.
+
+The [7a checkpoint](../spikes/results/7a5de06-ci-consumer-and-renewal-checkpoint-20261014.json)
+keeps these source-bound results separate. The last-attested pilot remains 8f,
+with reporting/forwarding off; no fresh deployment is claimed. v0.1.0 remains
+published, candidate assets unpublished and PR 8/P01–P12 open. Ordinary
+sharing, complete Safari/physical devices, sustained 7,200 s/22 churn,
+natural expiry/reconnection, matched wire/cost and final release acceptance
+remain open.
+
 ## Cached TURN credential correction
 
 A deterministic clock test at da9 reproduced an unchanged cached reply
@@ -21,9 +79,10 @@ Eleven lifecycle and four page-VM cases pass in one 481 ms focused run. The
 worker was reaped and its group and original birth were absent. This focused
 guard has no RSS/pressure sampler; no such resource proof is claimed. The
 [correction checkpoint](../spikes/results/turn-cached-lease-fix-20261014.json)
-records the exact source digests and preserved reproduction. Fresh CI, package
-consumption and Internet renewal for this correction remain pending; the da9
-results below belong to the preceding source. The pilot is unchanged.
+records the exact source digests and preserved reproduction. Exact-7a CI/package
+results and the separate RED Internet-renewal attempts
+are recorded above; the da9 results below belong to the preceding source.
+The pilot is unchanged.
 
 ## Optional TURN renewal candidate
 
@@ -49,8 +108,9 @@ owned fake issuer, 15 s credentials and real loopback WebRTC host media; the
 TURN endpoint is unavailable loopback port 9. Rollover retains consent and
 accepted spend, delivers new-swarm peer media, and passes link/restart/reset
 checks with scoped worker/API/group/scratch cleanup. These are browser
-integration passes, not Internet TURN renewal. The actual existing-service
-renewal check is **pending**, with no result claimed.
+integration passes, not Internet TURN renewal. At that da9 checkpoint the
+existing-service renewal check was pending;
+the later exact-7a attempts are recorded separately above.
 
 Fresh exact-da9 offline production-only consumption passes eleven documented
 imports, installed CLI, sequential durable ledger replay and separate-process

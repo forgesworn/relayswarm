@@ -5,6 +5,40 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
+## Current source checkpoint: 7a
+
+Exact `7a5de06a97baf14c00e3a420944b75a730042c85` passed all nine required
+jobs on attempt 1 of
+[CI 38625083620](https://github.com/forgesworn/relayswarm/actions/runs/38625083620);
+optional soak skipped. The injected loopback broadcast passed both qualities
+and restart sharing: six verified loads/3,240,180 bytes, including one high
+CC1 fragment/791,856 bytes with 1,291.1 ms deadline spare. One stall per donor
+and the absence of full broadcast API/OS cleanup proof remain explicit. The
+optional credential adapter was off; this PASS does not repair or relabel da9 RED.
+
+Fresh exact-7a offline production-only package/consumer/ESM passes cover 239
+exact-source members, eleven imports, installed CLI, sequential ledger replay
+and independent-process verified native/fallback. Assets remain unpublished;
+earlier smoke failures and source histories are retained.
+
+Mock-issuer browser renewal passes separately. Actual existing-service
+forced-renewal R3/R4 remain RED: R3 lacks the failed sample; R4 records three
+constructor refusals under the original two-lifetime-PC cap after initial
+glare. Refresh 2/new 3,600 s credentials were accepted with consent/spend
+retained, but no post-renewal transport/media or strictly selected positive
+TLS sample was proved. Owned client/fixture cleanup passed; shared allocation
+absence was not inspected. No runtime-failure or server-quota cause is inferred.
+
+The separate M4 Safari 26.6.2 tooling check returned driver ready, then timed
+out creating a session before any page/application test. Owned driver, wire
+workers and scratch cleanup passed; exact session destruction remains unknown.
+The M4 resource observation was before the blocked request, not continuous.
+
+The [7a summary](../spikes/results/7a5de06-ci-consumer-and-renewal-checkpoint-20261014.json)
+retains exact hashes and scope. Last-attested pilot 8f is unchanged; ordinary
+sharing, complete Safari/physical, sustained/churn, expiry/reconnection,
+wire/cost, immutable release/download and full P01–P12 acceptance remain open.
+
 Earlier source `a2c99a9` passed eight of nine required CI jobs; its loopback
 broadcast test recovered playback after producer restart but failed the
 unchanged new-discontinuity peer-fragment gate. The
@@ -24,8 +58,8 @@ returns the same cached material. It does not rebuild peers or increment the
 refresh counter, and uses the existing bounded retry. One deterministic da9
 reproduction is retained; the corrected eleven lifecycle and four page-VM
 cases pass with worker/group/birth absence. The focused guard has no resource
-sampler. Fresh exact-source CI, package and Internet renewal are pending; the
-[correction summary](../spikes/results/turn-cached-lease-fix-20261014.json)
+sampler. Exact-7a CI/package and separate RED Internet-renewal attempts are
+recorded above; the [correction summary](../spikes/results/turn-cached-lease-fix-20261014.json)
 does not replace the source-bound da9 evidence below or close field acceptance.
 
 ## Optional TURN renewal candidate
@@ -45,8 +79,9 @@ has eleven server/owned-HTTP, ten lifecycle and four page-VM passes. Separate
 real Chrome mock-issuer rollover fixtures pass locally (47.010 s) and in CI
 (50.433 s), preserving consent/spend and verifying new-swarm peer payload,
 link/restart/reset and scoped cleanup. They use 15 s fake credentials and
-loopback host WebRTC, not an actual TURN relay. Existing-service Internet
-renewal remains **pending**; sustained expiry/reconnection is unproved.
+loopback host WebRTC, not an actual TURN relay. Existing-service Internet renewal
+was pending at da9; the later exact-7a
+RED attempts appear above. Sustained expiry/reconnection remains unproved.
 
 Exact-da9 fresh offline production-only consumption passes all 237 package
 members, eleven documented imports, installed CLI, sequential durable ledger
@@ -442,10 +477,10 @@ records the later short/partial-long, TCP relay and Android checks separately.
 | P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Private durable ledger supports both Nostr and host website authentication. Controlled 55.780 s Chrome acceptance, 177 local publisher cases, 92 swarm cases, exact-source CI and 8f pilot deployment pass. Pilot Nostr is offered; website resolver is unconfigured. Real owner authentication and complete physical upload journeys remain open. Charges are reserved media payload, not an OS-wide meter |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-da9 offline production-only package (237 exact-source members), eleven documented imports, sequential durable ledger replay, installed CLI, separate-process verified native/fallback and rebuilt ESM pass. First smoke RED is retained separately. Unpublished assets do not close downloaded immutable-release acceptance |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-7a fresh offline production-only package (239 exact-source members), eleven imports, sequential durable ledger replay, installed CLI, independent-process verified native/fallback and rebuilt ESM pass. Earlier da9 smoke RED remains separate. Assets are unpublished; downloaded immutable-release acceptance remains open |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Pilot 8f retains its exact nine-job CI/deployment/normal-TLS and independent EE H1 proofs. Exact da9 has eight required CI PASS/media post-restart RED, plus fresh package/consumer/ESM PASS; earlier 07 all-nine PASS remains historical. Optional renewal is not deployed. Ordinary/fourteen-role REDs, unpublished assets and final release acceptance remain open |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Earlier Kit/OBS/private YouTube/Firefox evidence retained. Pilot 8f ordinary and earlier fourteen-role sharing REDs remain. Da9 mock-issuer rollover browser passes are loopback host-path integration; actual Internet renewal is pending. Earlier shared-service TLS scope remains 34 fragments, positive pairs67/91, four PCs and final seven samples without an active PC. Complete physical/Safari, continuous TLS/expiry/reconnection, server quotas,7200s/22churn, matched wire/cost and release gates remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact 7a has all nine required CI jobs PASS on attempt 1 plus fresh package/consumer/ESM PASS. Last-attested pilot 8f and independent EE H1 remain unchanged; optional renewal is not deployed. Earlier source/ordinary/fourteen-role REDs, unpublished assets and final release acceptance remain open |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Earlier Kit/OBS/private YouTube/Firefox evidence retained. Pilot 8f ordinary and earlier fourteen-role REDs remain. 7a mock-issuer rollover passes are loopback host-path evidence. Actual forced-renewal R3/R4 remain RED under declared fixture limits; accepted credentials do not prove post-renewal TLS/media. Latest Safari 26 tooling returned driver ready but session creation timed out before an application test; session destruction remains unknown despite owned process/scratch cleanup. Earlier short TLS evidence retains its separate scope. Complete Safari/physical, continuous TLS/natural expiry/reconnection, server quotas, 7,200 s/22 churn, matched wire/cost and release gates remain open |
 
 ## Evidence rules
 
