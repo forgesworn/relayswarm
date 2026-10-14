@@ -101,7 +101,9 @@ The [field guide](FIELD-TEST.md#optional-turn-credential-renewal) describes the
 issuer response, limits, cookie and consent behaviour. The descriptor in
 `/session.json` contains only the fixed same-origin endpoint contract.
 
-This integration replaces demo swarms on successful renewal. The core
+This integration replaces demo swarms when accepted credential material changes.
+An identical cached reply preserves the original lease and peers and schedules
+a bounded retry; it does not extend expiry or increment the refresh counter. The core
 `createHlsSwarm({iceServers})` option remains a configuration captured when the
 swarm is created; no seamless ICE-restart API is added.
 

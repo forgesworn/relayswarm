@@ -109,6 +109,11 @@ export function createTurnCredentials({ origin, fetchImpl = globalThis.fetch, no
       const wasFresh = fresh();
       if (closed || !active || signal.aborted || generation !== attempt.generation || now() < attempt.mono || wallNow() < attempt.wall
         || left(attempt, 5000) <= 0 || left(attempt, value.lifetime) <= 0) throw invalid();
+      if (wasFresh && current && JSON.stringify(current.servers) === JSON.stringify(value.servers)) {
+        // A conservatively early refresh can return the server's cached lease.
+        // Keep its original expiry and peers; retry without an immediate loop.
+        outcome = "accepted"; schedule(true); return true;
+      }
       current = { ...value, mono: attempt.mono, wall: attempt.wall }; outcome = "accepted"; refreshes = count(refreshes); schedule();
       if (!explicit && attempt.hadCurrent && wasFresh) onRefresh();
       return true;

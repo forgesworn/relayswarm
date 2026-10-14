@@ -9,21 +9,67 @@ Checkpoint: 14 October 2026. The published experimental release is
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
 
+## Cached TURN credential correction
+
+A deterministic clock test at da9 reproduced an unchanged cached reply
+rebuilding peers and moving the conservative local expiry. The follow-up client
+keeps the original lease for identical credential material, skips the refresh
+counter and callback, and retries within the existing bounds. All expiry,
+generation, suspension and consent checks still run before acceptance.
+
+Eleven lifecycle and four page-VM cases pass in one 481 ms focused run. The
+worker was reaped and its group and original birth were absent. This focused
+guard has no RSS/pressure sampler; no such resource proof is claimed. The
+[correction checkpoint](../spikes/results/turn-cached-lease-fix-20261014.json)
+records the exact source digests and preserved reproduction. Fresh CI, package
+consumption and Internet renewal for this correction remain pending; the da9
+results below belong to the preceding source. The pilot is unchanged.
+
 ## Optional TURN renewal candidate
 
-The source candidate adds the optional server-owned credential adapter and
-expiry-aware demo client described in the [field guide](FIELD-TEST.md#optional-turn-credential-renewal).
-It is off by default. Eleven server/owned-HTTP tests, ten client lifecycle
-tests and four page-VM integration cases pass. They cover separate viewer
-issuance, request bounds, cancellation, healthy refresh, spent allowances and
-expiry/background consent barriers. Owned validation workers were reaped. The
-[component checkpoint](../spikes/results/turn-renewal-components-20261014.json)
-retains the tested source digests and separate acceptance limits. Independent
-R2 review confirms the timeout/retry correction; the original finding is retained.
+Exact source `da9ac9202fd8794a68d6d707a1ab5d8109bbbb34` completed attempt 1 of
+[CI 38620173084](https://github.com/forgesworn/relayswarm/actions/runs/38620173084)
+with eight required jobs PASS and the media job RED; the optional soak was
+skipped. Both low/high peer checkpoints passed, but the unchanged 60 s
+post-producer-restart peer-fragment gate timed out. All 31 consumer fragments
+at discontinuity 1 came from origin. Their peer budgets were zero: playable
+ahead was 1,159–1,202 ms against the unchanged 2,000 ms reserve, even though
+matching donor completions preceded consumer loading. Accepted HAVE rows do
+not reconstruct current membership. This is a policy observation, not a
+playback repair or a reason to relax the gate. Each donor recorded one stall;
+baseline/consumer recorded none, with zero fatal/native/append failures.
+Broadcast recorder release does not establish missing actor/API or OS cleanup.
 
-These are component tests. Actual browser playback through credential rollover,
-Internet relay renewal, sustained capacity and final release acceptance remain
-open. The pilot and shared TURN service are unchanged.
+The optional server-owned [credential adapter](FIELD-TEST.md#optional-turn-credential-renewal)
+is off by default. Eleven server/owned-HTTP tests, ten client lifecycle tests
+and four page-VM cases pass. The retained retry-liveness finding is closed by
+the separately reviewed R2 correction. A real local Chrome fixture passed in
+47.010 s, and the equivalent hosted fixture passed in 50.433 s. Both use an
+owned fake issuer, 15 s credentials and real loopback WebRTC host media; the
+TURN endpoint is unavailable loopback port 9. Rollover retains consent and
+accepted spend, delivers new-swarm peer media, and passes link/restart/reset
+checks with scoped worker/API/group/scratch cleanup. These are browser
+integration passes, not Internet TURN renewal. The actual existing-service
+renewal check is **pending**, with no result claimed.
+
+Fresh exact-da9 offline production-only consumption passes eleven documented
+imports, installed CLI, sequential durable ledger replay and separate-process
+verified native transfer/HTTP fallback. All 237 package member paths, modes
+and bytes match committed source. The unpublished tarball is 1,082,277 bytes,
+SHA-256 `6d618c25d15032a79cb07a5050dd51f2aa9273575f511c1b83a1b1906e475412`;
+the rebuilt ESM is 121,478 bytes, SHA-256
+`612f5f502964462d8eba8909e5041db1030da96edbaea7dd5caa1088d1eac171`.
+Owned phase groups, sampled direct-child probes and scratch cleanup pass.
+The first consumer attempt remains RED: its new smoke assertion expected
+POST 404 where the unchanged disabled-route method contract returns 405;
+the corrected R2 proof does not relabel that attempt.
+
+The [da9 checkpoint](../spikes/results/da9ac92-ci-and-consumer-checkpoint-20261014.json)
+retains exact hashes and fixture limits. The deployed pilot remains 8f with
+reporting/forwarding off; v0.1.0 is published, candidate assets are unpublished,
+and PR 8/P01–P12 remain open. Ordinary sharing, physical devices, sustained
+load/churn, real credential-expiry/reconnection, matched wire/cost and release
+acceptance remain separate gates. Earlier source evidence below is unchanged.
 
 ## Earlier completed CI source: 07 on 14 October 2026
 

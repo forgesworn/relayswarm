@@ -178,18 +178,21 @@ four seconds for upstream headers/body and 16 KiB per response. Excess work
 is refused without evicting active viewer state.
 
 The client refreshes at two thirds of the conservative credential lifetime,
-with one request at a time and a five-second whole-request limit. Healthy
-renewal rebuilds peer connections while retaining valid consent, admission
-identity and spent allowances. Unexpired credentials can survive a failed
+with one request at a time and a five-second whole-request limit. New credential
+material rebuilds peer connections while retaining valid consent, admission
+identity and spent allowances. An identical cached reply keeps the original
+lease and peers, does not increment the refresh counter, and uses a bounded
+retry without extending expiry. Unexpired credentials can survive a failed
 refresh; expiry, configuration changes or page suspension stop peer delivery.
 Expiry clears uploading and requires fresh Apply. Returning credentials or
 returning to the page cannot restore upload consent. Origin playback remains
 available during peer reconnection. Receipts contain fixed lifecycle counters,
 not credential values, cookies or issuer addresses.
 
-Focused lifecycle, page-VM and owned HTTP tests pass. Real-browser playback
-through credential rollover, Internet relay renewal and sustained capacity
-remain acceptance gates.
+Focused lifecycle, page-VM and owned HTTP tests pass. The preceding da9 source
+also passed mock-issuer Chrome rollover locally and in CI. Fresh browser/CI
+coverage of the cached-reply correction, Internet relay renewal and sustained
+capacity remain acceptance gates.
 
 The embedded relay is for a controlled trial: at most 64 connections, eight
 subscriptions per connection, 24 KiB frames, 80 incoming messages per 10 s per

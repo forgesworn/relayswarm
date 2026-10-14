@@ -17,15 +17,45 @@ request timings confirm matched donor requests started after receiver completion
 the [summary](../spikes/results/d283071-ci-observations-20261014.json) separates
 that result from its macOS cancellation-test precondition correction.
 
+## Cached TURN credential correction
+
+The follow-up client preserves its original lease when the credential endpoint
+returns the same cached material. It does not rebuild peers or increment the
+refresh counter, and uses the existing bounded retry. One deterministic da9
+reproduction is retained; the corrected eleven lifecycle and four page-VM
+cases pass with worker/group/birth absence. The focused guard has no resource
+sampler. Fresh exact-source CI, package and Internet renewal are pending; the
+[correction summary](../spikes/results/turn-cached-lease-fix-20261014.json)
+does not replace the source-bound da9 evidence below or close field acceptance.
+
 ## Optional TURN renewal candidate
 
-The optional [credential adapter](FIELD-TEST.md#optional-turn-credential-renewal)
-and expiry-aware demo client now have eleven server/owned-HTTP, ten lifecycle
-and four page-VM passes. Healthy refresh preserves valid consent, admission
-and durable spend; expiry/background barriers require fresh Apply. The option
-is off by default. Browser playback through rollover, Internet renewal,
-sustained capacity and deployment remain unverified; component passes do not
-close those gates.
+Exact `da9ac9202fd8794a68d6d707a1ab5d8109bbbb34` completed
+[CI 38620173084](https://github.com/forgesworn/relayswarm/actions/runs/38620173084)
+with eight required PASS/media FAIL; optional soak skipped. The unchanged
+post-restart peer gate remains RED despite recovered origin playback. All 31
+consumer discontinuity-1 decisions had zero peer budget: 1,159–1,202 ms playable
+ahead versus the unchanged 2,000 ms reserve. Donors were ahead in the retained
+object timings; this does not establish a correctness repair or justify a
+playback-policy change. One stall per donor is retained; broadcast recorder
+cleanup does not prove actor/API or OS reaping.
+
+The off-by-default [credential adapter](FIELD-TEST.md#optional-turn-credential-renewal)
+has eleven server/owned-HTTP, ten lifecycle and four page-VM passes. Separate
+real Chrome mock-issuer rollover fixtures pass locally (47.010 s) and in CI
+(50.433 s), preserving consent/spend and verifying new-swarm peer payload,
+link/restart/reset and scoped cleanup. They use 15 s fake credentials and
+loopback host WebRTC, not an actual TURN relay. Existing-service Internet
+renewal remains **pending**; sustained expiry/reconnection is unproved.
+
+Exact-da9 fresh offline production-only consumption passes all 237 package
+members, eleven documented imports, installed CLI, sequential durable ledger
+replay, independent-process native/fallback and rebuilt ESM. The first smoke
+failure remains separate; corrected R2 passes do not rewrite it. Assets remain
+unpublished. The pilot is still 8f, v0.1.0 remains published, and all P01–P12
+acceptance remains open. See the
+[da9 summary](../spikes/results/da9ac92-ci-and-consumer-checkpoint-20261014.json)
+for exact assets, CI and scope limits.
 
 ## Earlier completed CI source checks: 07
 
@@ -412,10 +442,10 @@ records the later short/partial-long, TCP relay and Android checks separately.
 | P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Private durable ledger supports both Nostr and host website authentication. Controlled 55.780 s Chrome acceptance, 177 local publisher cases, 92 swarm cases, exact-source CI and 8f pilot deployment pass. Pilot Nostr is offered; website resolver is unconfigured. Real owner authentication and complete physical upload journeys remain open. Charges are reserved media payload, not an OS-wide meter |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-426 offline production-only package (226 members), eleven documented imports, durable account-ledger replay, rebuilt standalone ESM, installed CLI and separate-process verified native transfer/HTTP fallback pass; these unpublished exact-426 assets do not establish fresh 07 consumption or close downloaded immutable-release acceptance |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-da9 offline production-only package (237 exact-source members), eleven documented imports, sequential durable ledger replay, installed CLI, separate-process verified native/fallback and rebuilt ESM pass. First smoke RED is retained separately. Unpublished assets do not close downloaded immutable-release acceptance |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed 8f retains its nine-job CI/deployment/normal-TLS proofs and independent EE H1. Pushed 07 passed all nine required CI jobs attempt 1 (38616043417); its fresh package proof is pending. Earlier 426 consumer/ESM PASS and media CI FAIL remain source-bound. Ordinary sharing/fourteen-role REDs remain; assets unpublished and final release/production acceptance open |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Earlier Kit/OBS/private YouTube/Firefox evidence retained. Current 8f ordinary sharing and earlier fourteen-role qualification remain RED. Original cleanup failures and later absence remain separate. Existing shared-service TLS diagnostic passes within its declared scope: 34 verified fragments, positive TLS pairs 67/91 samples, four PCs and final seven samples without an active PC. It does not close continuous TLS, physical/hard-NAT or server-quota proof. Complete physical/Safari, 7200 s/22 churn, matched wire/billed cost and release gates remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Pilot 8f retains its exact nine-job CI/deployment/normal-TLS and independent EE H1 proofs. Exact da9 has eight required CI PASS/media post-restart RED, plus fresh package/consumer/ESM PASS; earlier 07 all-nine PASS remains historical. Optional renewal is not deployed. Ordinary/fourteen-role REDs, unpublished assets and final release acceptance remain open |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Earlier Kit/OBS/private YouTube/Firefox evidence retained. Pilot 8f ordinary and earlier fourteen-role sharing REDs remain. Da9 mock-issuer rollover browser passes are loopback host-path integration; actual Internet renewal is pending. Earlier shared-service TLS scope remains 34 fragments, positive pairs67/91, four PCs and final seven samples without an active PC. Complete physical/Safari, continuous TLS/expiry/reconnection, server quotas,7200s/22churn, matched wire/cost and release gates remain open |
 
 ## Evidence rules
 

@@ -1,0 +1,91 @@
+{
+  "v": 1,
+  "kind": "cached-turn-credential-material-correction",
+  "baseSourceSha": "da9ac9202fd8794a68d6d707a1ab5d8109bbbb34",
+  "candidateRuntimePins": [
+    {
+      "path": "demo/client.mjs",
+      "bytes": 34513,
+      "sha256": "1f2966a8e316b56e171fc7c6f78a3b607746f38b37c677734f618a4135c8351b"
+    },
+    {
+      "path": "demo/turn-credentials.mjs",
+      "bytes": 10832,
+      "sha256": "9b00c3ba2c3e8f399dd68e321e6c3c26ffba9b9955bc5f3735e761ca0d59c73a"
+    },
+    {
+      "path": "test/turn-credentials.test.mjs",
+      "bytes": 13749,
+      "sha256": "6758b4aa7ede846f4136dd29c67e7e570bb4e46a9eb40b1646af5d5a2a24e949"
+    },
+    {
+      "path": "test/demo-client.test.mjs",
+      "bytes": 60894,
+      "sha256": "adbcf25f8ecc0b426ec438b152b99ab6be770b7b479dda0f364fb49252a3f3d4"
+    }
+  ],
+  "reproduction": {
+    "source": "da9ac9202fd8794a68d6d707a1ab5d8109bbbb34",
+    "deterministicFakeClock": true,
+    "networkRequests": 0,
+    "verdict": "RED",
+    "elapsedMs": 87,
+    "observedAtMs": 9800,
+    "cachedReplyTriggeredRefreshCallback": true,
+    "refreshesBefore": 1,
+    "refreshesAfter": 2,
+    "remainingMsOriginal": 5000,
+    "remainingMsAfterCachedReply": 5200,
+    "nextTimerMs": 200,
+    "preservedManifestSha256": "901bfef5955928de27a8555fbe037ffad61dfcca120fdc9d8d781481d46e427e"
+  },
+  "correction": {
+    "sameValidatedServerMaterialComparedOnlyInMemory": true,
+    "originalLeaseAndExpiryRetained": true,
+    "refreshCounterAndCallbackSkipped": true,
+    "existingBoundedRetryUsed": true,
+    "expiryActiveGenerationDeadlineAndSingleFlightFencesUnchanged": true,
+    "newCredentialMaterialStillRefreshes": true,
+    "uploadConsentOrSpendReset": false
+  },
+  "focusedValidation": {
+    "lifecycleCasesPassed": 11,
+    "pageVmCasesPassed": 4,
+    "elapsedMs": 481,
+    "exitCode": 0,
+    "workerReaped": true,
+    "groupAbsent": true,
+    "leaderBirthAbsent": true,
+    "workSeconds": 40,
+    "wholeSeconds": 60,
+    "resourceSamplerPresent": false,
+    "browserHttpMediaOrInternetActors": false,
+    "sourcePinsUnchanged": true
+  },
+  "independentReview": {
+    "verdict": "PASS",
+    "reviewSha256": "f1a45c8693b21af27923cb9a0d65b2f0d9f0712739b24ad4de4b948f587ee8ee",
+    "actorsOrTests": false
+  },
+  "localEvidence": [
+    {
+      "path": "artifacts/turn-client-cached-lease-validation-20261014/analysis/EVIDENCE-MANIFEST.json",
+      "sha256": "45d403b7523b6b888226737986c683da25c07c8d0ec1544d7ebaa581d4e9dec1",
+      "recordsVerified": 18
+    },
+    {
+      "path": "artifacts/independent-turn-cached-lease-fix-review-20261014/EVIDENCE-MANIFEST.json",
+      "sha256": "077f6c9e2acaa4315ebf4e824eabbf9aee63b4ba2a3cd266f78fac44a97f5ce0",
+      "recordsVerified": 14
+    }
+  ],
+  "scope": {
+    "noHistoricalBroadcastFailureCauseClaim": true,
+    "noInternetRenewalProof": true,
+    "freshExactSourceCiPending": true,
+    "freshExactSourcePackagePending": true,
+    "pilotOrSharedServiceChanged": false,
+    "releasePublished": false,
+    "oldDa9InternetPreparationsExecuted": false
+  }
+}

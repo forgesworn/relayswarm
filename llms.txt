@@ -34,6 +34,9 @@ has upload limits, an origin-only kill switch and locally downloaded receipts.
 Viewer keys are ephemeral; participation is pseudonymous, and peers can learn network
 addresses. Origin-only avoids swarm participation. No managed TURN/super-peer service, accepted RelaySwarm NIP or durable media
 storage is supplied. Hosts can pass TURN credentials through explicit ICE policy.
+The demo has an optional server-owned renewal adapter, off by default; it
+preserves consent and spend on new credentials and keeps the original lease
+when a cached reply repeats the same material. Expiry requires fresh Apply.
 Current source optionally persists a private publisher identity, caches verified
 file hashes/signatures, limits cumulative media upload, measures peer choice and
 provides authenticated operator policy, bounded admission and durable idempotent
@@ -60,7 +63,14 @@ later absence/source removal remain separate. Another interpreter capture
 refused a remote timestamp 68 ms ahead before workload; no clock, deadline or
 freshness change is claimed. Earlier a2c99a9/d283071 restart-sharing failures
 remain separate from the 8f loopback fixture pass. The temporary SSH coturn
-fixture was removed; no permanent public TURN or Internet/hard-NAT pass exists.
+fixture was removed. An existing shared service on Stall separately carried
+verified Internet TLS-relay media in a scoped short test; continuous TLS,
+natural expiry, physical devices and hard NAT remain unproved. Exact da9 CI
+passed eight required jobs and failed its post-restart peer gate: all 31 later
+loads had zero peer budget under the two-second origin reserve. Its mock-issuer
+browser renewal and 237-member package/native/fallback checks passed. A later
+cached-credential correction passes eleven lifecycle/four VM cases; its fresh
+CI/package/Internet checks remain pending. See STATUS for source-bound limits.
 Earlier fourteen-role REDs, Safari bootstrap and
 no-evaluation iPhone USB checks do not close acceptance. Full P01–P12, long/churn,
 physical/NAT, cost and release gates remain open. No separate 37-row ledger was

@@ -32,8 +32,10 @@ test("TURN refresh preserves valid configuration, exposes no secrets and returns
   const f = fixture(); f.client.configure(descriptor, "session"); assert.equal(await f.client.acquire(), true);
   const servers = f.client.servers(); servers[0].credential = "changed"; servers[0].urls.length = 0;
   assert.equal(f.client.servers()[0].credential, "private-credential");
+  f.fetch(async () => jsonResponse(f.payload(60, "renewed-private-credential")));
   await f.advance(40000); assert.equal(f.calls.length, 2); assert.deepEqual(f.events, ["configuration-changed", "refresh"]);
   assert.equal(f.client.fresh(), true); assert.equal(f.client.snapshot().refreshes, 2);
+  assert.equal(f.client.servers()[0].credential, "renewed-private-credential");
   const snapshot = JSON.stringify(f.client.snapshot()); for (const forbidden of ["relay.test", "private-", "turn-credentials", "session"]) assert.equal(snapshot.includes(forbidden), false);
   f.client.close();
 });
@@ -126,6 +128,39 @@ test("late raw refresh settlement rearms a missed retry only for the same active
     assert.equal(f.calls.length, barrier ? 2 : 3);
     assert.equal(f.events.filter(event => event === "refresh").length, barrier ? 0 : 1);
     if (!barrier) { assert.equal(f.client.fresh(), true); assert.equal(f.client.servers()[0].credential, "fresh-secret"); assert.equal(f.client.snapshot().active, true); }
+    f.client.close(); assert.equal(f.timers.size, 0);
+  }
+});
+
+test("unchanged cached credentials preserve the original lease and retry without rebuilding peers", async () => {
+  for (const barrier of [null, "expired", "inactive", "suspend", "identity", "close"]) {
+    const f = fixture(); f.client.configure(descriptor, "session");
+    const issued = f.payload(15); let initialReply;
+    f.fetch(() => new Promise(resolve => { initialReply = resolve; }));
+    const acquiring = f.client.acquire(); await flush();
+    // The server timestamps a delayed initial response 200ms after its request
+    // began. Request-start anchoring schedules refresh before its cache expires.
+    f.jump(250); initialReply(jsonResponse({ ...issued, serverTime: issued.issuedAt + 200 }));
+    assert.equal(await acquiring, true);
+    f.fetch(async () => jsonResponse({ ...issued, serverTime: issued.issuedAt + 9800 }));
+    await f.advance(9550);
+    assert.equal(f.calls.length, 2);
+    assert.equal(f.client.snapshot().remainingMs, 5000, "Cached reply must not extend the original conservative expiry");
+    assert.equal(f.client.snapshot().refreshes, 1);
+    assert.equal(f.events.filter(event => event === "refresh").length, 0);
+    assert.equal(Math.min(...[...f.timers.values()].map(timer => timer.at)), 12300, "Use the existing bounded retry, not the cached refresh boundary");
+    f.fetch(async () => jsonResponse(f.payload(15, "new-private-credential")));
+    if (barrier === "expired") { f.jump(5000); assert.equal(f.client.fresh(), false); }
+    if (barrier === "inactive") f.client.setActive(false);
+    if (barrier === "suspend") f.client.suspend();
+    if (barrier === "identity") f.client.configure(descriptor, "replacement");
+    if (barrier === "close") f.client.close();
+    await f.advance(2499); assert.equal(f.calls.length, 2);
+    await f.advance(1);
+    assert.equal(f.calls.length, barrier ? 2 : 3);
+    assert.equal(f.client.snapshot().refreshes, barrier ? 1 : 2);
+    assert.equal(f.events.filter(event => event === "refresh").length, barrier ? 0 : 1);
+    if (!barrier) assert.equal(f.client.servers()[0].credential, "new-private-credential");
     f.client.close(); assert.equal(f.timers.size, 0);
   }
 });
