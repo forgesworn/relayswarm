@@ -37,6 +37,14 @@ OBS then targets its own loopback address. The container router uses an internal
 
 ## Output and recovery
 
+Add `--account-budget` to offer the optional shared upload allowance. It keeps
+`account-budget.json` in the private state directory and supports explicit
+Nostr sign-in. Website account authentication uses the JavaScript host callback,
+not a viewer-supplied account identifier. The Compose template enables the
+offer through `ACCOUNT_BUDGET_ENABLED=1`; viewers still choose whether to connect
+an account and separately opt into uploading. Preserve the ledger and its
+permanent lease files. See [shared upload allowance](ACCOUNT-UPLOAD-BUDGET.md).
+
 The encoder produces two fixed H.264/AAC renditions:
 
 | Rendition | Frame shape/rate | Target video rate | Audio |
@@ -69,4 +77,10 @@ Trusted host/container administrators can inspect ffmpeg's process arguments, wh
 
 ## Verification boundary
 
-The release includes native process/publication tests and actual Chrome fixtures. A short HTTPS/WSS pilot with a synthetic source has a passing receipt; an earlier hosted MSE append failure remains unresolved. Physical-device, separate-network/NAT, sustained-operation, actual OBS and YouTube acceptance remain open. The dated [status](STATUS.md) records both passing and failing evidence and its scope.
+The source includes native process/publication tests and actual Chrome fixtures.
+The dated [status](STATUS.md) retains the authorised OBS and private YouTube
+tests; that YouTube broadcast was stopped and deleted. Current deployed `2dd156e`
+playback passed its ordinary short check, while both-quality peer delivery and
+the fourteen-role qualification remain red. Complete physical-device,
+separate-network/hard-NAT, sustained-operation and final release acceptance
+remain open. Earlier passes retain their original source and scope.

@@ -127,29 +127,47 @@ their own integration and distribution work.
 
 ## Does RelaySwarmKit interoperate with this release?
 
-That has not been established. The separate
-[Swift project's README](https://github.com/forgesworn/relayswarm-kit) describes
-version-2 signalling; this repository uses version 3 for the shared session.
-Shared event kinds and successful NIP-44 vectors do not prove matching wire
-envelopes, native transport or signed HLS commitments. A RelaySwarm protocol draft and tested adapter exist, but no RelaySwarm NIP
-is accepted yet.
+The current 0.2.0 source candidate passes author, delegated-signing and
+adversarial transfer journeys with the published RelaySwarmKit v0.5.0 public
+SDK. These are macOS arm64/Chrome loopback checks, not physical iPhone
+acceptance. The earlier version-2 Kit baseline is incompatible with the
+candidate's version-3 signalling. Published RelaySwarm v0.1.0 assets keep their
+original protocol; do not infer compatibility from matching event kinds alone.
+See [the recorded SDK evidence](STATUS.md) and [interop guide](interop/README.md).
+No RelaySwarm NIP is accepted yet.
+
+## Can one upload allowance cover my phone and computers?
+
+The current source offers an optional [shared account allowance](ACCOUNT-UPLOAD-BUDGET.md).
+Devices explicitly connect using the same Nostr identity or an account
+authenticated by the host website, and use one durable ledger. Both methods
+are supported; linking them requires fresh proof of both. Their recorded spend
+is added and the lower cap is retained. Local browser allowances still apply,
+and each page separately requests upload consent. This feature is absent from
+the deployed `2dd156e` checkpoint; browser and field acceptance are tracked
+separately. It counts reserved media payload rather than total device traffic.
 
 ## Do the receipts measure money or data saved?
 
 `peerFirstBytes` measures verified media delivered in place of starting an
 origin fragment load. It excludes commitment, signalling and protocol traffic.
 Shadow transfers add traffic. `bytes.uploaded` counts full payloads accepted
-against the quota, including interrupted transfers; it is not acknowledged
-network delivery. Receipts stay local until downloaded. Use paired device/network
+for serving after any host reservation callback succeeds and current serving
+checks pass. Pending or refused callbacks do not enter that counter. Interrupted
+accepted transfers can send less; durable allowances can also retain charges
+for media never handed to the transport. These are not acknowledged network
+delivery totals. Receipts stay local until downloaded. Use paired device/network
 measurements to establish total data cost. See [receipt interpretation](FIELD-TEST.md#collect-comparable-receipts).
 
 ## What remains before production?
 
-Physical devices, separate-network/NAT trials, sustained resource and cost
-measurements, broader adaptive bitrate and fMP4 coverage, stronger adversarial
-testing and independent-client interoperability. [Status](STATUS.md) records
-which evidence exists. There is no prediction that audience upload capacity
-will cover a given deployment.
+Complete physical-device journeys, separate-network/hard-NAT trials, sustained
+resource/churn and matched cost measurements, and final immutable release
+acceptance remain open. Current deployed sharing and fourteen-role qualification
+are red; earlier short passes retain their own source and scope. Wider-media
+and independent SDK fixtures have passing evidence, which does not close those
+field gates. [Status](STATUS.md) records both results. There is no prediction
+that audience upload capacity will cover a given deployment.
 
 ## What permission does a contributing viewer need?
 

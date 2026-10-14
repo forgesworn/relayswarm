@@ -37,6 +37,13 @@ Hiding or leaving the page stops its swarm and clears upload and reporting
 consent. Returning uses origin until settings are applied again; physical
 background/resume playback remains a field gate.
 
+If the host offers a shared account allowance, connecting it is a separate,
+explicit action using a Nostr signer or the host's signed-in website account.
+It adds the service's cumulative cap to this browser's allowance and leaves
+uploading off until a fresh Apply. See [shared upload allowance](ACCOUNT-UPLOAD-BUDGET.md)
+for linking, resetting, reconnecting after reload and the service's privacy
+boundary. The deployed `2dd156e` checkpoint predates this feature.
+
 The player checks operator policy and publisher identity every two seconds,
 with at most three independent checks in flight. A stalled check cannot block
 a newer successful check. A fully validated check permits peer delivery for

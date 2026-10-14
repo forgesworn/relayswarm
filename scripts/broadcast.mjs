@@ -39,10 +39,10 @@ async function main() {
     input: { type: "string", default: "rtsp://127.0.0.1:8554/live" }, "state-dir": { type: "string", default: "artifacts/broadcast" }, ffmpeg: { type: "string", default: "ffmpeg" },
     mediamtx: { type: "string" }, "router-config": { type: "string", default: fileURLToPath(new URL("../broadcast/mediamtx.yml", import.meta.url)) },
     "youtube-url-file": { type: "string" }, "public-url": { type: "string" }, host: { type: "string", default: "127.0.0.1" }, port: { type: "string", default: "8787" },
-    "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" },
+    "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, "account-budget": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" },
   } });
   if (values.help) {
-    console.log("npm run broadcast -- [--mediamtx PATH] [--input rtsp://127.0.0.1:8554/live] [--state-dir DIR] [--youtube-url-file FILE] [--public-url https://trial.example] [--host 127.0.0.1] [--port 8787] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE] [--telemetry]\nSource must supply video and audio. Publisher identity and operator credentials remain in the private state directory. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/BROADCASTING.md.");
+    console.log("npm run broadcast -- [--mediamtx PATH] [--input rtsp://127.0.0.1:8554/live] [--state-dir DIR] [--youtube-url-file FILE] [--public-url https://trial.example] [--host 127.0.0.1] [--port 8787] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE] [--account-budget] [--telemetry]\nSource must supply video and audio. Publisher identity and operator credentials remain in the private state directory. --account-budget enables an optional Nostr-linked allowance in the private account-budget.json ledger; connecting it never enables uploading. Website account authentication is supplied through startDemoServer's host callback. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/BROADCASTING.md.");
     return;
   }
   const port = Number(values.port);
@@ -94,6 +94,7 @@ async function main() {
     const playerPort = waiting.port;
     server = await startDemoServer({ mediaDir: pipeline.mediaDir, manifest: pipeline.manifest, publisherState: join(state, "publisher.json"), operatorTokenFile: tokenFile, operatorState: join(state, "operator.json"),
       host: values.host, port: playerPort, publicUrl: values["public-url"], tlsKey: values["tls-key"], tlsCert: values["tls-cert"], relays: values.relay, telemetry: values.telemetry,
+      ...(values["account-budget"] ? { accountBudget: { statePath: join(state, "account-budget.json") } } : {}),
       beforeListen: async () => {
         if (stopping) throw new Error("Broadcaster stopped during player preparation.");
         await waiting.close();

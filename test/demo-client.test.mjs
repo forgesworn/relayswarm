@@ -5,6 +5,7 @@ import vm from "node:vm";
 import { webcrypto } from "node:crypto";
 import http from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
+import { generateSecretKey, getPublicKey, finalizeEvent } from "nostr-tools/pure";
 
 const bundle = await build({ entryPoints: ["demo/client.mjs"], bundle: true, write: false, format: "esm", plugins: [{ name: "fixture", setup(builder) {
   builder.onResolve({ filter: /^(hls\.js|\.\.\/src\/browser\/hls-swarm\.mjs)$/ }, (args) => ({ path: args.path, namespace: "fixture" }));
@@ -17,9 +18,10 @@ async function page(storage = new Map(), { realClock = false, fetchImpl } = {}) 
   class ClockDate extends Date { constructor(...args) { super(...(args.length ? args : [ClockDate.now()])); } static now() { return wallStart + now(); } }
   const element = (id) => { if (!elements.has(id)) elements.set(id, { value: "", checked: false, disabled: false, addEventListener(name, callback) { this[name] = callback; }, append() {} }); return elements.get(id); };
   element("mode").value = "off"; element("limit").value = "512000"; element("allowance").value = "100000000";
+  element("account-method").value = "nostr"; element("account-allowance").value = "100000000";
   const video = { addEventListener() {}, play: async () => {}, canPlayType: () => false };
   const fixture = { swarms: [], sourceLoads: 0, policy: { mode: null, revision: 0, telemetry: false }, session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment" } };
-  const context = { Date: ClockDate, fixture, document: { visibilityState: "visible", addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, TextDecoder, TextEncoder, console,
+  const context = { Date: ClockDate, fixture, location: { origin: "https://viewer.example" }, document: { visibilityState: "visible", addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, TextDecoder, TextEncoder, console,
     fetch: async (url, init) => { if (fetchImpl) return fetchImpl(url, init); const value = fixture.fetch ? await fixture.fetch(url, init) : url === "/session.json" ? fixture.session : fixture.policy; return { ok: true, json: async () => structuredClone(value) }; },
     setTimeout(callback, ms) { const id = realClock ? setTimeout(() => { timers.delete(id); callback(); }, ms) : Symbol(); timers.set(id, { callback, ms }); return id; }, clearTimeout(id) { if (realClock) clearTimeout(id); timers.delete(id); },
     setInterval(callback, ms) { intervals.push({ callback, ms }); }, window: { addEventListener(name, callback) { windowEvents.set(name, callback); } } };
@@ -35,6 +37,125 @@ test("operator mode cannot defeat viewer origin kill or grant upload consent", a
   assert.equal(p.fixture.swarms.at(-1).options.serve, false);
   p.element("kill").click();
   assert.equal(p.fixture.swarms.at(-1).options.mode, "off");
+});
+
+async function accountPage(storage = new Map()) {
+  const p = await page(storage), stable = generateSecretKey();
+  let grant = "a".repeat(64), spent = 200, revision = 1, generation = 1, cap = 100000000, delegation, expires, intent;
+  const calls = [], state = () => ({ v: 1, limit: cap, spent, remaining: Math.max(0, cap - spent), revision, generation, linkedMethods: ["nostr"] });
+  p.fixture.session.accountBudget = { v: 1, methods: ["nostr", "website"], defaultLimit: 100000000, grantTtlSeconds: 120, delegationTtlSeconds: 10800,
+    ...Object.fromEntries(["challenge", "authorize", "reserve", "status", "renew", "logout"].map(v => [`${v}Endpoint`, `/account-budget/${v}`])) };
+  p.fixture.accountSignatures = 0;
+  p.context.window.nostr = { async getPublicKey() { return getPublicKey(stable); }, async signEvent(event) { p.fixture.accountSignatures++; if (p.fixture.accountSignHold) await p.fixture.accountSignHold(); return finalizeEvent(JSON.parse(JSON.stringify(event)), stable); } };
+  p.fixture.fetch = async (url, init) => {
+    if (url === "/session.json") return p.fixture.session;
+    if (url === "/delivery-policy.json") return p.fixture.policy;
+    const body = JSON.parse(init.body); calls.push({ url, body }); const now = p.context.Date.now();
+    if (p.fixture.accountFetch) return p.fixture.accountFetch(url, body, init);
+    if (url.endsWith("/challenge")) {
+      delegation = now + 10800000; intent = body;
+      const content = { v: 1, purpose: "relayswarm-account-budget-authorize", origin: "https://viewer.example", challenge: "b".repeat(48), action: body.action, pagePubkey: body.pagePubkey, methods: body.methods, settings: body.settings ?? null, expiresAt: now + 30000, delegationExpiresAt: delegation };
+      return { v: 1, challenge: content.challenge, expiresAt: content.expiresAt, event: { kind: 27237, created_at: Math.floor(now / 1000), tags: [], content: JSON.stringify(content) } };
+    }
+    if (url.endsWith("/authorize")) {
+      if (intent.settings) { cap = intent.settings.limit; if (intent.settings.reset) { spent = 0; generation++; } revision++; }
+      expires = now + 120000;
+      return { v: 1, grant, expiresAt: expires, delegationExpiresAt: delegation, epoch: revision, requiresFreshUploadConsent: true, snapshot: state() };
+    }
+    if (url.endsWith("/reserve")) { spent += body.bytes; return { v: 1, accepted: true, duplicate: false, reservedBytes: body.bytes, snapshot: state() }; }
+    if (url.endsWith("/renew")) { grant = "c".repeat(64); expires = now + 120000; return { v: 1, grant, expiresAt: expires, delegationExpiresAt: delegation, epoch: revision, requiresFreshUploadConsent: false, snapshot: state() }; }
+    if (url.endsWith("/logout")) return { v: 1, revoked: true };
+    return { v: 1, expiresAt: expires, delegationExpiresAt: delegation, epoch: revision, snapshot: state() };
+  };
+  await p.poll(); return { ...p, calls };
+}
+
+test("account UI connection never grants upload; both caps reserve and ambiguous failure stays closed", async () => {
+  const p = await accountPage();
+  try {
+    p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+    await p.fixture.swarms.at(-1).options.reserveUploadBytes(101);
+    await p.element("account-connect").click();
+    assert.equal(p.context.window.relaySwarmDemo.report().accountBudget.connected, true, `account route stages: ${p.calls.map(v => v.url).join(",")}; signer calls: ${p.fixture.accountSignatures}`);
+    assert.equal(p.element("upload").checked, false); assert.equal(p.context.window.relaySwarmDemo.report().current, null);
+    assert.equal(p.context.window.relaySwarmDemo.report().accountBudget.spent, 200);
+    await p.submit(); assert.equal(p.fixture.swarms.at(-1).options.serve, false);
+    p.element("upload").checked = true; await p.submit();
+    assert.equal(await p.fixture.swarms.at(-1).options.reserveUploadBytes(77), true);
+    let report = p.context.window.relaySwarmDemo.report();
+    assert.equal(report.uploadBudget.spent, 178); assert.equal(report.accountBudget.spent, 277);
+    const serialized = JSON.stringify(report);
+    for (const call of p.calls) for (const secret of [call.body.grant, call.body.nostrProof?.pubkey]) if (secret) assert.ok(!serialized.includes(secret));
+    p.fixture.accountFetch = async () => { throw Error("private-account-identifier"); };
+    assert.equal(await p.fixture.swarms.at(-1).options.reserveUploadBytes(33), false);
+    assert.equal(p.element("upload").checked, false);
+    report = p.context.window.relaySwarmDemo.report(); assert.equal(report.uploadBudget.spent, 211);
+    assert.equal(report.accountBudget.required, true); assert.equal(report.accountBudget.available, false);
+    await p.poll(); p.element("upload").checked = true; await p.submit(); assert.equal(p.fixture.swarms.at(-1).options.serve, false);
+    assert.equal(p.fixture.accountSignatures, 1); assert.ok(!JSON.stringify(report).includes("private-account-identifier"));
+  } finally { p.close(); }
+});
+
+test("account UI link/settings/reset stop upload and require fresh proof without resetting browser usage", async () => {
+  const p = await accountPage();
+  try {
+    await p.element("account-connect").click(); p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+    await p.fixture.swarms.at(-1).options.reserveUploadBytes(99);
+    await p.element("account-link").click(); assert.equal(p.element("upload").checked, false); assert.equal(p.fixture.accountSignatures, 2);
+    p.element("upload").checked = true; await p.submit(); await p.element("account-settings").click();
+    assert.equal(p.element("upload").checked, false); assert.equal(p.context.window.relaySwarmDemo.report().accountBudget.spent, 299);
+    p.element("upload").checked = true; await p.submit(); await p.element("account-reset").click();
+    const report = p.context.window.relaySwarmDemo.report();
+    assert.equal(p.element("upload").checked, false); assert.equal(p.fixture.accountSignatures, 4);
+    assert.equal(report.accountBudget.spent, 0); assert.equal(report.uploadBudget.spent, 99);
+    await p.submit(); assert.equal(p.fixture.swarms.at(-1).options.serve, false);
+  } finally { p.close(); }
+});
+
+test("account UI renewal keeps existing consent only while fresh; reload retains no account authority", async () => {
+  const storage = new Map(), p = await accountPage(storage);
+  try {
+    await p.element("account-connect").click(); p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+    await p.fixture.swarms.at(-1).options.reserveUploadBytes(500);
+    for (let i = 0; i < 51; i++) { p.jumpWithoutTimers(2000); await p.poll(); }
+    assert.equal(p.fixture.accountSignatures, 1); assert.equal(p.element("upload").checked, true);
+    assert.equal(p.context.window.relaySwarmDemo.report().accountBudget.spent, 700);
+    p.jumpWithoutTimers(120001); const expired = p.context.window.relaySwarmDemo.report();
+    assert.equal(p.element("upload").checked, false); assert.equal(expired.current?.metrics.serving ?? false, false); assert.equal(expired.accountBudget.available, false);
+    const next = await accountPage(storage);
+    try { const report = next.context.window.relaySwarmDemo.report(); assert.equal(report.accountBudget.required, false); assert.equal(report.accountBudget.connected, false); assert.equal(report.uploadBudget.spent, 500); assert.equal(next.fixture.accountSignatures, 0); assert.equal(next.element("upload").checked, false); }
+    finally { next.close(); }
+  } finally { p.close(); }
+});
+
+test("account UI disconnect clears upload and preserves both spent counters without anonymous fallback", async () => {
+  const p = await accountPage();
+  try {
+    await p.element("account-connect").click(); p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+    await p.fixture.swarms.at(-1).options.reserveUploadBytes(70);
+    await p.element("account-disconnect").click();
+    const report = p.context.window.relaySwarmDemo.report();
+    assert.equal(p.element("upload").checked, false); assert.equal(report.current, null);
+    assert.equal(report.uploadBudget.spent, 70); assert.equal(report.accountBudget.spent, 270);
+    assert.equal(report.accountBudget.connected, false); assert.equal(report.accountBudget.required, true);
+    p.element("upload").checked = true; await p.submit(); assert.equal(p.fixture.swarms.at(-1).options.serve, false);
+    assert.equal(p.calls.filter(v => v.url.endsWith("/logout")).length, 1); assert.equal(p.fixture.accountSignatures, 1);
+  } finally { p.close(); }
+});
+
+test("account UI Apply during a pending signer cannot become post-grant upload consent", async () => {
+  const p = await accountPage(); let release, entered;
+  const ready = new Promise(resolve => { entered = resolve; });
+  p.fixture.accountSignHold = () => new Promise(resolve => { release = resolve; entered(); });
+  try {
+    const connecting = p.element("account-connect").click(); await ready;
+    assert.equal(p.element("start").disabled, true);
+    p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+    assert.equal(p.fixture.sourceLoads, 0); assert.equal(p.fixture.swarms.length, 0);
+    release(); await connecting; assert.equal(p.element("upload").checked, false);
+    p.fixture.policy.revision++; await p.poll(); assert.equal(p.fixture.swarms.length, 0);
+    p.element("upload").checked = true; await p.submit(); assert.equal(p.fixture.swarms.at(-1).options.serve, true);
+  } finally { p.close(); }
 });
 
 test("settings, kill and publisher identity recovery preserve page allowance and playback instance", async () => {

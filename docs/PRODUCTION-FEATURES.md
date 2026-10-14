@@ -89,6 +89,14 @@ unavailable storage disables contribution. Viewers may deliberately increase
 or reset the allowance. The quota covers reserved media payload, including
 interrupted sends, rather than complete connection traffic.
 
+An optional private account ledger adds reservations shared across devices.
+The example supports explicit Nostr sign-in and a host-supplied authenticated
+website account. Linking requires both proofs, adds recorded spend and retains
+the lower limit. Connection and account changes leave upload consent off;
+grants and identities stay outside swarm traffic and receipts. See the
+[account allowance guide](ACCOUNT-UPLOAD-BUDGET.md) for persistence, privacy,
+failure behaviour and the remaining acceptance scope.
+
 ## Operations and recovery
 
 Opt-in reports carry a temporary page report identifier and sequence alongside

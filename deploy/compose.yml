@@ -33,6 +33,7 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:?Set PUBLIC_URL to your HTTPS origin}
       RELAYS: ${RELAYS:-}
       STUN_URL: ${STUN_URL:-}
+      ACCOUNT_BUDGET_ENABLED: ${ACCOUNT_BUDGET_ENABLED:-1}
     ports:
       - "127.0.0.1:${APP_PORT:-8787}:8787"
     volumes:

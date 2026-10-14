@@ -36,6 +36,17 @@ stay in the browser until downloaded; optional reporting requires viewer
 opt-in and accepts only bounded numeric summaries, without a swarm public key.
 These controls do not establish unique participants or net cost.
 
+The optional [account allowance](ACCOUNT-UPLOAD-BUDGET.md) introduces a separate
+private trust boundary: its service learns a stable Nostr identity or the host's
+authenticated website subject and can correlate participating devices. Explicit
+linking reveals the association between those identities. The private ledger
+stores service-scoped pseudonyms and durable cumulative reservations; its
+secret and grant records require protection as account data. Stable identities
+and grants are excluded from swarm events, SDP, peer messages and downloaded or
+submitted reports. Host authentication, HTTPS and ledger preservation remain
+required. An open Nostr account service cannot establish unique humans or
+prevent someone deliberately using unrelated identities.
+
 These are specific tested boundaries, not completion of the adversarial suite
 below. Sybil resistance, broad NAT/mobile coverage and independent-client
 protocol interoperability remain outstanding.

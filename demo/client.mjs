@@ -6,6 +6,7 @@ import { segmentMediaContext } from "../src/browser/segment-commitment.mjs";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 import { createFetchDiagnostics } from "./fetch-diagnostics.mjs";
 import { createPolicyRenewal } from "./policy-renewal.mjs";
+import { createAccountBudgetClient } from "./account-budget-client.mjs";
 
 const fetchDiagnostics = createFetchDiagnostics();
 
@@ -27,7 +28,11 @@ const sessions = [], snapshots = [];
 let deliveryPolicy = { mode: null, revision: 0, telemetry: false }, policyUnavailable = true;
 const archivedTotals = { peerFirstBytes: 0, uploaded: 0, peerFirstLoads: 0, sessions: 0 };
 let session, hls, swarm, initialLoader, startRequestedAt = null, stallAt = null, seekAt = null, native = false, activeConfig, needsViewerApply = false, suspensionGeneration = 0;
+let accountActionPending = false;
 const status = (message) => { byId("status").textContent = message; };
+const accountBudget = createAccountBudgetClient({ secretKey: admissionKey, origin: location.origin,
+  onRevoke() { suspensionGeneration++; needsViewerApply = true; stopSwarm(); byId("upload").checked = false; },
+});
 const mediaRecovery = createMediaRecovery({ media: video, getHls: () => hls, getSession: () => session, now: elapsed,
   revokeContribution() { stopSwarm(); byId("mode").value = "off"; byId("upload").checked = false; },
   status(message) {
@@ -81,14 +86,16 @@ function stopSwarm() {
   swarm = null;
 }
 function configure() {
-  if (mediaRecovery.active()) return;
+  if (mediaRecovery.active() || accountActionPending) return;
   policyRenewal.fresh();
+  const account = accountBudget.snapshot();
   stopSwarm();
   const configuredSession = session, configuredCredential = admissionCredential;
   const chosenMode = byId("mode").value;
   const requestedMode = native || policyUnavailable || needsViewerApply || chosenMode === "off" ? "off" : deliveryPolicy.mode ?? chosenMode;
   const mode = session.admission && !admissionCredential ? "off" : requestedMode;
-  const budget = uploadBudget.snapshot(), allowance = budget.limit, remaining = budget.remaining;
+  const budget = uploadBudget.snapshot(), allowance = budget.limit;
+  const remaining = account.required ? Math.min(budget.remaining, account.available ? account.remaining : 0) : budget.remaining;
   const admissionReady = ownCredentialFresh(session);
   activeConfig = { mode, upload: byId("upload").checked && mode !== "off" && budget.available && remaining > 0 && admissionReady, uploadAllowance: allowance, uploadLimit: Number(byId("limit").value), cellular: byId("cellular").checked, startedAtMs: elapsed() };
   swarm = createHlsSwarm({ mode, swarmId: session.swarmId, relays: session.relays, streamEvent: session.streamEvent, delegation: session.delegation, revokedDelegationIds: session.revokedDelegationIds, delegationRevocations: session.delegationRevocations, swarmParts: session.mediaCapabilities?.parts === true, originReserveMs: session.mediaCapabilities?.parts === true ? 500 : 2000,
@@ -108,7 +115,7 @@ function configure() {
         return peerAuthorityFresh(configuredSession) && !signal.aborted && result.admitted === true && result.epoch === configuredSession.admission.epoch;
       } catch { return false; }
     } } : {}),
-    reserveUploadBytes: async (amount, options) => peerAuthorityFresh(configuredSession) && !options?.signal?.aborted && await uploadBudget.reserve(amount, options) && peerAuthorityFresh(configuredSession) && !options?.signal?.aborted,
+    reserveUploadBytes: async (amount, options) => peerAuthorityFresh(configuredSession) && accountBudget.snapshot().available && !options?.signal?.aborted && await uploadBudget.reserve(amount, options) && peerAuthorityFresh(configuredSession) && !options?.signal?.aborted && await accountBudget.reserve(amount, options) && peerAuthorityFresh(configuredSession) && !options?.signal?.aborted,
     serve: activeConfig.upload, maxUploadBytesPerSession: remaining, maxUploadBytesPerSecond: activeConfig.uploadLimit, serveOnCellular: activeConfig.cellular,
     ...(session.iceServers ? { iceServers: session.iceServers } : {}),
   });
@@ -119,6 +126,7 @@ function configure() {
   render();
 }
 function render() {
+  accountBudget.snapshot();
   const total = totals(), metrics = swarm?.metrics();
   byId("saved").textContent = bytes(total.peerFirstBytes);
   byId("origin").textContent = native || !observer ? "Unavailable" : String(network.originMediaRequests);
@@ -129,16 +137,28 @@ function render() {
   byId("allowance-used").textContent = `${bytes(budget.spent)} of ${bytes(allowance)} reserved in this browser${!budget.available ? " · persistent allowance unavailable; uploading disabled" : budget.spent >= allowance ? " · allowance exhausted; uploading stopped" : ""}`;
   byId("peers").textContent = String(metrics?.peers.connected || 0);
   byId("detail").textContent = `${total.peerFirstLoads} verified peer-first loads · ${player.stalls} playback stalls · ${player.fragmentsLoaded} media fragments loaded`;
+  renderAccount();
+}
+function renderAccount() {
+  const providers = accountBudget.providers(), account = accountBudget.snapshot();
+  byId("account-budget-controls").hidden = providers.length === 0;
+  for (const option of byId("account-method").options ?? []) { option.hidden = !providers.includes(option.value); option.disabled = option.hidden; }
+  if (!providers.includes(byId("account-method").value)) byId("account-method").value = providers[0] ?? "";
+  byId("account-link").hidden = !providers.includes("nostr") || !providers.includes("website");
+  for (const id of ["account-connect", "account-disconnect", "account-link", "account-settings", "account-reset"]) byId(id).disabled = accountActionPending || accountBudget.busy() || mediaRecovery.active() || document.visibilityState !== "visible";
+  byId("account-disconnect").disabled ||= !account.connected;
+  byId("account-status").textContent = !account.required ? "Not connected. Only this browser’s allowance applies." : !account.available ? "Shared allowance unavailable. Uploading is off; reconnect explicitly before applying upload settings." : `${bytes(account.spent)} of ${bytes(account.limit)} reserved across this service · ${bytes(account.remaining)} remaining. Uploading still requires your checkbox and Apply settings.`;
 }
 function report() {
   policyRenewal.fresh();
+  const account = accountBudget.snapshot();
   return { v: 1, kind: "relayswarm-field-receipt", startedAt, recordedAt: new Date().toISOString(), durationMs: elapsed(),
     environment: { browser: navigator.userAgent, secureContext: isSecureContext, networkLabel: byId("network").value, deviceLabel: byId("device").value, automated: navigator.webdriver === true },
     stream: { eventId: session?.streamEvent.id, publisher: session?.streamEvent.pubkey, swarmId: session?.swarmId, experimental: true },
     player: { ...player, mediaRecovery: mediaRecovery.snapshot(), isLive: hls?.latestLevelDetails?.live === true, liveLatencySeconds: Number.isFinite(hls?.latency) ? hls.latency : null, targetLatencySeconds: Number.isFinite(hls?.targetLatency) ? hls.targetLatency : null, liveSyncPosition: Number.isFinite(hls?.liveSyncPosition) ? hls.liveSyncPosition : null, currentTime: video.currentTime, paused: video.paused, bufferedSeconds: hls?.mainForwardBufferInfo?.len ?? null, activeStallMs: stallAt === null ? 0 : elapsed() - stallAt },
     network: { ...network, ...(native ? { originMediaRequests: null, encodedOriginMediaBytes: null, transferOriginMediaBytes: null } : {}), supported: Boolean(observer) && !native,
       scope: "same-origin media resource timings; includes init segments and cache hits; encoded bytes exclude protocol overhead; native HLS requests are not measured" },
-    totals: totals(), uploadBudget: uploadBudget.snapshot(), deliveryPolicy: { ...deliveryPolicy, unavailable: policyUnavailable }, current: swarm ? { ...activeConfig, metrics: swarm.metrics() } : null, sessions: [...sessions], snapshots: [...snapshots],
+    totals: totals(), uploadBudget: uploadBudget.snapshot(), accountBudget: account, deliveryPolicy: { ...deliveryPolicy, unavailable: policyUnavailable }, current: swarm ? { ...activeConfig, metrics: swarm.metrics() } : null, sessions: [...sessions], snapshots: [...snapshots],
     retention: { fragments: "latest 256", snapshots: "latest 60, every five seconds", sessions: "latest 64", archivedSessions: archivedTotals.sessions, totals: "whole page session" },
     loaderRestored: !hls || hls.config.fLoader === initialLoader, controlTimings: fetchDiagnostics.snapshot(), policyRenewal: policyRenewal.snapshot(), limits: ["Network and device labels are supplied by the viewer.", "No peer IP addresses or private signing keys are recorded.", "A receipt is evidence for this session only; it is not a production-readiness claim."],
   };
@@ -176,7 +196,7 @@ async function obtainAdmission(candidateSession, existing, signal) {
 }
 byId("settings").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!session || mediaRecovery.active() || document.visibilityState !== "visible") return;
+  if (!session || mediaRecovery.active() || accountActionPending || document.visibilityState !== "visible") return;
   byId("start").disabled = true;
   const submittedSession = session, priorCredential = admissionCredential;
   const submittedGeneration = suspensionGeneration;
@@ -233,6 +253,40 @@ byId("reset-allowance")?.addEventListener("click", async () => {
   await uploadBudget.reset(Number(byId("allowance").value));
   if (startRequestedAt !== null) configure(); render();
 });
+async function accountAction(action, reset = false) {
+  if (mediaRecovery.active() || accountActionPending || document.visibilityState !== "visible") return;
+  accountActionPending = true; byId("start").disabled = true;
+  suspensionGeneration++; needsViewerApply = true; stopSwarm(); byId("upload").checked = false;
+  const methods = action === "link" ? ["nostr", "website"] : [byId("account-method").value];
+  try {
+    const operation = accountBudget.ownerAction(action, methods, action === "settings" ? { limit: Number(byId("account-allowance").value), reset } : undefined);
+    renderAccount(); await operation;
+    status("Account allowance connected. Uploading is off; choose the checkbox and apply settings when ready.");
+  } catch { status("Account allowance could not be confirmed. Uploading remains off. Usage may have changed; this page does not retry or refund it."); }
+  finally {
+    // A checkbox/Apply attempted during a signer prompt is not post-grant consent.
+    suspensionGeneration++; needsViewerApply = true; stopSwarm(); byId("upload").checked = false;
+    accountActionPending = false; byId("start").disabled = mediaRecovery.active() || !session;
+  }
+  renderAccount();
+}
+byId("account-connect").addEventListener("click", () => accountAction("grant"));
+byId("account-disconnect").addEventListener("click", async () => {
+  if (mediaRecovery.active() || accountActionPending || document.visibilityState !== "visible") return;
+  accountActionPending = true; byId("start").disabled = true;
+  let confirmed = false;
+  try { const operation = accountBudget.disconnect(); renderAccount(); confirmed = await operation; }
+  catch { /* Unknown server revocation never restores page authority. */ }
+  finally {
+    suspensionGeneration++; needsViewerApply = true; stopSwarm(); byId("upload").checked = false;
+    accountActionPending = false; byId("start").disabled = mediaRecovery.active() || !session;
+  }
+  status(confirmed ? "Account disconnected and server grant revoked. Uploading is off." : "Account disconnected on this page. Server revocation was not confirmed; uploading is off.");
+  renderAccount();
+});
+byId("account-link").addEventListener("click", () => accountAction("link"));
+byId("account-settings").addEventListener("click", () => accountAction("settings"));
+byId("account-reset").addEventListener("click", () => accountAction("settings", true));
 byId("quality").addEventListener("change", () => { if (hls) { const level = Number(byId("quality").value); if (player.firstPlayingAtMs === null) hls.loadLevel = level; else hls.nextLevel = level; } });
 byId("kill").addEventListener("click", () => { if (mediaRecovery.active()) { mediaRecovery.cancel(); return; } byId("mode").value = "off"; configure(); });
 byId("download").addEventListener("click", () => {
@@ -240,7 +294,7 @@ byId("download").addEventListener("click", () => {
   const link = document.createElement("a"); link.href = url; link.download = `relayswarm-field-${new Date().toISOString().replace(/[:.]/gu, "-")}.json`; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
-function suspendPeerAuthority() { suspensionGeneration++; needsViewerApply = true; policyRenewal.suspend(); stopSwarm(); }
+function suspendPeerAuthority() { suspensionGeneration++; needsViewerApply = true; accountBudget.suspend(); policyRenewal.suspend(); stopSwarm(); }
 window.addEventListener("pagehide", () => { suspendPeerAuthority(); mediaRecovery.cancel("page-hidden"); });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") suspendPeerAuthority(); else policyRenewal.resume(); });
 window.addEventListener("pageshow", () => { policyRenewal.resume(); if (startRequestedAt !== null && !swarm) { byId("kill").disabled = true; status("Peer delivery stopped while this page was inactive. Playback uses origin; apply settings to rejoin."); } });
@@ -297,6 +351,7 @@ const policyRenewal = createPolicyRenewal({
     const identityChanged = !sameIdentity(current, session);
     const configurationChanged = !samePeerConfiguration(current, session);
     const changed = policyUnavailable || next.mode !== deliveryPolicy.mode || identityChanged || configurationChanged;
+    accountBudget.configure(current.accountBudget);
     if (identityChanged) { mediaRecovery.cancel("publisher-session-changed"); stopSwarm(); }
     if (identityChanged || configurationChanged) session = current;
     const credentialInstalled = identityChanged || admissionCredential === priorCredential;
@@ -318,7 +373,12 @@ const policyRenewal = createPolicyRenewal({
   },
   revoke: policyUnavailableNow,
 });
-function refreshPolicy() { return session ? policyRenewal.renew() : Promise.resolve(false); }
+async function refreshPolicy() {
+  if (!session) return false;
+  const result = await policyRenewal.renew();
+  if (result && document.visibilityState === "visible") await accountBudget.maintain();
+  renderAccount(); return result;
+}
 async function sendReport() {
   if (!policyRenewal.fresh() || !byId("telemetry").checked || !deliveryPolicy.telemetry || startRequestedAt === null) return;
   const total = totals();
@@ -330,6 +390,6 @@ setInterval(sendReport, 15000);
 setInterval(render, 1000);
 setInterval(() => { if (swarm) push(snapshots, { atMs: elapsed(), metrics: swarm.metrics() }, 60); }, 5000);
 try {
-  session = await fetchDiagnostics.json("session", "/session.json", { cache: "no-store" }); byId("allowance").value = String(uploadBudget.snapshot().limit); await refreshPolicy(); byId("start").disabled = false;
+  session = await fetchDiagnostics.json("session", "/session.json", { cache: "no-store" }); accountBudget.configure(session.accountBudget); byId("allowance").value = String(uploadBudget.snapshot().limit); await refreshPolicy(); byId("start").disabled = false;
   status(isSecureContext ? "Ready · choose a delivery mode and start playback." : "This address needs HTTPS for peer delivery. Origin playback is available.");
 } catch { status("The publisher is unavailable. Reload after it has started."); }

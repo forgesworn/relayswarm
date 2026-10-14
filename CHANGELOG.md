@@ -4,6 +4,14 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Added an optional durable account upload allowance supporting Nostr sign-in,
+  host website accounts, explicit linking and short-lived page authority.
+  Account actions preserve cumulative charges and require fresh upload consent.
+- Added bounded numeric peer-eligibility observations to distinguish deadline
+  and availability decisions without changing peer selection or its budgets.
+- Separated in-flight upload quota from accepted-upload metrics so a pending
+  or refused host reservation cannot be archived as an uploaded payload.
+
 - Added fresh live-media coordination, measured fallback reserves and actual
   fMP4/adaptive, audio, AES-128, mixed-codec and low-latency-part journeys.
 - Added exact schema 2 media commitments, scoped signing delegation/revocation

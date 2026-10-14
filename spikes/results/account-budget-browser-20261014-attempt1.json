@@ -1,0 +1,499 @@
+{
+  "v": 1,
+  "recordedAt": "2026-10-14T10:50:07.892Z",
+  "baseHead": "2589f5569727f10d476baeda4337d427452c5cfd",
+  "source": "Uncommitted account implementation and reviewed guarded fixture; exact source pins in root decision",
+  "receiptSHA256": "897c715c08722cce9450f84f39a1104b8036822fc31bf7e1ac3bea841a120246",
+  "rootDecisionSHA256": "7852e703a7d858f5123fef45abdef9f3ce25fd58e0a98e90c365b35a3e24131b",
+  "result": "PASS as asserted; provisional sender-metric caveat discovered in subsequent review",
+  "caveats": [
+    "bytes.uploaded was incremented before async reservation completed and could be archived before a refused callback decremented the live counter. It must not be read as delivered bytes or compared with durable account spend while work is pending.",
+    "At the link checkpoint receiver verified bytes and merged durable shared spend both equal6342744. Sender metrics plus local precharges include pending or refused work. The exact301552-byte operation correlation was not retained.",
+    "This uses disposable Nostr signatures, an owned website session, explicit loopback RTC fixture flags and three browser contexts. It does not prove owner signer, physical phones, hard NAT, deployed host-account integration, sustained load or wire cost."
+  ],
+  "receipt": {
+    "v": 1,
+    "kind": "relayswarm-account-budget-browser",
+    "at": "2026-10-14T10:46:54.529Z",
+    "ok": true,
+    "scope": {
+      "network": "loopback",
+      "physicalDevices": false,
+      "wholeMs": 180000,
+      "browserFlags": [
+        "--autoplay-policy=no-user-gesture-required",
+        "--disable-features=WebRtcHideLocalIpsWithMdns",
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream"
+      ],
+      "signer": "disposable NIP-07 bridge with real signatures",
+      "websiteAccount": "test-owned authenticated session",
+      "quota": "durable accepted media reservations; not wire metering or NAT acceptance",
+      "chromeProcessIdentityMatched": true,
+      "browserVersion": "155.0.8059.41",
+      "accountGrantTtlSeconds": 30
+    },
+    "checkpoints": [
+      {
+        "name": "both-authentication-paths-reserve-before-real-peer-upload",
+        "atMs": 44753,
+        "viewers": [
+          {
+            "name": "nostr-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 111672,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 111672,
+              "limit": 100000000,
+              "revision": 2,
+              "available": true,
+              "remaining": 99888328
+            },
+            "shared": {
+              "required": true,
+              "connected": true,
+              "available": true,
+              "limit": 100000000,
+              "spent": 111672,
+              "remaining": 99888328,
+              "revision": 1,
+              "generation": 1
+            },
+            "uploadChecked": true,
+            "telemetryChecked": false,
+            "serving": true,
+            "currentTime": 35.21319,
+            "fatalErrors": 0
+          },
+          {
+            "name": "website-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 6231072,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 6231072,
+              "limit": 100000000,
+              "revision": 23,
+              "available": true,
+              "remaining": 93768928
+            },
+            "shared": {
+              "required": true,
+              "connected": true,
+              "available": true,
+              "limit": 100000000,
+              "spent": 5947568,
+              "remaining": 94052432,
+              "revision": 1,
+              "generation": 1
+            },
+            "uploadChecked": true,
+            "telemetryChecked": false,
+            "serving": true,
+            "currentTime": 34.647445,
+            "fatalErrors": 0
+          },
+          {
+            "name": "receive-only",
+            "totals": {
+              "peerFirstBytes": 6059240,
+              "uploaded": 0,
+              "peerFirstLoads": 22
+            },
+            "local": {
+              "v": 1,
+              "spent": 0,
+              "limit": 100000000,
+              "revision": 1,
+              "available": true,
+              "remaining": 100000000
+            },
+            "shared": {
+              "required": false,
+              "connected": false,
+              "available": true,
+              "limit": null,
+              "spent": null,
+              "remaining": null,
+              "revision": null,
+              "generation": null
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 34.135083,
+            "fatalErrors": 0
+          }
+        ]
+      },
+      {
+        "name": "explicit-link-preserves-spend-and-withdraws-old-page-consent",
+        "atMs": 46753,
+        "viewers": [
+          {
+            "name": "nostr-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 111672,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 111672,
+              "limit": 100000000,
+              "revision": 2,
+              "available": true,
+              "remaining": 99888328
+            },
+            "shared": {
+              "required": true,
+              "connected": true,
+              "available": true,
+              "limit": 100000000,
+              "spent": 6342744,
+              "remaining": 93657256,
+              "revision": 2,
+              "generation": 2
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 37.211731,
+            "fatalErrors": 0
+          },
+          {
+            "name": "website-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 6532624,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 6532624,
+              "limit": 100000000,
+              "revision": 24,
+              "available": true,
+              "remaining": 93467376
+            },
+            "shared": {
+              "required": true,
+              "connected": false,
+              "available": false,
+              "limit": 100000000,
+              "spent": 6231072,
+              "remaining": 0,
+              "revision": 1,
+              "generation": 1
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 36.647729,
+            "fatalErrors": 0
+          },
+          {
+            "name": "receive-only",
+            "totals": {
+              "peerFirstBytes": 6342744,
+              "uploaded": 0,
+              "peerFirstLoads": 23
+            },
+            "local": {
+              "v": 1,
+              "spent": 0,
+              "limit": 100000000,
+              "revision": 1,
+              "available": true,
+              "remaining": 100000000
+            },
+            "shared": {
+              "required": false,
+              "connected": false,
+              "available": true,
+              "limit": null,
+              "spent": null,
+              "remaining": null,
+              "revision": null,
+              "generation": null
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 36.134222,
+            "fatalErrors": 0
+          }
+        ]
+      },
+      {
+        "name": "server-restart-and-explicit-page-reconnection-retain-shared-spend",
+        "atMs": 47288,
+        "viewers": [
+          {
+            "name": "nostr-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 0,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 111672,
+              "limit": 100000000,
+              "revision": 2,
+              "available": true,
+              "remaining": 99888328
+            },
+            "shared": {
+              "required": true,
+              "connected": true,
+              "available": true,
+              "limit": 100000000,
+              "spent": 6342744,
+              "remaining": 93657256,
+              "revision": 2,
+              "generation": 2
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 0,
+            "fatalErrors": 0
+          },
+          {
+            "name": "website-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 6532624,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 6532624,
+              "limit": 100000000,
+              "revision": 24,
+              "available": true,
+              "remaining": 93467376
+            },
+            "shared": {
+              "required": true,
+              "connected": false,
+              "available": false,
+              "limit": 100000000,
+              "spent": 6231072,
+              "remaining": 0,
+              "revision": 1,
+              "generation": 1
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 37.173912,
+            "fatalErrors": 0
+          },
+          {
+            "name": "receive-only",
+            "totals": {
+              "peerFirstBytes": 6342744,
+              "uploaded": 0,
+              "peerFirstLoads": 23
+            },
+            "local": {
+              "v": 1,
+              "spent": 0,
+              "limit": 100000000,
+              "revision": 1,
+              "available": true,
+              "remaining": 100000000
+            },
+            "shared": {
+              "required": false,
+              "connected": false,
+              "available": true,
+              "limit": null,
+              "spent": null,
+              "remaining": null,
+              "revision": null,
+              "generation": null
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 36.66466,
+            "fatalErrors": 0
+          }
+        ]
+      },
+      {
+        "name": "fresh-owner-reset-and-explicit-disconnection-never-enable-uploading",
+        "atMs": 47478,
+        "viewers": [
+          {
+            "name": "nostr-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 0,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 111672,
+              "limit": 100000000,
+              "revision": 2,
+              "available": true,
+              "remaining": 99888328
+            },
+            "shared": {
+              "required": true,
+              "connected": false,
+              "available": false,
+              "limit": 100000000,
+              "spent": 0,
+              "remaining": 0,
+              "revision": 3,
+              "generation": 3
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 0,
+            "fatalErrors": 0
+          },
+          {
+            "name": "website-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 6532624,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 6532624,
+              "limit": 100000000,
+              "revision": 24,
+              "available": true,
+              "remaining": 93467376
+            },
+            "shared": {
+              "required": true,
+              "connected": false,
+              "available": false,
+              "limit": 100000000,
+              "spent": 6231072,
+              "remaining": 0,
+              "revision": 1,
+              "generation": 1
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 37.37248,
+            "fatalErrors": 0
+          },
+          {
+            "name": "receive-only",
+            "totals": {
+              "peerFirstBytes": 6342744,
+              "uploaded": 0,
+              "peerFirstLoads": 23
+            },
+            "local": {
+              "v": 1,
+              "spent": 0,
+              "limit": 100000000,
+              "revision": 1,
+              "available": true,
+              "remaining": 100000000
+            },
+            "shared": {
+              "required": false,
+              "connected": false,
+              "available": true,
+              "limit": null,
+              "spent": null,
+              "remaining": null,
+              "revision": null,
+              "generation": null
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 36.855526,
+            "fatalErrors": 0
+          }
+        ]
+      }
+    ],
+    "failures": [],
+    "cleanup": {
+      "browserClosed": true,
+      "serverClosed": true,
+      "mediaFixtureRemoved": true
+    },
+    "stage": "complete",
+    "renewals": {
+      "nostr-contributor": 2,
+      "website-contributor": 3
+    },
+    "elapsedMs": 48644,
+    "finishedAt": "2026-10-14T10:47:43.191Z",
+    "deadlineExpired": false,
+    "pageErrors": [],
+    "supervisor": {
+      "v": 1,
+      "at": "2026-10-14T10:46:54.189Z",
+      "finishedAt": "2026-10-14T10:47:43.232Z",
+      "elapsedMs": 49043,
+      "bounds": {
+        "wholeMs": 180000,
+        "workMs": 150000,
+        "gracefulCleanupEndsMs": 165000,
+        "groupReapEndsMs": 175000
+      },
+      "worker": {
+        "code": 0,
+        "signal": null
+      },
+      "failures": [],
+      "cleanup": {
+        "workerGroupAbsent": true,
+        "workerReaped": true,
+        "chromeGroupAbsent": true,
+        "ownedScratchRemoved": true
+      },
+      "ok": true
+    }
+  },
+  "sourceSHA256": {
+    "src/account-upload-budget.mjs": "31a051498cca8d80ab846743b80daddeb9d0a980096ab125852191d67047b048",
+    "demo/account-budget.mjs": "2bdab6e0cab1c5fd1f5a47f44a22b030106013bb096a61ba69b0956f54a4d30e",
+    "demo/account-budget-client.mjs": "4e2e495bd13e49e9548c1e045bc01694ca06f5fd9bb445af8f7ef2e413e6a505",
+    "demo/server.mjs": "dd3ce34a68400840315ff7a82963a1ea25331e6862c48fda93c38f95f27143fb",
+    "demo/client.mjs": "02d2b54d5ccfd04bea1e665e3f26aae1b302b4beb8c02ae5bd175df381336415",
+    "demo/index.html": "b3e4ce2c7c1176a316b4f90846db3125022d340214caa337ae9504e1f249d220",
+    "demo/style.css": "3361e1e2501a861aad2a01187fa4262b524f5085a829cd4338e9c3fac0b20eaf",
+    "test/account-upload-budget.test.mjs": "c7b271e3c13c17120f3615cfc7758289effbfb70864fea3f5a3e378b968a14f2",
+    "test/account-budget-http.test.mjs": "06b377f56d20a53da9495d3bcefc1a6eadd919b33f656c8645a2e26a0c94e111",
+    "test/account-budget-client.test.mjs": "dfb47158a4c421517b4aac14510ff37f97b4cb2f831ebc103ed4ec4e83efe813",
+    "test/demo-client.test.mjs": "7906908d8ccbe39803ea09f638a0b552152ec8a6d8dd4e23de0fd0e6d164d9ed",
+    "test/account-budget-browser.mjs": "256e742eb1779a6dde47d2dd700607a07b6328abc8b8cc3f0b7b188d9d249d94",
+    "test/support/account-budget-browser-worker.mjs": "7a4e0f5e284557bb42b40c9449fd635e006e1e2ddb2eebd440b5570c25268b2b",
+    "test/support/account-browser-chrome.mjs": "f5b9b2cc1ba07b13695e2a8c15b358dc511e01dcba4e830a812db50ec641252e",
+    "test/support/account-browser-guard.mjs": "09c7abcae2dfa083e7587426c1604110d7f1813bf22bed6b4fe34254bd752c93",
+    "test/account-browser-guard.test.mjs": "9209a98fd82a1d1f9a8631de665b35bfa5727f799af2322c0d61192545fbe246",
+    "package.json": "1d64db675bdc8214f5b7ea635634fa3add03beb72440ee7525bdb56e2fbc569a",
+    "test/operator-browser-suite.mjs": "ab2c197e92592767b4d2fe50ad42bbdb80a120bb69b367d7deecc1d9135254f5",
+    "src/browser/hls-swarm.mjs": "85892f0de415c41cc4ba75488bf450d936fbba02c4a4556ad58aa5992bf2364c"
+  },
+  "independentActualReview": {
+    "manifestSHA256": "94d0f40f83f37af7f3d2c670ff4fcc1a8cf321a0ca13886de24137ca79d1f427",
+    "path": "artifacts/independent-account-budget-browser-attempt1-analysis-20261014/manifest.json"
+  }
+}

@@ -174,6 +174,9 @@ try {
   await baseline.waitForFunction(() => window.relaySwarmDemo.report().player.fragments.some((fragment) => fragment.level === 1));
   await checkpoint("real-time-high-rendition-peer-playback");
   const beforeRestart = await Promise.all([baseline, consumer].map(read));
+  receipt.checkpoints.push({ name: "before-producer-restart", viewers: beforeRestart.map((report, index) => ({
+    name: index === 0 ? "baseline" : "consumer", receipt: report,
+  })) });
   const restartAt = Date.now();
   const publications = pipeline.metrics().publications, generation = pipeline.metrics().generation;
   log("restarting the synthetic RTMP producer"); await stop(producer); await pause(1000); producer = startProducer();

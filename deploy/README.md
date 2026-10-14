@@ -25,6 +25,15 @@ docker compose --env-file deploy/.env -f deploy/compose.yml build
 
 Use a distinct Compose project name if deploying another instance. The default project is `relayswarm-pilot`. Set `APP_TAG` to a meaningful local release identifier, set `SOURCE_REVISION` to the source commit for the image provenance label, and retain the previous image for rollback. `RELAYS` accepts comma-separated `wss://` URLs without credentials; an empty value uses the app's built-in relay over the same HTTPS origin. `STUN_URL` is optional. This package does not configure a TURN service or prove cross-network connectivity. Reporting is off; no telemetry flag is added.
 
+`ACCOUNT_BUDGET_ENABLED=1` offers an optional shared account allowance, backed by
+`/state/account-budget.json` and its exclusive lease. Set it to `0` to omit the
+account service. The broadcaster CLI supports explicit Nostr sign-in; an
+embedding website supplies its existing account authentication through the
+server API. Connecting an account does not enable uploading or reporting.
+Preserve this private ledger with the state volume: recreating it would discard
+the recorded account allowances. Account acceptance is tracked separately in
+[the delivery requirements](../docs/PRODUCTION-READINESS.md).
+
 After checking existing host listeners and reverse-proxy configuration, the operator can start this stack:
 
 ```sh

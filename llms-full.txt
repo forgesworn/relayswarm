@@ -208,6 +208,14 @@ Origin-only mode avoids swarm participation; the origin still receives normal
 HLS requests. Upload consent and publisher redistribution permission are
 separate requirements.
 
+The optional [shared upload allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md) uses
+explicit Nostr sign-in or a host website account to coordinate media reservations
+across devices. Its private service can associate those devices; linking both
+identities also reveals their association to that service. Stable account
+identities and grants stay out of swarm traffic and receipts. Sign-in never
+enables uploading or reporting. This source feature is absent from the deployed
+`2dd156e` checkpoint.
+
 The browser defaults to Google's public STUN server unless the host supplies
 `iceServers`; the native path uses HyperDHT bootstrap/routing nodes instead.
 No managed TURN or super-peer service is supplied. Hosts can pass TURN ICE
@@ -401,6 +409,26 @@ Keep receipts local unless the viewer explicitly agrees to reporting. The
 current demo's optional reporting endpoint accepts a numeric summary rather
 than this full snapshot; see [operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md).
 
+`peerEligibilityDiagnostics` is an additive local version-2 snapshot field in
+the current source. Its fixed reason `counters` survive eviction from the
+64-record ring; `capacity` and `dropped` describe that ring. Each row contains
+elapsed `atMs`, numeric `cc` and `level` (null when unavailable), the already
+computed initial `budgetMs`, `reason` and `matchingHave` (boolean or null).
+`no-budget` records HAVE as **null/unobserved**: the loader does not compute a
+segment key or inspect peer availability to populate this diagnostic. The
+original origin fallback may still compute its normal key afterwards.
+Positive-budget reasons distinguish `no-have-no-wait`, `no-have-wait`,
+`wait-no-longer-eligible`, `wait-aborted`, `wait-expired`, `have-at-entry` and
+`have-after-wait`; `aborted-before-eligibility` means cancellation after the
+existing key computation, before the HAVE decision. Wait expiry/cancellation
+also leaves HAVE null rather than claiming it was still absent. One load can
+produce both a wait-entry and a wait-outcome row: counters count decisions,
+not distinct segments. Budget is the initial allowance, not remaining request
+time. Rows contain no segment keys, hashes, URLs, peer identities or addresses.
+They remain readable after stop and use the existing local/reporting-consent
+boundary; they add no requests, authority checks or deadline changes. These
+observations do not establish the cause of a failed peer transfer.
+
 Deployed source `f393abf` includes `transportDiagnostics` within metrics version
 2. It contains fixed-enum
 `counters`, a ring of at most 64 `records`, `capacity` and an eviction `dropped`
@@ -433,10 +461,16 @@ actually delivered to hls.js instead of starting an origin fragment request;
 `originFallbacks` counts loads delegated to the original loader. Shadow
 coverage fields are null in peer-first mode.
 
-`bytes.uploaded` counts media payloads accepted against the upload token bucket.
-An interrupted transfer can send less than this amount; signalling and protocol
-overhead are excluded. Treat it as quota consumption, not a measurement of total
-connection data or acknowledged delivery.
+`bytes.uploaded` counts payloads accepted for serving after the upload token
+bucket, any host reservation callback, and the subsequent live-state checks.
+Pending or refused host reservations never increment it. Session capacity is
+reserved internally before awaiting that callback, so concurrent requests cannot
+overspend; an accepted reservation remains charged if the link closes before
+serving. Consequently `uploadRemaining` can include charges absent from
+`uploaded`. An interrupted accepted transfer can send less than its counted
+payload; signalling and protocol overhead are excluded. These counters are not
+wire metering or acknowledged delivery, and durable host-ledger spend may exceed
+accepted serving totals.
 
 The session allowance is additive within metrics version 2. Exhaustion
 withdraws media availability and stops serving while receiving remains
@@ -577,6 +611,14 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Added an optional durable account upload allowance supporting Nostr sign-in,
+  host website accounts, explicit linking and short-lived page authority.
+  Account actions preserve cumulative charges and require fresh upload consent.
+- Added bounded numeric peer-eligibility observations to distinguish deadline
+  and availability decisions without changing peer selection or its budgets.
+- Separated in-flight upload quota from accepted-upload metrics so a pending
+  or refused host reservation cannot be archived as an uploaded payload.
+
 - Added fresh live-media coordination, measured fallback reserves and actual
   fMP4/adaptive, audio, AES-128, mixed-codec and low-latency-part journeys.
 - Added exact schema 2 media commitments, scoped signing delegation/revocation
@@ -679,6 +721,7 @@ its measured scope and acceptance gaps in [Status](https://raw.githubusercontent
 | Run a trial on separate devices and interpret receipts | [Publisher/player field test](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md) |
 | Ingest a live broadcast or add optional RTMPS forwarding | [Broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md) |
 | Operate private state, remote policy and opt-in reports | [Operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md) |
+| Share an upload allowance across devices using Nostr or website accounts | [Shared upload allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md) |
 | Deploy beside existing services with private ingest | [Container pilot](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md) |
 | Understand HyperDHT/Noise and native authorisation | [Native transport](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NATIVE-TRANSPORT.md) |
 | Review integrity, privacy and resource boundaries | [Threat model](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/THREAT-MODEL.md) |
@@ -867,6 +910,7 @@ are not a stable interoperability promise.
 | `relayswarm/broadcast-pipeline` | Node with FFmpeg | `startBroadcastPipeline`, `broadcastEncoderArgs`, `broadcastForwardArgs` |
 | `relayswarm/native-client` | Installed Node application | `validateNativeDescriptor`, `fetchNativeObject`, `createNativeObjectSeeder` |
 | `relayswarm/publisher-advertisement` | Node or a browser bundler | `createPublisherAdvertisement`, `verifyPublisherAdvertisement` |
+| `relayswarm/account-upload-budget` | Node on supported local POSIX storage | `createAccountUploadBudget`, `AccountBudgetError`, `accountBudgetError` |
 | `relayswarm/package.json` | Package metadata | Name, version and declared dependencies |
 
 The wildcard export also permits source subpaths such as
@@ -903,6 +947,37 @@ reporting a completed load.
 
 The rotation/refusal helpers are exported for the loader's policy and tests;
 most hosts only need `createHlsSwarm` and `HLS_SWARM_METRICS_VERSION`.
+
+## Shared account upload allowance
+
+`createAccountUploadBudget(options)` supplies the private durable reservation
+ledger. Its `identity`, `authorize`, `inspectGrant`, `reserve`, `renew` and
+`revokeGrant` methods are trusted server operations, not a public authentication
+interface. Await `ready()` before use and `close()` during shutdown. The required
+`statePath` has the private filesystem requirements described in the
+[account allowance guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md).
+
+The example HTTP integration is `startDemoServer({accountBudget: {...}})`.
+Omitting `accountBudget` omits the service. Configure `statePath` and optionally
+`resolveWebsiteAccount(request, {signal})`, which must resolve the host's
+authenticated session to `{issuer, subject}`. Nostr proof verification is
+supplied by the example; website authentication belongs to the host. Neither
+method enables uploading, resets spend or enrols other devices automatically.
+
+Defaults are `defaultLimit: 100000000`, `grantTtlSeconds: 120` and
+`delegationTtlSeconds: 10800`. Limits accept zero through 10¹² bytes; grants
+accept 30–300 seconds; delegation accepts the grant duration through 86,400
+seconds. Account, identity, grant, replay-operation and pending-write bounds
+refuse excess work rather than evicting recorded spend. The HTTP adapter also
+bounds challenges, active requests and authentication time. This is a serial,
+durable payload ledger; no high-volume capacity or physical wire metering is
+claimed.
+
+The same-origin POST routes under `/account-budget/` use a private versioned
+proof contract and short-lived page-bound grants. Keep them behind HTTPS and
+the configured origin; do not expose the trusted ledger methods directly or
+accept viewer-supplied account subjects as authentication. The session
+descriptor contains supported methods, bounds and fixed endpoint paths only.
 
 ## Node HLS publisher
 
@@ -1180,6 +1255,37 @@ Checkpoint: 14 October 2026. The published experimental release is
 `3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. The 0.2.0 production feature
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
+
+## Current source: shared account allowance
+
+The current branch adds both requested account methods: explicit Nostr sign-in
+and an integrating website's authenticated account. One private durable ledger
+serialises reservations across devices. Explicit linking adds spend and retains
+the lower limit; settings, reset, linking and connection leave uploading off.
+See [shared upload allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md).
+
+The [controlled Chrome result](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/account-budget-implementation-20261014.json)
+passes in 55.780 s with both authentication methods, verified peer media at both
+qualities, short-grant renewal, linking, server restart/reconnection, reset and
+disconnect. At linking, receiver bytes, committed upload totals and merged
+spend equal 6,337,480 bytes; the same balance survives restart. All browser,
+server, media, owned-group/reap and scratch cleanup checks pass. This uses
+disposable Nostr signatures, an owned website session and explicit loopback RTC
+fixture flags, not physical phones or a real owner's signer. Local tests pass:
+177 publisher cases (two Windows-only skips) and 92 swarm cases.
+
+The earlier 49.043 s pass is retained with its provisional upload-counter
+caveat. The corrected source separates pending quota from committed uploads.
+One intervening full-suite guard test failed on `EPERM`; its original cleanup
+remains unknown because its exact PID was not retained. A later read-only check
+found no matching test program; this does not reconstruct original cleanup.
+The final guard waits for explicit absence within the unchanged deadline, and
+the corrected full suite passes. Original failures are not replaced by later
+passes.
+
+These are local source results. Final-source CI, clean package consumption,
+deployment and physical/network/sustained/release acceptance remain open. The
+public app remains on `2dd156e` and predates this account service.
 
 ## Published v0.1.0 capabilities
 
@@ -2387,6 +2493,13 @@ Hiding or leaving the page stops its swarm and clears upload and reporting
 consent. Returning uses origin until settings are applied again; physical
 background/resume playback remains a field gate.
 
+If the host offers a shared account allowance, connecting it is a separate,
+explicit action using a Nostr signer or the host's signed-in website account.
+It adds the service's cumulative cap to this browser's allowance and leaves
+uploading off until a fresh Apply. See [shared upload allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md)
+for linking, resetting, reconnecting after reload and the service's privacy
+boundary. The deployed `2dd156e` checkpoint predates this feature.
+
 The player checks operator policy and publisher identity every two seconds,
 with at most three independent checks in flight. A stalled check cannot block
 a newer successful check. A fully validated check permits peer delivery for
@@ -3188,6 +3301,17 @@ stay in the browser until downloaded; optional reporting requires viewer
 opt-in and accepts only bounded numeric summaries, without a swarm public key.
 These controls do not establish unique participants or net cost.
 
+The optional [account allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md) introduces a separate
+private trust boundary: its service learns a stable Nostr identity or the host's
+authenticated website subject and can correlate participating devices. Explicit
+linking reveals the association between those identities. The private ledger
+stores service-scoped pseudonyms and durable cumulative reservations; its
+secret and grant records require protection as account data. Stable identities
+and grants are excluded from swarm events, SDP, peer messages and downloaded or
+submitted reports. Host authentication, HTTPS and ledger preservation remain
+required. An open Nostr account service cannot establish unique humans or
+prevent someone deliberately using unrelated identities.
+
 These are specific tested boundaries, not completion of the adversarial suite
 below. Sybil resistance, broad NAT/mobile coverage and independent-client
 protocol interoperability remain outstanding.
@@ -3406,29 +3530,47 @@ their own integration and distribution work.
 
 ## Does RelaySwarmKit interoperate with this release?
 
-That has not been established. The separate
-[Swift project's README](https://github.com/forgesworn/relayswarm-kit) describes
-version-2 signalling; this repository uses version 3 for the shared session.
-Shared event kinds and successful NIP-44 vectors do not prove matching wire
-envelopes, native transport or signed HLS commitments. A RelaySwarm protocol draft and tested adapter exist, but no RelaySwarm NIP
-is accepted yet.
+The current 0.2.0 source candidate passes author, delegated-signing and
+adversarial transfer journeys with the published RelaySwarmKit v0.5.0 public
+SDK. These are macOS arm64/Chrome loopback checks, not physical iPhone
+acceptance. The earlier version-2 Kit baseline is incompatible with the
+candidate's version-3 signalling. Published RelaySwarm v0.1.0 assets keep their
+original protocol; do not infer compatibility from matching event kinds alone.
+See [the recorded SDK evidence](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md) and [interop guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/interop/README.md).
+No RelaySwarm NIP is accepted yet.
+
+## Can one upload allowance cover my phone and computers?
+
+The current source offers an optional [shared account allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md).
+Devices explicitly connect using the same Nostr identity or an account
+authenticated by the host website, and use one durable ledger. Both methods
+are supported; linking them requires fresh proof of both. Their recorded spend
+is added and the lower cap is retained. Local browser allowances still apply,
+and each page separately requests upload consent. This feature is absent from
+the deployed `2dd156e` checkpoint; browser and field acceptance are tracked
+separately. It counts reserved media payload rather than total device traffic.
 
 ## Do the receipts measure money or data saved?
 
 `peerFirstBytes` measures verified media delivered in place of starting an
 origin fragment load. It excludes commitment, signalling and protocol traffic.
 Shadow transfers add traffic. `bytes.uploaded` counts full payloads accepted
-against the quota, including interrupted transfers; it is not acknowledged
-network delivery. Receipts stay local until downloaded. Use paired device/network
+for serving after any host reservation callback succeeds and current serving
+checks pass. Pending or refused callbacks do not enter that counter. Interrupted
+accepted transfers can send less; durable allowances can also retain charges
+for media never handed to the transport. These are not acknowledged network
+delivery totals. Receipts stay local until downloaded. Use paired device/network
 measurements to establish total data cost. See [receipt interpretation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#collect-comparable-receipts).
 
 ## What remains before production?
 
-Physical devices, separate-network/NAT trials, sustained resource and cost
-measurements, broader adaptive bitrate and fMP4 coverage, stronger adversarial
-testing and independent-client interoperability. [Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md) records
-which evidence exists. There is no prediction that audience upload capacity
-will cover a given deployment.
+Complete physical-device journeys, separate-network/hard-NAT trials, sustained
+resource/churn and matched cost measurements, and final immutable release
+acceptance remain open. Current deployed sharing and fourteen-role qualification
+are red; earlier short passes retain their own source and scope. Wider-media
+and independent SDK fixtures have passing evidence, which does not close those
+field gates. [Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md) records both results. There is no prediction
+that audience upload capacity will cover a given deployment.
 
 ## What permission does a contributing viewer need?
 
@@ -3565,6 +3707,143 @@ production/security claims to this repository's metadata.
 
 ---
 
+Source: [docs/ACCOUNT-UPLOAD-BUDGET.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md)
+
+# Shared upload allowance
+
+[Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md) ·
+[Delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md)
+
+The current source implements an optional account allowance shared across
+devices, supporting Nostr sign-in and host website accounts. The
+[controlled Chrome journey](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/account-budget-implementation-20261014.json)
+passes both methods, real peer uploads, renewal, linking, restart persistence
+and fresh consent. It uses disposable signatures and an owned website session
+on loopback; physical devices and deployed host authentication remain separate
+acceptance gates under P06/P12. The deployed `2dd156e` checkpoint has only the
+existing browser allowance.
+
+The account service records cumulative media payload reservations. Every
+participating device uses the same service and durable ledger. The browser's
+local allowance continues to apply as well. These limits exclude signalling,
+connection overhead and other HTTP traffic; they are not wire-traffic meters.
+
+## Enabling the service
+
+The standalone demo accepts `--account-budget-state FILE`. Its parent directory
+must be private, owned by the service user and free of symlinks. The ledger is a
+0600 file on a supported local POSIX filesystem, protected by an exclusive
+writer lease. Preserve it and its lease files during upgrades and backups.
+Keep account state outside the source checkout. The default
+`account-budget.json` name and its sidecars are excluded from Git, package and
+container contexts; a custom filename needs equivalent protection.
+
+The broadcaster accepts `--account-budget` and uses
+`account-budget.json` inside its existing private state directory. The Compose
+template offers the service with `ACCOUNT_BUDGET_ENABLED=1`; set that value to
+`0` to omit it. Offering the service does not connect a viewer's identity or
+enable uploading or reporting.
+
+The CLI supplies optional Nostr authentication. A website integrating the
+server supplies its own authenticated account resolver:
+
+```js
+await startDemoServer({
+  // Existing publisher and HTTPS configuration goes here.
+  accountBudget: {
+    statePath: '/private/relayswarm/account-budget.json',
+    async resolveWebsiteAccount(request, { signal }) {
+      const session = await yourAuthentication.requireSession(request, { signal });
+      return { issuer: 'your-website', subject: session.userId };
+    },
+  },
+});
+```
+
+`yourAuthentication` represents the host's existing session authentication.
+Derive the subject from verified authentication. A submitted account ID,
+request header chosen by the viewer, operator token or displayed public key
+does not establish that authority. No account-registration system is supplied.
+Both identity methods use the same reservation implementation; the website
+method appears only when the host configures it.
+
+## Connecting and linking identities
+
+The viewer explicitly chooses a connection method. Nostr uses the browser
+signer's `getPublicKey` and `signEvent` capabilities from
+[NIP-07](https://github.com/nostr-protocol/nips/blob/master/07.md). Private keys
+stay with the signer. Website authentication uses the host's existing signed-in
+session. Neither connection enables uploading. Each new page still requires
+fresh upload consent.
+
+A connection obtains a short-lived opaque grant bound to that page's separate
+ephemeral key. Renewal remains inside the original account-authorised
+delegation deadline. It cannot raise the limit, reset spent bytes or extend that
+deadline. Website renewal checks the current authenticated website account.
+Authentication proofs use a private, versioned contract; they are not NIP-98
+HTTP-auth events and are never broadcast to Nostr relays.
+
+Different unlinked identities have separate allowances. Linking a Nostr identity
+and a website account requires fresh proof of both and an explicit linking
+action. Their recorded spend is added and the lower limit is retained. Existing
+grants are revoked; uploading requires a fresh Apply action. Connecting another
+device or reconnecting after a reload reads the existing balance.
+
+The initial account allowance is 100 MB unless the host chooses another
+supported default. Raising its limit or resetting recorded spend requires a
+separate explicit action with fresh account authentication. Local allowance
+settings are not copied over an existing account balance on sign-in.
+The two shared-limit buttons both apply the selected limit; the reset button
+also clears recorded shared usage.
+
+## Reservation and failure behaviour
+
+Before sending media, the client reserves its full payload against both local
+and account allowances. The server serialises concurrent devices, checks the
+grant and remaining allowance, and durably commits the charge before returning
+acceptance. Repeating the exact same reservation operation does not charge it
+again; reusing its operation ID for a different amount is refused.
+
+An accepted or ambiguous reservation remains charged after cancellation,
+disconnect or crash. There are no automatic refunds, retries or allowance
+resets. A failure between the local and remote reservations can therefore
+consume allowance without uploading. A connected account's unavailable or
+expired authority stops contribution; it never silently substitutes a fresh
+local-only allowance. Receiving can continue through the normal origin loader.
+
+Disconnecting explicitly clears upload consent, leaves recorded spend intact
+and keeps the page's requirement for account authority. Reconnecting is required
+before that page can contribute again. Account and replay-record capacity limits refuse new work rather than
+discarding spent counters to make room. Preserve the ledger: deleting it
+discards the service's record of account expenditure. Independent deployments
+with separate ledgers do not enforce one shared limit.
+
+Grant expiry uses wall time and monotonic time while the service runs. Observed
+wall-clock rollback fails closed; orderly shutdown persists the highest
+observed time. After restart the service trusts the host's UTC clock and that
+durable high-water mark. It cannot establish physical elapsed time during an
+unobserved crash or clock change. Recorded spend persists independently of
+grant expiry. Use a reliable host clock and preserve the private state.
+
+## Privacy and scope
+
+The account service necessarily learns which devices connect to the same
+identity, and an explicit link reveals that the two identities belong together.
+Its private ledger uses service-scoped pseudonyms. Protect that state and its
+pseudonymisation secret as account data.
+
+Account subjects, stable Nostr identities and grants stay out of public
+admission tickets, relay events, SDP, peer messages, downloaded player receipts
+and opt-in operational reports. Swarm identity remains ephemeral. Reporting
+still requires its separate opt-in.
+
+This is a cooperative payload allowance for clients using the account service.
+It does not identify unique people or impose an operating-system-wide limit on
+other browsers, applications or unrelated services. Physical device, sustained
+operation and release acceptance remain separate gates.
+
+---
+
 Source: [docs/BROADCASTING.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md)
 
 # Broadcaster source workflow
@@ -3606,6 +3885,14 @@ OBS then targets its own loopback address. The container router uses an internal
 
 ## Output and recovery
 
+Add `--account-budget` to offer the optional shared upload allowance. It keeps
+`account-budget.json` in the private state directory and supports explicit
+Nostr sign-in. Website account authentication uses the JavaScript host callback,
+not a viewer-supplied account identifier. The Compose template enables the
+offer through `ACCOUNT_BUDGET_ENABLED=1`; viewers still choose whether to connect
+an account and separately opt into uploading. Preserve the ledger and its
+permanent lease files. See [shared upload allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md).
+
 The encoder produces two fixed H.264/AAC renditions:
 
 | Rendition | Frame shape/rate | Target video rate | Audio |
@@ -3638,7 +3925,13 @@ Trusted host/container administrators can inspect ffmpeg's process arguments, wh
 
 ## Verification boundary
 
-The release includes native process/publication tests and actual Chrome fixtures. A short HTTPS/WSS pilot with a synthetic source has a passing receipt; an earlier hosted MSE append failure remains unresolved. Physical-device, separate-network/NAT, sustained-operation, actual OBS and YouTube acceptance remain open. The dated [status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md) records both passing and failing evidence and its scope.
+The source includes native process/publication tests and actual Chrome fixtures.
+The dated [status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md) retains the authorised OBS and private YouTube
+tests; that YouTube broadcast was stopped and deleted. Current deployed `2dd156e`
+playback passed its ordinary short check, while both-quality peer delivery and
+the fourteen-role qualification remain red. Complete physical-device,
+separate-network/hard-NAT, sustained-operation and final release acceptance
+remain open. Earlier passes retain their original source and scope.
 
 ---
 
@@ -3912,7 +4205,9 @@ The page polls policy and the publisher session every two seconds, with a single
 
 ## Upload and measurement limits
 
-The page offers 10 MB, 100 MB (default) or 1 GB of cumulative **media payload** allowance, plus a separate upload rate choice. Web Locks and origin storage reserve payloads atomically across settings, rejoining, reloads and tabs. Interrupted sends are not refunded; oversized next segments do not spend the smaller balance. Exhaustion stops contribution while playback continues. Storage failure disables uploading. Consent is requested anew after reload; the viewer can explicitly raise or reset the allowance. It is not an account-wide or physical wire-traffic cap.
+The page offers 10 MB, 100 MB (default) or 1 GB of cumulative **media payload** allowance, plus a separate upload rate choice. Web Locks and origin storage reserve payloads atomically across settings, rejoining, reloads and tabs. Interrupted sends are not refunded; oversized next segments do not spend the smaller balance. Exhaustion stops contribution while playback continues. Storage failure disables uploading. Consent is requested anew after reload; the viewer can explicitly raise or reset the allowance. This local allowance covers one browser profile at the origin.
+
+The current source also offers an optional [shared account allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md), using explicit Nostr sign-in or the integrating website's authenticated account. Devices using one identity and ledger share cumulative reservations in addition to their local allowances. Account connection, linking, settings changes and resets leave uploading off until fresh viewer consent. Keep the private ledger through upgrades; disconnecting or reloading does not refund its charges. Neither allowance counts complete physical wire traffic. The deployed `2dd156e` checkpoint predates the account service.
 
 The library option is `maxUploadBytesPerSession`; omission means unlimited and zero means no media uploads. Its metrics expose configured cap, remaining allowance and exhaustion. Host applications that recreate a swarm must carry their own cumulative allowance forward, as the page does. Rate limits use a token bucket with up to a two-second burst. Signalling, transport overhead, commitment fetches and shadow downloads are additional traffic; an upload media cap is not a wire-traffic limit.
 
@@ -4077,6 +4372,14 @@ upload consent and signing keys are never saved. Blocked, corrupt or
 unavailable storage disables contribution. Viewers may deliberately increase
 or reset the allowance. The quota covers reserved media payload, including
 interrupted sends, rather than complete connection traffic.
+
+An optional private account ledger adds reservations shared across devices.
+The example supports explicit Nostr sign-in and a host-supplied authenticated
+website account. Linking requires both proofs, adds recorded spend and retains
+the lower limit. Connection and account changes leave upload consent off;
+grants and identities stay outside swarm traffic and receipts. See the
+[account allowance guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md) for persistence, privacy,
+failure behaviour and the remaining acceptance scope.
 
 ## Operations and recovery
 
@@ -4414,7 +4717,7 @@ records the later short/partial-long, TCP relay and Android checks separately.
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/exact-source CI and 0e in-place own-ticket renewal pass with unchanged expiry, authority, admission and quota limits; all three peer actors retained sampled session/link/consent state across renewal; prior fourteen-viewer address-limit 429/authority-expiry reds remain unresolved operational capacity evidence under P12 |
 | P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Deployed 768 ordinary-Chrome trusted opt-in, real process restart, duplicate handling and natural five-minute expiry pass; reporting-off/policy/lease preservation and source cleanup pass; first deployed 219 timeout remains separately retained; backend component evidence does not replace new-client opt-in/reporting validation |
-| P06 | Upload budgets across reloads and tabs | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; uploading still requires new consent | Chrome reload/tab and installed Firefox durable quota/fresh-consent evidence pass; complete physical upload journeys remain open |
+| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Browser-profile Chrome/Firefox evidence retained. Current source implements a private durable account ledger with both optional Nostr and host website authentication. The controlled 55.780 s Chrome journey passes real uploads, renewal, conservative linking, server restart and fresh consent; 177 publisher and 92 swarm tests pass locally. It is reserved media payload, not an OS-wide meter. Deployed `2dd156e` predates accounts; real owner authentication, deployed account and complete physical upload journeys remain open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
 | P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-2dd offline production-only package, ten documented imports, rebuilt standalone ESM, installed CLI and separate-process verified native transfer/HTTP fallback pass; unpublished local assets do not close downloaded immutable-release acceptance |

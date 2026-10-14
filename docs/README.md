@@ -19,6 +19,7 @@ its measured scope and acceptance gaps in [Status](STATUS.md).
 | Run a trial on separate devices and interpret receipts | [Publisher/player field test](FIELD-TEST.md) |
 | Ingest a live broadcast or add optional RTMPS forwarding | [Broadcasting](BROADCASTING.md) |
 | Operate private state, remote policy and opt-in reports | [Operations](OPERATIONS.md) |
+| Share an upload allowance across devices using Nostr or website accounts | [Shared upload allowance](ACCOUNT-UPLOAD-BUDGET.md) |
 | Deploy beside existing services with private ingest | [Container pilot](../deploy/README.md) |
 | Understand HyperDHT/Noise and native authorisation | [Native transport](NATIVE-TRANSPORT.md) |
 | Review integrity, privacy and resource boundaries | [Threat model](THREAT-MODEL.md) |

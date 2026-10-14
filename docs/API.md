@@ -22,6 +22,7 @@ are not a stable interoperability promise.
 | `relayswarm/broadcast-pipeline` | Node with FFmpeg | `startBroadcastPipeline`, `broadcastEncoderArgs`, `broadcastForwardArgs` |
 | `relayswarm/native-client` | Installed Node application | `validateNativeDescriptor`, `fetchNativeObject`, `createNativeObjectSeeder` |
 | `relayswarm/publisher-advertisement` | Node or a browser bundler | `createPublisherAdvertisement`, `verifyPublisherAdvertisement` |
+| `relayswarm/account-upload-budget` | Node on supported local POSIX storage | `createAccountUploadBudget`, `AccountBudgetError`, `accountBudgetError` |
 | `relayswarm/package.json` | Package metadata | Name, version and declared dependencies |
 
 The wildcard export also permits source subpaths such as
@@ -58,6 +59,37 @@ reporting a completed load.
 
 The rotation/refusal helpers are exported for the loader's policy and tests;
 most hosts only need `createHlsSwarm` and `HLS_SWARM_METRICS_VERSION`.
+
+## Shared account upload allowance
+
+`createAccountUploadBudget(options)` supplies the private durable reservation
+ledger. Its `identity`, `authorize`, `inspectGrant`, `reserve`, `renew` and
+`revokeGrant` methods are trusted server operations, not a public authentication
+interface. Await `ready()` before use and `close()` during shutdown. The required
+`statePath` has the private filesystem requirements described in the
+[account allowance guide](ACCOUNT-UPLOAD-BUDGET.md).
+
+The example HTTP integration is `startDemoServer({accountBudget: {...}})`.
+Omitting `accountBudget` omits the service. Configure `statePath` and optionally
+`resolveWebsiteAccount(request, {signal})`, which must resolve the host's
+authenticated session to `{issuer, subject}`. Nostr proof verification is
+supplied by the example; website authentication belongs to the host. Neither
+method enables uploading, resets spend or enrols other devices automatically.
+
+Defaults are `defaultLimit: 100000000`, `grantTtlSeconds: 120` and
+`delegationTtlSeconds: 10800`. Limits accept zero through 10¹² bytes; grants
+accept 30–300 seconds; delegation accepts the grant duration through 86,400
+seconds. Account, identity, grant, replay-operation and pending-write bounds
+refuse excess work rather than evicting recorded spend. The HTTP adapter also
+bounds challenges, active requests and authentication time. This is a serial,
+durable payload ledger; no high-volume capacity or physical wire metering is
+claimed.
+
+The same-origin POST routes under `/account-budget/` use a private versioned
+proof contract and short-lived page-bound grants. Keep them behind HTTPS and
+the configured origin; do not expose the trusted ledger methods directly or
+accept viewer-supplied account subjects as authentication. The session
+descriptor contains supported methods, bounds and fixed endpoint paths only.
 
 ## Node HLS publisher
 

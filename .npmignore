@@ -11,4 +11,5 @@ state/
 **/*.pem
 **/operator-token
 **/publisher.json
+**/account-budget.json*
 **/youtube-url

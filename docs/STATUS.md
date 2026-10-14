@@ -9,6 +9,37 @@ Checkpoint: 14 October 2026. The published experimental release is
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
 
+## Current source: shared account allowance
+
+The current branch adds both requested account methods: explicit Nostr sign-in
+and an integrating website's authenticated account. One private durable ledger
+serialises reservations across devices. Explicit linking adds spend and retains
+the lower limit; settings, reset, linking and connection leave uploading off.
+See [shared upload allowance](ACCOUNT-UPLOAD-BUDGET.md).
+
+The [controlled Chrome result](../spikes/results/account-budget-implementation-20261014.json)
+passes in 55.780 s with both authentication methods, verified peer media at both
+qualities, short-grant renewal, linking, server restart/reconnection, reset and
+disconnect. At linking, receiver bytes, committed upload totals and merged
+spend equal 6,337,480 bytes; the same balance survives restart. All browser,
+server, media, owned-group/reap and scratch cleanup checks pass. This uses
+disposable Nostr signatures, an owned website session and explicit loopback RTC
+fixture flags, not physical phones or a real owner's signer. Local tests pass:
+177 publisher cases (two Windows-only skips) and 92 swarm cases.
+
+The earlier 49.043 s pass is retained with its provisional upload-counter
+caveat. The corrected source separates pending quota from committed uploads.
+One intervening full-suite guard test failed on `EPERM`; its original cleanup
+remains unknown because its exact PID was not retained. A later read-only check
+found no matching test program; this does not reconstruct original cleanup.
+The final guard waits for explicit absence within the unchanged deadline, and
+the corrected full suite passes. Original failures are not replaced by later
+passes.
+
+These are local source results. Final-source CI, clean package consumption,
+deployment and physical/network/sustained/release acceptance remain open. The
+public app remains on `2dd156e` and predates this account service.
+
 ## Published v0.1.0 capabilities
 
 | Capability | Implementation and evidence | Remaining boundary |

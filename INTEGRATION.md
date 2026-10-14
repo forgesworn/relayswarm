@@ -158,6 +158,26 @@ Keep receipts local unless the viewer explicitly agrees to reporting. The
 current demo's optional reporting endpoint accepts a numeric summary rather
 than this full snapshot; see [operations](docs/OPERATIONS.md).
 
+`peerEligibilityDiagnostics` is an additive local version-2 snapshot field in
+the current source. Its fixed reason `counters` survive eviction from the
+64-record ring; `capacity` and `dropped` describe that ring. Each row contains
+elapsed `atMs`, numeric `cc` and `level` (null when unavailable), the already
+computed initial `budgetMs`, `reason` and `matchingHave` (boolean or null).
+`no-budget` records HAVE as **null/unobserved**: the loader does not compute a
+segment key or inspect peer availability to populate this diagnostic. The
+original origin fallback may still compute its normal key afterwards.
+Positive-budget reasons distinguish `no-have-no-wait`, `no-have-wait`,
+`wait-no-longer-eligible`, `wait-aborted`, `wait-expired`, `have-at-entry` and
+`have-after-wait`; `aborted-before-eligibility` means cancellation after the
+existing key computation, before the HAVE decision. Wait expiry/cancellation
+also leaves HAVE null rather than claiming it was still absent. One load can
+produce both a wait-entry and a wait-outcome row: counters count decisions,
+not distinct segments. Budget is the initial allowance, not remaining request
+time. Rows contain no segment keys, hashes, URLs, peer identities or addresses.
+They remain readable after stop and use the existing local/reporting-consent
+boundary; they add no requests, authority checks or deadline changes. These
+observations do not establish the cause of a failed peer transfer.
+
 Deployed source `f393abf` includes `transportDiagnostics` within metrics version
 2. It contains fixed-enum
 `counters`, a ring of at most 64 `records`, `capacity` and an eviction `dropped`
@@ -190,10 +210,16 @@ actually delivered to hls.js instead of starting an origin fragment request;
 `originFallbacks` counts loads delegated to the original loader. Shadow
 coverage fields are null in peer-first mode.
 
-`bytes.uploaded` counts media payloads accepted against the upload token bucket.
-An interrupted transfer can send less than this amount; signalling and protocol
-overhead are excluded. Treat it as quota consumption, not a measurement of total
-connection data or acknowledged delivery.
+`bytes.uploaded` counts payloads accepted for serving after the upload token
+bucket, any host reservation callback, and the subsequent live-state checks.
+Pending or refused host reservations never increment it. Session capacity is
+reserved internally before awaiting that callback, so concurrent requests cannot
+overspend; an accepted reservation remains charged if the link closes before
+serving. Consequently `uploadRemaining` can include charges absent from
+`uploaded`. An interrupted accepted transfer can send less than its counted
+payload; signalling and protocol overhead are excluded. These counters are not
+wire metering or acknowledged delivery, and durable host-ledger spend may exceed
+accepted serving totals.
 
 The session allowance is additive within metrics version 2. Exhaustion
 withdraws media availability and stops serving while receiving remains

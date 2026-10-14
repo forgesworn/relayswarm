@@ -39,6 +39,22 @@
           <p id="allowance-used" class="hint">0 B of 100 MB used in this browser</p>
           <p class="hint">Counts media payload reserved for sending, including interrupted sends. Usage persists across reloads and tabs on this site; upload permission is requested again. Protocol traffic is additional.</p>
           <button id="reset-allowance" type="button">Reset upload allowance</button>
+          <fieldset id="account-budget-controls" hidden>
+            <legend>Optional shared account allowance</legend>
+            <p class="hint">Share one cap across your signed-in devices on this service. Both this browser’s allowance and the shared cap apply. This is reserved media payload, not an operating-system data limit or a bill.</p>
+            <label for="account-method">Connect using</label>
+            <select id="account-method"><option value="nostr">Nostr signer</option><option value="website">Signed-in website account</option></select>
+            <button id="account-connect" type="button">Connect account allowance</button>
+            <button id="account-disconnect" type="button">Disconnect · stop uploading</button>
+            <button id="account-link" type="button" hidden>Link Nostr and website allowances</button>
+            <p id="account-status" class="hint" role="status">Not connected. Only this browser’s allowance applies.</p>
+            <p class="hint">Website sign-in is provided by this host. Connecting, linking or changing an account cap never enables uploading. Reconnect after a reload; previous shared usage remains.</p>
+            <label for="account-allowance">Shared account allowance</label>
+            <select id="account-allowance"><option value="10000000">10 MB</option><option value="100000000" selected>100 MB</option><option value="1000000000">1 GB</option></select>
+            <button id="account-settings" type="button">Change shared allowance</button>
+            <button id="account-reset" type="button">Apply shared limit and reset usage</button>
+            <p class="hint">Both buttons apply the selected limit. Reset also clears recorded shared usage. Each action requires fresh account approval and stops uploading. Linking revokes existing grants; other pages must reconnect.</p>
+          </fieldset>
           <p id="policy-status" class="hint">Checking operator delivery policy…</p>
           <label class="check"><input id="telemetry" type="checkbox" disabled aria-describedby="telemetry-status">Share numeric measurements with this server</label>
           <p id="telemetry-status" class="hint" role="status">Reporting is unavailable until the server policy is checked.</p>

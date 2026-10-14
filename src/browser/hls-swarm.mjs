@@ -136,6 +136,10 @@ const TRANSPORT_EVENTS = Object.freeze({
     "protocol", "send-error", "serve-error", "upload-queue", "upload-drain-timeout"],
 });
 const increment = (value) => Math.min(Number.MAX_SAFE_INTEGER, value + 1);
+const PEER_ELIGIBILITY_REASONS = Object.freeze([
+  "no-budget", "aborted-before-eligibility", "no-have-no-wait", "no-have-wait",
+  "wait-no-longer-eligible", "wait-aborted", "wait-expired", "have-at-entry", "have-after-wait",
+]);
 
 function gathered(pc, capMs = 1_200, signal, observed) {
   return new Promise((resolve) => {
@@ -259,6 +263,9 @@ class HlsSwarm {
     this.transportCounters = Object.fromEntries(Object.entries(TRANSPORT_EVENTS).map(([event, values]) =>
       [event, Object.fromEntries(values.map((value) => [value, 0]))]));
     this.transportConnections = new WeakMap();
+    this.peerEligibilityRecords = [];
+    this.peerEligibilityDropped = 0;
+    this.peerEligibilityCounters = Object.fromEntries(PEER_ELIGIBILITY_REASONS.map((reason) => [reason, 0]));
     this.disabledReason = this.#validate();
     this.stopped = false;
     this.lifecycle = new AbortController();
@@ -287,6 +294,7 @@ class HlsSwarm {
     this.rendition = null;
     this.renditions = new Map();
     this.originFetches = new Map();
+    this.uploadQuotaBytes = 0;
     this.uploadTokens = this.options.maxUploadBytesPerSecond;
     this.uploadRefilledAt = now();
     this.counters = {
@@ -482,6 +490,12 @@ class HlsSwarm {
         dropped: this.transportDropped,
         counters: Object.fromEntries(Object.entries(this.transportCounters).map(([event, values]) => [event, { ...values }])),
         records: this.transportRecords.map((record) => ({ ...record })),
+      },
+      peerEligibilityDiagnostics: {
+        capacity: 64,
+        dropped: this.peerEligibilityDropped,
+        counters: { ...this.peerEligibilityCounters },
+        records: this.peerEligibilityRecords.map((record) => ({ ...record })),
       },
       signalling: {
         samples: this.signallingSamples.length,
@@ -681,10 +695,13 @@ class HlsSwarm {
             },
           });
         };
-        if (budgetMs === 0) return fallback();
+        if (budgetMs === 0) {
+          swarm.#peerEligibility(context, budgetMs, "no-budget", null);
+          return fallback();
+        }
         timer = setTimeout(fallback, budgetMs);
         swarm.lifecycle.signal.addEventListener("abort", fallback, { once: true });
-        swarm.#peerFirst(context, controller.signal, t0 + budgetMs).then((result) => {
+        swarm.#peerFirst(context, controller.signal, t0 + budgetMs, budgetMs).then((result) => {
           if (this.active !== token || controller.signal.aborted || swarm.stopped) return;
           if (!result || now() >= t0 + budgetMs) return fallback();
           this.active = null;
@@ -805,22 +822,59 @@ class HlsSwarm {
     return sha256Hex(utf8.encode(`${this.options.swarmId}\n${raw}${range}`));
   }
 
-  async #peerFirst(context, signal, deadline) {
+  #peerEligibility(context, budgetMs, reason, matchingHave) {
+    // Observe only decisions already made. In particular a zero budget must
+    // not hash a key or inspect HAVE merely to fill this local diagnostic.
+    try {
+      if (!PEER_ELIGIBILITY_REASONS.includes(reason)) return;
+      const numeric = (value) => Number.isSafeInteger(value) && value >= 0 ? value : null;
+      let cc = null, level = null;
+      try { cc = numeric(context?.frag?.cc); } catch {}
+      try { level = numeric(context?.frag?.level); } catch {}
+      const elapsed = now() - this.transportStartedAt;
+      const record = { atMs: Number.isFinite(elapsed) ? Math.max(0, Math.round(elapsed)) : 0,
+        cc, level, budgetMs: Number.isFinite(budgetMs) && budgetMs >= 0 ? budgetMs : null,
+        reason, matchingHave: typeof matchingHave === "boolean" ? matchingHave : null };
+      this.peerEligibilityCounters[reason] = increment(this.peerEligibilityCounters[reason]);
+      if (this.peerEligibilityRecords.length === 64) {
+        this.peerEligibilityRecords.shift();
+        this.peerEligibilityDropped = increment(this.peerEligibilityDropped);
+      }
+      this.peerEligibilityRecords.push(record);
+    } catch {}
+  }
+
+  async #peerFirst(context, signal, deadline, budgetMs) {
     const key = await this.#segmentKey(context);
-    if (signal.aborted || this.stopped) return null;
+    if (signal.aborted || this.stopped) {
+      this.#peerEligibility(context, budgetMs, "aborted-before-eligibility", null);
+      return null;
+    }
     const rendition = this.#renditionContext(context);
     const coordinated = ![...this.links.values()].some((peer) => peer.have.has(key));
     if (coordinated) {
-      if (!this.#shouldWaitForOrigin(key, rendition)) return null;
+      if (!this.#shouldWaitForOrigin(key, rendition)) {
+        this.#peerEligibility(context, budgetMs, "no-have-no-wait", false);
+        return null;
+      }
+      this.#peerEligibility(context, budgetMs, "no-have-wait", false);
       this.counters.coordinatedWaits += 1;
       // No playlist manipulation or origin prefetch. The elected contributor
       // loads normally; all advisory leases expire before the HTTP deadline.
       while (!signal.aborted && !this.stopped && now() < deadline && ![...this.links.values()].some((peer) => peer.have.has(key))) {
-        if (!this.#shouldWaitForOrigin(key, rendition)) return null;
+        if (!this.#shouldWaitForOrigin(key, rendition)) {
+          this.#peerEligibility(context, budgetMs, "wait-no-longer-eligible", false);
+          return null;
+        }
         await this.#waitForHave(key, Math.min(100, deadline - now()), signal);
       }
-      if (signal.aborted || this.stopped || now() >= deadline) return null;
+      const cancelled = signal.aborted || this.stopped;
+      if (cancelled || now() >= deadline) {
+        this.#peerEligibility(context, budgetMs, cancelled ? "wait-aborted" : "wait-expired", null);
+        return null;
+      }
     }
+    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true);
     let commitment;
     try {
       this.counters.commitmentRequests += 1;
@@ -1129,7 +1183,7 @@ class HlsSwarm {
 
   #uploadRemaining() {
     const limit = this.options.maxUploadBytesPerSession;
-    return !Number.isSafeInteger(limit) || limit < 0 ? null : Math.max(0, limit - this.counters.bytesUploaded);
+    return !Number.isSafeInteger(limit) || limit < 0 ? null : Math.max(0, limit - this.uploadQuotaBytes);
   }
 
   #withdrawContribution() {
@@ -1168,20 +1222,21 @@ class HlsSwarm {
       return null;
     }
     this.uploadTokens -= bytes.byteLength;
-    this.counters.bytesUploaded += bytes.byteLength;
-    // Reserve the full accepted payload before PeerLink can yield. Interrupted
-    // uploads keep their reservation, so concurrent requests cannot overspend.
+    // Reserve capacity before yielding, separately from public accepted-upload
+    // metrics. Host revocation may archive metrics while its callback is pending.
+    this.uploadQuotaBytes += bytes.byteLength;
     if (this.#uploadRemaining() === 0) this.#withdrawContribution();
     if (this.options.reserveUploadBytes) {
       let accepted = false;
       try { accepted = await boundedOperation((signal) => this.options.reserveUploadBytes(bytes.byteLength, { signal }), this.lifecycle.signal, this.options.admissionTimeoutMs) === true; }
       catch { this.#noteError("upload-reservation"); }
       if (!accepted || this.stopped || link.closed || this.options.serve !== true || (!this.options.serveOnCellular && onCellular())) {
-        if (!accepted) this.counters.bytesUploaded -= bytes.byteLength;
+        if (!accepted) this.uploadQuotaBytes -= bytes.byteLength;
         this.counters.uploadsRefused += 1;
         return null;
       }
     }
+    this.counters.bytesUploaded += bytes.byteLength;
     this.counters.uploadsServed += 1;
     if (this.options.testHooks?.corruptUploads) {
       const tampered = bytes.slice();

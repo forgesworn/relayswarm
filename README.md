@@ -196,6 +196,14 @@ Origin-only mode avoids swarm participation; the origin still receives normal
 HLS requests. Upload consent and publisher redistribution permission are
 separate requirements.
 
+The optional [shared upload allowance](docs/ACCOUNT-UPLOAD-BUDGET.md) uses
+explicit Nostr sign-in or a host website account to coordinate media reservations
+across devices. Its private service can associate those devices; linking both
+identities also reveals their association to that service. Stable account
+identities and grants stay out of swarm traffic and receipts. Sign-in never
+enables uploading or reporting. This source feature is absent from the deployed
+`2dd156e` checkpoint.
+
 The browser defaults to Google's public STUN server unless the host supplies
 `iceServers`; the native path uses HyperDHT bootstrap/routing nodes instead.
 No managed TURN or super-peer service is supplied. Hosts can pass TURN ICE

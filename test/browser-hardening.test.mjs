@@ -55,13 +55,13 @@ class RecordedChannel extends Channel {
 // Exercise the real relay/session admission and PeerLink paths, with only the
 // browser connection replaced. No private swarm state is exposed to tests.
 async function linkedFixture(options = {}, LoaderImpl = Loader) {
-  const relay = await startLocalRelay();
+  const relay = options.WebSocketImpl ? { url: "wss://memory-relay.example", close: async () => {} } : await startLocalRelay();
   const connections = [], peers = [];
   class Connection extends PC { constructor() { super(); connections.push(this); } }
   const swarm = createHlsSwarm({ ...base, relays: [relay.url], RTCPeerConnectionImpl: Connection, shadowSampleRate: 0, ...options });
   const hls = { config: { loader: LoaderImpl } };
   swarm.attach(hls);
-  const pool = new RelayPool([relay.url]); await pool.connect();
+  const pool = new RelayPool([relay.url], { WebSocketImpl: options.WebSocketImpl }); await pool.connect();
   await until(() => swarm.metrics().pubkey);
   const addPeer = async (channel = new RecordedChannel(), peerPool = pool) => {
     const peer = new RelaySwarmSession({ pool: peerPool, swarmId: base.swarmId }); peer.start(); peers.push(peer);
@@ -75,6 +75,31 @@ async function linkedFixture(options = {}, LoaderImpl = Loader) {
   const load = () => new Promise((resolve) => new hls.config.fLoader({}).load(context, {}, { onSuccess: resolve }));
   const close = async () => { swarm.stop(); for (const peer of peers) peer.close(); pool.close(); await relay.close(); };
   return { swarm, hls, addPeer, load, close, peers, pool, connections };
+}
+
+// Real session/signature/encryption handling over an in-memory relay boundary.
+// These focused loader diagnostics require no HTTP/WebSocket server or browser.
+function memoryRelaySocket() {
+  const sockets = new Set();
+  return class extends EventTarget {
+    subscriptions = new Set();
+    constructor() { super(); sockets.add(this); queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
+    send(text) {
+      const [type, id] = JSON.parse(text);
+      if (type === "REQ") this.subscriptions.add(id);
+      else if (type === "CLOSE") this.subscriptions.delete(id);
+      else if (type === "EVENT") {
+        // RelayPool still applies its live filter and event validation before
+        // dispatch; sending to unrelated subscriptions tests that boundary too.
+        for (const socket of sockets) for (const subscription of socket.subscriptions) {
+          queueMicrotask(() => { if (sockets.has(socket)) socket.dispatchEvent(new MessageEvent("message", {
+            data: JSON.stringify(["EVENT", subscription, id]),
+          })); });
+        }
+      }
+    }
+    close() { sockets.delete(this); this.dispatchEvent(new Event("close")); }
+  };
 }
 
 test("concurrent accepted uploads reserve the full session allowance and withdraw availability", async () => {
@@ -584,6 +609,128 @@ class ServingChannel extends RecordedChannel {
     }, this.delayMs);
   }
 }
+
+test("peer eligibility distinguishes zero budget with HAVE from positive budget without HAVE, without extra work", async () => {
+  const playback = peerPlaybackOptions(120);
+  let keyCalls = 0, commitments = 0, admissions = 0, deliveries = 0;
+  class CountedOrigin extends Loader {
+    load(ctx, config, callbacks) { deliveries++; super.load(ctx, config, callbacks); }
+  }
+  const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(),
+    segmentKey: () => { keyCalls++; return "/seg.ts"; },
+    getCommitment: () => { commitments++; assert.fail("neither branch requests a commitment"); },
+    admit: () => { admissions++; return true; },
+  }, CountedOrigin);
+  try {
+    const peer = await fixture.addPeer();
+    peer.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    fixture.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 11 } };
+    const admissionBaseline = admissions;
+    let synchronous = false;
+    new fixture.hls.config.fLoader({}).load(context, {}, { onSuccess: (response) => {
+      synchronous = true; assert.deepEqual(new Uint8Array(response.data), playback.bytes);
+    } });
+    assert.equal(synchronous, true, "zero budget preserves immediate origin fallback even with matching HAVE");
+    assert.equal(keyCalls, 2, "only the existing origin claim and origin retention key computations ran");
+    await until(() => fixture.swarm.metrics().segments.originLoaded === 1);
+    assert.equal(fixture.swarm.metrics().bytes.held, 0, "receive-only fallback does not retain upload media");
+    let trace = fixture.swarm.metrics().peerEligibilityDiagnostics;
+    assert.deepEqual(trace.records.map(({ reason, matchingHave, budgetMs }) => ({ reason, matchingHave, budgetMs })),
+      [{ reason: "no-budget", matchingHave: null, budgetMs: 0 }]);
+    peer.receive(JSON.stringify({ t: "have", keys: [] }));
+    fixture.hls.media.buffered.end = () => 15;
+    await fixture.load();
+    trace = fixture.swarm.metrics().peerEligibilityDiagnostics;
+    assert.equal(keyCalls, 5, "positive eligibility adds only its existing key computation, not a diagnostic hash");
+    assert.deepEqual(trace.records.at(-1), { atMs: trace.records.at(-1).atMs, cc: 0, level: 0,
+      budgetMs: 120, reason: "no-have-no-wait", matchingHave: false });
+    assert.equal(trace.counters["no-budget"], 1); assert.equal(trace.counters["no-have-no-wait"], 1);
+    assert.equal(commitments, 0); assert.equal(admissions, admissionBaseline);
+    assert.equal(deliveries, 2); assert.equal(fixture.connections.length, 1);
+    assert.equal(peer.sent.filter((frame) => frame.t === "want").length, 0);
+    assert.equal(fixture.swarm.metrics().segments.originFallbacks, 2);
+    assert.equal(fixture.swarm.metrics().segments.coordinatedWaits, 0);
+    assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 0);
+    for (const sensitive of [context.url, playback.key, fixture.peers[0].pubkey]) assert.ok(!JSON.stringify(trace).includes(sensitive));
+  } finally { await fixture.close(); }
+});
+
+test("peer eligibility counters survive ring eviction and snapshots cannot mutate retained records", async () => {
+  const playback = peerPlaybackOptions(); let keys = 0;
+  const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(),
+    segmentKey: () => { keys++; return "/seg.ts"; }, getCommitment: () => assert.fail("zero budget has no commitment"),
+  });
+  try {
+    fixture.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    for (let i = 0; i < 70; i++) await fixture.load();
+    assert.equal(keys, 140, "ring bookkeeping performs no additional key work");
+    const snapshot = fixture.swarm.metrics().peerEligibilityDiagnostics;
+    assert.equal(snapshot.capacity, 64); assert.equal(snapshot.records.length, 64); assert.equal(snapshot.dropped, 6);
+    assert.equal(snapshot.counters["no-budget"], 70);
+    assert.ok(snapshot.records.every((row) => row.matchingHave === null && row.budgetMs === 0));
+    snapshot.records[0].reason = "untrusted-text"; snapshot.counters["no-budget"] = 0;
+    assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.counters["no-budget"], 70);
+    assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.records[0].reason, "no-budget");
+    const before = fixture.swarm.metrics().peerEligibilityDiagnostics;
+    fixture.swarm.stop(); assert.deepEqual(fixture.swarm.metrics().peerEligibilityDiagnostics, before);
+  } finally { await fixture.close(); }
+});
+
+test("peer eligibility preserves origin errors and pending loader aborts without added commitments", async () => {
+  const playback = peerPlaybackOptions(100); const error = { code: 503, text: "origin-owned-error" }; let errors = 0;
+  class FailedOrigin extends Loader {
+    load(ctx, _config, callbacks) { callbacks.onError(error, ctx, "origin-details"); }
+  }
+  const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(),
+    getCommitment: () => assert.fail("missing HAVE cannot request commitment"),
+  }, FailedOrigin);
+  try {
+    fixture.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    const frag = { ...context.frag }; Object.defineProperty(frag, "cc", { get() { throw Error("private diagnostic getter"); } });
+    new fixture.hls.config.fLoader({}).load({ ...context, frag }, {}, { onError: (actual, ctx, details) => {
+      errors++; assert.equal(actual, error); assert.equal(ctx.frag, frag); assert.equal(details, "origin-details");
+    } });
+    assert.equal(errors, 1);
+    assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.records.at(-1).cc, null, "diagnostic getter failure cannot affect fallback");
+    fixture.hls.media.buffered = { length: 1, start: () => 0, end: () => 5 };
+    const loader = new fixture.hls.config.fLoader({}); let aborts = 0;
+    loader.load(context, {}, { onAbort: (stats) => { aborts++; assert.equal(stats.aborted, true); },
+      onSuccess: () => assert.fail("aborted load must not deliver"), onError: () => assert.fail("aborted load must not fallback") });
+    loader.abort(); await sleep(20);
+    assert.equal(aborts, 1); assert.equal(errors, 1);
+    assert.equal(fixture.swarm.metrics().segments.aborted, 1);
+    assert.equal(fixture.swarm.metrics().segments.originFallbacks, 1);
+    assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.counters["aborted-before-eligibility"], 1);
+    assert.ok(!JSON.stringify(fixture.swarm.metrics().peerEligibilityDiagnostics).includes("private diagnostic getter"));
+  } finally { await fixture.close(); }
+});
+
+test("peer eligibility observes existing coordination outcomes and matching HAVE without extra requests", async () => {
+  const playback = peerPlaybackOptions(60), requested = [];
+  const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket() });
+  try {
+    const peer = await fixture.addPeer(new ServingChannel(playback.bytes, 1, requested, "existing-peer"));
+    peer.receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:0" }));
+    await fixture.load();
+    // The loader's original fallback timer can abort the pending wait at its
+    // deadline; that is cancellation, not a fabricated still-missing HAVE read.
+    await sleep(10);
+    const ended = fixture.swarm.metrics().peerEligibilityDiagnostics;
+    assert.equal(ended.counters["no-have-wait"], 1);
+    assert.equal(ended.counters["wait-aborted"] + ended.counters["wait-expired"], 1);
+    assert.equal(ended.records.at(-1).matchingHave, null);
+    assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 0);
+    assert.deepEqual(requested, []);
+    const pending = fixture.load();
+    setTimeout(() => peer.receive(JSON.stringify({ t: "have", keys: [playback.key] })), 10);
+    assert.deepEqual(new Uint8Array((await pending).data), playback.bytes);
+    assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.counters["have-after-wait"], 1);
+    await fixture.load();
+    assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.counters["have-at-entry"], 1);
+    assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 2);
+    assert.deepEqual(requested, ["existing-peer", "existing-peer"]);
+  } finally { await fixture.close(); }
+});
 
 test("peer-first explores a cold link, then prefers its measured faster verified delivery", async () => {
   const playback = peerPlaybackOptions(), trace = [];
@@ -1199,4 +1346,131 @@ test("a throwing gathering getter at the cap cannot prevent original wait comple
     assert.equal(metrics.transportDiagnostics.counters["signal-send"].answer, 1);
     assert.ok(!JSON.stringify(metrics.transportDiagnostics).includes("private-gathering-getter"));
   } finally { await f.close(); }
+});
+
+test("pending upload reservations never enter public metrics or a synchronous stop archive", async () => {
+  for (const outcome of ["refused", "stop-refused", "stop-late-accepted", "throw"]) {
+    let settle, fail, archived;
+    const fixture = await linkedFixture({ WebSocketImpl: memoryRelaySocket(), serve: true, maxUploadBytesPerSession: 64,
+      reserveUploadBytes: () => new Promise((resolve, reject) => { settle = resolve; fail = reject; }),
+    });
+    try {
+      const peer = await fixture.addPeer(); await fixture.load();
+      await until(() => fixture.swarm.metrics().bytes.held === 32);
+      const key = peer.sent.find((frame) => frame.t === "have" && frame.add?.length).add[0];
+      peer.receive(JSON.stringify({ t: "want", id: 1, k: key }));
+      await until(() => settle);
+      assert.equal(fixture.swarm.metrics().bytes.uploaded, 0, outcome);
+      assert.equal(fixture.swarm.metrics().bytes.uploadsServed, 0);
+      assert.equal(fixture.swarm.metrics().bytes.uploadRemaining, 32, "pending reservation consumes capacity before yielding");
+      assert.equal(peer.sent.filter((frame) => frame.t === "meta").length, 0);
+      // Model the host revoking/archive-taking within the still-pending callback.
+      archived = fixture.swarm.metrics();
+      if (outcome.startsWith("stop")) fixture.swarm.stop();
+      if (outcome === "throw") fail(new Error("fixture reservation error"));
+      else settle(outcome === "stop-late-accepted");
+      await until(() => fixture.swarm.metrics().bytes.uploadsRefused === 1);
+      assert.equal(archived.bytes.uploaded, 0);
+      assert.equal(fixture.swarm.metrics().bytes.uploaded, 0);
+      assert.equal(fixture.swarm.metrics().bytes.uploadsServed, 0);
+      assert.equal(peer.sent.filter((frame) => frame.t === "meta" || frame.t === "eof").length, 0);
+      if (!outcome.startsWith("stop")) assert.equal(fixture.swarm.metrics().bytes.uploadRemaining, 64, "refusal releases only the internal provisional debit");
+    } finally { await fixture.close(); }
+  }
+});
+
+test("accepted reservation on a closed link remains charged without becoming an uploaded payload", async () => {
+  let settle;
+  const fixture = await linkedFixture({ WebSocketImpl: memoryRelaySocket(), serve: true, maxUploadBytesPerSession: 64,
+    reserveUploadBytes: () => new Promise((resolve) => { settle = resolve; }),
+  });
+  try {
+    const peer = await fixture.addPeer(); await fixture.load();
+    await until(() => fixture.swarm.metrics().bytes.held === 32);
+    const key = peer.sent.find((frame) => frame.t === "have" && frame.add?.length).add[0];
+    peer.receive(JSON.stringify({ t: "want", id: 1, k: key }));
+    await until(() => settle); peer.close(); settle(true);
+    await until(() => fixture.swarm.metrics().bytes.uploadsRefused === 1);
+    const snapshot = fixture.swarm.metrics();
+    assert.equal(snapshot.bytes.uploaded, 0); assert.equal(snapshot.bytes.uploadsServed, 0);
+    assert.equal(snapshot.bytes.uploadRemaining, 32, "accepted host reservation is never refunded after the link closes");
+    assert.equal(peer.sent.filter((frame) => frame.t === "meta" || frame.t === "eof").length, 0);
+    fixture.swarm.stop(); assert.equal(fixture.swarm.metrics().bytes.uploaded, snapshot.bytes.uploaded);
+  } finally { await fixture.close(); }
+});
+
+test("concurrent pending uploads exhaust internal capacity without publishing provisional bytes", async () => {
+  const pending = [];
+  const fixture = await linkedFixture({ WebSocketImpl: memoryRelaySocket(), serve: true, maxUploadBytesPerSession: 64,
+    reserveUploadBytes: (size) => new Promise((resolve) => pending.push({ size, resolve })),
+  });
+  try {
+    const peers = [await fixture.addPeer(), await fixture.addPeer(), await fixture.addPeer()];
+    await fixture.load(); await until(() => fixture.swarm.metrics().bytes.held === 32);
+    const key = peers[0].sent.find((frame) => frame.t === "have" && frame.add?.length).add[0];
+    peers.forEach((peer, index) => peer.receive(JSON.stringify({ t: "want", id: index + 1, k: key })));
+    await until(() => pending.length === 2 && peers[2].sent.some((frame) => frame.t === "none"));
+    assert.deepEqual(pending.map(({ size }) => size), [32, 32]);
+    const before = fixture.swarm.metrics();
+    assert.equal(before.bytes.uploaded, 0); assert.equal(before.bytes.uploadsServed, 0);
+    assert.equal(before.bytes.uploadRemaining, 0); assert.equal(before.serving, false);
+    assert.equal(peers.flatMap((peer) => peer.sent).filter((frame) => frame.t === "meta").length, 0);
+    pending[0].resolve(true);
+    await until(() => peers[0].sent.some((frame) => frame.t === "eof"));
+    assert.equal(fixture.swarm.metrics().bytes.uploaded, 32);
+    assert.equal(fixture.swarm.metrics().bytes.uploadRemaining, 0, "other pending bytes still consume capacity");
+    pending[1].resolve(true);
+    await until(() => peers[1].sent.some((frame) => frame.t === "eof"));
+    const after = fixture.swarm.metrics();
+    assert.equal(after.bytes.uploaded, 64); assert.equal(after.bytes.uploadsServed, 2);
+    assert.equal(after.bytes.uploadsRefused, 1); assert.equal(after.bytes.uploadRemaining, 0);
+    assert.equal(peers.flatMap((peer) => peer.sent).filter((frame) => frame instanceof Uint8Array).reduce((sum, bytes) => sum + bytes.byteLength, 0), 64);
+    assert.equal(before.bytes.uploaded, 0, "previous metric snapshots remain stable");
+    fixture.swarm.stop(); assert.equal(fixture.swarm.metrics().bytes.uploaded, 64);
+  } finally { for (const { resolve } of pending) resolve(false); await fixture.close(); }
+});
+
+test("refused upload callbacks do not refund rate tokens when public counters stay zero", async (t) => {
+  let clock = 0, calls = 0, settle;
+  t.mock.method(performance, "now", () => clock);
+  const fixture = await linkedFixture({ WebSocketImpl: memoryRelaySocket(), serve: true, maxUploadBytesPerSession: 64, maxUploadBytesPerSecond: 32,
+    reserveUploadBytes: () => { calls++; return new Promise((resolve) => { settle = resolve; }); },
+  });
+  try {
+    const peer = await fixture.addPeer(); await fixture.load();
+    await until(() => fixture.swarm.metrics().bytes.held === 32);
+    const key = peer.sent.find((frame) => frame.t === "have" && frame.add?.length).add[0];
+    peer.receive(JSON.stringify({ t: "want", id: 1, k: key })); await until(() => settle);
+    settle(false); await until(() => peer.sent.some((frame) => frame.t === "none" && frame.id === 1));
+    assert.equal(fixture.swarm.metrics().bytes.uploaded, 0); assert.equal(fixture.swarm.metrics().bytes.uploadRemaining, 64);
+    peer.receive(JSON.stringify({ t: "want", id: 2, k: key }));
+    await until(() => peer.sent.some((frame) => frame.t === "none" && frame.id === 2));
+    assert.equal(calls, 1, "a refused reservation does not restore token-bucket capacity");
+    clock = 1000;
+    peer.receive(JSON.stringify({ t: "want", id: 3, k: key })); await until(() => calls === 2); settle(true);
+    await until(() => peer.sent.some((frame) => frame.t === "eof" && frame.id === 3));
+    assert.equal(fixture.swarm.metrics().bytes.uploaded, 32); assert.equal(fixture.swarm.metrics().bytes.uploadRemaining, 32);
+  } finally { await fixture.close(); }
+});
+
+test("a stopped swarm retains an already accepted charge without committing public upload metrics", async () => {
+  let archive;
+  const fixture = await linkedFixture({ WebSocketImpl: memoryRelaySocket(), serve: true, maxUploadBytesPerSession: 64,
+    reserveUploadBytes: () => {
+      // The bounded callback settles true first, then stop precedes its caller's
+      // continuation. This exercises the accepted-but-no-longer-live branch.
+      queueMicrotask(() => queueMicrotask(() => { archive = fixture.swarm.metrics(); fixture.swarm.stop(); }));
+      return true;
+    },
+  });
+  try {
+    const peer = await fixture.addPeer(); await fixture.load();
+    await until(() => fixture.swarm.metrics().bytes.held === 32);
+    const key = peer.sent.find((frame) => frame.t === "have" && frame.add?.length).add[0];
+    peer.receive(JSON.stringify({ t: "want", id: 1, k: key }));
+    await until(() => fixture.swarm.metrics().bytes.uploadsRefused === 1);
+    assert.equal(archive.bytes.uploaded, 0); assert.equal(fixture.swarm.metrics().bytes.uploaded, 0);
+    assert.equal(fixture.swarm.metrics().bytes.uploadRemaining, 32);
+    assert.equal(peer.sent.filter((frame) => frame.t === "meta" || frame.t === "eof").length, 0);
+  } finally { await fixture.close(); }
 });
