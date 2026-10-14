@@ -102,12 +102,16 @@ export function createBlockingPlaylistReload({ publisher, enabled = true, platfo
     }
     return result;
   }
-  function notify(entry, _event, filename) {
+  function notify(entry, event, filename) {
     const subscriptions = [...entry.subscriptions.values()];
     if (subscriptions.some(value => value.direct)) { wake(); return; }
     // A Windows shallow ancestor sees child-directory moves even when the
     // directory's own watcher does not. Ignore unrelated sibling activity.
-    if (typeof filename !== "string" || filename.length > 4096) { entry.failed = true; counts.watchErrors++; wake(); return; }
+    if (typeof filename !== "string" || !filename.length || filename.length > 4096) { entry.failed = true; counts.watchErrors++; wake(); return; }
+    // This shallow ancestor covers directory identity, not file contents.
+    // Windows modification/access events are redundant with the direct watch.
+    if (event === "change") return;
+    if (event !== "rename") { entry.failed = true; counts.watchErrors++; wake(); return; }
     if (subscriptions.some(value => value.children.has(filename.toLowerCase()))) wake();
   }
   function acquire(directory, token, subscription) {

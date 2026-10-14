@@ -3,48 +3,6 @@
   "date": "2026-10-14",
   "baseHead": "4aa87c76e6dde08ab7a2f14a6ac23625a59a6edc",
   "scope": "Reviewed source correction; exact source file hashes below, prior evidence retained separately. No release or deployment.",
-  "source": [
-    {
-      "path": "demo/blocking-playlist-reload.mjs",
-      "bytes": 13852,
-      "sha256": "8dd15f0acfbf0194e89c9dc64324e10336e3058a7ccb4e22a86e80df1101a3ff"
-    },
-    {
-      "path": "test/blocking-playlist-reload.test.mjs",
-      "bytes": 25733,
-      "sha256": "1ff4384c720868a019ea6e071b817d3b2851f716ae008068edc2739d86ddd82f"
-    },
-    {
-      "path": "test/blocking-playlist-http.test.mjs",
-      "bytes": 8004,
-      "sha256": "fda705e0d03d1232b9133599b08ded11cc315ed5eb66701496fa1e9d917fcc99"
-    },
-    {
-      "path": "test/broadcast-request-timings.test.mjs",
-      "bytes": 13754,
-      "sha256": "9b1245561f3ee846698f0a09ad870654b16724e8410f343f160af53ab9daea3a"
-    },
-    {
-      "path": "src/broadcast-worker-diagnostics.mjs",
-      "bytes": 1180,
-      "sha256": "944e6e05ef7641928fa945f43125c18cfc12ed30ba3271295f099cd70d742474"
-    },
-    {
-      "path": "src/broadcast-worker-control.mjs",
-      "bytes": 4655,
-      "sha256": "f4907d6cda0768a105c2beae4d519acfdd79a55c9cacae2a416e21545474e6f1"
-    },
-    {
-      "path": "src/broadcast-worker-guardian.mjs",
-      "bytes": 8156,
-      "sha256": "5480d7f1731a6737d92a08c5c65dfceb563f659f1381feeccea5eff47dee979d"
-    },
-    {
-      "path": "test/exclusive-state-lease.test.mjs",
-      "bytes": 7008,
-      "sha256": "9aa9006d6697151546173a5a42ed5fdc4fc8fef0ef2b3cbf1f75cc8add2adfaf"
-    }
-  ],
   "changes": [
     "Canonical real-filesystem fixture paths and readiness from actual blocked-wait registration.",
     "Windows shallow parent watchers filtered to authorised child-directory names; unsupported coverage returns original HTTP bytes.",
@@ -139,5 +97,101 @@
     "hostOrSharedTurnSettingsChanged": false,
     "publishedRelease": "v0.1.0",
     "candidateAssetsPublished": false
+  },
+  "sourceAtInitialCorrection": [
+    {
+      "path": "demo/blocking-playlist-reload.mjs",
+      "bytes": 13852,
+      "sha256": "8dd15f0acfbf0194e89c9dc64324e10336e3058a7ccb4e22a86e80df1101a3ff"
+    },
+    {
+      "path": "test/blocking-playlist-reload.test.mjs",
+      "bytes": 25733,
+      "sha256": "1ff4384c720868a019ea6e071b817d3b2851f716ae008068edc2739d86ddd82f"
+    },
+    {
+      "path": "test/blocking-playlist-http.test.mjs",
+      "bytes": 8004,
+      "sha256": "fda705e0d03d1232b9133599b08ded11cc315ed5eb66701496fa1e9d917fcc99"
+    },
+    {
+      "path": "test/broadcast-request-timings.test.mjs",
+      "bytes": 13754,
+      "sha256": "9b1245561f3ee846698f0a09ad870654b16724e8410f343f160af53ab9daea3a"
+    },
+    {
+      "path": "src/broadcast-worker-diagnostics.mjs",
+      "bytes": 1180,
+      "sha256": "944e6e05ef7641928fa945f43125c18cfc12ed30ba3271295f099cd70d742474"
+    },
+    {
+      "path": "src/broadcast-worker-control.mjs",
+      "bytes": 4655,
+      "sha256": "f4907d6cda0768a105c2beae4d519acfdd79a55c9cacae2a416e21545474e6f1"
+    },
+    {
+      "path": "src/broadcast-worker-guardian.mjs",
+      "bytes": 8156,
+      "sha256": "5480d7f1731a6737d92a08c5c65dfceb563f659f1381feeccea5eff47dee979d"
+    },
+    {
+      "path": "test/exclusive-state-lease.test.mjs",
+      "bytes": 7008,
+      "sha256": "9aa9006d6697151546173a5a42ed5fdc4fc8fef0ef2b3cbf1f75cc8add2adfaf"
+    }
+  ],
+  "windowsFollowUp": {
+    "baseHead": "83f72de4752ad284e9482eba7ba92f0920595930",
+    "source": [
+      {
+        "path": "demo/blocking-playlist-reload.mjs",
+        "bytes": 14152,
+        "sha256": "cf35c4a41269496bdc87ad9aef0e4d10935652eecd28699e76f9d3fe3f55d568"
+      },
+      {
+        "path": "test/blocking-playlist-reload.test.mjs",
+        "bytes": 26763,
+        "sha256": "ac984b1abbc5c192d5945252a1ab31437055ad3c896f1aa660050aa640c3d13e"
+      }
+    ],
+    "hostedRun": "https://github.com/forgesworn/relayswarm/actions/runs/38650769463",
+    "hostedWindowsFailure": {
+      "job": 116148703787,
+      "step": "publisher suite",
+      "nativeAndSwarmSteps": "passed",
+      "failures": [
+        "Real directory replacement exhausted the unchanged three-change revalidation budget.",
+        "Mock master-removal callback selected the parent-only watcher with no filename, producing503 instead of404."
+      ]
+    },
+    "changes": [
+      "Parent-only subscriptions validate filenames, ignore known metadata change events and retain matching-child rename observations. Direct-watch behaviour is unchanged.",
+      "Missing/null/empty filenames and unknown event types still fail closed, including overflow-shaped notifications.",
+      "The master-removal mock selects the canonical direct callback and sends a real event shape; expected404 and original assertions remain."
+    ],
+    "primarySources": [
+      "https://raw.githubusercontent.com/nodejs/node/v24.21.0/deps/uv/src/win/fs-event.c",
+      "https://raw.githubusercontent.com/nodejs/node/v24.21.0/src/fs_event_wrap.cc"
+    ],
+    "causalLimit": "Exact native event chronology at the fourth-pass refusal was not retained. Upstream mapping supports an unnecessary metadata wake source, not its exact causal sequence.",
+    "review": "Independent source review found no blockers; no Windows execution by the local injected-platform cases.",
+    "localFullSuite": {
+      "tests": 266,
+      "pass": 264,
+      "fail": 0,
+      "skipped": 2,
+      "cancelled": 0,
+      "elapsedMs": 15954,
+      "manifestSHA256": "44b46d6f3e8d1ac1c3ef28d982ff7822e719fe1134a350cad1503d33f1f89b12",
+      "peakSampledRssBytes": 1436172288,
+      "peakSampledProcesses": 21,
+      "minimumSampledFreePercent": 43,
+      "resourceLimitsHeld": true,
+      "outerWorkerGroupReaped": true,
+      "attemptedAndAcceptedResourceProbeChildrenReaped": true
+    },
+    "boundsAndRealFilesystemSequenceChanged": false,
+    "exactCorrectedSourceHostedCI": "pending",
+    "releaseAndDeployment": "pending"
   }
 }

@@ -11,6 +11,26 @@ on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current correction checkpoint
 
+The follow-up to exact `83f72de4752ad284e9482eba7ba92f0920595930` narrows
+Windows parent-only watches to child-entry changes. Named metadata notifications
+are ignored; missing names and unknown event types still fail closed. Direct
+watches and all limits are unchanged. The master-removal fixture now sends a
+real event shape to its canonical direct watcher, retaining its 404 assertion.
+Independent review found no blockers. The full local publisher suite passes in
+15.954 s: 264 passing, two skipped, none failed or cancelled, within the original
+sampled resource limits and with outer runner reaping. Injected platform cases
+do not establish Windows OS acceptance.
+
+At this checkpoint, [83f CI 38650769463](https://github.com/forgesworn/relayswarm/actions/runs/38650769463)
+has six required jobs passing, including both POSIX suites, Swift and both HLS
+modes. Windows native/swarm checks passed before two publisher tests failed:
+directory replacement exhausted the unchanged revalidation budget, and the
+master-removal mock selected the parent watcher without a filename. The media
+job is still running; dependent live relays and optional soak were skipped.
+Pinned Node 24.21.0 event mapping supports the narrower parent subscription;
+the native fourth-pass event chronology was not retained and remains unproved.
+Exact corrected-source CI, release and deployment remain pending.
+
 Exact `4aa87c76e6dde08ab7a2f14a6ac23625a59a6edc` finished
 [CI 38646569729](https://github.com/forgesworn/relayswarm/actions/runs/38646569729)
 with five required jobs passing. Three native matrix jobs failed in the
@@ -42,13 +62,13 @@ The earlier failure did not recur, which does not identify its cause. The
 records the source hashes and separate results. Exact-source hosted CI, release
 and deployment remain pending for this correction.
 
-Fresh offline consumption of exact `4aa87c7` separately passed all 245 package
+Fresh offline consumption of exact `83f72de` separately passed all 247 package
 members against committed source, eleven documented imports, the installed CLI,
 durable ledger replay, separate-process verified native transfer/HTTP fallback,
-and rebuilt browser ESM. The 1,114,939-byte unpublished tarball has SHA-256
-`a5d8698675c0d31859f3b523cacf654299c5be373b0a8ac8a0f54c84a73e8c0b`.
+and rebuilt browser ESM. The 1,121,981-byte unpublished tarball has SHA-256
+`4088a9997fa1774d63a5d68076180285d32d32c6d33d9a517b856ba0c8737131`.
 Owned phase groups, sampled probe children and scratch cleanup passed. This
-source-bound result does not cover the uncommitted correction or published assets.
+source-bound result does not cover the later event-filter correction or published assets.
 
 ## Complete-playlist blocking reload candidate
 

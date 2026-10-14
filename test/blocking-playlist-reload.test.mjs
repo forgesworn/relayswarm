@@ -271,10 +271,10 @@ test("a ready snapshot is reauthorised after a concurrent master removal, not re
     const snapshot = await publisher.playlistSnapshot(...args);
     if (++calls === 2) {
       await writeFile(join(directory, "index.m3u8"), '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2\nhigh.m3u8\n');
-      changed();
+      changed("change", "index.m3u8");
     }
     return snapshot;
-  } }, watchDirectory(_path, _options, callback) { changed = callback; const event = new EventEmitter(); event.close = () => {}; return event; } });
+  } }, watchDirectory(path, _options, callback) { if (path === directory) changed = callback; const event = new EventEmitter(); event.close = () => {}; return event; } });
   await assert.rejects(reload.read("/media/low.m3u8", params(4)), { status: 404 });
   assert.equal(calls, 2); // The third fresh publisher read itself refuses membership.
   assert.equal(reload.snapshot().watchers, 0);
@@ -361,6 +361,8 @@ test("Windows shallow parent coverage observes directory replacement and ignores
   await until(() => state.reload.snapshot().activeBlocked === 1);
   const parent = state.events.find(event => event.directory === "/");
   assert.ok(parent); const before = state.reads;
+  parent.emitChange("change", "fixture"); await flush();
+  assert.equal(state.reads, before, "A parent-only watch must ignore known-child metadata/access changes.");
   parent.emitChange("rename", "unrelated-fixture"); await flush();
   assert.equal(state.reads, before, "A parent-only watch must ignore other temporary directories.");
   identity = "after"; parent.emitChange("rename", "fixture");
@@ -380,5 +382,20 @@ test("Windows excess shallow coverage declines capability for the whole presenta
     if (platform === "win32") { assert.equal(bytes.toString(), playlist()); assert.equal(state.events.length, 0); }
     else assert.match(bytes.toString(), /CAN-BLOCK-RELOAD=YES/u);
     assert.equal(state.reload.snapshot().watchers, 0);
+  }
+});
+
+
+test("Windows parent-only unknown filename or event remains fail-closed, including empty notification overflow", async t => {
+  for (const [event, filename] of [["change", undefined], ["change", null], ["change", ""], ["unknown", "fixture"]]) {
+    const state = fake(t, { platform: "win32" });
+    const pending = state.reload.read("/media/index.m3u8", params(5));
+    const refused = assert.rejects(pending, { status: 503 });
+    await until(() => state.reload.snapshot().activeBlocked === 1);
+    state.events.find(value => value.directory === "/").emitChange(event, filename);
+    await refused;
+    assert.equal(state.reload.snapshot().watchErrors, 1);
+    assert.equal(state.reload.snapshot().activeBlocked, 0); assert.equal(state.reload.snapshot().watchers, 0);
+    assert.equal(state.timers.size, 0);
   }
 });

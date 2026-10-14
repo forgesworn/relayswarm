@@ -185,7 +185,8 @@ not receive a partial blocking-reload promise. Raw pipeline files and media
 bytes are unchanged.
 
 On Windows, shallow watches of immediate parents also observe playlist-directory
-moves and ignore unrelated siblings. If a presentation requires more than
+moves and ignore unrelated siblings and named metadata events. Missing filenames
+or unknown event types fail closed. If a presentation requires more than
 41 watched directories, it retains its original bytes without added blocking
 capability. Arbitrary ancestor-tree moves are outside this coverage.
 
