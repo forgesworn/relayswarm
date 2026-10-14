@@ -242,7 +242,100 @@ Chrome tests.
 
 ## Current field checkpoint: 14 October 2026
 
-Source `bb90bd6a54cabc163846ee1737ac3fe28b63eaa2` is now deployed after all nine
+The deployed checkpoint is source `2e1bdeb724eb45e37f7b97604e4f396a73985719`. All nine required jobs passed in
+[CI run 38483497575](https://github.com/forgesworn/relayswarm/actions/runs/38483497575);
+the optional long soak was skipped. Fresh offline production-only consumption
+passed ten documented imports, exact packaged demo/renewal/recovery bytes,
+the installed CLI, separate-process verified native transfer and HTTP fallback.
+The unpublished tarball contains 190 files, is 847,937 bytes and has
+SHA-256 `21103ad4dc0701ed41d07f4393560053a480963995bbe4682bfda76bf4b0c0e1`.
+The standalone ESM remains 114,201 bytes, SHA-256
+`01de11837fbd08098bf98b6e8be945866ef766f76629030fec89de2318170d19`. Local artifacts do not prove downloaded-release acceptance.
+
+The guarded app-only deployment passed the 51-file UID-1000 image preflight,
+clean writer drain, stable identity/private lease/shared-service preservation
+and normal-TLS exact-client/fresh-playlist attestation. Image is
+`sha256:e73b4a0bb57ca37950abab2ae5c9f22c63a1ab4128880b9c85883d438701d87a`; public client is 728,315 bytes,
+SHA-256 `c264287acad81090c8952f99946f75f844e8f5fa718e907899dc77cacf04ef59`. Reporting remained off.
+
+The maintained no-store real-HTTP renewal regression passed, but the deployed
+ordinary four-role Chrome 155.0.8059.40 check remains red for contribution and
+verified peers: 60.013 s of requested video/native-audio decode passed, with
+zero fatal/native/page errors or stalls, while both contributors uploaded zero
+and the receiver verified zero peer bytes. Authority-expiry timing is retained;
+the underlying missing-response cause remains unproved.
+
+A subsequent sequential comparison used Chrome 155.0.8059.41 and the same
+finite source/client. Adding only `--disable-http2` passed all three short gates
+in 60.009 s: the receive-only actor accepted 2,806,464 verified peer bytes at
+both qualities, and both contributors retained consent/serving. Successful
+fixed-route responses reported HTTP/1.1; the high contributor's one stall is
+retained. A fresh default-browser check on the same source measured 60.015 s:
+playback passed but both contributors withdrew, uploaded zero, and the receiver
+verified zero peer bytes; successful requests used HTTP/2. These sequential
+same-desktop checks isolate a useful transport diagnostic, not a proven HTTP/2
+implementation cause or default production acceptance. No quota resets,
+automatic reconsent, fake media or permission overrides were used.
+
+Browser/provider cleanup passed in all three windows. The independently bounded
+source remained Root-owned and separate from observer cleanup. Named evidence:
+`artifacts/public-cdp-2e1bdeb-run-20261014`,
+`artifacts/public-cdp-2e1bdeb-http1-diagnostic-r2-run-20261014` and
+`artifacts/public-cdp-2e1bdeb-http1-window-default-run-20261014`.
+The later temporary server-H1 trial used ordinary Chrome 155.0.8059.41 with
+no browser transport override and unchanged app/client source. Its 60.009 s
+measurement retained a partial red result: playback passed and both contributors
+kept consent/serving, but only high delivered peer media (10,082,816 verified
+bytes in 15 loads); low delivered zero. Contribution and both-quality peer gates
+therefore failed. All 385 successfully completed fixed-route responses in the
+four pre-cleanup CDP ledgers reported HTTP/1.1, with no ledger records dropped.
+Fatal/native/page errors and sampled zero-frame intervals were zero; the high
+contributor's one stall is retained. This short diagnostic does not establish
+sustained benefit, a named HTTP/2 defect or permanent H1 readiness.
+
+The first trial preparation failed before proxy mutation because the image's
+file-capability binary could not execute with all capabilities dropped. That
+setup red remains retained. The isolated r2 preflight passed after copying and
+hash-verifying the same public binary bytes without capability attributes in
+private tmpfs; non-root/no-network/no-shared-mount/cap-drop/NNP bounds stayed in
+place. This setup correction is not a product or transport fix.
+
+Browser/provider cleanup passed despite the overall red outcome. Explicit
+controller finish and audit restored the original H1/H2 file and complete runtime
+at the same inode, proved the watchdog absent, and separate source cleanup
+removed the exact owned source (retained exit code 255). Named evidence is
+`artifacts/public-cdp-server-h1-trial-r2-run-20261014`,
+`artifacts/caddy-http1-trial-2e1bdeb-r2-preparation-20261014` and
+`artifacts/public-proxy-http1-trial-source-2e1bdeb-r2-preparation-20261014`.
+No permanent protocol change was made or authorised by this partial trial.
+
+A subsequent r3 trial retained ordinary Chrome 155.0.8059.41 and the same
+application/client, with only temporary server H1 and bounded read-only metrics.
+All three gates passed in 60.010 s: the receive-only actor accepted 13,205,308
+verified peer bytes in 30 loads, comprising 3,151,444 low and 10,053,864 high
+bytes. Both contributors kept consent/serving throughout; fatal/native/page
+errors, stalls, sampled zero-frame intervals and contribution withdrawals were
+zero. All 407 successfully completed fixed-route CDP responses reported
+HTTP/1.1. No browser transport override, quota reset or reconsent was used.
+
+Browser/provider cleanup, controller finish/audit and exact source removal
+passed. The original H1/H2 file/runtime and inode were restored and the watchdog
+was absent. Evidence is retained under
+`artifacts/public-cdp-server-h1-trial-metrics-r3-run-20261014`,
+`artifacts/caddy-http1-trial-2e1bdeb-r3-preparation-20261014` and
+`artifacts/public-proxy-http1-trial-source-2e1bdeb-r3-preparation-20261014`.
+This one-minute ordinary-browser result supports selecting H1 as a deployment
+mitigation; it does not establish a specific HTTP/2 implementation fault or
+replace the r2 partial red. Permanent H1 has not been deployed: it still requires
+a new clean commit, all nine exact-source CI jobs, guarded actual application
+of the proxy change, and fresh default-browser short and full two-hour gates.
+Decoded audio bytes do not prove audible output. Prior red outcomes, sustained
+load, full physical/hard-NAT/cost gates, v0.2.0 publication and downloaded-release
+acceptance remain open.
+
+### Earlier bb90 checkpoint
+
+Source `bb90bd6a54cabc163846ee1737ac3fe28b63eaa2` was deployed after all nine
 required jobs passed in
 [CI run 38478501111](https://github.com/forgesworn/relayswarm/actions/runs/38478501111),
 fresh local consumer/ESM gates, a 51-file non-root image preflight and guarded
@@ -278,9 +371,9 @@ The final maintained
 three-fetch correction passed real-server policy/session arrivals at 2,000/2,001 ms
 while the previous response remained held, plus full-outage expiry and recovery
 with consent off. Root's combined local suite/source hashes passed, and resource
-closes completed without a separate kernel inventory. No new field result exists:
-the initial public missing response remains unexplained and bb90 contribution
-remains red. Final receipt:
+closes completed without a separate kernel inventory. Later 2e1 field results
+are recorded above; the initial public missing response remains unexplained and
+the earlier bb90 contribution remains red. Final receipt:
 `artifacts/policy-cache-integration-20261014/validation.json`.
 
 The earlier verified pilot checkpoint used source `f9990b36956282f3d4e849b55bd64a79eb440151`,
@@ -298,6 +391,10 @@ device identifiers, credentials and personal filesystem paths.
 
 | Journey | Measured outcome | Remaining boundary |
 |---|---|---|
+| 2e1 ordinary public 60.013 s | Requested video/native-audio decode green; both contributor uploads and receiver peer bytes zero; fatal/native/page/stall counts zero | Sharing red; expiry timing retained, underlying transport cause unproved |
+| 2e1 same-source HTTP/1 browser diagnostic versus default | Chrome 155.0.8059.41: 60.009 s diagnostic accepted 2,806,464 verified peer bytes across both qualities; fresh 60.015 s default check accepted zero | Browser `--disable-http2` diagnostic only; high's one stall retained; sequential same-source/default comparison; later ordinary server-H1 trial partial red; no sustained/physical/hard-NAT/cost proof |
+| 2e1 temporary server-H1 ordinary 60.009 s | Consent/serving held; high delivered 10,082,816 verified bytes/15 loads, low zero; playback green, all 385 completed control responses HTTP/1.1 | Partial red for contribution/both-quality peers; high one stall retained; exact H1/H2 runtime/inode restored, watchdog absent/source removed; no permanent change |
+| 2e1 r3 temporary server-H1 ordinary 60.010 s | All three gates green; 13,205,308 verified bytes/30 loads across low/high, consent/serving held, all stalls/errors/withdrawals zero | One-minute same-desktop trial, exact H1/H2 runtime restored; permanent mitigation requires new exact-source CI/apply and fresh short/two-hour gates; physical/NAT/cost/publication remain open |
 | bb90 ordinary public 60.010 s | Requested video/native-audio decode green; contribution and verified peer red, both contributors uploaded zero/receiver peer zero, all fatal/native/page errors zero | Authority-expiry timing and delayed sends retained; underlying cause unproved; short desktop scope, historical reds remain |
 | CI two-hour load/churn | Twelve honest roles, 22 replacements, zero retained stalls/fatal hls.js errors and clean resource stops | Loopback flags and host candidates; native media errors not separately instrumented |
 | Deployed 7,205 s four-context run | Completed but red: policy timeout withdrew contribution before quota exhaustion; 34 zero-frame intervals and stalls retained | Same Mac/headless contexts; separate support audiences prevent controlled traffic attribution |
