@@ -425,6 +425,16 @@ also leaves HAVE null rather than claiming it was still absent. One load can
 produce both a wait-entry and a wait-outcome row: counters count decisions,
 not distinct segments. Budget is the initial allowance, not remaining request
 time. Rows contain no segment keys, hashes, URLs, peer identities or addresses.
+Each row also carries `budgetGeometry`: the calculation's final `currentTime`,
+`bufferedEnd`, `playableEnd`, `fragmentStart` (seconds) and computed
+`originReserveMs`. These are the values consumed by the original calculation,
+without additional media or context getter reads. Finite signed values are
+retained; unavailable or nonfinite values are null. The fixed `source` is
+`buffer`, `no-media`, `no-buffer`, `error` or `unobserved`; `positionSource` is
+`part`, `fragment` or null. Non-buffer sources leave the numeric fields null.
+Wait outcomes retain their original geometry, rather than sampling the later
+buffer. Each row and returned snapshot owns a copy. These values explain the
+initial budget calculation, not donor availability or remaining request time.
 They remain readable after stop and use the existing local/reporting-consent
 boundary; they add no requests, authority checks or deadline changes. These
 observations do not establish the cause of a failed peer transfer.
@@ -616,6 +626,8 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
   Account actions preserve cumulative charges and require fresh upload consent.
 - Added bounded numeric peer-eligibility observations to distinguish deadline
   and availability decisions without changing peer selection or its budgets.
+  Records retain the original buffer geometry; the broadcast fixture observes
+  existing request timings with explicit pending and missing measurements.
 - Separated in-flight upload quota from accepted-upload metrics so a pending
   or refused host reservation cannot be archived as an uploaded payload.
 
@@ -1288,6 +1300,41 @@ required CI jobs, clean package consumption and guarded pilot deployment pass.
 The pilot offers Nostr sign-in; integrating sites supply their own authenticated
 website resolver. Actual owner authentication, complete physical journeys and
 network/sustained/release acceptance remain open.
+
+## Later source checks: restart sharing remains open
+
+Checkpoint `a2c99a9` finished attempt 1 of
+[CI run 38569064323](https://github.com/forgesworn/relayswarm/actions/runs/38569064323)
+with eight of nine required jobs passing. The playback job failed its unchanged
+60 s post-producer-restart peer-fragment assertion. Both pre-restart peer
+qualities passed. After restart baseline and consumer playback progressed
+without stalls, fatal/native errors or append failures, but the consumer
+loaded all 30 completed new-discontinuity fragments from origin. Its 31 measured
+peer waits had initial budgets of 286.846–337.173 ms: 17 aborted, 13 expired and
+one remained pending. Established links and upload consent remained active.
+
+Thirty matching donor fragment-completion events occurred 53–108 ms after
+consumer origin completion, subject to the retained cross-page clock limits.
+This does not establish a lost notification, key mismatch or exact scheduling
+cause. Per-load buffer geometry and actual request start timings were absent.
+The [original failure summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/a2c99a9-ci-restart-failure-20261014.json)
+retains that failure and its cleanup limits. Later observations are separate
+results. Playback policy, fallback cap and origin reserve remain unchanged;
+the deployed pilot remains `df51cbe`.
+
+Current source adds bounded numeric `budgetGeometry` to the existing local
+eligibility records using only values already read by the calculation. Wait
+outcomes retain the original values, and returned snapshots own copies. The
+full 94-case swarm suite passes locally; an independent source review found no
+getter-order, formula, deadline or authority change. See the
+[metrics contract](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md). This observation is not a sharing repair
+or new hosted/physical acceptance result.
+The broadcast fixture also records cached request lifecycle timings without
+extra requests or body reads; ten pure observation tests pass, including release
+after each possible teardown rejection. Its original
+startup, waits, launch flags and peer assertions are preserved. The
+[broadcasting guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md#verification-boundary) describes the bounds
+and diagnostic scope.
 
 ## Current deployed checkpoint: df51 on 14 October 2026
 
@@ -4045,6 +4092,18 @@ the fourteen-role qualification remain red. Complete physical-device,
 separate-network/hard-NAT, sustained-operation and final release acceptance
 remain open. Earlier passes retain their original source and scope.
 
+The broadcast browser fixture uses loopback Chrome, synthetic media and explicit
+RTC/fake-media fixture flags. Its receipt adds bounded observations of existing
+media request events: at most four pages, 512 shared object labels, 256 retained
+rows and 64 tracked active requests per page. Labels correlate the same private
+pathname/range within one run; they do not reveal paths, queries or parsed
+playlist sequence/continuity. Fixed media/rendition categories and numeric cached
+Playwright timings distinguish request start, response and completion. Unavailable
+values remain null; evictions, overflow and pending requests remain explicit.
+Snapshots before and after browser close are separate observations. The recorder
+adds no requests or body reads and changes no playback deadline or assertion.
+It is diagnostic evidence, not ordinary network or physical-device qualification.
+
 ---
 
 Source: [docs/NIP-DRAFT.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md)
@@ -4548,6 +4607,14 @@ This checklist tracks the production work requested on 13 October 2026. It
 retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
+
+Later source `a2c99a9` passed eight of nine required CI jobs; its loopback
+broadcast test recovered playback after producer restart but failed the
+unchanged new-discontinuity peer-fragment gate. The
+[retained failure](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/a2c99a9-ci-restart-failure-20261014.json)
+and [current observations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#later-source-checks-restart-sharing-remains-open)
+are separate from the deployed checkpoint below. No playback-latency or
+deadline change has been made to increase sharing.
 
 ## Current deployed checkpoint: df51
 

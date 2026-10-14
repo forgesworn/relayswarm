@@ -12,6 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright-core";
 import { installMediaDiagnostics } from "./support/browser-media-diagnostics.mjs";
+import { createBroadcastRequestTimings } from "./support/broadcast-request-timings.mjs";
 import { startBroadcastPipeline, broadcastEncoderArgs } from "../src/broadcast-pipeline.mjs";
 import { startDemoServer } from "../demo/server.mjs";
 
@@ -55,7 +56,9 @@ const log = (message) => console.error(`[broadcast-browser] ${message}`);
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const children = [], pages = [], pageErrors = [], consoleErrors = [];
 const receipt = { v: 1, kind: "relayswarm-broadcast-browser-test", at: new Date().toISOString(), ok: false, failures: [], scope: { network: "loopback", producer: "FFmpeg synthetic real-time H.264/AAC", router: "MediaMTX", ingress: "RTMP", pipelineInput: "RTSP over TCP", output: "two-rendition live HLS", browser: "Chrome", OBS: false, YouTube: false, physicalDevices: false }, checkpoints: [] };
-let root, router, producer, pipeline, demo, browser, closingBrowser = false;
+Object.assign(receipt.scope, { automatedHeadlessChrome: true, autoplayUserGestureOverride: true, fakeMediaDeviceAndPermissionUI: true, getUserMediaWarmup: true, mdnsHidingDisabled: true,
+  ordinaryDefaultTransportEvidence: false, requestTimingMetadataOnly: true, additionalMediaRequestsOrBodyReads: false });
+let root, router, producer, pipeline, demo, browser, requestTimings, closingBrowser = false;
 function child(command, args) {
   const process = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
   const record = { process, stdout: "", stderr: "", done: null, error: null };
@@ -128,6 +131,7 @@ try {
   }
   const state = join(root, "publisher.json");
   demo = await startDemoServer({ mediaDir: pipeline.mediaDir, publisherState: state, operatorToken: "broadcast-browser-loopback-token-32-characters", iceServers: [], operatorExtraStatus: () => pipeline.metrics() });
+  requestTimings = createBroadcastRequestTimings({ origin: demo.base, epochMs: Date.parse(receipt.at) });
   const session = async () => { const response = await fetch(`${demo.base}/session.json`, { signal: AbortSignal.timeout(5000) }); assert.equal(response.status, 200); return response.json(); };
   const original = await session();
   receipt.identity = { eventId: original.streamEvent.id, pubkey: original.streamEvent.pubkey, swarmId: original.swarmId, manifest: original.manifest };
@@ -136,8 +140,9 @@ try {
   const read = (page) => page.evaluate(() => window.relaySwarmDemo.report());
   async function viewer(name, mode, upload, level) {
     const context = await browser.newContext(); const page = await context.newPage(); page.setDefaultTimeout(20000);
+    const timing = requestTimings.page(name); timing.attach(page);
     const network = { mediaRequests: 0, failedMediaRequests: 0 };
-    pages.push({ name, page, network });
+    pages.push({ name, page, network, timing });
     page.on("pageerror", (error) => pageErrors.push({ name, message: error.message }));
     page.on("console", (message) => { if (["error", "warning"].includes(message.type()) && consoleErrors.length < 100) consoleErrors.push({ viewer: name, type: message.type(), text: message.text().slice(0, 2000) }); });
     await page.addInitScript(installMediaDiagnostics);
@@ -166,7 +171,7 @@ try {
   await pause(6000);
   const baseline = await viewer("baseline", "off", false, 0);
   const consumer = await viewer("consumer", "peer-first", false, 0);
-  const checkpoint = async (name) => { receipt.checkpoints.push({ name, pipeline: pipeline.metrics(), viewers: await Promise.all(pages.map(async ({ name, page, network }) => ({ name, network: { ...network }, receipt: await read(page) }))) }); log(name); };
+  const checkpoint = async (name) => { receipt.checkpoints.push({ name, pipeline: pipeline.metrics(), viewers: await Promise.all(pages.map(async ({ name, page, network, timing }) => ({ name, network: { ...network }, requestTimings: timing.snapshot(), receipt: await read(page) }))) }); log(name); };
   await consumer.waitForFunction(() => window.relaySwarmDemo.report().player.fragments.some((fragment) => fragment.source === "peer" && fragment.level === 0), null, { timeout: 30000 });
   await checkpoint("real-time-low-rendition-peer-playback");
   for (const page of [baseline, consumer]) await page.locator("#quality").selectOption("1");
@@ -202,8 +207,10 @@ finally {
   receipt.pipeline = pipeline?.metrics();
   receipt.viewers = await Promise.all(pages.map(async ({ name, page, network }) => ({ name, network, receipt: await page.evaluate(() => window.relaySwarmDemo?.report()).catch(() => null), appendFailures: await page.evaluate(() => window.broadcastAppendFailures).catch(() => []), mediaDiagnostics: await page.evaluate(() => window.relaySwarmMediaDiagnostics).catch(() => []) })));
   if (pipeline) receipt.playlists = Object.fromEntries(await Promise.all(["master.m3u8", "low/index.m3u8", "high/index.m3u8"].map(async (path) => [path, await readFile(join(pipeline.mediaDir, path), "utf8").catch(() => null)])));
+  receipt.requestTimingsBeforeBrowserClose = requestTimings?.snapshot();
   closingBrowser = true;
-  await browser?.close(); await demo?.close(); await pipeline?.close(); await stop(producer); await stop(router);
+  try { await browser?.close(); await demo?.close(); await pipeline?.close(); await stop(producer); await stop(router); }
+  finally { receipt.requestTimingsAfterBrowserClose = requestTimings?.close(); }
   receipt.childProcesses = children.map(({ code, signal, error, stderr, stdout }) => ({ code, signal, error, ...(receipt.ok ? {} : { stderr, stdout }) }));
   const payload = `${JSON.stringify(receipt, null, 2)}\n`;
   await writeFile(join(values.resultsDir, `broadcast-browser-${receipt.at.replace(/\D/gu, "")}.json`), payload);

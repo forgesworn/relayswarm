@@ -9,6 +9,8 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
   Account actions preserve cumulative charges and require fresh upload consent.
 - Added bounded numeric peer-eligibility observations to distinguish deadline
   and availability decisions without changing peer selection or its budgets.
+  Records retain the original buffer geometry; the broadcast fixture observes
+  existing request timings with explicit pending and missing measurements.
 - Separated in-flight upload quota from accepted-upload metrics so a pending
   or refused host reservation cannot be archived as an uploaded payload.
 

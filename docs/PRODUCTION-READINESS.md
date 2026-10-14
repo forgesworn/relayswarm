@@ -5,6 +5,14 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
+Later source `a2c99a9` passed eight of nine required CI jobs; its loopback
+broadcast test recovered playback after producer restart but failed the
+unchanged new-discontinuity peer-fragment gate. The
+[retained failure](../spikes/results/a2c99a9-ci-restart-failure-20261014.json)
+and [current observations](STATUS.md#later-source-checks-restart-sharing-remains-open)
+are separate from the deployed checkpoint below. No playback-latency or
+deadline change has been made to increase sharing.
+
 ## Current deployed checkpoint: df51
 
 The deployed application is `df51cbed1ebb3bd09ef1b521c451d6b47989a664`. All nine

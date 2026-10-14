@@ -55,7 +55,10 @@ Documentation on main can include corrections after the immutable releases.
 Current deployed source checkpoint df51cbe passed nine required CI jobs and local
 package/deployment checks; ordinary sharing remains RED. A separate native ICE
 diagnostic narrows the unanswered-check boundary without proving its cause or
-ordinary qualification. Earlier fourteen-role REDs, Safari bootstrap and
+ordinary qualification. Later a2c99a9 CI passed eight of nine required jobs:
+post-restart playback recovered, but its new-discontinuity peer-fragment gate
+failed. Current numeric budget observations retain the original playback policy.
+Earlier fourteen-role REDs, Safari bootstrap and
 no-evaluation iPhone USB checks do not close acceptance. Full P01–P12, long/churn,
 physical/NAT, cost and release gates remain open. No separate 37-row ledger was
 located; no 37-item completion is asserted. Consult dated STATUS evidence.

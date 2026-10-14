@@ -495,7 +495,7 @@ class HlsSwarm {
         capacity: 64,
         dropped: this.peerEligibilityDropped,
         counters: { ...this.peerEligibilityCounters },
-        records: this.peerEligibilityRecords.map((record) => ({ ...record })),
+        records: this.peerEligibilityRecords.map((record) => ({ ...record, budgetGeometry: { ...record.budgetGeometry } })),
       },
       signalling: {
         samples: this.signallingSamples.length,
@@ -629,7 +629,8 @@ class HlsSwarm {
         this.releaseFetch = null;
         this.peerStats = null;
         this.peerContext = context;
-        const budgetMs = swarm.#peerBudget(context);
+        const budgetGeometry = { source: "unobserved", positionSource: null, currentTime: null, bufferedEnd: null, playableEnd: null, fragmentStart: null, originReserveMs: null };
+        const budgetMs = swarm.#peerBudget(context, budgetGeometry);
         swarm.#contributionContext(context);
         if (swarm.stopped || !context.frag || context.frag.sn === "initSegment" || (context.part && !swarm.options.swarmParts)
           || (!swarm.options.serveOnCellular && onCellular())) return this.inner.load(context, config, callbacks);
@@ -696,12 +697,12 @@ class HlsSwarm {
           });
         };
         if (budgetMs === 0) {
-          swarm.#peerEligibility(context, budgetMs, "no-budget", null);
+          swarm.#peerEligibility(context, budgetMs, "no-budget", null, budgetGeometry);
           return fallback();
         }
         timer = setTimeout(fallback, budgetMs);
         swarm.lifecycle.signal.addEventListener("abort", fallback, { once: true });
-        swarm.#peerFirst(context, controller.signal, t0 + budgetMs, budgetMs).then((result) => {
+        swarm.#peerFirst(context, controller.signal, t0 + budgetMs, budgetMs, budgetGeometry).then((result) => {
           if (this.active !== token || controller.signal.aborted || swarm.stopped) return;
           if (!result || now() >= t0 + budgetMs) return fallback();
           this.active = null;
@@ -793,9 +794,9 @@ class HlsSwarm {
     };
   }
 
-  #peerBudget(context) {
+  #peerBudget(context, geometry) {
     const media = this.hls?.media;
-    if (!media) return this.options.originFallbackMs;
+    if (!media) { geometry.source = "no-media"; return this.options.originFallbackMs; }
     try {
       for (let i = 0; i < media.buffered.length; i++) {
         if (media.buffered.start(i) <= media.currentTime && media.buffered.end(i) > media.currentTime) {
@@ -806,12 +807,23 @@ class HlsSwarm {
           // A later LL-HLS part has its own playback position. Using the
           // parent's start discards already buffered earlier parts and can
           // reduce every safe peer opportunity to a zero-length budget.
-          const fragStart = context?.part?.start ?? context?.frag?.start;
-          const playableEnd = Number.isFinite(fragStart) && fragStart > media.currentTime ? Math.min(media.buffered.end(i), fragStart) : media.buffered.end(i);
-          return Math.min(this.options.originFallbackMs, Math.max(0, (playableEnd - media.currentTime) * 1000 - originReserve));
+          let partStart, bufferedEnd, currentTime;
+          const fragStart = (partStart = context?.part?.start) ?? context?.frag?.start;
+          const playableEnd = Number.isFinite(fragStart) && fragStart > media.currentTime ? Math.min(bufferedEnd = media.buffered.end(i), fragStart) : (bufferedEnd = media.buffered.end(i));
+          const budgetMs = Math.min(this.options.originFallbackMs, Math.max(0, (playableEnd - (currentTime = media.currentTime)) * 1000 - originReserve));
+          // Capture the values already consumed by the formula, without
+          // rereading mutable media/fragment getters or changing their order.
+          try {
+            const finite = (value) => Number.isFinite(value) ? value : null;
+            Object.assign(geometry, { source: "buffer", positionSource: partStart == null ? "fragment" : "part",
+              currentTime: finite(currentTime), bufferedEnd: finite(bufferedEnd), playableEnd: finite(playableEnd),
+              fragmentStart: finite(fragStart), originReserveMs: finite(originReserve) });
+          } catch {}
+          return budgetMs;
         }
       }
-    } catch {}
+    } catch { geometry.source = "error"; return 0; }
+    geometry.source = "no-buffer";
     return 0;
   }
 
@@ -822,7 +834,7 @@ class HlsSwarm {
     return sha256Hex(utf8.encode(`${this.options.swarmId}\n${raw}${range}`));
   }
 
-  #peerEligibility(context, budgetMs, reason, matchingHave) {
+  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry) {
     // Observe only decisions already made. In particular a zero budget must
     // not hash a key or inspect HAVE merely to fill this local diagnostic.
     try {
@@ -834,7 +846,7 @@ class HlsSwarm {
       const elapsed = now() - this.transportStartedAt;
       const record = { atMs: Number.isFinite(elapsed) ? Math.max(0, Math.round(elapsed)) : 0,
         cc, level, budgetMs: Number.isFinite(budgetMs) && budgetMs >= 0 ? budgetMs : null,
-        reason, matchingHave: typeof matchingHave === "boolean" ? matchingHave : null };
+        reason, matchingHave: typeof matchingHave === "boolean" ? matchingHave : null, budgetGeometry: { ...budgetGeometry } };
       this.peerEligibilityCounters[reason] = increment(this.peerEligibilityCounters[reason]);
       if (this.peerEligibilityRecords.length === 64) {
         this.peerEligibilityRecords.shift();
@@ -844,37 +856,37 @@ class HlsSwarm {
     } catch {}
   }
 
-  async #peerFirst(context, signal, deadline, budgetMs) {
+  async #peerFirst(context, signal, deadline, budgetMs, budgetGeometry) {
     const key = await this.#segmentKey(context);
     if (signal.aborted || this.stopped) {
-      this.#peerEligibility(context, budgetMs, "aborted-before-eligibility", null);
+      this.#peerEligibility(context, budgetMs, "aborted-before-eligibility", null, budgetGeometry);
       return null;
     }
     const rendition = this.#renditionContext(context);
     const coordinated = ![...this.links.values()].some((peer) => peer.have.has(key));
     if (coordinated) {
       if (!this.#shouldWaitForOrigin(key, rendition)) {
-        this.#peerEligibility(context, budgetMs, "no-have-no-wait", false);
+        this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry);
         return null;
       }
-      this.#peerEligibility(context, budgetMs, "no-have-wait", false);
+      this.#peerEligibility(context, budgetMs, "no-have-wait", false, budgetGeometry);
       this.counters.coordinatedWaits += 1;
       // No playlist manipulation or origin prefetch. The elected contributor
       // loads normally; all advisory leases expire before the HTTP deadline.
       while (!signal.aborted && !this.stopped && now() < deadline && ![...this.links.values()].some((peer) => peer.have.has(key))) {
         if (!this.#shouldWaitForOrigin(key, rendition)) {
-          this.#peerEligibility(context, budgetMs, "wait-no-longer-eligible", false);
+          this.#peerEligibility(context, budgetMs, "wait-no-longer-eligible", false, budgetGeometry);
           return null;
         }
         await this.#waitForHave(key, Math.min(100, deadline - now()), signal);
       }
       const cancelled = signal.aborted || this.stopped;
       if (cancelled || now() >= deadline) {
-        this.#peerEligibility(context, budgetMs, cancelled ? "wait-aborted" : "wait-expired", null);
+        this.#peerEligibility(context, budgetMs, cancelled ? "wait-aborted" : "wait-expired", null, budgetGeometry);
         return null;
       }
     }
-    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true);
+    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry);
     let commitment;
     try {
       this.counters.commitmentRequests += 1;

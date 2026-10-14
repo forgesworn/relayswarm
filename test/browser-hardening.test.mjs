@@ -643,7 +643,8 @@ test("peer eligibility distinguishes zero budget with HAVE from positive budget 
     trace = fixture.swarm.metrics().peerEligibilityDiagnostics;
     assert.equal(keyCalls, 5, "positive eligibility adds only its existing key computation, not a diagnostic hash");
     assert.deepEqual(trace.records.at(-1), { atMs: trace.records.at(-1).atMs, cc: 0, level: 0,
-      budgetMs: 120, reason: "no-have-no-wait", matchingHave: false });
+      budgetMs: 120, reason: "no-have-no-wait", matchingHave: false,
+      budgetGeometry: { source: "buffer", positionSource: "fragment", currentTime: 10, bufferedEnd: 15, playableEnd: 15, fragmentStart: null, originReserveMs: 2000 } });
     assert.equal(trace.counters["no-budget"], 1); assert.equal(trace.counters["no-have-no-wait"], 1);
     assert.equal(commitments, 0); assert.equal(admissions, admissionBaseline);
     assert.equal(deliveries, 2); assert.equal(fixture.connections.length, 1);
@@ -652,6 +653,60 @@ test("peer eligibility distinguishes zero budget with HAVE from positive budget 
     assert.equal(fixture.swarm.metrics().segments.coordinatedWaits, 0);
     assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 0);
     for (const sensitive of [context.url, playback.key, fixture.peers[0].pubkey]) assert.ok(!JSON.stringify(trace).includes(sensitive));
+  } finally { await fixture.close(); }
+});
+
+test("peer eligibility geometry captures original getter order and final calculation values", async () => {
+  const fixture = await linkedFixture({ ...peerPlaybackOptions(1500).options, WebSocketImpl: memoryRelaySocket(), swarmParts: true });
+  try {
+    const reads = [], times = [10, 10, 10, 10.25], ends = [14, 13];
+    const buffered = { get length() { reads.push("length"); return 1; },
+      start() { reads.push("start"); return 0; }, end() { reads.push("end"); return ends.shift(); } };
+    fixture.hls.media = { get buffered() { reads.push("buffered"); return buffered; },
+      get currentTime() { reads.push("time"); return times.shift(); } };
+    const ctx = { ...context, frag: { ...context.frag, get start() { assert.fail("part position must short-circuit fragment getter"); } },
+      part: { index: 1, get start() { reads.push("partStart"); return 12.75; } } };
+    await new Promise((resolve) => new fixture.hls.config.fLoader({}).load(ctx, {}, { onSuccess: resolve }));
+    assert.deepEqual(reads, ["buffered", "length", "buffered", "start", "time", "buffered", "end", "time", "partStart", "time", "buffered", "end", "time"]);
+    const row = fixture.swarm.metrics().peerEligibilityDiagnostics.records.at(-1);
+    assert.equal(row.budgetMs, 500);
+    assert.deepEqual(row.budgetGeometry, { source: "buffer", positionSource: "part", currentTime: 10.25,
+      bufferedEnd: 13, playableEnd: 12.75, fragmentStart: 12.75, originReserveMs: 2000 });
+    assert.equal(row.reason, "no-have-no-wait");
+    assert.equal(fixture.swarm.metrics().segments.originFallbacks, 1);
+    assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 0);
+  } finally { await fixture.close(); }
+});
+
+test("peer eligibility geometry retains signed finite positions and isolates unavailable getters", async () => {
+  const fixture = await linkedFixture({ ...peerPlaybackOptions(1500).options, WebSocketImpl: memoryRelaySocket() });
+  try {
+    let timeReads = 0, startReads = 0;
+    fixture.hls.media = { get currentTime() { timeReads++; return -5; }, buffered: { length: 1, start: () => -10, end: () => 0 } };
+    const ctx = { ...context, frag: { ...context.frag, get start() { startReads++; return -1; } } };
+    await new Promise((resolve) => new fixture.hls.config.fLoader({}).load(ctx, {}, { onSuccess: resolve }));
+    let row = fixture.swarm.metrics().peerEligibilityDiagnostics.records.at(-1);
+    assert.equal(timeReads, 4); assert.equal(startReads, 1); assert.equal(row.budgetMs, 1500);
+    assert.deepEqual(row.budgetGeometry, { source: "buffer", positionSource: "fragment", currentTime: -5,
+      bufferedEnd: 0, playableEnd: -1, fragmentStart: -1, originReserveMs: 2000 });
+    for (const start of [NaN, Infinity, "private-fragment-position"]) {
+      timeReads = 0;
+      const nonfinite = { ...context, frag: { ...context.frag, start } };
+      await new Promise((resolve) => new fixture.hls.config.fLoader({}).load(nonfinite, {}, { onSuccess: resolve }));
+      row = fixture.swarm.metrics().peerEligibilityDiagnostics.records.at(-1);
+      assert.equal(timeReads, 3, "nonfinite fragment start preserves the original short-circuit");
+      assert.equal(row.budgetGeometry.fragmentStart, null); assert.equal(row.budgetGeometry.playableEnd, 0);
+      assert.ok(!JSON.stringify(row).includes("private-fragment-position"));
+    }
+    fixture.hls.media = { currentTime: 0, get buffered() { throw Error("private geometry failure"); } };
+    let synchronous = false;
+    new fixture.hls.config.fLoader({}).load(context, {}, { onSuccess: () => { synchronous = true; } });
+    assert.equal(synchronous, true, "original failing budget getter still falls back synchronously");
+    row = fixture.swarm.metrics().peerEligibilityDiagnostics.records.at(-1);
+    assert.equal(row.reason, "no-budget"); assert.equal(row.matchingHave, null);
+    assert.deepEqual(row.budgetGeometry, { source: "error", positionSource: null, currentTime: null,
+      bufferedEnd: null, playableEnd: null, fragmentStart: null, originReserveMs: null });
+    assert.ok(!JSON.stringify(row).includes("private geometry failure"));
   } finally { await fixture.close(); }
 });
 
@@ -667,10 +722,12 @@ test("peer eligibility counters survive ring eviction and snapshots cannot mutat
     const snapshot = fixture.swarm.metrics().peerEligibilityDiagnostics;
     assert.equal(snapshot.capacity, 64); assert.equal(snapshot.records.length, 64); assert.equal(snapshot.dropped, 6);
     assert.equal(snapshot.counters["no-budget"], 70);
-    assert.ok(snapshot.records.every((row) => row.matchingHave === null && row.budgetMs === 0));
+    assert.ok(snapshot.records.every((row) => row.matchingHave === null && row.budgetMs === 0 && row.budgetGeometry.source === "no-buffer"));
     snapshot.records[0].reason = "untrusted-text"; snapshot.counters["no-budget"] = 0;
+    snapshot.records[0].budgetGeometry.currentTime = 999;
     assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.counters["no-budget"], 70);
     assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.records[0].reason, "no-budget");
+    assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.records[0].budgetGeometry.currentTime, null);
     const before = fixture.swarm.metrics().peerEligibilityDiagnostics;
     fixture.swarm.stop(); assert.deepEqual(fixture.swarm.metrics().peerEligibilityDiagnostics, before);
   } finally { await fixture.close(); }
@@ -725,8 +782,12 @@ test("peer eligibility observes existing coordination outcomes and matching HAVE
     t.mock.method(performance, "now", () => clock);
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const advance = (ms) => { clock += ms; t.mock.timers.tick(ms); };
+    fixture.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 13 } };
     const missing = fixture.load();
     await phase(() => fixture.swarm.metrics().peerEligibilityDiagnostics.counters["no-have-wait"] === 1);
+    const initialGeometry = fixture.swarm.metrics().peerEligibilityDiagnostics.records.at(-1).budgetGeometry;
+    fixture.hls.media.currentTime = 11;
+    fixture.hls.media.buffered.end = () => 50;
     advance(60);
     await missing;
     // The loader's original fallback timer can abort the pending wait at its
@@ -739,6 +800,10 @@ test("peer eligibility observes existing coordination outcomes and matching HAVE
     assert.equal(ended.counters["no-have-wait"], 1);
     assert.equal(ended.counters["wait-aborted"] + ended.counters["wait-expired"], 1);
     assert.equal(ended.records.at(-1).matchingHave, null);
+    assert.deepEqual(ended.records.at(-1).budgetGeometry, initialGeometry, "async outcome retains original geometry despite media changes");
+    ended.records[0].budgetGeometry.currentTime = 999;
+    assert.equal(ended.records.at(-1).budgetGeometry.currentTime, 10, "rows do not share mutable geometry snapshots");
+    assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.records.at(-1).budgetGeometry.currentTime, 10);
     assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 0);
     assert.deepEqual(requested, []);
     const pending = fixture.load();

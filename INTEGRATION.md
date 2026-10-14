@@ -174,6 +174,16 @@ also leaves HAVE null rather than claiming it was still absent. One load can
 produce both a wait-entry and a wait-outcome row: counters count decisions,
 not distinct segments. Budget is the initial allowance, not remaining request
 time. Rows contain no segment keys, hashes, URLs, peer identities or addresses.
+Each row also carries `budgetGeometry`: the calculation's final `currentTime`,
+`bufferedEnd`, `playableEnd`, `fragmentStart` (seconds) and computed
+`originReserveMs`. These are the values consumed by the original calculation,
+without additional media or context getter reads. Finite signed values are
+retained; unavailable or nonfinite values are null. The fixed `source` is
+`buffer`, `no-media`, `no-buffer`, `error` or `unobserved`; `positionSource` is
+`part`, `fragment` or null. Non-buffer sources leave the numeric fields null.
+Wait outcomes retain their original geometry, rather than sampling the later
+buffer. Each row and returned snapshot owns a copy. These values explain the
+initial budget calculation, not donor availability or remaining request time.
 They remain readable after stop and use the existing local/reporting-consent
 boundary; they add no requests, authority checks or deadline changes. These
 observations do not establish the cause of a failed peer transfer.

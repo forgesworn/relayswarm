@@ -84,3 +84,15 @@ playback passed its ordinary short check, while both-quality peer delivery and
 the fourteen-role qualification remain red. Complete physical-device,
 separate-network/hard-NAT, sustained-operation and final release acceptance
 remain open. Earlier passes retain their original source and scope.
+
+The broadcast browser fixture uses loopback Chrome, synthetic media and explicit
+RTC/fake-media fixture flags. Its receipt adds bounded observations of existing
+media request events: at most four pages, 512 shared object labels, 256 retained
+rows and 64 tracked active requests per page. Labels correlate the same private
+pathname/range within one run; they do not reveal paths, queries or parsed
+playlist sequence/continuity. Fixed media/rendition categories and numeric cached
+Playwright timings distinguish request start, response and completion. Unavailable
+values remain null; evictions, overflow and pending requests remain explicit.
+Snapshots before and after browser close are separate observations. The recorder
+adds no requests or body reads and changes no playback deadline or assertion.
+It is diagnostic evidence, not ordinary network or physical-device qualification.

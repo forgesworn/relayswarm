@@ -42,6 +42,41 @@ The pilot offers Nostr sign-in; integrating sites supply their own authenticated
 website resolver. Actual owner authentication, complete physical journeys and
 network/sustained/release acceptance remain open.
 
+## Later source checks: restart sharing remains open
+
+Checkpoint `a2c99a9` finished attempt 1 of
+[CI run 38569064323](https://github.com/forgesworn/relayswarm/actions/runs/38569064323)
+with eight of nine required jobs passing. The playback job failed its unchanged
+60 s post-producer-restart peer-fragment assertion. Both pre-restart peer
+qualities passed. After restart baseline and consumer playback progressed
+without stalls, fatal/native errors or append failures, but the consumer
+loaded all 30 completed new-discontinuity fragments from origin. Its 31 measured
+peer waits had initial budgets of 286.846–337.173 ms: 17 aborted, 13 expired and
+one remained pending. Established links and upload consent remained active.
+
+Thirty matching donor fragment-completion events occurred 53–108 ms after
+consumer origin completion, subject to the retained cross-page clock limits.
+This does not establish a lost notification, key mismatch or exact scheduling
+cause. Per-load buffer geometry and actual request start timings were absent.
+The [original failure summary](../spikes/results/a2c99a9-ci-restart-failure-20261014.json)
+retains that failure and its cleanup limits. Later observations are separate
+results. Playback policy, fallback cap and origin reserve remain unchanged;
+the deployed pilot remains `df51cbe`.
+
+Current source adds bounded numeric `budgetGeometry` to the existing local
+eligibility records using only values already read by the calculation. Wait
+outcomes retain the original values, and returned snapshots own copies. The
+full 94-case swarm suite passes locally; an independent source review found no
+getter-order, formula, deadline or authority change. See the
+[metrics contract](../INTEGRATION.md). This observation is not a sharing repair
+or new hosted/physical acceptance result.
+The broadcast fixture also records cached request lifecycle timings without
+extra requests or body reads; ten pure observation tests pass, including release
+after each possible teardown rejection. Its original
+startup, waits, launch flags and peer assertions are preserved. The
+[broadcasting guide](BROADCASTING.md#verification-boundary) describes the bounds
+and diagnostic scope.
+
 ## Current deployed checkpoint: df51 on 14 October 2026
 
 The deployed application is `df51cbed1ebb3bd09ef1b521c451d6b47989a664`.
