@@ -46,7 +46,7 @@ export function signalOwned(owner, signal, { kill = process.kill, readBirth = bi
   assert.ok(owner && owner.pid === owner.pgid && owner.pid !== process.pid);
   if (groupAbsent(owner.pgid, kill)) return false;
   const live = readBirth(owner.pid);
-  assert.ok(!live || (live.pgid === owner.pgid && live.birth === owner.birth), "Owned group leader identity changed");
+  assert.ok(live && live.pgid === owner.pgid && live.birth === owner.birth, "Owned group leader identity changed");
   try { kill(-owner.pgid, signal); return true; } catch (error) {
     if (error.code === "ESRCH" || error.code === "EPERM") return false;
     throw error;
@@ -55,6 +55,13 @@ export function signalOwned(owner, signal, { kill = process.kill, readBirth = bi
 export async function reapOwned(owner, clock, operations) {
   if (!owner) return null;
   if (groupAbsent(owner.pgid, operations?.kill)) return true;
+  const leader = (operations?.readBirth ?? birth)(owner.pid);
+  if (!leader) {
+    const absentEnd = now() + BigInt(cap(clock, "reap", 1500)) * 1000000n;
+    while (!groupAbsent(owner.pgid, operations?.kill) && now() < absentEnd) await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.ok(groupAbsent(owner.pgid, operations?.kill), "Owned group leader absent; remaining group ownership UNKNOWN");
+    return true;
+  }
   signalOwned(owner, "SIGTERM", operations);
   const termEnd = now() + BigInt(cap(clock, "reap", 1500)) * 1000000n;
   while (!groupAbsent(owner.pgid, operations?.kill) && now() < termEnd) await new Promise((resolve) => setTimeout(resolve, 25));

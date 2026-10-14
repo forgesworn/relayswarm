@@ -18,6 +18,7 @@ import { readIceConfigFile } from "../src/ice-config.mjs";
 import { createAccountBudgetControls } from "./account-budget.mjs";
 import { createRequestDiagnostics } from "./request-diagnostics.mjs";
 import { isCliEntry } from "../src/cli-entry.mjs";
+import { createTurnCredentialService, validateTurnCredentialsUrl } from "./turn-credential-service.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -32,7 +33,11 @@ export function httpRange(header, size) {
 
 export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host = "127.0.0.1", port = 0, publicUrl, tlsKey, tlsCert, relays = [], iceServers,
   publisherState, operatorToken, operatorTokenFile, operatorState, telemetry = false, reportCapacity, reportTtlMs, operatorExtraStatus, beforeListen,
-  admissionOptions, accountBudget, mediaCapabilities = { parts: false }, allowEncryptedMedia = false, commitmentSecretKey, delegation, revokedDelegationIds = [], delegationRevocations = [] } = {}) {
+  admissionOptions, accountBudget, turnCredentials, mediaCapabilities = { parts: false }, allowEncryptedMedia = false, commitmentSecretKey, delegation, revokedDelegationIds = [], delegationRevocations = [] } = {}) {
+  if (turnCredentials !== undefined) {
+    if (!turnCredentials || typeof turnCredentials !== "object" || Array.isArray(turnCredentials) || iceServers !== undefined) throw new Error("Supply either static ICE servers or a TURN credential issuer.");
+    validateTurnCredentialsUrl(turnCredentials.url);
+  }
   if (beforeListen !== undefined && typeof beforeListen !== "function") throw new Error("beforeListen must be a function.");
   if (!mediaCapabilities || typeof mediaCapabilities.parts !== "boolean" || Object.keys(mediaCapabilities).some((key) => key !== "parts")) throw new Error("Invalid media capabilities.");
   if (Boolean(tlsKey) !== Boolean(tlsCert)) throw new Error("Supply both --tls-key and --tls-cert.");
@@ -51,7 +56,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
   const admission = createAdmissionControls({ ...admissionOptions, swarmId: publisher.swarmId });
   const controls = createOperatorControls({ token, telemetry, reportCapacity, reportTtlMs, operatorExtraStatus, statePath: operatorState, admission,
     requestDiagnostics: () => requestDiagnostics.snapshot() });
-  let requestDiagnostics, accountControls;
+  let requestDiagnostics, accountControls, turnControls;
   let base, activeMedia = 0;
   const signingBudget = { count: 0, since: Date.now() };
   const handler = async (request, response) => {
@@ -63,6 +68,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
     response.setHeader("cache-control", "no-store");
     try {
       const url = new URL(request.url, "http://localhost");
+      if (turnControls && await turnControls.handle(request, response, url.pathname, base)) return;
       if (accountControls && await accountControls.handle(request, response, url.pathname, base)) return;
       if (await controls.handle(request, response, url.pathname, base, publisher)) return;
       if (await admission.handle(request, response, url.pathname, base)) return;
@@ -82,7 +88,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
       if (url.pathname === "/stream.json") return send("application/json", JSON.stringify(advertisement));
       if (url.pathname === "/session.json") return send("application/json", JSON.stringify({ v: 1, swarmId: publisher.swarmId, streamEvent: publisher.streamEvent,
         manifest: publisher.manifestPath, relays: relays.length ? relays : [`${base.replace(/^http/u, "ws")}/relay`],
-        ...(iceServers ? { iceServers } : {}), ...(accountControls ? { accountBudget: accountControls.descriptor() } : {}), ...(publisher.delegation ? { delegation: publisher.delegation } : {}),
+        ...(iceServers ? { iceServers } : {}), ...(turnControls ? { turnCredentials: turnControls.descriptor() } : {}), ...(accountControls ? { accountBudget: accountControls.descriptor() } : {}), ...(publisher.delegation ? { delegation: publisher.delegation } : {}),
         ...(revokedDelegationIds.length ? { revokedDelegationIds } : {}), ...(delegationRevocations.length ? { delegationRevocations } : {}),
         admission: admission.descriptor(), mediaCapabilities: { ...mediaCapabilities }, streamAdvertisementEndpoint: "/stream.json", commitmentEndpoint: "/commitment", deliveryPolicyEndpoint: "/delivery-policy.json", experimental: true }));
       if (url.pathname === "/commitment") {
@@ -133,6 +139,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
   };
   let server, relay, advertisement, renewal, closing, advertisementPool;
   try {
+    if (turnCredentials !== undefined) turnControls = createTurnCredentialService(turnCredentials);
     if (accountBudget !== undefined) accountControls = createAccountBudgetControls(accountBudget);
     await accountControls?.ready();
     server = tlsKey ? httpsServer({ key: await readFile(tlsKey), cert: await readFile(tlsCert), maxHeaderSize: 8192 }, handler) : httpServer({ maxHeaderSize: 8192 }, handler);
@@ -165,7 +172,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
       closing = (async () => {
         clearInterval(renewal); try { advertise("ended"); } catch {}
         const failures = [];
-        for (const cleanup of [() => advertisementPool?.close(), () => relay?.close(), () => accountControls?.close(),
+        for (const cleanup of [() => advertisementPool?.close(), () => relay?.close(), () => turnControls?.close(), () => accountControls?.close(),
           () => server.closeAllConnections(), () => new Promise((done, reject) => server.close((error) => error ? reject(error) : done())),
           () => controls.close(), () => requestDiagnostics.close()]) {
           try { await cleanup(); } catch (error) { failures.push(error); }
@@ -176,19 +183,20 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
     } };
   } catch (error) {
     clearInterval(renewal); requestDiagnostics?.close(); advertisementPool?.close();
-    await Promise.allSettled([Promise.resolve().then(() => relay?.close()), Promise.resolve().then(() => server?.close()), Promise.resolve().then(() => controls.close()), Promise.resolve().then(() => accountControls?.close())]);
+    await Promise.allSettled([Promise.resolve().then(() => relay?.close()), Promise.resolve().then(() => server?.close()), Promise.resolve().then(() => controls.close()), Promise.resolve().then(() => accountControls?.close()), Promise.resolve().then(() => turnControls?.close())]);
     throw error;
   }
 }
 
 async function main() {
   const { values } = parseArgs({ options: { "media-dir": { type: "string" }, manifest: { type: "string", default: "master.m3u8" }, host: { type: "string", default: "127.0.0.1" }, port: { type: "string", default: "8787" },
-    "public-url": { type: "string" }, "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, "publisher-state": { type: "string" }, "operator-token-file": { type: "string" }, "operator-state": { type: "string" }, "account-budget-state": { type: "string" }, "allow-encrypted-media": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" } } });
-  if (values.help) { console.log("npm run demo -- [--media-dir DIR --manifest master.m3u8] [--host 127.0.0.1 --port 8787] [--public-url https://demo.example] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE] [--publisher-state FILE] [--operator-token-file FILE] [--account-budget-state FILE] [--telemetry]\nWithout --media-dir, ffmpeg generates a two-rendition live test stream. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/FIELD-TEST.md."); return; }
+    "public-url": { type: "string" }, "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, "turn-credentials-url": { type: "string" }, "publisher-state": { type: "string" }, "operator-token-file": { type: "string" }, "operator-state": { type: "string" }, "account-budget-state": { type: "string" }, "allow-encrypted-media": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" } } });
+  if (values.help) { console.log("npm run demo -- [--media-dir DIR --manifest master.m3u8] [--host 127.0.0.1 --port 8787] [--public-url https://demo.example] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE | --turn-credentials-url https://issuer.example/turn] [--publisher-state FILE] [--operator-token-file FILE] [--account-budget-state FILE] [--telemetry]\nWithout --media-dir, ffmpeg generates a two-rendition live test stream. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/FIELD-TEST.md."); return; }
   const port = Number(values.port);
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new Error("Invalid port.");
   if (values.stun?.some((url) => !/^stuns?:[^\s]+$/u.test(url))) throw new Error("--stun requires a STUN URL.");
-  if (values.stun && values["ice-config"]) throw new Error("Supply either --stun or --ice-config.");
+  if ([values.stun, values["ice-config"], values["turn-credentials-url"]].filter(value => value !== undefined).length > 1) throw new Error("Supply only one of --stun, --ice-config or --turn-credentials-url.");
+  if (values["turn-credentials-url"] !== undefined) validateTurnCredentialsUrl(values["turn-credentials-url"]);
   const iceServers = values["ice-config"] ? await readIceConfigFile(values["ice-config"]) : values.stun?.map((urls) => ({ urls }));
   const fixture = values["media-dir"] ? null : await createMediaFixture({ live: true });
   let demo;
@@ -202,7 +210,7 @@ async function main() {
       publisherState: values["publisher-state"], operatorTokenFile: values["operator-token-file"], operatorToken: values["operator-token-file"] ? undefined : process.env.RELAYSWARM_OPERATOR_TOKEN, telemetry: values.telemetry,
       operatorState: values["operator-state"], ...(values["account-budget-state"] ? { accountBudget: { statePath: values["account-budget-state"] } } : {}), allowEncryptedMedia: values["allow-encrypted-media"],
       publicUrl: values["public-url"], tlsKey: values["tls-key"], tlsCert: values["tls-cert"], relays: values.relay,
-      ...(iceServers ? { iceServers } : {}) });
+      ...(iceServers ? { iceServers } : {}), ...(values["turn-credentials-url"] !== undefined ? { turnCredentials: { url: values["turn-credentials-url"] } } : {}) });
     console.log(`RelaySwarm field-test player: ${demo.base}\n${values["publisher-state"] ? "Publisher identity is restored from the private server state file." : "Publisher key is ephemeral and stays on this server."} Press Ctrl-C to stop.`);
     let stopping = false;
     const stop = async () => { if (stopping) return; stopping = true; await close(); };

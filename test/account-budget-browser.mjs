@@ -13,11 +13,12 @@ import { now, stamp, deadlines, cap, bounded, journal, birth, groupAbsent, reapO
 
 const { values } = parseArgs({ options: {
   chrome: { type: "string", default: process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" },
-  resultsDir: { type: "string", default: "artifacts/account-budget-browser" },
+  resultsDir: { type: "string" }, "turn-renewal": { type: "boolean", default: false },
 } });
 assert.notEqual(process.platform, "win32", "This browser fixture requires POSIX process groups");
 const start = now(), clock = deadlines(start), at = stamp(), nonce = randomBytes(16).toString("hex");
-values.resultsDir = resolve(values.resultsDir);
+const receiptPrefix = values["turn-renewal"] ? "account-budget-turn-renewal" : "account-budget";
+values.resultsDir = resolve(values.resultsDir || (values["turn-renewal"] ? "artifacts/account-budget-turn-renewal-browser" : "artifacts/account-budget-browser"));
 const runId = at.replace(/\D/gu, "") + "-" + nonce.slice(0, 8);
 let child, owner, root, rootIdentity, input, workerClosed = false, stopped = false, chromeMayExist = false;
 const cleanup = { workerGroupAbsent: null, workerReaped: null, chromeGroupAbsent: null, ownedScratchRemoved: null };
@@ -110,15 +111,15 @@ finally {
     } catch { cleanup.ownedScratchRemoved = false; }
   }
   let receipt;
-  try { receipt = JSON.parse(await readFile(input.workerReceipt, "utf8")); } catch { receipt = { v: 1, kind: "relayswarm-account-budget-browser", ok: false, checkpoints: [], failures: [{ category: "worker-receipt-unavailable" }], cleanup: {} }; }
+  try { receipt = JSON.parse(await readFile(input.workerReceipt, "utf8")); } catch { receipt = { v: 1, kind: values["turn-renewal"] ? "relayswarm-account-budget-turn-renewal-browser" : "relayswarm-account-budget-browser", ok: false, checkpoints: [], failures: [{ category: "worker-receipt-unavailable" }], cleanup: {} }; }
   const supervisor = { v: 1, at, finishedAt: stamp(), elapsedMs: Number((now() - start) / 1000000n),
     bounds: { wholeMs: 180000, workMs: 150000, gracefulCleanupEndsMs: 165000, groupReapEndsMs: 175000 }, worker, failures: fail, cleanup };
   supervisor.ok = worker?.code === 0 && worker?.signal === null && fail.length === 0 && Object.values(cleanup).every((value) => value === true) && supervisor.elapsedMs < 180000;
   receipt.supervisor = supervisor; receipt.ok = receipt.ok === true && supervisor.ok && !stopped;
   try {
     await bounded(async () => {
-      await writeFile(join(values.resultsDir, `account-budget-${runId}.json`), JSON.stringify(receipt, null, 2) + "\n", { flag: "wx", mode: 0o600 });
-      await writeFile(join(values.resultsDir, "account-budget-browser.json"), JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
+      await writeFile(join(values.resultsDir, `${receiptPrefix}-${runId}.json`), JSON.stringify(receipt, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+      await writeFile(join(values.resultsDir, `${receiptPrefix}-browser.json`), JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
     }, clock, "whole", 3000);
   } catch { receipt.ok = false; }
   clearTimeout(wholeAlarm);

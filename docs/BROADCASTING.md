@@ -35,6 +35,13 @@ ssh -N -L 1935:127.0.0.1:1935 deploy@your-host
 
 OBS then targets its own loopback address. The container router uses an internal app/router network plus a separate normal bridge needed for its loopback RTMP port publication; RTSP has no published host port. Container ingest mappings and the existing/new HTTPS proxy choices are in the [deployment guide](../deploy/README.md). Remote browsers require configured TLS or an explicit `--public-url https://your-hostname` behind an HTTPS proxy. The public origin must match browser Origin headers. Configure repeated `--relay wss://...` options if using external relays; otherwise the server supplies its own bounded relay at `/relay`. `--stun` accepts a STUN URL. Alternatively, `--ice-config FILE` loads private host-provided STUN/TURN browser credentials; the [field guide](FIELD-TEST.md#use-separate-devices-and-networks) gives the bounded format and disclosure boundary. No TURN deployment is supplied.
 
+For an existing short-lived credential issuer, use
+`--turn-credentials-url https://issuer.example/turn` instead of `--stun` or
+`--ice-config`. The optional [renewal adapter](FIELD-TEST.md#optional-turn-credential-renewal)
+is off by default. It obtains separate viewer credentials, refreshes active
+peer sessions and retains consent and spent allowances. It supplies no TURN
+deployment; expired credentials leave playback on origin until fresh Apply.
+
 ## Output and recovery
 
 Add `--account-budget` to offer the optional shared upload allowance. It keeps

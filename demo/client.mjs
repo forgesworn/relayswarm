@@ -7,6 +7,7 @@ import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 import { createFetchDiagnostics } from "./fetch-diagnostics.mjs";
 import { createPolicyRenewal } from "./policy-renewal.mjs";
 import { createAccountBudgetClient } from "./account-budget-client.mjs";
+import { createTurnCredentials } from "./turn-credentials.mjs";
 
 const fetchDiagnostics = createFetchDiagnostics();
 
@@ -33,6 +34,14 @@ const status = (message) => { byId("status").textContent = message; };
 const accountBudget = createAccountBudgetClient({ secretKey: admissionKey, origin: location.origin,
   onRevoke() { suspensionGeneration++; needsViewerApply = true; stopSwarm(); byId("upload").checked = false; },
 });
+const turnCredentials = createTurnCredentials({ origin: location.origin,
+  onRefresh() { if (swarm && activeConfig.mode !== "off" && peerAuthorityFresh(session)) configure(); },
+  onUnavailable() {
+    suspensionGeneration++; needsViewerApply = true; byId("upload").checked = false; stopSwarm();
+    status("Peer relay credentials unavailable · origin playback; apply settings to rejoin.");
+  },
+});
+const turnIdentity = value => JSON.stringify([value?.swarmId, value?.streamEvent?.id, value?.admission?.issuer, value?.admission?.epoch]);
 const mediaRecovery = createMediaRecovery({ media: video, getHls: () => hls, getSession: () => session, now: elapsed,
   revokeContribution() { stopSwarm(); byId("mode").value = "off"; byId("upload").checked = false; },
   status(message) {
@@ -75,6 +84,7 @@ function totals() {
     { peerFirstBytes: archivedTotals.peerFirstBytes, uploaded: archivedTotals.uploaded, peerFirstLoads: archivedTotals.peerFirstLoads });
 }
 function stopSwarm() {
+  turnCredentials.setActive(false);
   if (!swarm) return;
   swarm.stop();
   sessions.push({ ...activeConfig, endedAtMs: elapsed(), metrics: swarm.metrics() });
@@ -88,15 +98,16 @@ function stopSwarm() {
 function configure() {
   if (mediaRecovery.active() || accountActionPending) return;
   policyRenewal.fresh();
-  const account = accountBudget.snapshot();
+  const account = accountBudget.snapshot(), turnReady = turnCredentials.fresh();
   stopSwarm();
   const configuredSession = session, configuredCredential = admissionCredential;
   const chosenMode = byId("mode").value;
-  const requestedMode = native || policyUnavailable || needsViewerApply || chosenMode === "off" ? "off" : deliveryPolicy.mode ?? chosenMode;
+  const requestedMode = native || policyUnavailable || needsViewerApply || !turnReady || chosenMode === "off" ? "off" : deliveryPolicy.mode ?? chosenMode;
   const mode = session.admission && !admissionCredential ? "off" : requestedMode;
   const budget = uploadBudget.snapshot(), allowance = budget.limit;
   const remaining = account.required ? Math.min(budget.remaining, account.available ? account.remaining : 0) : budget.remaining;
   const admissionReady = ownCredentialFresh(session);
+  const iceServers = session.turnCredentials ? turnCredentials.servers() : session.iceServers;
   activeConfig = { mode, upload: byId("upload").checked && mode !== "off" && budget.available && remaining > 0 && admissionReady, uploadAllowance: allowance, uploadLimit: Number(byId("limit").value), cellular: byId("cellular").checked, startedAtMs: elapsed() };
   swarm = createHlsSwarm({ mode, swarmId: session.swarmId, relays: session.relays, streamEvent: session.streamEvent, delegation: session.delegation, revokedDelegationIds: session.revokedDelegationIds, delegationRevocations: session.delegationRevocations, swarmParts: session.mediaCapabilities?.parts === true, originReserveMs: session.mediaCapabilities?.parts === true ? 500 : 2000,
     getCommitment: async (context, { signal }) => {
@@ -117,8 +128,9 @@ function configure() {
     } } : {}),
     reserveUploadBytes: async (amount, options) => peerAuthorityFresh(configuredSession) && accountBudget.snapshot().available && !options?.signal?.aborted && await uploadBudget.reserve(amount, options) && peerAuthorityFresh(configuredSession) && !options?.signal?.aborted && await accountBudget.reserve(amount, options) && peerAuthorityFresh(configuredSession) && !options?.signal?.aborted,
     serve: activeConfig.upload, maxUploadBytesPerSession: remaining, maxUploadBytesPerSecond: activeConfig.uploadLimit, serveOnCellular: activeConfig.cellular,
-    ...(session.iceServers ? { iceServers: session.iceServers } : {}),
+    ...(iceServers ? { iceServers } : {}),
   });
+  turnCredentials.setActive(mode !== "off" && admissionReady);
   if (hls) swarm.attach(hls);
   const metrics = swarm.metrics();
   byId("kill").disabled = mode === "off";
@@ -151,7 +163,7 @@ function renderAccount() {
 }
 function report() {
   policyRenewal.fresh();
-  const account = accountBudget.snapshot();
+  const account = accountBudget.snapshot(), turn = turnCredentials.snapshot();
   return { v: 1, kind: "relayswarm-field-receipt", startedAt, recordedAt: new Date().toISOString(), durationMs: elapsed(),
     environment: { browser: navigator.userAgent, secureContext: isSecureContext, networkLabel: byId("network").value, deviceLabel: byId("device").value, automated: navigator.webdriver === true },
     stream: { eventId: session?.streamEvent.id, publisher: session?.streamEvent.pubkey, swarmId: session?.swarmId, experimental: true },
@@ -160,7 +172,7 @@ function report() {
       scope: "same-origin media resource timings; includes init segments and cache hits; encoded bytes exclude protocol overhead; native HLS requests are not measured" },
     totals: totals(), uploadBudget: uploadBudget.snapshot(), accountBudget: account, deliveryPolicy: { ...deliveryPolicy, unavailable: policyUnavailable }, current: swarm ? { ...activeConfig, metrics: swarm.metrics() } : null, sessions: [...sessions], snapshots: [...snapshots],
     retention: { fragments: "latest 256", snapshots: "latest 60, every five seconds", sessions: "latest 64", archivedSessions: archivedTotals.sessions, totals: "whole page session" },
-    loaderRestored: !hls || hls.config.fLoader === initialLoader, controlTimings: fetchDiagnostics.snapshot(), policyRenewal: policyRenewal.snapshot(), limits: ["Network and device labels are supplied by the viewer.", "No peer IP addresses or private signing keys are recorded.", "A receipt is evidence for this session only; it is not a production-readiness claim."],
+    loaderRestored: !hls || hls.config.fLoader === initialLoader, controlTimings: fetchDiagnostics.snapshot(), policyRenewal: policyRenewal.snapshot(), turnCredentials: turn, limits: ["Network and device labels are supplied by the viewer.", "No peer IP addresses or private signing keys are recorded.", "A receipt is evidence for this session only; it is not a production-readiness claim."],
   };
 }
 
@@ -168,7 +180,7 @@ function sameIdentity(a, b) {
   return a?.swarmId === b?.swarmId && a?.streamEvent?.id === b?.streamEvent?.id && a?.admission?.epoch === b?.admission?.epoch && a?.admission?.issuer === b?.admission?.issuer;
 }
 function samePeerConfiguration(a, b) {
-  const fields = (value) => [value?.swarmId, value?.streamEvent, value?.relays, value?.admission, value?.manifest, value?.deliveryPolicyEndpoint, value?.commitmentEndpoint, value?.iceServers, value?.mediaCapabilities, value?.delegation, value?.revokedDelegationIds, value?.delegationRevocations];
+  const fields = (value) => [value?.swarmId, value?.streamEvent, value?.relays, value?.admission, value?.manifest, value?.deliveryPolicyEndpoint, value?.commitmentEndpoint, value?.iceServers, value?.turnCredentials, value?.mediaCapabilities, value?.delegation, value?.revokedDelegationIds, value?.delegationRevocations];
   return JSON.stringify(fields(a)) === JSON.stringify(fields(b));
 }
 function ownCredentialFresh(configuredSession) {
@@ -177,7 +189,7 @@ function ownCredentialFresh(configuredSession) {
   return Boolean(credential && credential.issuer === admission.issuer && credential.epoch === admission.epoch && credential.swarmId === configuredSession.swarmId && Number.isSafeInteger(credential.expiresAt) && credential.expiresAt * 1000 > Date.now());
 }
 function peerAuthorityFresh(configuredSession) {
-  if (session !== configuredSession || needsViewerApply || document.visibilityState !== "visible" || !policyRenewal.fresh()) return false;
+  if (session !== configuredSession || needsViewerApply || document.visibilityState !== "visible" || !policyRenewal.fresh() || !turnCredentials.fresh()) return false;
   if (ownCredentialFresh(configuredSession)) return true;
   policyUnavailableNow("admission-expired");
   return false;
@@ -200,6 +212,7 @@ byId("settings").addEventListener("submit", async (event) => {
   byId("start").disabled = true;
   const submittedSession = session, priorCredential = admissionCredential;
   const submittedGeneration = suspensionGeneration;
+  let turnReady = true;
   const applyIsCurrent = () => submittedGeneration === suspensionGeneration && document.visibilityState === "visible";
   try {
     await uploadBudget.setLimit(Number(byId("allowance").value));
@@ -207,11 +220,15 @@ byId("settings").addEventListener("submit", async (event) => {
     if (byId("mode").value !== "off" && policyRenewal.fresh() && deliveryPolicy.mode !== "off") {
       const credential = await obtainAdmission(submittedSession, priorCredential);
       if (applyIsCurrent() && session === submittedSession && admissionCredential === priorCredential && policyRenewal.fresh()) admissionCredential = credential;
+      if (applyIsCurrent() && session === submittedSession && policyRenewal.fresh() && Hls.isSupported() && session.turnCredentials) {
+        turnReady = await turnCredentials.acquire();
+        if (!turnReady && applyIsCurrent()) byId("upload").checked = false;
+      }
     }
   } catch { if (applyIsCurrent() && session === submittedSession && admissionCredential === priorCredential) { admissionCredential = null; status("Peer admission unavailable · origin playback remains available."); } }
   finally { byId("start").disabled = mediaRecovery.active(); }
   if (mediaRecovery.active() || !applyIsCurrent()) return;
-  needsViewerApply = false;
+  needsViewerApply = !turnReady;
   if (startRequestedAt === null) {
     startRequestedAt = elapsed();
     if (Hls.isSupported()) {
@@ -294,7 +311,7 @@ byId("download").addEventListener("click", () => {
   const link = document.createElement("a"); link.href = url; link.download = `relayswarm-field-${new Date().toISOString().replace(/[:.]/gu, "-")}.json`; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
-function suspendPeerAuthority() { suspensionGeneration++; needsViewerApply = true; accountBudget.suspend(); policyRenewal.suspend(); stopSwarm(); }
+function suspendPeerAuthority() { suspensionGeneration++; needsViewerApply = true; accountBudget.suspend(); policyRenewal.suspend(); turnCredentials.suspend(); stopSwarm(); }
 window.addEventListener("pagehide", () => { suspendPeerAuthority(); mediaRecovery.cancel("page-hidden"); });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") suspendPeerAuthority(); else policyRenewal.resume(); });
 window.addEventListener("pageshow", () => { policyRenewal.resume(); if (startRequestedAt !== null && !swarm) { byId("kill").disabled = true; status("Peer delivery stopped while this page was inactive. Playback uses origin; apply settings to rejoin."); } });
@@ -354,6 +371,7 @@ const policyRenewal = createPolicyRenewal({
     accountBudget.configure(current.accountBudget);
     if (identityChanged) { mediaRecovery.cancel("publisher-session-changed"); stopSwarm(); }
     if (identityChanged || configurationChanged) session = current;
+    turnCredentials.configure(current.turnCredentials, turnIdentity(current));
     const credentialInstalled = identityChanged || admissionCredential === priorCredential;
     if (credentialInstalled) admissionCredential = candidateCredential;
     deliveryPolicy = next; policyUnavailable = false;
@@ -390,6 +408,6 @@ setInterval(sendReport, 15000);
 setInterval(render, 1000);
 setInterval(() => { if (swarm) push(snapshots, { atMs: elapsed(), metrics: swarm.metrics() }, 60); }, 5000);
 try {
-  session = await fetchDiagnostics.json("session", "/session.json", { cache: "no-store" }); accountBudget.configure(session.accountBudget); byId("allowance").value = String(uploadBudget.snapshot().limit); await refreshPolicy(); byId("start").disabled = false;
+  session = await fetchDiagnostics.json("session", "/session.json", { cache: "no-store" }); accountBudget.configure(session.accountBudget); turnCredentials.configure(session.turnCredentials, turnIdentity(session)); byId("allowance").value = String(uploadBudget.snapshot().limit); await refreshPolicy(); byId("start").disabled = false;
   status(isSecureContext ? "Ready · choose a delivery mode and start playback." : "This address needs HTTPS for peer delivery. Origin playback is available.");
 } catch { status("The publisher is unavailable. Reload after it has started."); }

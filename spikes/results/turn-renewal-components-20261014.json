@@ -1,0 +1,81 @@
+{
+  "v": 1,
+  "kind": "optional-turn-renewal-component-checkpoint",
+  "date": "2026-10-14",
+  "parentSourceSha": "07ea96becce44fec6baa0b41f7719e0e99ee4031",
+  "defaultEnabled": false,
+  "runtimePins": [
+    {
+      "path": "demo/client.mjs",
+      "bytes": 34513,
+      "sha256": "1f2966a8e316b56e171fc7c6f78a3b607746f38b37c677734f618a4135c8351b"
+    },
+    {
+      "path": "demo/turn-credentials.mjs",
+      "bytes": 10503,
+      "sha256": "0e84f49714f9dc56b0d91dc63c07c6f3258fd8279ae7b539b878e12161e5658d"
+    },
+    {
+      "path": "demo/turn-credential-service.mjs",
+      "bytes": 12966,
+      "sha256": "6e8e463c6d402d911582a946c1fcebcd3b6492ddebb480cac35baa6b168aea4b"
+    },
+    {
+      "path": "demo/server.mjs",
+      "bytes": 19288,
+      "sha256": "64e050930578b15b9d2c4792553ecfb2ee04f21b3615b862248fd8877b915129"
+    },
+    {
+      "path": "scripts/broadcast.mjs",
+      "bytes": 9868,
+      "sha256": "d837d90e663928b01cd989ffdbf809ecd2d0edb065ad41426477d4623bbb8dac"
+    }
+  ],
+  "componentValidation": {
+    "serverFocusedCasesPassed": 11,
+    "serverGuardWholeMs": 1881,
+    "serverWorkerReapedAndGroupsAbsent": true,
+    "clientLifecycleCasesPassed": 10,
+    "pageVMCasesPassed": 4,
+    "clientGuardWholeMs": 1115,
+    "clientWorkerReapedAndGroupsAbsent": true,
+    "realBrowserOrMediaActors": false,
+    "externalIssuerOrTURNContacted": false,
+    "independentReview": "R2 pass; retained R1 retry recovery finding closed",
+    "lateSettlementRetryRegression": true,
+    "serverSingleFlightIncludesUnsettledRawWork": true,
+    "clientSingleFlightIncludesUnsettledRawWork": true
+  },
+  "bounds": {
+    "viewerCaches": 64,
+    "viewerCookieSeconds": 10800,
+    "activeCredentialRequests": 64,
+    "upstreamTasks": 10,
+    "issuanceBurst": 10,
+    "issuanceTokenRefillMs": 3000,
+    "upstreamWholeMs": 4000,
+    "clientWholeMs": 5000,
+    "responseBytes": 16384,
+    "minimumTtlSeconds": 5,
+    "maximumTtlSeconds": 3600
+  },
+  "consent": {
+    "healthyRefreshRetainsValidConsentAdmissionAndSpend": true,
+    "expiryClearsUploadingAndRequiresApply": true,
+    "backgroundReturnDoesNotRejoin": true,
+    "returnedCredentialsDoNotGrantConsent": true
+  },
+  "openAcceptance": {
+    "actualBrowserRollover": true,
+    "internetRelayRenewal": true,
+    "sustainedCapacity": true,
+    "exactCandidateCIAndPackage": true,
+    "deploymentAndRelease": true
+  },
+  "evidenceSHA256": {
+    "serverManifest": "857cfb1eea4c5847d5bf4d73dbc700efdd6657c0f5528114b476ef62adfdf750",
+    "clientR2Manifest": "b964e1c78c9d2b683a76f9a1ed49efe5f78fe62e3c16e658f42042bcf86ff2cd",
+    "independentR2ReviewManifest": "c78eb8672a41488809b5c472cc219240ed047a394dcb255e7f94d2ea09fcf68e"
+  },
+  "privacy": "Numeric metadata and source digests only; no issuer addresses, cookies, credentials, account identifiers or private state contents."
+}

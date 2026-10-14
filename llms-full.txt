@@ -358,7 +358,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `reannounceDebounceMs` / `minReannounceGapMs` | `4000` / `12000` | Bound capacity-change presence announcements. |
 | `presenceIntervalMs` | `20000` | Presence heartbeat, jittered 30%. |
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
-| `iceServers` | one public STUN | Host-provided STUN/TURN configuration. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster CLI accepts a private `--ice-config FILE`. |
+| `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 
@@ -991,6 +991,20 @@ the configured origin; do not expose the trusted ledger methods directly or
 accept viewer-supplied account subjects as authentication. The session
 descriptor contains supported methods, bounds and fixed endpoint paths only.
 
+## Optional demo TURN renewal
+
+`startDemoServer({turnCredentials: {url: 'https://issuer.example/turn'}})` enables
+the demo's bounded, per-viewer credential adapter. Omit it for the existing
+static/default ICE path; it is mutually exclusive with `iceServers`. The demo
+and broadcaster CLIs expose the same choice as `--turn-credentials-url`.
+The [field guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#optional-turn-credential-renewal) describes the
+issuer response, limits, cookie and consent behaviour. The descriptor in
+`/session.json` contains only the fixed same-origin endpoint contract.
+
+This integration replaces demo swarms on successful renewal. The core
+`createHlsSwarm({iceServers})` option remains a configuration captured when the
+swarm is created; no seamless ICE-restart API is added.
+
 ## Node HLS publisher
 
 ```js
@@ -1268,14 +1282,59 @@ Checkpoint: 14 October 2026. The published experimental release is
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
 
-## Latest source checkpoint: 426 on 14 October 2026
+## Optional TURN renewal candidate
+
+The source candidate adds the optional server-owned credential adapter and
+expiry-aware demo client described in the [field guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#optional-turn-credential-renewal).
+It is off by default. Eleven server/owned-HTTP tests, ten client lifecycle
+tests and four page-VM integration cases pass. They cover separate viewer
+issuance, request bounds, cancellation, healthy refresh, spent allowances and
+expiry/background consent barriers. Owned validation workers were reaped. The
+[component checkpoint](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/turn-renewal-components-20261014.json)
+retains the tested source digests and separate acceptance limits. Independent
+R2 review confirms the timeout/retry correction; the original finding is retained.
+
+These are component tests. Actual browser playback through credential rollover,
+Internet relay renewal, sustained capacity and final release acceptance remain
+open. The pilot and shared TURN service are unchanged.
+
+## Earlier completed CI source: 07 on 14 October 2026
+
+Exact source `07ea96becce44fec6baa0b41f7719e0e99ee4031` passed all nine
+required jobs on attempt 1 of
+[CI run 38616043417](https://github.com/forgesworn/relayswarm/actions/runs/38616043417);
+the optional soak was skipped. The Windows CRLF observation-test correction
+retains six meaningful cases and the byte-exact LF diagnostic bundle.
+
+The Linux Chrome 155.0.8059.79 broadcast diagnostic passed all four checkpoints,
+including producer restart, with six verified peer loads/3,125,876 bytes.
+Low/high contributors recorded 221,840/2,904,036 uploaded bytes. All 239
+observation rows (77/82/20/60) were retained with zero drops, unknowns or
+unlabelled objects, and all four final extractions passed. Each contributor
+recorded one stall (2,938/1,968 ms); baseline and consumer recorded none.
+Fatal, native and append failures were zero. This uses an injected diagnostic
+bundle and declared loopback/headless/fake-media RTC fixture settings. It does
+not establish ordinary/physical qualification or repair the earlier failures.
+The raw receipt has no full actor/API or OS-reaping cleanup flags; recorder
+release does not replace that missing proof.
+
+The earlier `abb5de7` CI remains seven required PASS/Windows FAIL, with the
+media job PASS and dependent live-relay/optional soak skipped. The 426 CI's
+eight required PASS/media FAIL also remains. Exact-426 package/consumer/ESM
+proofs below remain bound to 426; fresh 07 package proof has not run. The
+[07 summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/07ea96b-ci-checkpoint-20261014.json) records these
+separate results. The deployed pilot stays 8f; v0.1.0 is published and PR 8/P01–P12
+remain open. Exact 07 retains the static TURN credential limitation below;
+the later renewal candidate's component evidence is separate.
+
+## Earlier source checkpoint: 426 on 14 October 2026
 
 Exact source `42608f758919628dfa86dee667f6c7f3050fbcc4` completed
 [CI run 38607468217](https://github.com/forgesworn/relayswarm/actions/runs/38607468217)
 with eight required jobs passing and one media job failing its first low-quality
-peer-load gate after 30 s. That RED remains. The following test-only diagnostic
-candidate has no new exact-head CI result yet; it changes observation, not
-playback policy, peer deadlines, origin reserve or upload consent.
+peer-load gate after 30 s. That RED remains. The later test-only diagnostic
+adds observation, preserving playback policy, peer deadlines, origin reserve
+and upload consent; its later CI results are recorded separately above.
 
 The separate local injected HAVE/deadline diagnostic passed in 33.759 s with
 six total verified peer loads/3,107,076 bytes across both qualities. Only the
@@ -1295,7 +1354,7 @@ The unpublished tarball is 1,044,255 bytes, SHA-256
 the rebuilt ESM is 121,478 bytes, SHA-256
 `612f5f502964462d8eba8909e5041db1030da96edbaea7dd5caa1088d1eac171`.
 Both workers, their groups, sampler children and scratch cleanup passed. These
-proofs belong to 426, not an upcoming documentation/test commit or release.
+proofs belong to 426, not 07, another documentation/test commit or a release.
 
 An existing shared TURN service was then confirmed separately from the earlier
 Till inventory. One controlled RelaySwarm TLS-relay check passed over 90.005 s
@@ -2870,7 +2929,7 @@ relays instead of the embedded one. Optional `--stun stun:stun.example:3478`
 STUN/TURN configuration. The same option is available to the broadcaster. The
 file is a canonical, owner-controlled POSIX regular file, mode 0600, with one
 link and at most 16 KiB; its parent must have no group/world writes or symlinks.
-Supply either `--stun` or `--ice-config`, rather than both.
+Supply only one of `--stun`, `--ice-config` or the optional renewal setting below.
 
 ```json
 {
@@ -2896,6 +2955,39 @@ The CLI configures an existing host-provided service; it supplies no managed
 TURN or super-peer deployment. A TCP TURN configuration needs its own actual
 transport, capacity and privacy acceptance. An unreachable peer should leave
 the viewer playing from origin.
+
+### Optional TURN credential renewal
+
+The demo and broadcaster accept
+`--turn-credentials-url https://issuer.example/turn`. It is disabled by default
+and uses an existing issuer; it does not deploy TURN. The fixed HTTPS URL must
+have no credentials, query or fragment. Its JSON response must contain exactly
+`urls` (one to four TURN URLs), `username`, `credential` and integer `ttl`
+(5–3,600 seconds). The issuer must mint fresh browser credentials per request.
+Its shared signing secret stays outside RelaySwarm.
+
+The server exposes a separate same-origin POST endpoint. Explicit peer
+Start/Apply obtains credentials; origin-only/native playback and two-second
+session polls do not mint them. A three-hour HttpOnly, SameSite=Strict cookie
+isolates each viewer's bounded cache; it is Secure on HTTPS and is not account
+authentication. Bounds are 64 viewer caches, 64 active endpoint requests,
+10 upstream tasks, a burst of 10 with one token restored per three seconds,
+four seconds for upstream headers/body and 16 KiB per response. Excess work
+is refused without evicting active viewer state.
+
+The client refreshes at two thirds of the conservative credential lifetime,
+with one request at a time and a five-second whole-request limit. Healthy
+renewal rebuilds peer connections while retaining valid consent, admission
+identity and spent allowances. Unexpired credentials can survive a failed
+refresh; expiry, configuration changes or page suspension stop peer delivery.
+Expiry clears uploading and requires fresh Apply. Returning credentials or
+returning to the page cannot restore upload consent. Origin playback remains
+available during peer reconnection. Receipts contain fixed lifecycle counters,
+not credential values, cookies or issuer addresses.
+
+Focused lifecycle, page-VM and owned HTTP tests pass. Real-browser playback
+through credential rollover, Internet relay renewal and sustained capacity
+remain acceptance gates.
 
 The embedded relay is for a controlled trial: at most 64 connections, eight
 subscriptions per connection, 24 KiB frames, 80 incoming messages per 10 s per
@@ -2989,7 +3081,26 @@ These field gates remain outstanding until their actual receipts are recorded.
 No new physical-device or internet-network result is claimed by the automated
 Chrome tests.
 
-## Latest controlled checks: 426 on 14 October 2026
+## Earlier completed fixture checkpoint: 07 on 14 October 2026
+
+[Exact 07 CI 38616043417](https://github.com/forgesworn/relayswarm/actions/runs/38616043417)
+passed all nine required jobs on attempt 1; optional soak was skipped. Its Linux
+Chrome 155.0.8059.79 injected broadcast fixture passed four checkpoints with six
+verified peer loads/3,125,876 bytes (low/high uploads 221,840/2,904,036).
+All 239 numeric observation rows and four final extractions passed without
+drops/unknowns/unlabelled objects. Each donor retained one stall; consumer and
+baseline had none, and fatal/native/append failures were zero. The raw receipt
+has no full actor/API or OS-reaping cleanup flags. This is automated headless
+loopback coverage with declared RTC/fake-media settings, not physical acceptance.
+
+Prior abb Windows RED and 426 media RED remain separate; no historical cause or
+playback repair is established. Package/ESM proofs belong to 426, with no fresh
+07 package proof yet. Deployed 8f is unchanged. Static credentials still limit
+exact 07; that CI does not qualify the later optional renewal candidate.
+The [07 summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/07ea96b-ci-checkpoint-20261014.json) retains
+these scopes; P01–P12, long/churn/physical/hard-NAT/cost and release gates stay open.
+
+## Earlier controlled checks: 426 on 14 October 2026
 
 The deployed pilot remains 8f. Later exact source 426 passed fresh offline
 package/ESM and installed native/fallback checks, but
@@ -3026,7 +3137,7 @@ changed. Its actual server quotas/allocation absence, physical devices, difficul
 NAT, wider networks, sustained cohorts/churn and matched wire/cost remain
 unproved. This result is separate from the earlier SSH-only simulation and Till
 inventory. See the [sanitised checkpoint](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/42608f7-source-and-tls-checkpoint-20261014.json).
-A new exact-head CI result and the full P01–P12/release gates remain pending.
+Later exact-07 CI passed separately above; the full P01–P12/release gates remain open.
 
 ## Current field checkpoint: 8f on 14 October 2026
 
@@ -4256,6 +4367,13 @@ ssh -N -L 1935:127.0.0.1:1935 deploy@your-host
 
 OBS then targets its own loopback address. The container router uses an internal app/router network plus a separate normal bridge needed for its loopback RTMP port publication; RTSP has no published host port. Container ingest mappings and the existing/new HTTPS proxy choices are in the [deployment guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md). Remote browsers require configured TLS or an explicit `--public-url https://your-hostname` behind an HTTPS proxy. The public origin must match browser Origin headers. Configure repeated `--relay wss://...` options if using external relays; otherwise the server supplies its own bounded relay at `/relay`. `--stun` accepts a STUN URL. Alternatively, `--ice-config FILE` loads private host-provided STUN/TURN browser credentials; the [field guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#use-separate-devices-and-networks) gives the bounded format and disclosure boundary. No TURN deployment is supplied.
 
+For an existing short-lived credential issuer, use
+`--turn-credentials-url https://issuer.example/turn` instead of `--stun` or
+`--ice-config`. The optional [renewal adapter](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#optional-turn-credential-renewal)
+is off by default. It obtains separate viewer credentials, refreshes active
+peer sessions and retains consent and spent allowances. It supplies no TURN
+deployment; expired credentials leave playback on origin until fresh Apply.
+
 ## Output and recovery
 
 Add `--account-budget` to offer the optional shared upload allowance. It keeps
@@ -4838,14 +4956,43 @@ request timings confirm matched donor requests started after receiver completion
 the [summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/d283071-ci-observations-20261014.json) separates
 that result from its macOS cancellation-test precondition correction.
 
-## Latest source checks: 426
+## Optional TURN renewal candidate
+
+The optional [credential adapter](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#optional-turn-credential-renewal)
+and expiry-aware demo client now have eleven server/owned-HTTP, ten lifecycle
+and four page-VM passes. Healthy refresh preserves valid consent, admission
+and durable spend; expiry/background barriers require fresh Apply. The option
+is off by default. Browser playback through rollover, Internet renewal,
+sustained capacity and deployment remain unverified; component passes do not
+close those gates.
+
+## Earlier completed CI source checks: 07
+
+Exact `07ea96becce44fec6baa0b41f7719e0e99ee4031` passed all nine required jobs
+on attempt 1 of
+[CI 38616043417](https://github.com/forgesworn/relayswarm/actions/runs/38616043417);
+the optional soak was skipped. The broadcast diagnostic passed four checkpoints
+with six verified loads/3,125,876 bytes. All 239 observation rows and four final
+extractions were retained without drops/unknowns/unlabelled objects. Each donor
+recorded one stall; baseline/consumer recorded none, with zero fatal/native/append
+failures. Declared injected/headless loopback fixture scope applies, and the raw
+receipt does not prove full actor/API or OS cleanup.
+
+The earlier abb Windows failure and 426 media failure remain. Fresh package
+proof belongs to 426; fresh 07 package/consumer/ESM has not run. The pilot remains
+8f and published release v0.1.0; all P01–P12/release acceptance stays open. Exact
+07 retains the static TURN lifecycle gap below; its CI does not qualify the
+later optional renewal candidate. See the
+[07 summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/07ea96b-ci-checkpoint-20261014.json).
+
+## Earlier source checks: 426
 
 [Exact 426 CI](https://github.com/forgesworn/relayswarm/actions/runs/38607468217)
 finished with eight required jobs passing and the media job RED at its 30 s
 first low-quality peer-load gate. Fresh production-only package/ESM, eleven
 imports, durable ledger replay and installed native/fallback checks pass at
-that exact source. The next candidate maintains bounded queued/accepted HAVE
-test observations; it has no new exact-head CI result or playback repair claim.
+that exact source. Later candidates maintain bounded queued/accepted HAVE
+test observations; their separate results above make no playback repair claim.
 
 A separate injected Mac diagnostic passed in 33.759 s: six total peer loads/
 3,107,076 bytes, with only the last high object observed after restart and
@@ -4857,7 +5004,7 @@ PCs in total, and had no active PC in the final seven samples. Video/time
 continued; this is not continuous TLS, both-quality, physical, hard-NAT, server
 quota or matched-cost acceptance. Client cleanup and separate issued-credential
 removal passed; the shared service and network rules were unchanged. See
-[status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#latest-source-checkpoint-426-on-14-october-2026) and the
+[status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#earlier-source-checkpoint-426-on-14-october-2026) and the
 [scope summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/42608f7-source-and-tls-checkpoint-20261014.json).
 Static ICE configuration has no supported credential renewal: the observed
 3,600 s issuer TTL does not prove fresh allocations/reconnections throughout the
@@ -5204,9 +5351,9 @@ records the later short/partial-long, TCP relay and Android checks separately.
 | P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Private durable ledger supports both Nostr and host website authentication. Controlled 55.780 s Chrome acceptance, 177 local publisher cases, 92 swarm cases, exact-source CI and 8f pilot deployment pass. Pilot Nostr is offered; website resolver is unconfigured. Real owner authentication and complete physical upload journeys remain open. Charges are reserved media payload, not an OS-wide meter |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-426 offline production-only package (226 members), eleven documented imports, durable account-ledger replay, rebuilt standalone ESM, installed CLI and separate-process verified native transfer/HTTP fallback pass; these unpublished exact-source assets do not close downloaded immutable-release acceptance |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-426 offline production-only package (226 members), eleven documented imports, durable account-ledger replay, rebuilt standalone ESM, installed CLI and separate-process verified native transfer/HTTP fallback pass; these unpublished exact-426 assets do not establish fresh 07 consumption or close downloaded immutable-release acceptance |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed 8f retains its nine-job CI/deployment/normal-TLS proofs and independent EE H1. Later source 426 has fresh consumer/ESM PASS but CI 38607468217 is eight required PASS/one media FAIL; next diagnostic candidate CI is pending. Ordinary sharing/fourteen-role REDs remain; assets unpublished and final release/production acceptance open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed 8f retains its nine-job CI/deployment/normal-TLS proofs and independent EE H1. Pushed 07 passed all nine required CI jobs attempt 1 (38616043417); its fresh package proof is pending. Earlier 426 consumer/ESM PASS and media CI FAIL remain source-bound. Ordinary sharing/fourteen-role REDs remain; assets unpublished and final release/production acceptance open |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Earlier Kit/OBS/private YouTube/Firefox evidence retained. Current 8f ordinary sharing and earlier fourteen-role qualification remain RED. Original cleanup failures and later absence remain separate. Existing shared-service TLS diagnostic passes within its declared scope: 34 verified fragments, positive TLS pairs 67/91 samples, four PCs and final seven samples without an active PC. It does not close continuous TLS, physical/hard-NAT or server-quota proof. Complete physical/Safari, 7200 s/22 churn, matched wire/billed cost and release gates remain open |
 
 ## Evidence rules

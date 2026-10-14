@@ -17,14 +17,43 @@ request timings confirm matched donor requests started after receiver completion
 the [summary](../spikes/results/d283071-ci-observations-20261014.json) separates
 that result from its macOS cancellation-test precondition correction.
 
-## Latest source checks: 426
+## Optional TURN renewal candidate
+
+The optional [credential adapter](FIELD-TEST.md#optional-turn-credential-renewal)
+and expiry-aware demo client now have eleven server/owned-HTTP, ten lifecycle
+and four page-VM passes. Healthy refresh preserves valid consent, admission
+and durable spend; expiry/background barriers require fresh Apply. The option
+is off by default. Browser playback through rollover, Internet renewal,
+sustained capacity and deployment remain unverified; component passes do not
+close those gates.
+
+## Earlier completed CI source checks: 07
+
+Exact `07ea96becce44fec6baa0b41f7719e0e99ee4031` passed all nine required jobs
+on attempt 1 of
+[CI 38616043417](https://github.com/forgesworn/relayswarm/actions/runs/38616043417);
+the optional soak was skipped. The broadcast diagnostic passed four checkpoints
+with six verified loads/3,125,876 bytes. All 239 observation rows and four final
+extractions were retained without drops/unknowns/unlabelled objects. Each donor
+recorded one stall; baseline/consumer recorded none, with zero fatal/native/append
+failures. Declared injected/headless loopback fixture scope applies, and the raw
+receipt does not prove full actor/API or OS cleanup.
+
+The earlier abb Windows failure and 426 media failure remain. Fresh package
+proof belongs to 426; fresh 07 package/consumer/ESM has not run. The pilot remains
+8f and published release v0.1.0; all P01–P12/release acceptance stays open. Exact
+07 retains the static TURN lifecycle gap below; its CI does not qualify the
+later optional renewal candidate. See the
+[07 summary](../spikes/results/07ea96b-ci-checkpoint-20261014.json).
+
+## Earlier source checks: 426
 
 [Exact 426 CI](https://github.com/forgesworn/relayswarm/actions/runs/38607468217)
 finished with eight required jobs passing and the media job RED at its 30 s
 first low-quality peer-load gate. Fresh production-only package/ESM, eleven
 imports, durable ledger replay and installed native/fallback checks pass at
-that exact source. The next candidate maintains bounded queued/accepted HAVE
-test observations; it has no new exact-head CI result or playback repair claim.
+that exact source. Later candidates maintain bounded queued/accepted HAVE
+test observations; their separate results above make no playback repair claim.
 
 A separate injected Mac diagnostic passed in 33.759 s: six total peer loads/
 3,107,076 bytes, with only the last high object observed after restart and
@@ -36,7 +65,7 @@ PCs in total, and had no active PC in the final seven samples. Video/time
 continued; this is not continuous TLS, both-quality, physical, hard-NAT, server
 quota or matched-cost acceptance. Client cleanup and separate issued-credential
 removal passed; the shared service and network rules were unchanged. See
-[status](STATUS.md#latest-source-checkpoint-426-on-14-october-2026) and the
+[status](STATUS.md#earlier-source-checkpoint-426-on-14-october-2026) and the
 [scope summary](../spikes/results/42608f7-source-and-tls-checkpoint-20261014.json).
 Static ICE configuration has no supported credential renewal: the observed
 3,600 s issuer TTL does not prove fresh allocations/reconnections throughout the
@@ -383,9 +412,9 @@ records the later short/partial-long, TCP relay and Android checks separately.
 | P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Private durable ledger supports both Nostr and host website authentication. Controlled 55.780 s Chrome acceptance, 177 local publisher cases, 92 swarm cases, exact-source CI and 8f pilot deployment pass. Pilot Nostr is offered; website resolver is unconfigured. Real owner authentication and complete physical upload journeys remain open. Charges are reserved media payload, not an OS-wide meter |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-426 offline production-only package (226 members), eleven documented imports, durable account-ledger replay, rebuilt standalone ESM, installed CLI and separate-process verified native transfer/HTTP fallback pass; these unpublished exact-source assets do not close downloaded immutable-release acceptance |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-426 offline production-only package (226 members), eleven documented imports, durable account-ledger replay, rebuilt standalone ESM, installed CLI and separate-process verified native transfer/HTTP fallback pass; these unpublished exact-426 assets do not establish fresh 07 consumption or close downloaded immutable-release acceptance |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed 8f retains its nine-job CI/deployment/normal-TLS proofs and independent EE H1. Later source 426 has fresh consumer/ESM PASS but CI 38607468217 is eight required PASS/one media FAIL; next diagnostic candidate CI is pending. Ordinary sharing/fourteen-role REDs remain; assets unpublished and final release/production acceptance open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed 8f retains its nine-job CI/deployment/normal-TLS proofs and independent EE H1. Pushed 07 passed all nine required CI jobs attempt 1 (38616043417); its fresh package proof is pending. Earlier 426 consumer/ESM PASS and media CI FAIL remain source-bound. Ordinary sharing/fourteen-role REDs remain; assets unpublished and final release/production acceptance open |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Earlier Kit/OBS/private YouTube/Firefox evidence retained. Current 8f ordinary sharing and earlier fourteen-role qualification remain RED. Original cleanup failures and later absence remain separate. Existing shared-service TLS diagnostic passes within its declared scope: 34 verified fragments, positive TLS pairs 67/91 samples, four PCs and final seven samples without an active PC. It does not close continuous TLS, physical/hard-NAT or server-quota proof. Complete physical/Safari, 7200 s/22 churn, matched wire/billed cost and release gates remain open |
 
 ## Evidence rules

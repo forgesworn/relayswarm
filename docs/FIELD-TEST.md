@@ -131,7 +131,7 @@ relays instead of the embedded one. Optional `--stun stun:stun.example:3478`
 STUN/TURN configuration. The same option is available to the broadcaster. The
 file is a canonical, owner-controlled POSIX regular file, mode 0600, with one
 link and at most 16 KiB; its parent must have no group/world writes or symlinks.
-Supply either `--stun` or `--ice-config`, rather than both.
+Supply only one of `--stun`, `--ice-config` or the optional renewal setting below.
 
 ```json
 {
@@ -157,6 +157,39 @@ The CLI configures an existing host-provided service; it supplies no managed
 TURN or super-peer deployment. A TCP TURN configuration needs its own actual
 transport, capacity and privacy acceptance. An unreachable peer should leave
 the viewer playing from origin.
+
+### Optional TURN credential renewal
+
+The demo and broadcaster accept
+`--turn-credentials-url https://issuer.example/turn`. It is disabled by default
+and uses an existing issuer; it does not deploy TURN. The fixed HTTPS URL must
+have no credentials, query or fragment. Its JSON response must contain exactly
+`urls` (one to four TURN URLs), `username`, `credential` and integer `ttl`
+(5–3,600 seconds). The issuer must mint fresh browser credentials per request.
+Its shared signing secret stays outside RelaySwarm.
+
+The server exposes a separate same-origin POST endpoint. Explicit peer
+Start/Apply obtains credentials; origin-only/native playback and two-second
+session polls do not mint them. A three-hour HttpOnly, SameSite=Strict cookie
+isolates each viewer's bounded cache; it is Secure on HTTPS and is not account
+authentication. Bounds are 64 viewer caches, 64 active endpoint requests,
+10 upstream tasks, a burst of 10 with one token restored per three seconds,
+four seconds for upstream headers/body and 16 KiB per response. Excess work
+is refused without evicting active viewer state.
+
+The client refreshes at two thirds of the conservative credential lifetime,
+with one request at a time and a five-second whole-request limit. Healthy
+renewal rebuilds peer connections while retaining valid consent, admission
+identity and spent allowances. Unexpired credentials can survive a failed
+refresh; expiry, configuration changes or page suspension stop peer delivery.
+Expiry clears uploading and requires fresh Apply. Returning credentials or
+returning to the page cannot restore upload consent. Origin playback remains
+available during peer reconnection. Receipts contain fixed lifecycle counters,
+not credential values, cookies or issuer addresses.
+
+Focused lifecycle, page-VM and owned HTTP tests pass. Real-browser playback
+through credential rollover, Internet relay renewal and sustained capacity
+remain acceptance gates.
 
 The embedded relay is for a controlled trial: at most 64 connections, eight
 subscriptions per connection, 24 KiB frames, 80 incoming messages per 10 s per
@@ -250,7 +283,26 @@ These field gates remain outstanding until their actual receipts are recorded.
 No new physical-device or internet-network result is claimed by the automated
 Chrome tests.
 
-## Latest controlled checks: 426 on 14 October 2026
+## Earlier completed fixture checkpoint: 07 on 14 October 2026
+
+[Exact 07 CI 38616043417](https://github.com/forgesworn/relayswarm/actions/runs/38616043417)
+passed all nine required jobs on attempt 1; optional soak was skipped. Its Linux
+Chrome 155.0.8059.79 injected broadcast fixture passed four checkpoints with six
+verified peer loads/3,125,876 bytes (low/high uploads 221,840/2,904,036).
+All 239 numeric observation rows and four final extractions passed without
+drops/unknowns/unlabelled objects. Each donor retained one stall; consumer and
+baseline had none, and fatal/native/append failures were zero. The raw receipt
+has no full actor/API or OS-reaping cleanup flags. This is automated headless
+loopback coverage with declared RTC/fake-media settings, not physical acceptance.
+
+Prior abb Windows RED and 426 media RED remain separate; no historical cause or
+playback repair is established. Package/ESM proofs belong to 426, with no fresh
+07 package proof yet. Deployed 8f is unchanged. Static credentials still limit
+exact 07; that CI does not qualify the later optional renewal candidate.
+The [07 summary](../spikes/results/07ea96b-ci-checkpoint-20261014.json) retains
+these scopes; P01–P12, long/churn/physical/hard-NAT/cost and release gates stay open.
+
+## Earlier controlled checks: 426 on 14 October 2026
 
 The deployed pilot remains 8f. Later exact source 426 passed fresh offline
 package/ESM and installed native/fallback checks, but
@@ -287,7 +339,7 @@ changed. Its actual server quotas/allocation absence, physical devices, difficul
 NAT, wider networks, sustained cohorts/churn and matched wire/cost remain
 unproved. This result is separate from the earlier SSH-only simulation and Till
 inventory. See the [sanitised checkpoint](../spikes/results/42608f7-source-and-tls-checkpoint-20261014.json).
-A new exact-head CI result and the full P01–P12/release gates remain pending.
+Later exact-07 CI passed separately above; the full P01–P12/release gates remain open.
 
 ## Current field checkpoint: 8f on 14 October 2026
 

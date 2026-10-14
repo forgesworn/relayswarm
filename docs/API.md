@@ -91,6 +91,20 @@ the configured origin; do not expose the trusted ledger methods directly or
 accept viewer-supplied account subjects as authentication. The session
 descriptor contains supported methods, bounds and fixed endpoint paths only.
 
+## Optional demo TURN renewal
+
+`startDemoServer({turnCredentials: {url: 'https://issuer.example/turn'}})` enables
+the demo's bounded, per-viewer credential adapter. Omit it for the existing
+static/default ICE path; it is mutually exclusive with `iceServers`. The demo
+and broadcaster CLIs expose the same choice as `--turn-credentials-url`.
+The [field guide](FIELD-TEST.md#optional-turn-credential-renewal) describes the
+issuer response, limits, cookie and consent behaviour. The descriptor in
+`/session.json` contains only the fixed same-origin endpoint contract.
+
+This integration replaces demo swarms on successful renewal. The core
+`createHlsSwarm({iceServers})` option remains a configuration captured when the
+swarm is created; no seamless ICE-restart API is added.
+
 ## Node HLS publisher
 
 ```js

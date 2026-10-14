@@ -15,6 +15,7 @@ import { cap, now, bounded, stamp, journal } from "./account-browser-guard.mjs";
 const input = JSON.parse(await readFile(process.env.RELAYSWARM_ACCOUNT_INPUT, "utf8"));
 const clock = input.clock;
 const workerReceipt = input.workerReceipt;
+const turnRenewal = input.values["turn-renewal"] === true;
 // The supervisor records this direct child's group before authorising any setup.
 await new Promise((resolve) => {
   const lost = () => process.exit(1);
@@ -23,14 +24,17 @@ await new Promise((resolve) => {
   process.send({ ready: true });
 });
 const args = ["--autoplay-policy=no-user-gesture-required", "--disable-features=WebRtcHideLocalIpsWithMdns", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"];
-const receipt = { v: 1, kind: "relayswarm-account-budget-browser", at: new Date().toISOString(), ok: false,
+const receipt = { v: 1, kind: turnRenewal ? "relayswarm-account-budget-turn-renewal-browser" : "relayswarm-account-budget-browser", at: new Date().toISOString(), ok: false,
   scope: { network: "loopback", physicalDevices: false, wholeMs: 180000, browserFlags: args,
     signer: "disposable NIP-07 bridge with real signatures", websiteAccount: "test-owned authenticated session",
     quota: "durable accepted media reservations; not wire metering or NAT acceptance" }, checkpoints: [], failures: [], cleanup: {} };
+if (turnRenewal) Object.assign(receipt.scope, { turnCredentialRenewal: true, issuer: "owned fake response; no issuer DNS or HTTP", turnEndpoint: "unavailable loopback TCP port9",
+  actualInternetTurnOrTlsRelayProof: false, mediaTransport: "real loopback WebRTC host path", credentialTtlSeconds: 15 });
 const contexts = [], pages = [], pageErrors = [], renewals = {};
 const accountKey = generateSecretKey(), accountPubkey = getPublicKey(accountKey);
 const websiteSession = randomBytes(32).toString("hex"), websiteDigest = createHash("sha256").update(websiteSession).digest();
 let root = input.root, fixture, demo, browser, browserServer, expired = false;
+let issuerCalls = 0;
 const begin = performance.now();
 const log = (message) => console.error(`[account-budget-browser] ${message}`);
 const budget = (maximum) => cap(clock, "work", maximum);
@@ -44,7 +48,11 @@ const save = async () => { await writeFile(workerReceipt, JSON.stringify(receipt
 try {
   receipt.stage = "media-setup"; cap(clock, "work", 1);
   fixture = await createMediaFixture({ sectionSeconds: 60 });
-  const config = { mediaDir: fixture.directory, publisherState: join(root, "publisher.json"), iceServers: [],
+  const config = { mediaDir: fixture.directory, publisherState: join(root, "publisher.json"),
+    ...(turnRenewal ? { turnCredentials: { url: "https://issuer.invalid/turn", fetchImpl: async () => {
+      issuerCalls++;
+      return new Response(JSON.stringify({ urls: ["turn:127.0.0.1:9?transport=tcp"], username: `owned-${issuerCalls}`, credential: `owned-test-${issuerCalls}`, ttl: 15 }), { headers: { "content-type": "application/json" } });
+    } } } : { iceServers: [] }),
     accountBudget: { statePath: join(root, "account-budget.json"), grantTtlSeconds: 30,
       resolveWebsiteAccount(request, { signal }) {
         if (signal.aborted) return null;
@@ -72,7 +80,11 @@ try {
     assert.ok(!JSON.stringify(report).includes(accountPubkey), "Player receipts must omit the stable account identity");
     return { name, totals: report.totals, local: report.uploadBudget, shared: report.accountBudget,
       uploadChecked: await page.locator("#upload").isChecked(), telemetryChecked: await page.locator("#telemetry").isChecked(),
-      serving: report.current?.metrics.serving ?? false, currentTime: report.player.currentTime, fatalErrors: report.player.fatalErrors };
+      serving: report.current?.metrics.serving ?? false, currentTime: report.player.currentTime, fatalErrors: report.player.fatalErrors,
+      ...(turnRenewal ? { turn: { refreshes: report.turnCredentials?.refreshes ?? null, available: report.turnCredentials?.available ?? null,
+        failures: report.turnCredentials?.failures ?? null, remainingMs: report.turnCredentials?.remainingMs ?? null },
+      activeSwarmStartedAtMs: report.current?.startedAtMs ?? null, activeSwarmPeerLoads: report.current?.metrics.segments.peerFirstLoaded ?? null,
+      activeSwarmPeerBytes: report.current?.metrics.bytes.peerFirst ?? null } : {}) };
   };
   const checkpoint = async (name) => { receipt.checkpoints.push({ name, atMs: Math.round(performance.now() - begin), viewers: await Promise.all(pages.map(({ name, page }) => inspect(name, page))) }); await save(); log(name); };
   async function viewer(name, { context, method, level = 0, upload = false } = {}) {
@@ -110,17 +122,44 @@ try {
   const nostr = await viewer("nostr-contributor", { context: persistent, method: "nostr", level: 0, upload: true });
   const website = await viewer("website-contributor", { method: "website", level: 1, upload: true });
   const consumer = await viewer("receive-only");
+  const turnBefore = turnRenewal ? await Promise.all(pages.map(({ name, page }) => inspect(name, page))) : null;
+  if (turnRenewal) for (const before of turnBefore) assert.ok(Number.isFinite(before.activeSwarmStartedAtMs));
   receipt.stage = "verified-peer-delivery";
   await consumer.waitForFunction(() => window.relaySwarmDemo.report().player.fragments.some((fragment) => fragment.source === "peer" && fragment.level === 0), null, { timeout: budget(20000) });
   await consumer.locator("#quality").selectOption("1");
   await consumer.waitForFunction(() => window.relaySwarmDemo.report().player.fragments.some((fragment) => fragment.source === "peer" && fragment.level === 1), null, { timeout: budget(20000) });
   receipt.stage = "account-renewal";
-  for (const page of [nostr, website]) await page.waitForFunction(() => window.relaySwarmDemo.report().durationMs >= 35000 && window.relaySwarmDemo.report().accountBudget.available, null, { timeout: budget(40000) });
+  // The additional TURN gate shares the existing first40s renewal phase; it
+  // does not append a new wait budget or renew the original worker deadline.
+  const renewalEnd = turnRenewal ? now() + BigInt(budget(40000)) * 1000000n : null;
+  for (const page of [nostr, website]) await page.waitForFunction(() => window.relaySwarmDemo.report().durationMs >= 35000 && window.relaySwarmDemo.report().accountBudget.available, null,
+    { timeout: turnRenewal ? cap({ work: String(renewalEnd) }, "work", budget(40000)) : budget(40000) });
   assert.ok(renewals["nostr-contributor"] > 0 && renewals["website-contributor"] > 0);
   assert.equal(pages[0].signerCalls(), 1, "Page-key renewal does not prompt the stable signer again");
   assert.equal(pages[0].keyReads(), 1);
   assert.equal(pages[1].signerCalls(), 0);
   assert.equal(pages[1].keyReads(), 0);
+  if (turnRenewal) {
+    receipt.stage = "turn-credential-rollover";
+    await consumer.waitForFunction((before) => {
+      const report = window.relaySwarmDemo.report();
+      return report.durationMs >= 35000 && report.turnCredentials?.refreshes >= 2
+        && report.turnCredentials.refreshes > before.refreshes && report.current?.startedAtMs > before.startedAtMs
+        && report.current?.metrics.segments.peerFirstLoaded > 0 && report.current?.metrics.bytes.peerFirst > 0;
+    }, { startedAtMs: turnBefore[2].activeSwarmStartedAtMs, refreshes: turnBefore[2].turn.refreshes }, { timeout: cap({ work: String(renewalEnd) }, "work", budget(40000)) });
+    const after = await Promise.all(pages.map(({ name, page }) => inspect(name, page)));
+    for (let i = 0; i < after.length; i++) {
+      assert.ok(after[i].turn.refreshes >= 2); assert.equal(after[i].turn.available, true);
+      assert.ok(Number.isSafeInteger(after[i].local.spent) && Number.isSafeInteger(turnBefore[i].local.spent) && after[i].local.spent >= turnBefore[i].local.spent);
+      if (i < 2) {
+        assert.ok(Number.isSafeInteger(after[i].shared.spent) && Number.isSafeInteger(turnBefore[i].shared.spent) && after[i].shared.spent >= turnBefore[i].shared.spent);
+        assert.equal(after[i].uploadChecked, true); assert.equal(after[i].serving, true);
+      }
+      else { assert.equal(after[i].uploadChecked, false); assert.equal(after[i].totals.uploaded, 0); }
+    }
+    receipt.turnRollover = { issuerCalls, before: turnBefore, after };
+    await checkpoint("turn-rollover-preserves-consent-and-spend-with-new-swarm-peer-delivery");
+  }
   receipt.renewals = { ...renewals }; receipt.scope.accountGrantTtlSeconds = 30;
   await checkpoint("both-authentication-paths-reserve-before-real-peer-upload");
   const original = await Promise.all([inspect("nostr", nostr), inspect("website", website)]);

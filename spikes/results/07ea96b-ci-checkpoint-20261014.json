@@ -1,0 +1,141 @@
+{
+  "v": 1,
+  "kind": "sanitised-exact07-CI-checkpoint",
+  "date": "2026-10-14",
+  "sourceSha": "07ea96becce44fec6baa0b41f7719e0e99ee4031",
+  "deployedSourceSha": "8f482b4528a671acfe9f1afc336cce5743aaaefd",
+  "CI": {
+    "runId": 38616043417,
+    "attempt": 1,
+    "requiredPassed": 9,
+    "requiredFailed": 0,
+    "optionalSoakSkipped": true,
+    "windowsCRLFObservationCorrectionCases": 6,
+    "LFDiagnosticBundleByteExact": true
+  },
+  "broadcast": {
+    "pass": true,
+    "checkpoints": [
+      "real-time-low-rendition-peer-playback",
+      "real-time-high-rendition-peer-playback",
+      "before-producer-restart",
+      "producer-reconnect-stable-manifest-and-identity"
+    ],
+    "verifiedPeerLoads": 6,
+    "verifiedPeerBytes": 3125876,
+    "contributorLowUploadedPayloadBytes": 221840,
+    "contributorHighUploadedPayloadBytes": 2904036,
+    "observations": {
+      "rows": 239,
+      "byRole": {
+        "contributor-low": 77,
+        "contributor-high": 82,
+        "baseline": 20,
+        "consumer": 60
+      },
+      "dropped": 0,
+      "unknown": 0,
+      "unlabelled": 0,
+      "finalExtractionsPassed": 4,
+      "acceptedDeletionsRetained": false
+    },
+    "roles": {
+      "contributor-low": {
+        "stalls": 1,
+        "stallMs": 2938,
+        "fatalErrors": 0,
+        "nativeErrors": 0,
+        "appendFailures": 0
+      },
+      "contributor-high": {
+        "stalls": 1,
+        "stallMs": 1968,
+        "fatalErrors": 0,
+        "nativeErrors": 0,
+        "appendFailures": 0
+      },
+      "baseline": {
+        "stalls": 0,
+        "stallMs": 0,
+        "fatalErrors": 0,
+        "nativeErrors": 0,
+        "appendFailures": 0
+      },
+      "consumer": {
+        "stalls": 0,
+        "stallMs": 0,
+        "fatalErrors": 0,
+        "nativeErrors": 0,
+        "appendFailures": 0
+      }
+    },
+    "bundle": {
+      "bytes": 749444,
+      "sha256": "b9e8366d8dff4bd29fcc263463fb152701f2e7d57a7bd277c7cfd36d0e2bd254",
+      "sourcePins": {
+        "client": "02d2b54d5ccfd04bea1e665e3f26aae1b302b4beb8c02ae5bd175df381336415",
+        "swarm": "69406d71e11537d78fceef47ec70e403c1d3f475354eb4daa08bac52ffe63f14",
+        "peer": "86706487235c536f9f25e81d59df7d220a04755a872ba8a3e1057b503c615005"
+      }
+    },
+    "scope": {
+      "browserVersion": "155.0.8059.79",
+      "platform": "Linux CI",
+      "injectedDiagnosticBundle": true,
+      "headless": true,
+      "loopback": true,
+      "autoplayOverride": true,
+      "fakeMediaPermissionWarmup": true,
+      "mDNSHidingDisabled": true,
+      "ordinaryOrPhysicalQualification": false
+    },
+    "cleanup": {
+      "rawReceiptHasFullActorOrOSReapingFlags": false,
+      "OSCleanupStatus": "not independently established by this receipt",
+      "recorderReleaseIsNotActorReaping": true
+    },
+    "historicalFailureCauseOrPlaybackRepairClaimed": false
+  },
+  "priorCI": {
+    "abb5de7": {
+      "runId": 38614934872,
+      "requiredPassed": 7,
+      "windowsFailed": true,
+      "mediaPassed": true,
+      "dependentLiveRelaySkipped": true,
+      "optionalSoakSkipped": true
+    },
+    "42608f7": {
+      "runId": 38607468217,
+      "requiredPassed": 8,
+      "mediaFailed": true
+    }
+  },
+  "packageEvidence": {
+    "provedSourceSha": "42608f758919628dfa86dee667f6c7f3050fbcc4",
+    "fresh07PackageConsumerOrESMExecuted": false,
+    "assetsUnpublished": true,
+    "historical426PackageMembers": 226,
+    "historical426DocumentedImports": 11
+  },
+  "TURN": {
+    "previous90SecondSharedServiceResultRemainsSeparate": true,
+    "staticCredentialLimitationAppliesToPushed07": true,
+    "localRenewalWorkAcceptanceVerified": false,
+    "renewalDeployed": false,
+    "continuousTLSOrHardNATProved": false
+  },
+  "release": {
+    "published": "v0.1.0",
+    "pullRequestOpen": true,
+    "allP01toP12Open": true,
+    "productionReady": false
+  },
+  "evidenceSHA256": {
+    "terminal": "ab567ecd7883c6f39815d3502daff1f7c1e6cc9324a9e186d185c21931259991",
+    "artifactMetadata": "6f1b1e42ce24fa1fafd405638965982e5097b7b0bb80d91473fc16012661197d",
+    "archive": "01bc9f52a3ca0b56f9cf37ebced9a634dcea2c62c6251618c080434c934b71f7",
+    "receipt": "291545daf5c5978c289a9582167ac32d5d612c15a63a6144b9361e690f507e72"
+  },
+  "privacy": "No service URLs, credentials, SDP, candidate addresses, account identities, private billing or state bodies."
+}

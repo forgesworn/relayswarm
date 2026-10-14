@@ -9,14 +9,59 @@ Checkpoint: 14 October 2026. The published experimental release is
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
 
-## Latest source checkpoint: 426 on 14 October 2026
+## Optional TURN renewal candidate
+
+The source candidate adds the optional server-owned credential adapter and
+expiry-aware demo client described in the [field guide](FIELD-TEST.md#optional-turn-credential-renewal).
+It is off by default. Eleven server/owned-HTTP tests, ten client lifecycle
+tests and four page-VM integration cases pass. They cover separate viewer
+issuance, request bounds, cancellation, healthy refresh, spent allowances and
+expiry/background consent barriers. Owned validation workers were reaped. The
+[component checkpoint](../spikes/results/turn-renewal-components-20261014.json)
+retains the tested source digests and separate acceptance limits. Independent
+R2 review confirms the timeout/retry correction; the original finding is retained.
+
+These are component tests. Actual browser playback through credential rollover,
+Internet relay renewal, sustained capacity and final release acceptance remain
+open. The pilot and shared TURN service are unchanged.
+
+## Earlier completed CI source: 07 on 14 October 2026
+
+Exact source `07ea96becce44fec6baa0b41f7719e0e99ee4031` passed all nine
+required jobs on attempt 1 of
+[CI run 38616043417](https://github.com/forgesworn/relayswarm/actions/runs/38616043417);
+the optional soak was skipped. The Windows CRLF observation-test correction
+retains six meaningful cases and the byte-exact LF diagnostic bundle.
+
+The Linux Chrome 155.0.8059.79 broadcast diagnostic passed all four checkpoints,
+including producer restart, with six verified peer loads/3,125,876 bytes.
+Low/high contributors recorded 221,840/2,904,036 uploaded bytes. All 239
+observation rows (77/82/20/60) were retained with zero drops, unknowns or
+unlabelled objects, and all four final extractions passed. Each contributor
+recorded one stall (2,938/1,968 ms); baseline and consumer recorded none.
+Fatal, native and append failures were zero. This uses an injected diagnostic
+bundle and declared loopback/headless/fake-media RTC fixture settings. It does
+not establish ordinary/physical qualification or repair the earlier failures.
+The raw receipt has no full actor/API or OS-reaping cleanup flags; recorder
+release does not replace that missing proof.
+
+The earlier `abb5de7` CI remains seven required PASS/Windows FAIL, with the
+media job PASS and dependent live-relay/optional soak skipped. The 426 CI's
+eight required PASS/media FAIL also remains. Exact-426 package/consumer/ESM
+proofs below remain bound to 426; fresh 07 package proof has not run. The
+[07 summary](../spikes/results/07ea96b-ci-checkpoint-20261014.json) records these
+separate results. The deployed pilot stays 8f; v0.1.0 is published and PR 8/P01–P12
+remain open. Exact 07 retains the static TURN credential limitation below;
+the later renewal candidate's component evidence is separate.
+
+## Earlier source checkpoint: 426 on 14 October 2026
 
 Exact source `42608f758919628dfa86dee667f6c7f3050fbcc4` completed
 [CI run 38607468217](https://github.com/forgesworn/relayswarm/actions/runs/38607468217)
 with eight required jobs passing and one media job failing its first low-quality
-peer-load gate after 30 s. That RED remains. The following test-only diagnostic
-candidate has no new exact-head CI result yet; it changes observation, not
-playback policy, peer deadlines, origin reserve or upload consent.
+peer-load gate after 30 s. That RED remains. The later test-only diagnostic
+adds observation, preserving playback policy, peer deadlines, origin reserve
+and upload consent; its later CI results are recorded separately above.
 
 The separate local injected HAVE/deadline diagnostic passed in 33.759 s with
 six total verified peer loads/3,107,076 bytes across both qualities. Only the
@@ -36,7 +81,7 @@ The unpublished tarball is 1,044,255 bytes, SHA-256
 the rebuilt ESM is 121,478 bytes, SHA-256
 `612f5f502964462d8eba8909e5041db1030da96edbaea7dd5caa1088d1eac171`.
 Both workers, their groups, sampler children and scratch cleanup passed. These
-proofs belong to 426, not an upcoming documentation/test commit or release.
+proofs belong to 426, not 07, another documentation/test commit or a release.
 
 An existing shared TURN service was then confirmed separately from the earlier
 Till inventory. One controlled RelaySwarm TLS-relay check passed over 90.005 s

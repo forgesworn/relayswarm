@@ -110,6 +110,26 @@ test("Chrome executable wrapper journals before child launch and its original wa
 
 const probeError = (code) => Object.assign(new Error("owned probe fixture"), { code });
 
+test("absent or changed leaders cannot authorise group signals; absent-leader reaping only observes", async () => {
+  const owner = { pid: 2147483000, pgid: 2147483000, birth: "owned-fixture" };
+  for (const live of [null, { ...owner, birth: "reused" }, { ...owner, pgid: owner.pgid - 1 }]) {
+    const signals = [];
+    const operations = { readBirth: () => live, kill: (_pid, signal) => { signals.push(signal); } };
+    assert.throws(() => signalOwned(owner, "SIGTERM", operations), /identity changed/u);
+    assert.deepEqual(signals, [0], "a probe is not permission to signal a missing or changed leader");
+  }
+  const signals = []; let probes = 0;
+  const operations = { readBirth: () => null, kill: (_pid, signal) => {
+    signals.push(signal); if (++probes >= 3) throw probeError("ESRCH");
+  } };
+  assert.equal(await reapOwned(owner, { reap: String(now() + 100000000n) }, operations), true);
+  assert.ok(signals.every(signal => signal === 0));
+  const originalEnd = String(now() + 10000000n);
+  await assert.rejects(reapOwned(owner, { reap: originalEnd }, { readBirth: () => null, kill: (_pid, signal) => {
+    assert.equal(signal, 0); throw probeError("EPERM");
+  } }), /ownership UNKNOWN/u);
+});
+
 test("EPERM is not absence and only later explicit ESRCH completes owned reaping", async () => {
   const owner = { pid: 2147483000, pgid: 2147483000, birth: "owned-fixture" };
   assert.equal(groupAbsent(owner.pid, () => { throw probeError("EPERM"); }), false);
