@@ -63,8 +63,8 @@ async function linkedFixture(options = {}, LoaderImpl = Loader) {
   swarm.attach(hls);
   const pool = new RelayPool([relay.url]); await pool.connect();
   await until(() => swarm.metrics().pubkey);
-  const addPeer = async (channel = new RecordedChannel()) => {
-    const peer = new RelaySwarmSession({ pool, swarmId: base.swarmId }); peer.start(); peers.push(peer);
+  const addPeer = async (channel = new RecordedChannel(), peerPool = pool) => {
+    const peer = new RelaySwarmSession({ pool: peerPool, swarmId: base.swarmId }); peer.start(); peers.push(peer);
     const count = connections.length, accepted = swarm.metrics().peers.offersAccepted;
     peer.sendSignal(swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: `fixture-${count}`, payload: { sdp: "fixture-offer", ...(options.admit ? { ticket: "fixture-ticket" } : {}) } });
     await until(() => connections.length > count && swarm.metrics().peers.offersAccepted > accepted);
@@ -350,6 +350,139 @@ test("dialling heartbeats and cooldowns skip checks but changed tickets and answ
     assert.equal(swarm.metrics().peers.dialsStarted, 1);
     witness.close();
   } finally { swarm.stop(); peer.close(); pool.close(); await relay.close(); }
+});
+
+test("own ticket renewal preserves a live relay peer, verified media, held bytes and spent allowance", async () => {
+  const verified = [], reservations = [], trace = [], announcements = [];
+  let allowed = true;
+  const http = createServer(async (request, response) => {
+    const chunks = []; for await (const chunk of request) chunks.push(chunk);
+    verified.push(JSON.parse(Buffer.concat(chunks)));
+    response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ admitted: allowed }));
+  });
+  http.listen(0, "127.0.0.1"); await once(http, "listening");
+  const playback = peerPlaybackOptions();
+  const fixture = await linkedFixture({ ...playback.options, serve: true, ticket: "own-before", maxUploadBytesPerSession: 96,
+    reannounceDebounceMs: 1, minReannounceGapMs: 0,
+    reserveUploadBytes: (size) => { reservations.push(size); return true; },
+    admit: async (pubkey, ticket, { signal }) => {
+      const response = await fetch(`http://127.0.0.1:${http.address().port}/verify`, { method: "POST", body: JSON.stringify({ pubkey, ticket }), signal });
+      return (await response.json()).admitted;
+    },
+  });
+  try {
+    const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 1, trace, "same-link")), peer = fixture.peers[0];
+    peer.onPresence(({ from, payload }) => { if (from === fixture.swarm.metrics().pubkey) announcements.push(payload.ticket); });
+    await fixture.load(); await until(() => fixture.swarm.metrics().bytes.held === 32);
+    const loader = fixture.hls.config.fLoader, pubkey = fixture.swarm.metrics().pubkey;
+    const upload = async (id) => {
+      channel.receive(JSON.stringify({ t: "want", id, k: playback.key }));
+      await until(() => channel.sent.some((frame) => frame.t === "eof" && frame.id === id));
+      const payload = channel.sent.filter((frame) => frame instanceof Uint8Array).at(-1);
+      assert.equal(createHash("sha256").update(payload).digest("hex"), createHash("sha256").update(playback.bytes).digest("hex"));
+    };
+    await upload(1001);
+    channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+    const before = fixture.swarm.metrics(), presence = before.relays.presenceSent;
+    assert.equal(fixture.swarm.updateTicket("own-before"), true);
+    await sleep(10); assert.equal(fixture.swarm.metrics().relays.presenceSent, presence, "same-ticket updates do not announce");
+    assert.equal(fixture.swarm.updateTicket("own-after"), true);
+    await until(() => announcements.includes("own-after"));
+    peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }], ticket: "remote-after" });
+    await until(() => verified.some((input) => input.ticket === "remote-after"));
+    await upload(1002);
+    assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+    const after = fixture.swarm.metrics();
+    assert.equal(fixture.hls.config.fLoader, loader); assert.equal(after.pubkey, pubkey);
+    assert.equal(after.peers.connected, 1); assert.equal(after.peers.linksOpened, 1); assert.equal(after.peers.linksClosed, 0);
+    assert.equal(channel.readyState, "open"); assert.equal(after.bytes.held, 32);
+    assert.equal(after.bytes.uploaded, 64); assert.equal(after.bytes.uploadRemaining, 32);
+    assert.equal(after.segments.peerFirstLoaded, 2); assert.deepEqual(reservations, [32, 32]);
+    assert.equal(verified.at(-1).ticket, "remote-after", "payload access checks the renewed remote credential online");
+    allowed = false; channel.receive(JSON.stringify({ t: "want", id: 1003, k: playback.key }));
+    await until(() => channel.readyState === "closed");
+    assert.equal(fixture.swarm.metrics().bytes.uploaded, 64);
+    fixture.swarm.stop(); assert.equal(fixture.swarm.updateTicket("late"), false);
+  } finally { await fixture.close(); http.closeAllConnections(); await new Promise((resolve) => http.close(resolve)); }
+});
+
+test("ticket updates reject unusable swarms and bounded invalid credentials", () => {
+  const gated = createHlsSwarm({ ...base, relays: ["wss://relay.example"], admit: () => true });
+  try {
+    for (const ticket of [null, "", {}, "x".repeat(2049), "é".repeat(1025)]) assert.equal(gated.updateTicket(ticket), false);
+    assert.equal(gated.updateTicket("valid"), true);
+    assert.equal(createHlsSwarm({ ...base, mode: "off" }).updateTicket("valid"), false);
+    assert.equal(createHlsSwarm({ ...base }).updateTicket("valid"), false);
+  } finally { gated.stop(); }
+});
+
+test("active ticket refresh floods retain only the latest credential within sixteen real HTTP checks", async () => {
+  const received = [], completed = [], held = new Map(); let peak = 0;
+  const http = createServer(async (request, response) => {
+    const chunks = []; for await (const chunk of request) chunks.push(chunk);
+    const input = JSON.parse(Buffer.concat(chunks)); received.push(input);
+    if (input.ticket.startsWith("old-")) {
+      held.set(input.pubkey, response); peak = Math.max(peak, held.size);
+      response.on("close", () => held.delete(input.pubkey));
+    } else response.writeHead(200, { "content-type": "application/json" }).end('{"admitted":true}');
+  });
+  http.listen(0, "127.0.0.1"); await once(http, "listening");
+  const fixture = await linkedFixture({ maxPeers: 17, serve: true, admit: async (pubkey, ticket, { signal }) => {
+    const response = await fetch(`http://127.0.0.1:${http.address().port}/verify`, { method: "POST", body: JSON.stringify({ pubkey, ticket }), signal });
+    const result = await response.json(); completed.push(ticket); return result.admitted;
+  } });
+  const extraPool = new RelayPool(fixture.pool.urls); await extraPool.connect();
+  const witness = new RelaySwarmSession({ pool: extraPool, swarmId: base.swarmId }); witness.start();
+  try {
+    const channels = []; for (let i = 0; i < 17; i++) channels.push(await fixture.addPeer(new RecordedChannel(), i < 16 ? fixture.pool : extraPool));
+    let observed = 0;
+    witness.onPresence(({ payload }) => { if (payload.have.length) observed++; });
+    let serial = 0;
+    const announce = (peer, ticket) => peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }], ticket,
+      have: [createHash("sha256").update(String(++serial)).digest("hex")] });
+    const before = received.length;
+    for (let i = 0; i < 16; i++) announce(fixture.peers[i], `old-${i}`);
+    await until(() => held.size === 16);
+    announce(fixture.peers[16], "seventeenth");
+    for (let round = 0; round < 4; round++) for (let i = 0; i < 16; i++) announce(fixture.peers[i], `latest-${round}-${i}`);
+    await until(() => observed === 81);
+    assert.equal(received.length, before + 16, "neither same-peer floods nor a seventeenth check start extra HTTP work");
+    for (const response of held.values()) response.writeHead(200, { "content-type": "application/json" }).end('{"admitted":true}');
+    await until(() => completed.filter((ticket) => ticket.startsWith("latest-3-")).length === 16);
+    assert.equal(received.length, before + 32); assert.equal(peak, 16);
+    assert.equal(received.some(({ ticket }) => /^latest-[012]-/.test(ticket)), false);
+    assert.equal(fixture.swarm.metrics().peers.connected, 17); assert.equal(fixture.swarm.metrics().peers.linksClosed, 0);
+    await fixture.load(); await until(() => fixture.swarm.metrics().bytes.held === 32);
+    const key = channels[0].sent.find((frame) => frame.t === "have" && frame.add?.length).add[0];
+    channels[0].receive(JSON.stringify({ t: "want", id: 2001, k: key }));
+    await until(() => fixture.swarm.metrics().bytes.uploaded === 32);
+    assert.equal(received.at(-1).ticket, "latest-3-0", "the old completion cannot overwrite the accepted new credential");
+    announce(fixture.peers[0], "old-stop"); await until(() => held.size === 1);
+    announce(fixture.peers[0], "never-after-stop"); await until(() => observed === 83);
+    fixture.swarm.stop(); await until(() => held.size === 0);
+    assert.equal(received.some(({ ticket }) => ticket === "never-after-stop"), false);
+  } finally { witness.close(); extraPool.close(); await fixture.close(); http.closeAllConnections(); await new Promise((resolve) => http.close(resolve)); }
+});
+
+test("full outgoing dial slots skip new presence checks but admit changed active tickets and incoming offers", async () => {
+  const relay = await startLocalRelay(), pool = new RelayPool([relay.url]), peers = [], checks = [];
+  const swarm = createHlsSwarm({ ...base, relays: [relay.url], maxDialsInFlight: 1, maxPeers: 4, admit: (_pubkey, ticket) => { checks.push(ticket); return true; } });
+  try {
+    swarm.attach({ config: { loader: Loader } }); await pool.connect(); await until(() => swarm.metrics().pubkey);
+    for (let i = 0; i < 3; i++) { const peer = new RelaySwarmSession({ pool, swarmId: base.swarmId }); peer.start(); peers.push(peer); }
+    let observed = 0; peers[2].onPresence(({ from }) => { if (from !== swarm.metrics().pubkey) observed++; });
+    const announce = (peer, ticket) => peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }], ticket });
+    announce(peers[0], "first"); await until(() => swarm.metrics().peers.dialsStarted === 1 && checks.length === 3);
+    const before = checks.length;
+    announce(peers[1], "cannot-dial"); await until(() => observed === 2); await sleep(20);
+    assert.equal(checks.length, before, "a spare maxPeers slot does not authorise wasted verification when outgoing slots are full");
+    announce(peers[0], "renewed-active"); await until(() => checks.at(-1) === "renewed-active");
+    peers[1].sendSignal(swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: "incoming-with-outgoing-full", payload: { sdp: "offer", ticket: "incoming" } });
+    await until(() => swarm.metrics().peers.offersAccepted === 1);
+    assert.equal(checks.filter((ticket) => ticket === "incoming").length, 2);
+    assert.equal(swarm.metrics().peers.dialsStarted, 1);
+  } finally { swarm.stop(); for (const peer of peers) peer.close(); pool.close(); await relay.close(); }
 });
 
 test("unchanged active credentials keep advisory open hints without trusting unknown full-capacity peers", async () => {

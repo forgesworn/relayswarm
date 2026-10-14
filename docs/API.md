@@ -31,11 +31,21 @@ object-transfer modules into an ordinary browser page.
 
 ## Browser loader
 
-`createHlsSwarm(options)` returns `{ attach(hls), stop(), metrics() }`.
+`createHlsSwarm(options)` returns
+`{ attach(hls), updateTicket(ticket), stop(), metrics() }`.
 `attach` wraps `hls.config.fLoader`; call it before `loadSource`. `stop` is the
 origin-only kill switch and closes connections, cancels pending work, releases
 held bytes and restores the original loader. Create a new swarm to participate
 again. Uploading defaults to off; `mode` defaults to `shadow`.
+
+`updateTicket(ticket)` refreshes this viewer's bounded opaque admission ticket
+without rebuilding connections, the loader or upload accounting. It returns
+`true` for an accepted ticket, including the current ticket, and `false` for an
+invalid ticket or stopped, disabled or ungated swarm. The host must first
+validate the credential's identity and expiry. Remote admission checks before
+SDP and media serving remain required; this method grants no new authority and
+does not restore consent. Use a new swarm when the publisher, policy or peer
+configuration changes.
 
 The complete options, callback contract, metrics and peer-first validation are
 in [INTEGRATION.md](../INTEGRATION.md). The host must honour upload consent and

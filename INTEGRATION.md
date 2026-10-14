@@ -62,6 +62,16 @@ was configured, and `stop()` puts the original back, closes every peer
 connection and relay socket, drops held segments and emits one final
 `onMetrics`. Requires a secure context (https, or localhost) for WebCrypto.
 
+For a same-identity admission renewal, `updateTicket(ticket)` replaces only this
+viewer's opaque ticket and schedules a bounded presence announcement. Established
+links, the loader, held segments, counters and upload reservations remain intact.
+It returns `true` for an accepted ticket (including an unchanged one), or `false`
+for an invalid ticket or stopped, disabled or ungated swarm. The host must validate
+its own credential's issuer, swarm, epoch and expiry before calling it, and retain
+expiry checks around asynchronous admission and upload reservations. It does not
+validate an opaque credential, extend policy authority or restore upload consent.
+Publisher, policy or peer-configuration changes still require reconfiguration.
+
 ## Options
 
 | Option | Default | What it does |

@@ -242,7 +242,18 @@ Chrome tests.
 
 ## Current field checkpoint: 14 October 2026
 
-The current deployed checkpoint is `ee1510d429ac85f3738c03f10a09b753ec4eb037`,
+The latest deployed application is `fa79c2260431cf7901921fab4eaca251c4988f4b`,
+with independent EE proxy provenance and all nine jobs green in
+[CI run 38496983011](https://github.com/forgesworn/relayswarm/actions/runs/38496983011).
+The [fresh public short check](../spikes/results/fa79c22-permanent-public-short-20261014.json)
+passed all three gates over 60.011 s with 13,206,248 verified peer bytes at both
+qualities and zero recorded stalls/errors/withdrawals. All actors/source closed.
+M4's zero-churn local check still hit the admission address cap and completed no
+peer links; raw two-context RTC also failed. Current source's in-place ticket
+renewal requires fresh acceptance. Sustained, device/network/cost and release
+gates remain open; see [status](STATUS.md).
+
+The preceding deployed checkpoint is `ee1510d429ac85f3738c03f10a09b753ec4eb037`,
 with permanently committed HTTP/1.1 and all nine required jobs green in
 [CI run 38492003110](https://github.com/forgesworn/relayswarm/actions/runs/38492003110)
 after one failed-job retry. The [fresh ordinary short check](../spikes/results/ee1510d-permanent-public-short-20261014.json)

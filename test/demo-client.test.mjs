@@ -6,16 +6,17 @@ import { webcrypto } from "node:crypto";
 
 const bundle = await build({ entryPoints: ["demo/client.mjs"], bundle: true, write: false, format: "esm", plugins: [{ name: "fixture", setup(builder) {
   builder.onResolve({ filter: /^(hls\.js|\.\.\/src\/browser\/hls-swarm\.mjs)$/ }, (args) => ({ path: args.path, namespace: "fixture" }));
-  builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={}; static isSupported(){return true;} constructor(){this.config={};} on(){} loadSource(){globalThis.fixture.sourceLoads++;} attachMedia(){} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;}, attach(hls){hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, metrics(){return {mode:options.mode, serving:options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
+  builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={}; static isSupported(){return true;} constructor(){this.config={};} on(){} loadSource(){globalThis.fixture.sourceLoads++;} attachMedia(){} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0, tickets:[]}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;}, updateTicket(ticket){if(record.stopped||globalThis.fixture.rejectTicketUpdates||globalThis.fixture.disabledSwarm)return false; options.ticket=ticket; record.tickets.push(ticket); return true;}, attach(hls){if(globalThis.fixture.disabledSwarm)return;hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, metrics(){return {mode:globalThis.fixture.disabledSwarm?'off':options.mode, disabledReason:globalThis.fixture.disabledSwarm?'no-webrtc':null, serving:!globalThis.fixture.disabledSwarm&&options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
 } }] });
 async function page(storage = new Map()) {
   const elements = new Map(), intervals = [], timers = new Map(), windowEvents = new Map(), documentEvents = new Map();
-  let clock = 0;
+  let clock = 0; const wallStart = Date.now();
+  class ClockDate extends Date { constructor(...args) { super(...(args.length ? args : [ClockDate.now()])); } static now() { return wallStart + clock; } }
   const element = (id) => { if (!elements.has(id)) elements.set(id, { value: "", checked: false, disabled: false, addEventListener(name, callback) { this[name] = callback; }, append() {} }); return elements.get(id); };
   element("mode").value = "off"; element("limit").value = "512000"; element("allowance").value = "100000000";
   const video = { addEventListener() {}, play: async () => {}, canPlayType: () => false };
   const fixture = { swarms: [], sourceLoads: 0, policy: { mode: null, revision: 0, telemetry: false }, session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment" } };
-  const context = { fixture, document: { visibilityState: "visible", addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now: () => clock }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, TextDecoder, TextEncoder, console,
+  const context = { Date: ClockDate, fixture, document: { visibilityState: "visible", addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now: () => clock }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, TextDecoder, TextEncoder, console,
     fetch: async (url, init) => { const value = fixture.fetch ? await fixture.fetch(url, init) : url === "/session.json" ? fixture.session : fixture.policy; return { ok: true, json: async () => structuredClone(value) }; },
     setTimeout(callback, ms) { const id = Symbol(); timers.set(id, { callback, ms }); return id; }, clearTimeout(id) { timers.delete(id); },
     setInterval(callback, ms) { intervals.push({ callback, ms }); }, window: { addEventListener(name, callback) { windowEvents.set(name, callback); } } };
@@ -119,6 +120,118 @@ test("late admission result remains bound to the configured session and admitted
   p.fixture.session = { ...p.fixture.session, swarmId: "new", streamEvent: { id: "new" }, admission: { ...p.fixture.session.admission, epoch: "epoch-b" } };
   await p.poll(); finishVerify({ admitted: true, epoch: "epoch-a" }); assert.equal(await pending, false);
   assert.equal(p.element("upload").checked, false); assert.equal(p.fixture.swarms.at(-1).options.serve, false);
+});
+
+async function admittedPage(ttl = 120, fixtureOptions = {}) {
+  const p = await page(); Object.assign(p.fixture, fixtureOptions); let issued = 0;
+  p.fixture.session.admission = { issuer: "issuer", epoch: "epoch-a", challengeEndpoint: "/challenge", ticketEndpoint: "/ticket", verifyEndpoint: "/verify" };
+  p.fixture.fetch = async (url, init) => {
+    if (url === "/session.json") return p.fixture.session;
+    if (url === "/delivery-policy.json") return p.fixture.policy;
+    if (p.fixture.admissionFetch) return p.fixture.admissionFetch(url, init);
+    if (url === "/verify") return { admitted: true, epoch: p.fixture.session.admission.epoch };
+    return { ...p.fixture.session.admission, swarmId: p.fixture.session.swarmId, challenge: "challenge", ticket: url === "/ticket" ? `ticket-${++issued}` : "challenge", expiresAt: Math.ceil(p.context.Date.now() / 1000) + ttl };
+  };
+  await p.poll(); p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+  return p;
+}
+
+test("same-config ticket renewal preserves the swarm, loader and spent allowance without reconsent", async () => {
+  const p = await admittedPage(), active = p.fixture.swarms.at(-1), count = p.fixture.swarms.length;
+  assert.equal(await active.options.reserveUploadBytes(4321), true); active.uploaded = 4321;
+  for (let i = 0; i < 51; i++) { p.jumpWithoutTimers(2000); await p.poll(); }
+  assert.equal(p.fixture.swarms.length, count); assert.equal(active.stopped, undefined);
+  assert.deepEqual(Array.from(active.tickets), ["ticket-2"]); assert.equal(active.options.ticket, "ticket-2");
+  assert.equal(p.context.window.relaySwarmDemo.report().uploadBudget.spent, 4321);
+  assert.equal(p.element("upload").checked, true); assert.equal(active.options.serve, true); assert.equal(p.fixture.sourceLoads, 1);
+  p.fixture.policy.mode = "off"; p.fixture.policy.revision++; await p.poll();
+  assert.equal(active.stopped, true); assert.equal(p.element("upload").checked, false);
+  p.fixture.policy.mode = "peer-first"; p.fixture.policy.revision++; await p.poll();
+  assert.equal(p.fixture.swarms.at(-1).options.serve, false);
+  assert.equal(p.fixture.swarms.at(-1).options.maxUploadBytesPerSession, 100000000 - 4321);
+});
+
+test("same-identity configuration changes rebuild rather than repurpose a live ticket update", async () => {
+  const p = await admittedPage(), active = p.fixture.swarms.at(-1);
+  p.fixture.session = { ...p.fixture.session, relays: ["wss://changed.example"], admission: { ...p.fixture.session.admission, verifyEndpoint: "/new-verify" } };
+  await p.poll(); assert.equal(active.stopped, true); assert.equal(active.tickets.length, 0);
+  assert.equal(p.fixture.swarms.at(-1).options.relays[0], "wss://changed.example");
+});
+
+test("a refused in-place ticket update fails closed without returning spent allowance", async () => {
+  const p = await admittedPage(10), active = p.fixture.swarms.at(-1);
+  await active.options.reserveUploadBytes(123); p.fixture.rejectTicketUpdates = true; await p.poll();
+  assert.equal(active.stopped, true); assert.equal(p.element("upload").checked, false);
+  const receipt = p.context.window.relaySwarmDemo.report();
+  assert.equal(receipt.policyRenewal.fresh, false); assert.equal(receipt.uploadBudget.spent, 123);
+  assert.equal(receipt.current.mode, "off");
+});
+
+test("disabled peer fallback renews its credential without declaring delivery policy unavailable", async () => {
+  const p = await admittedPage(10, { disabledSwarm: true }), prior = p.fixture.swarms.at(-1);
+  assert.equal(prior.options.mode, "peer-first", "the viewer requested peers while the implementation falls back to origin");
+  assert.equal(p.context.window.relaySwarmDemo.report().current.metrics.disabledReason, "no-webrtc");
+  await p.poll();
+  const current = p.fixture.swarms.at(-1), receipt = p.context.window.relaySwarmDemo.report();
+  assert.notEqual(current, prior); assert.equal(prior.stopped, true);
+  assert.equal(current.options.ticket, "ticket-2"); assert.equal(prior.tickets.length, 0);
+  assert.equal(receipt.policyRenewal.fresh, true); assert.equal(receipt.deliveryPolicy.unavailable, false);
+  assert.equal(receipt.current.metrics.mode, "off"); assert.equal(receipt.current.metrics.disabledReason, "no-webrtc");
+  assert.equal(receipt.current.metrics.serving, false); assert.equal(receipt.loaderRestored, true);
+  assert.equal(p.fixture.sourceLoads, 1, "renewal preserves the origin playback instance");
+});
+
+test("a renewal that loses credential CAS cannot replace a later explicit Apply ticket", async () => {
+  const p = await admittedPage(10); let finishTicket, tickets = 1;
+  p.fixture.admissionFetch = async (url) => {
+    if (url === "/verify") return { admitted: true, epoch: "epoch-a" };
+    const credential = { ...p.fixture.session.admission, swarmId: p.fixture.session.swarmId, challenge: "challenge", ticket: `ticket-${url === "/ticket" ? ++tickets : tickets}`, expiresAt: Math.ceil(p.context.Date.now() / 1000) + 120 };
+    if (url === "/ticket" && tickets === 2) return new Promise((resolve) => { finishTicket = () => resolve(credential); });
+    return credential;
+  };
+  const pending = p.poll(); for (let i = 0; i < 40 && !finishTicket; i++) await Promise.resolve(); assert.ok(finishTicket);
+  await p.submit(); const current = p.fixture.swarms.at(-1);
+  assert.equal(current.options.ticket, "ticket-3"); finishTicket(); await pending;
+  assert.equal(p.fixture.swarms.at(-1), current); assert.equal(current.options.ticket, "ticket-3"); assert.equal(current.tickets.length, 0);
+});
+
+test("a pending renewal cannot restore a hidden page's peer authority or upload consent", async () => {
+  const p = await admittedPage(10), active = p.fixture.swarms.at(-1); let finish;
+  await active.options.reserveUploadBytes(123);
+  p.fixture.admissionFetch = async (url) => {
+    const credential = { ...p.fixture.session.admission, swarmId: p.fixture.session.swarmId, challenge: "challenge", ticket: "late-renewal", expiresAt: Math.ceil(p.context.Date.now() / 1000) + 120 };
+    return url === "/ticket" ? new Promise((resolve) => { finish = () => resolve(credential); }) : credential;
+  };
+  const pending = p.poll(); for (let i = 0; i < 40 && !finish; i++) await Promise.resolve(); assert.ok(finish);
+  p.visibility("hidden"); const count = p.fixture.swarms.length; finish(); await pending; p.fixture.admissionFetch = undefined;
+  p.visibility("visible"); await p.poll();
+  assert.equal(p.fixture.swarms.length, count); assert.equal(active.stopped, true); assert.equal(active.tickets.length, 0);
+  assert.equal(p.element("upload").checked, false); assert.equal(p.context.window.relaySwarmDemo.report().uploadBudget.spent, 123);
+  await p.submit(); assert.equal(p.fixture.swarms.at(-1).options.serve, false);
+});
+
+test("own credential expiry before and after admission I/O clears contribution without renewal consent", async () => {
+  for (const expiryBefore of [true, false]) {
+    const p = await admittedPage(1), active = p.fixture.swarms.at(-1); let finish;
+    p.fixture.admissionFetch = (url) => url === "/verify" ? new Promise((resolve) => { finish = resolve; }) : assert.fail("unexpected admission request");
+    if (expiryBefore) p.jumpWithoutTimers(2000);
+    const pending = active.options.admit("peer", "remote-ticket", { signal: new AbortController().signal });
+    if (!expiryBefore) { assert.ok(finish); p.jumpWithoutTimers(2000); finish({ admitted: true, epoch: "epoch-a" }); }
+    assert.equal(await pending, false); assert.equal(active.stopped, true); assert.equal(p.element("upload").checked, false);
+    assert.equal(await active.options.reserveUploadBytes(1), false);
+    assert.equal(p.context.window.relaySwarmDemo.report().uploadBudget.spent, 0);
+  }
+});
+
+test("own expiry after a persisted upload reservation cannot refund it or restore consent", async () => {
+  const p = await admittedPage(1), active = p.fixture.swarms.at(-1); let finish;
+  p.context.navigator.locks.request = async (_name, _options, callback) => {
+    const reserved = callback(); await new Promise((resolve) => { finish = resolve; }); return reserved;
+  };
+  const pending = active.options.reserveUploadBytes(123);
+  assert.ok(finish); p.jumpWithoutTimers(2000); finish(); assert.equal(await pending, false);
+  assert.equal(active.stopped, true); assert.equal(p.element("upload").checked, false);
+  assert.equal(p.context.window.relaySwarmDemo.report().uploadBudget.spent, 123);
 });
 
 test("Apply awaiting a ticket cannot undo a newer hide/resume rejoin barrier", async () => {

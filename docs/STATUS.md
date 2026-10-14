@@ -62,7 +62,46 @@ merged source do not establish production readiness.
 
 ## Current source acceptance on 14 October
 
-The deployed application and permanent HTTP/1.1 proxy checkpoint is
+The deployed application is `fa79c2260431cf7901921fab4eaca251c4988f4b`, with
+all nine required jobs green on their first attempt in
+[CI run 38496983011](https://github.com/forgesworn/relayswarm/actions/runs/38496983011).
+The independent permanent HTTP/1.1 proxy remains attested to EE. The new image
+passed non-root preflight, clean writer drain, stable identity/lease checks and
+normal-TLS attestation. Its public client is 728,551 bytes, SHA-256
+`398ac43764774747fa2fa9a3d15805d66c30101057f664212c05f56cf5250702`.
+
+The [fresh fa79 public short check](../spikes/results/fa79c22-permanent-public-short-20261014.json)
+passed all three gates over 60.011 s: 30 verified peer loads and 13,206,248 bytes
+across both qualities. All recorded stalls, fatal/native/page errors, freezes and
+consent withdrawals were zero. All 393 completed controls used HTTP/1.1 and
+returned HTTP 200. Actual deployment/source identity and cleanup-v2 helper,
+input and journal provenance passed independent checks. All actors/source closed.
+
+Its offline production-only consumer passed all ten imports, packaged demo,
+installed CLI, verified separate-process native transfer and HTTP fallback.
+The unpublished tarball is 867,160 bytes/191 files, SHA-256
+`149eda2cea6abeb440e3a3d9a993bc2aadc302b5975dc9da79ae776be9e2eed9`.
+The rebuilt standalone ESM is 114,437 bytes, SHA-256
+`cb8e14ee74bf8eeaf6fbb88b9026b00de005190b23b6e7e4ceecd4d8a683b00e`.
+These remain local artifacts; publication/downloaded-release checks are open.
+
+M4 qualification remains red. The accelerated run completed 22 stop/rejoin
+cycles in 91.208 s before authority expiry; a separate zero-churn steady run
+stopped after 91.990 of 300 s on seven observed admission address-limit HTTP 429s.
+It observed zero completed peer links/payload and healthy resource headroom.
+A burst followed successful ticket renewals; the existing client rebuilt each
+swarm on renewal. A raw two-context M4 RTC diagnostic also selected no candidate
+pair and transferred zero bytes, without Nostr or admission. These results do not
+identify a VPN, browser or transport implementation cause. All owned test
+resources were removed, including a separately audited scratch-directory recovery.
+
+Current source adds in-place opaque-ticket renewal and early outgoing-capacity
+checks. Host identity/expiry checks, remote online admission, consent, limits and
+five-second authority remain enforced. These changes need fresh exact-source
+CI, package, cohort, deployment and sustained acceptance. They do not establish
+that M4 peer connectivity or the admission demand failure is resolved.
+
+The preceding deployed application and permanent HTTP/1.1 proxy checkpoint is
 `ee1510d429ac85f3738c03f10a09b753ec4eb037`. All nine required jobs passed in
 [CI run 38492003110](https://github.com/forgesworn/relayswarm/actions/runs/38492003110)
 after one failed-job retry. The original fMP4 startup timeout remains recorded;

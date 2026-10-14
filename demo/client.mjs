@@ -89,7 +89,7 @@ function configure() {
   const requestedMode = native || policyUnavailable || needsViewerApply || chosenMode === "off" ? "off" : deliveryPolicy.mode ?? chosenMode;
   const mode = session.admission && !admissionCredential ? "off" : requestedMode;
   const budget = uploadBudget.snapshot(), allowance = budget.limit, remaining = budget.remaining;
-  const admissionReady = !session.admission || admissionCredential && admissionCredential.epoch === session.admission.epoch && admissionCredential.expiresAt * 1000 > Date.now();
+  const admissionReady = ownCredentialFresh(session);
   activeConfig = { mode, upload: byId("upload").checked && mode !== "off" && budget.available && remaining > 0 && admissionReady, uploadAllowance: allowance, uploadLimit: Number(byId("limit").value), cellular: byId("cellular").checked, startedAtMs: elapsed() };
   swarm = createHlsSwarm({ mode, swarmId: session.swarmId, relays: session.relays, streamEvent: session.streamEvent, delegation: session.delegation, revokedDelegationIds: session.revokedDelegationIds, delegationRevocations: session.delegationRevocations, swarmParts: session.mediaCapabilities?.parts === true, originReserveMs: session.mediaCapabilities?.parts === true ? 500 : 2000,
     getCommitment: async (context, { signal }) => {
@@ -103,12 +103,12 @@ function configure() {
     secretKey: admissionKey,
     ...(configuredSession.admission && configuredCredential ? { ticket: configuredCredential.ticket, admit: async (pubkey, ticket, { signal }) => {
       try {
-        if (session !== configuredSession || !policyRenewal.fresh()) return false;
+        if (!peerAuthorityFresh(configuredSession) || signal.aborted) return false;
         const result = await fetchDiagnostics.json("admissionVerify", configuredSession.admission.verifyEndpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey, ticket }), signal });
-        return session === configuredSession && !signal.aborted && policyRenewal.fresh() && result.admitted === true && result.epoch === configuredSession.admission.epoch;
+        return peerAuthorityFresh(configuredSession) && !signal.aborted && result.admitted === true && result.epoch === configuredSession.admission.epoch;
       } catch { return false; }
     } } : {}),
-    reserveUploadBytes: async (amount, options) => policyRenewal.fresh() && await uploadBudget.reserve(amount, options) && policyRenewal.fresh(),
+    reserveUploadBytes: async (amount, options) => peerAuthorityFresh(configuredSession) && !options?.signal?.aborted && await uploadBudget.reserve(amount, options) && peerAuthorityFresh(configuredSession) && !options?.signal?.aborted,
     serve: activeConfig.upload, maxUploadBytesPerSession: remaining, maxUploadBytesPerSecond: activeConfig.uploadLimit, serveOnCellular: activeConfig.cellular,
     ...(session.iceServers ? { iceServers: session.iceServers } : {}),
   });
@@ -146,6 +146,21 @@ function report() {
 
 function sameIdentity(a, b) {
   return a?.swarmId === b?.swarmId && a?.streamEvent?.id === b?.streamEvent?.id && a?.admission?.epoch === b?.admission?.epoch && a?.admission?.issuer === b?.admission?.issuer;
+}
+function samePeerConfiguration(a, b) {
+  const fields = (value) => [value?.swarmId, value?.streamEvent, value?.relays, value?.admission, value?.manifest, value?.deliveryPolicyEndpoint, value?.commitmentEndpoint, value?.iceServers, value?.mediaCapabilities, value?.delegation, value?.revokedDelegationIds, value?.delegationRevocations];
+  return JSON.stringify(fields(a)) === JSON.stringify(fields(b));
+}
+function ownCredentialFresh(configuredSession) {
+  if (!configuredSession.admission) return true;
+  const credential = admissionCredential, admission = configuredSession.admission;
+  return Boolean(credential && credential.issuer === admission.issuer && credential.epoch === admission.epoch && credential.swarmId === configuredSession.swarmId && Number.isSafeInteger(credential.expiresAt) && credential.expiresAt * 1000 > Date.now());
+}
+function peerAuthorityFresh(configuredSession) {
+  if (session !== configuredSession || needsViewerApply || document.visibilityState !== "visible" || !policyRenewal.fresh()) return false;
+  if (ownCredentialFresh(configuredSession)) return true;
+  policyUnavailableNow("admission-expired");
+  return false;
 }
 async function obtainAdmission(candidateSession, existing, signal) {
   if (!candidateSession.admission) return null;
@@ -269,15 +284,25 @@ const policyRenewal = createPolicyRenewal({
   eligible: ({ base, current }) => sameIdentity(base, session) || sameIdentity(current, session),
   commit({ next, current, candidateCredential, priorCredential, renewAdmission }) {
     const identityChanged = !sameIdentity(current, session);
-    const changed = policyUnavailable || next.mode !== deliveryPolicy.mode || identityChanged;
-    if (identityChanged) { mediaRecovery.cancel("publisher-session-changed"); stopSwarm(); session = current; }
-    if (identityChanged || admissionCredential === priorCredential) admissionCredential = candidateCredential;
+    const configurationChanged = !samePeerConfiguration(current, session);
+    const changed = policyUnavailable || next.mode !== deliveryPolicy.mode || identityChanged || configurationChanged;
+    if (identityChanged) { mediaRecovery.cancel("publisher-session-changed"); stopSwarm(); }
+    if (identityChanged || configurationChanged) session = current;
+    const credentialInstalled = identityChanged || admissionCredential === priorCredential;
+    if (credentialInstalled) admissionCredential = candidateCredential;
     deliveryPolicy = next; policyUnavailable = false;
     if (next.mode === "off") byId("upload").checked = false;
     byId("telemetry").disabled = !next.telemetry;
     byId("telemetry-status").textContent = next.telemetry ? "Reporting is available. Tick the checkbox to share measurements." : "Reporting is switched off on this server. The checkbox is unavailable.";
     if (!next.telemetry) byId("telemetry").checked = false;
-    if ((changed || renewAdmission) && (swarm || startRequestedAt !== null && !needsViewerApply)) configure();
+    if (changed && (swarm || startRequestedAt !== null && !needsViewerApply)) configure();
+    else if (renewAdmission && credentialInstalled && swarm && !needsViewerApply) {
+      if (!peerAuthorityFresh(session)) throw new Error("Peer admission renewal unavailable.");
+      // A disabled peer implementation is a supported origin fallback. It has
+      // no live peers to preserve and rejects in-place credential updates.
+      if (swarm.metrics().mode === "off") configure();
+      else if (!swarm.updateTicket(admissionCredential.ticket)) throw new Error("Peer admission renewal unavailable.");
+    }
     byId("policy-status").textContent = next.mode === null ? "Viewer chooses delivery mode." : `Operator delivery policy: ${next.mode === "off" ? "origin only" : next.mode}.`;
   },
   revoke: policyUnavailableNow,

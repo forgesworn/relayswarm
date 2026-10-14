@@ -217,6 +217,7 @@ export function createHlsSwarm(options = {}) {
   const swarm = new HlsSwarm(options);
   return {
     attach: (hls) => swarm.attach(hls),
+    updateTicket: (ticket) => swarm.updateTicket(ticket),
     stop: () => swarm.stop(),
     metrics: () => swarm.metrics(),
   };
@@ -357,6 +358,16 @@ class HlsSwarm {
     } catch (error) {
       this.#noteError("attach", error);
     }
+  }
+
+  // The host validates its own credential and lifetime. Replacing that opaque
+  // credential grants no new remote authority and must not reset live state.
+  updateTicket(ticket) {
+    if (this.stopped || this.disabledReason || !this.#gated() || !validTicket(ticket)) return false;
+    if (ticket === this.options.ticket) return true;
+    this.options.ticket = ticket;
+    this.#scheduleReannounce();
+    return true;
   }
 
   stop() {
@@ -1297,6 +1308,10 @@ class HlsSwarm {
     return this.links.size + this.dials.size < this.options.maxPeers;
   }
 
+  #hasOutgoingSlot() {
+    return [...this.dials.values()].filter((dial) => dial.outgoing).length + this.dialChecks.size < this.options.maxDialsInFlight;
+  }
+
   #coolingDown(pubkey) {
     return this.banned.has(pubkey) || (this.cooldowns.get(pubkey) || 0) > Date.now();
   }
@@ -1324,7 +1339,7 @@ class HlsSwarm {
       try {
         ok = await boundedOperation((signal) => this.options.admit(pubkey, ticket, { signal }), this.lifecycle.signal, this.options.admissionTimeoutMs) === true;
       } catch (error) { this.#noteError("admit", error); }
-      if (this.stopped) return false;
+      if (this.stopped || this.admissionChecks.get(pubkey) !== check) return false;
       if (ok) {
         this.admitted.set(pubkey, { ticket });
         if (this.admitted.size > 256) this.admitted.delete(this.admitted.keys().next().value);
@@ -1334,7 +1349,18 @@ class HlsSwarm {
       }
       return ok;
     })().finally(() => {
-      if (this.admissionChecks.get(pubkey) === check) this.admissionChecks.delete(pubkey);
+      if (this.admissionChecks.get(pubkey) !== check) return;
+      this.admissionChecks.delete(pubkey);
+      // At most one latest presence per already active peer, within the same
+      // 16-check bound. Floods replace this value rather than queueing waits.
+      const latest = check.latestPresence;
+      if (latest && !this.stopped && (this.links.has(pubkey) || this.dials.has(pubkey))) {
+        this.#guard("admission-refresh", async () => {
+          if (await this.#admits(pubkey, latest.ticket)) {
+            if (latest.open !== null) this.#rememberOpen(pubkey, latest.open);
+          }
+        });
+      }
     });
     this.admissionChecks.set(pubkey, check);
     return check.promise;
@@ -1352,8 +1378,13 @@ class HlsSwarm {
     }
     // An unchanged heartbeat grants no new access. Check authority when using
     // SDP or serving bytes, and refresh changed credentials on active links.
-    if (!active && (this.#coolingDown(from) || !this.#hasCapacity())) {
+    if (!active && (this.#coolingDown(from) || !this.#hasCapacity() || !this.#hasOutgoingSlot())) {
       if (knownCredential && payload.open !== null) this.#rememberOpen(from, payload.open);
+      return;
+    }
+    const pending = this.admissionChecks.get(from);
+    if (active && pending) {
+      if (validTicket(payload.ticket) && payload.ticket !== pending.ticket) pending.latestPresence = { ticket: payload.ticket, open: payload.open };
       return;
     }
     if (!(await this.#admits(from, payload.ticket)) || this.stopped) return;
@@ -1368,7 +1399,7 @@ class HlsSwarm {
     // the newcomer is not handed more offers than it can take.
     this.#after(Math.random() * 1_500, () => {
       if (this.links.has(from) || this.dials.has(from) || this.#coolingDown(from) || !this.#hasCapacity()) return;
-      if ([...this.dials.values()].filter((dial) => dial.outgoing).length >= this.options.maxDialsInFlight) return;
+      if (!this.#hasOutgoingSlot()) return;
       return this.#dial(from);
     });
   }
@@ -1379,7 +1410,7 @@ class HlsSwarm {
   }
 
   async #dial(pubkey) {
-    if (this.stopped || this.dialChecks.has(pubkey) || this.#coolingDown(pubkey)) return;
+    if (this.stopped || this.links.has(pubkey) || this.dials.has(pubkey) || this.dialChecks.has(pubkey) || this.#coolingDown(pubkey) || !this.#hasCapacity() || !this.#hasOutgoingSlot()) return;
     this.dialChecks.add(pubkey);
     try {
       if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.ticket))) return;
