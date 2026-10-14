@@ -242,16 +242,61 @@ Chrome tests.
 
 ## Current field checkpoint: 14 October 2026
 
-The latest deployed application is `fa79c2260431cf7901921fab4eaca251c4988f4b`,
+The actual deployed application is `0e688470b6746b3a9afe80e1192ac4d46fa6aaea`,
+with independent EE permanent HTTP/1.1 proxy provenance and all nine required jobs
+green on their first attempt in
+[CI run 38500343145](https://github.com/forgesworn/relayswarm/actions/runs/38500343145).
+Fresh offline production-only consumption, ten documented exports, installed
+independent-process native transfer/verified fallback and rebuilt standalone ESM
+passed. Package/source/client hashes are recorded in [status](STATUS.md); local
+candidate assets remain unpublished. This checkpoint binds actual 0e, not the
+upcoming documentation revision.
+
+The ordinary 60.013 s public check passed all three playback/contribution/verified-
+peer gates with 19 loads/6,285,968 peer bytes across both qualities and zero
+recorded stalls/fatal/native/page errors. The
+[180.015 s renewal check](../spikes/results/0e68847-public-renewal-180-20261014.json)
+passed all four declared gates with 90 peer loads/39,608,780 bytes (45 low loads/
+9,488,548 bytes; 45 high/30,120,232). Each contributor retained one completed
+pre-measurement stall (550/2,372 ms); no new stall occurred during measurement.
+All 1,009 controls finished HTTP 200/H1 before cleanup. Passive sampled session,
+peer-set/link counters, consent and monotonic quota held across successful own-
+ticket renewal for all three peer actors; direct PC object identity is not proved.
+Programmatic dropdowns/trusted Start and upload, one browser/four contexts and
+host/host links bound this evidence. Setup/nonfatal media aborts remain retained.
+
+The later cross-machine public HLS check was red for sharing over 60.060 s:
+playback progressed without recorded stalls/fatal/native/page errors, but both
+contributors uploaded zero and the receiver opened zero links/received zero peer
+bytes after two dial timeouts. Its 323 controls ultimately finished HTTP 200/H1;
+verification status alone does not prove admission. No ICE/transport cause is
+established. Separate loopback-origin raw RTC exchanged 8,192 bytes each way
+cross-machine but failed in both same-M4 topologies; this does not prove public-
+origin HLS or a NAT class. A separate public-origin raw M1-offer → M4-answer
+case passed in 7.972 s: both exact 0e public clients exchanged one verified
+8,192-byte message each way, gathering completed and each SDP had one mDNS-form
+and one IPv4-form candidate. Both apps remained unstarted with no media/admission/
+upload consent, and all cleanup passed. M4 VPN remained connected in a read-only
+03:14:35 UTC receipt; no settings changed or mDNS/VPN cause was proved. The HLS
+sharing red remains separate. A separate reverse M4-offer → M1-answer raw case
+passed in 7.566 s, again with one hash-matched 8,192-byte message each way,
+complete gathering and one mDNS-form/one IPv4-form candidate per actual SDP.
+Apps remained unstarted with no media/admission/upload consent; all cleanup
+passed. Neither raw case proves the hosted HLS rendezvous/admission journey or
+its failure cause; investigation continues. All owned completed-run browsers/readers/sources are closed; the
+installed app awaits ingest. Fourteen-role/7,200-second/22-churn, complete
+physical journeys, hard NAT, cost and immutable release/download gates remain open.
+
+The earlier deployed application was `fa79c2260431cf7901921fab4eaca251c4988f4b`,
 with independent EE proxy provenance and all nine jobs green in
 [CI run 38496983011](https://github.com/forgesworn/relayswarm/actions/runs/38496983011).
 The [fresh public short check](../spikes/results/fa79c22-permanent-public-short-20261014.json)
 passed all three gates over 60.011 s with 13,206,248 verified peer bytes at both
 qualities and zero recorded stalls/errors/withdrawals. All actors/source closed.
 M4's zero-churn local check still hit the admission address cap and completed no
-peer links; raw two-context RTC also failed. Current source's in-place ticket
-renewal requires fresh acceptance. Sustained, device/network/cost and release
-gates remain open; see [status](STATUS.md).
+peer links; raw two-context RTC also failed. The later 0e renewal evidence is
+recorded above; fourteen-role, sustained, device/network/cost and release gates
+remain open; see [status](STATUS.md).
 
 The preceding deployed checkpoint is `ee1510d429ac85f3738c03f10a09b753ec4eb037`,
 with permanently committed HTTP/1.1 and all nine required jobs green in
@@ -413,6 +458,12 @@ device identifiers, credentials and personal filesystem paths.
 
 | Journey | Measured outcome | Remaining boundary |
 |---|---|---|
+| 0e ordinary public 60.013 s | Playback, contribution and both-quality verified peers green; 19 loads/6,285,968 bytes, recorded stalls/fatal/native/page errors zero; 369 completed controls HTTP 200/H1 | Four commitment aborts retained; programmatic dropdowns/trusted Start/upload; one-browser short scope; owned cleanup passed |
+| 0e ordinary public renewal 180.015 s | All four gates green; 90 peer loads/39,608,780 bytes (45 low/9,488,548; 45 high/30,120,232); three peer actors retained sampled session/peer-set/link counters and consent through own-ticket renewal; 1,009 controls HTTP 200/H1 | One completed pre-measurement stall per contributor, none added during measurement; 89 unique segment contexts, one completed twice; passive equality is not PC-object identity; all owned cleanup/source-v2 audit passed; [summary](../spikes/results/0e68847-public-renewal-180-20261014.json) |
+| 0e cross-machine public HLS 60.060 s | Playback/video/native-audio decode green, recorded stalls/fatal/native/page errors zero; contributors consented/serving but uploaded zero; receiver two timeouts/zero opened links/zero peer bytes | Sharing red; 323 controls ultimately HTTP 200/H1 does not prove every admission accepted; ICE/SDP phase and cause unproved; both-machine browser/provider/source cleanup passed |
+| 0e public-origin raw RTC M1-offer → M4-answer | One verified 8,192-byte message each way in 7.972 s; exact deployed client loaded at both endpoints, complete gathering, each SDP one mDNS-form/one IPv4-form candidate; owned cleanup passed | Apps unstarted, no media/Nostr/admission/upload consent; VPN still connected/no settings changed; does not resolve cross-HLS red or prove a named cause |
+| 0e public-origin raw RTC M4-offer → M1-answer | Separate reverse case passed in 7.566 s; one hash-matched 8,192-byte message each way, complete gathering, every actual SDP one mDNS-form/one IPv4-form candidate; all owned cleanup passed | Apps unstarted, no media/admission/upload consent; not the hosted HLS rendezvous/admission journey, does not close its sharing red or establish cause |
+| Raw RTC topology comparison | Literal loopback-origin cross-machine M1/M4 exchanged 8,192 verified bytes each way; same-M4 single/separate-process cases transferred zero despite complete gathering | Different topology/Chrome patch versions; no HLS/Nostr/admission or public-origin proof; error 701 also present in pass; no named network/browser/NAT cause; owned cleanup completed, including explicit historical scratch recovery |
 | 2e1 ordinary public 60.013 s | Requested video/native-audio decode green; both contributor uploads and receiver peer bytes zero; fatal/native/page/stall counts zero | Sharing red; expiry timing retained, underlying transport cause unproved |
 | 2e1 same-source HTTP/1 browser diagnostic versus default | Chrome 155.0.8059.41: 60.009 s diagnostic accepted 2,806,464 verified peer bytes across both qualities; fresh 60.015 s default check accepted zero | Browser `--disable-http2` diagnostic only; high's one stall retained; sequential same-source/default comparison; later ordinary server-H1 trial partial red; no sustained/physical/hard-NAT/cost proof |
 | 2e1 temporary server-H1 ordinary 60.009 s | Consent/serving held; high delivered 10,082,816 verified bytes/15 loads, low zero; playback green, all 385 completed control responses HTTP/1.1 | Partial red for contribution/both-quality peers; high one stall retained; exact H1/H2 runtime/inode restored, watchdog absent/source removed; no permanent change |

@@ -62,7 +62,108 @@ merged source do not establish production readiness.
 
 ## Current source acceptance on 14 October
 
-The deployed application is `fa79c2260431cf7901921fab4eaca251c4988f4b`, with
+The actual deployed application is `0e688470b6746b3a9afe80e1192ac4d46fa6aaea`.
+All nine required jobs passed on their first attempt in
+[CI run 38500343145](https://github.com/forgesworn/relayswarm/actions/runs/38500343145).
+The permanent HTTP/1.1 proxy retains its independent
+`ee1510d429ac85f3738c03f10a09b753ec4eb037` attestation. The image passed the
+51-file non-root preflight, clean writer drain, stable publisher identity/private
+state/lease checks and normal-TLS public-client/fresh-playlist attestation. The
+served client is 729,998 bytes, SHA-256
+`9daf8749141d4282cdb4b5198a6b03e5495abdec2261eff186787d441a43ee4b`.
+These results bind the deployed 0e source; a subsequent documentation commit does
+not change its runtime identity or inherit its exact-source CI proof.
+
+Its fresh offline production-only consumer passed all ten documented imports,
+exact packaged demo modules, installed CLI help, independent-process verified
+native transfer and verified HTTP fallback. The unpublished package is 877,977
+bytes/192 files, SHA-256
+`23ca68947576e38e3203a118d6c3c75851ebd24c834ac681959ef355425b1971`.
+The exact-source archive is 3,184,640 bytes, SHA-256
+`4045c676a06a3b824e51dc7d23e931d4da4558ab675d30682166c25d3b58552c`.
+The rebuilt standalone ESM is 115,084 bytes, SHA-256
+`77f9da297a6ad6218e10a7836ecfd7d161f8679b0fdb760d7197a0ab3bfa4784`;
+its six repository inputs, locked dependencies, expected exports and absence of
+external imports were checked. Named local receipts are
+`clean-consumer-0e68847-20261014/receipt.json` and
+`standalone-esm-0e68847-20261014/receipt.json`. These are local candidate assets,
+not published or downloaded-release acceptance.
+
+The ordinary four-role public short check passed playback, contribution and
+verified peer payload over 60.013 s: 19 peer loads/6,285,968 bytes across both
+qualities, with zero recorded stalls/fatal/native/page errors or freezes. Its
+369 completed controls returned HTTP 200 over HTTP/1.1; four commitment request
+aborts remain recorded. The initial wrong-Node-path invocation refused before
+creating a browser and remains separate evidence.
+
+The [180.015 s public renewal check](../spikes/results/0e68847-public-renewal-180-20261014.json)
+then passed all four declared gates, including own-ticket renewal for all three
+peer actors. The receive-only actor accepted 90 completed peer loads/39,608,780
+bytes: 45 low/9,488,548 bytes and 45 high/30,120,232 bytes, matching donor uploads.
+These are 89 unique segment contexts; one high context completed twice. Each
+contributor retained one completed post-warm-up, pre-measurement stall (550 ms
+low, 2,372 ms high); neither added a stall during measurement, and baseline and
+receiver recorded none. Fatal/native/page errors and sampled frame freezes were
+zero. A setup media abort and a nonfatal receiver abort near the quality switch
+remain recorded.
+
+First settled renewal witnesses were at 02:45:39.198 UTC for both contributors
+and 02:45:59.232 UTC for the receiver on 14 October. Sampled session/stream/key,
+complete peer-set and link-counter equality held around successful renewal;
+each peer actor retained two connected links, two opened and zero closed.
+Consent, serving, monotonic uptime and spent allowance were preserved without
+reset or reconsent. These passive observations do not prove direct credential
+CAS or RTCPeerConnection object identity. All 1,009 pre-cleanup controls finished
+HTTP 200 over HTTP/1.1, with zero failed/pending/dropped controls; initial loading
+policy-unknown samples occurred before Start. Dropdowns were programmatic;
+Start/upload input was trusted. Muted native audio decode does not prove audibility.
+The single-browser, four-context host/host scope does not qualify fourteen roles,
+7,200 seconds/22 churn cycles, physical devices, hard NAT or financial savings.
+
+A later cross-machine public HLS check on the same 0e revision completed
+60.060 s with playback green but contribution and verified peers red. M1
+contributors remained consented/serving but uploaded zero; the M4 receiver had
+two outgoing dial timeouts, zero opened links and zero peer bytes, using origin
+fallback. All recorded stalls/fatal/native/page errors/freezes/withdrawals were
+zero. Of 323 controls, 321 had finished HTTP 200/H1 before cleanup and two pending
+policy requests finished HTTP 200 later; HTTP 200 alone does not prove admission.
+The observer did not retain gathering completeness, individual ICE states or
+end-to-end SDP identity, so the failed phase and transport cause remain unproved.
+Named evidence is `public-cross-hls-0e-analysis-20261014`.
+
+The separate raw RTC topology comparison used literal loopback HTTP origins,
+without HLS/Nostr/admission: cross-machine M1/M4 exchanged 8,192 verified bytes
+each way in 5.989 s, while same-M4 single-process (fa79) and separate-process
+(0e) cases transferred zero. Gathering completed in all three; ICE error 701
+also occurred in the successful case. Chrome patch versions/topology differ,
+so neither separate processes nor a named browser/network/mDNS/NAT cause is
+established.
+
+A separate public-origin raw M1-offer → M4-answer case then passed in 7.972 s
+(`public-origin-raw-rtc-0e-20261014`). Both pages loaded the exact deployed 0e
+client above and exchanged one hash-verified 8,192-byte message each way.
+Gathering completed; each actual SDP contained one mDNS-form and one IPv4-form
+candidate. Both applications remained unstarted, with no media, admission or
+upload consent; all owned cleanup passed. A read-only receipt still showed the
+M4 VPN connected at 03:14:35 UTC, with no setting changes. This single raw case
+does not resolve the separate public HLS sharing red or prove an mDNS/VPN cause.
+The separate reverse-direction M4-offer → M1-answer case also passed in 7.566 s
+(`public-origin-reverse-raw-rtc-0e-20261014`): one hash-matched 8,192-byte message
+each way, complete gathering, and one mDNS-form/one IPv4-form candidate in each
+actual SDP. Both apps remained unstarted with no media, admission or upload
+consent; all owned cleanup passed. These raw cases do not reproduce the hosted
+HLS rendezvous/admission journey or identify its failed phase; investigation
+continues.
+
+All owned browsers, readers, test services and finite sources for these completed
+checks are closed. Renewal source cleanup-v2 matched actual source identity,
+helper/input pins and before/after journal digest claims; an independent audit
+passed 29 checks. Raw remote journal bodies were not independently rehashed.
+The installed pilot awaits another ingest; no current live source is claimed.
+The earlier public reds, local fourteen-viewer admission reds and original
+physical/Safari/hard-NAT/cost/7,200-second/release gates remain open.
+
+The earlier deployed application was `fa79c2260431cf7901921fab4eaca251c4988f4b`, with
 all nine required jobs green on their first attempt in
 [CI run 38496983011](https://github.com/forgesworn/relayswarm/actions/runs/38496983011).
 The independent permanent HTTP/1.1 proxy remains attested to EE. The new image
@@ -95,11 +196,12 @@ pair and transferred zero bytes, without Nostr or admission. These results do no
 identify a VPN, browser or transport implementation cause. All owned test
 resources were removed, including a separately audited scratch-directory recovery.
 
-Current source adds in-place opaque-ticket renewal and early outgoing-capacity
-checks. Host identity/expiry checks, remote online admission, consent, limits and
-five-second authority remain enforced. These changes need fresh exact-source
-CI, package, cohort, deployment and sustained acceptance. They do not establish
-that M4 peer connectivity or the admission demand failure is resolved.
+The subsequent 0e source adds in-place opaque-ticket renewal and early outgoing-
+capacity checks. Host identity/expiry checks, remote online admission, consent,
+limits and five-second authority remain enforced. Its current CI/package/public
+renewal evidence is recorded above; fourteen-role capacity and sustained acceptance
+remain open. M4 peer connectivity and the earlier admission demand failure are
+not established as resolved.
 
 The preceding deployed application and permanent HTTP/1.1 proxy checkpoint is
 `ee1510d429ac85f3738c03f10a09b753ec4eb037`. All nine required jobs passed in
