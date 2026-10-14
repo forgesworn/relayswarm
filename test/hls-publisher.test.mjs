@@ -111,12 +111,13 @@ test("publisher caches immutable events, deduplicates hashes and renews expired 
   concurrent[0].content = "caller mutation";
   publisher.streamEvent.id = "caller mutation";
   assert.equal((await publisher.commitment(firstRange)).id, original);
+  const hashCacheHitsBeforeRenewal = publisher.getMetrics().hashCacheHits;
   at += 61000;
   const renewed = await publisher.commitment(firstRange);
   assert.notEqual(renewed.id, original);
   assert.equal(JSON.parse(renewed.content).expiresAt, Math.floor(at / 1000) + 60);
   assert.equal(publisher.getMetrics().hashReads, 1);
-  assert.equal(publisher.getMetrics().hashCacheHits, 1);
+  assert.equal(publisher.getMetrics().hashCacheHits, hashCacheHitsBeforeRenewal + 1);
   assert.equal(publisher.getMetrics().renewals, 1);
   assert.equal(publisher.getMetrics().inFlight, 0);
 });
