@@ -3,27 +3,41 @@
 // automatic bandwidth adaptation under Chrome network shaping. No playlist
 // delay or HAVE barrier is used to obtain peer delivery.
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright-core";
-import { startDemoServer } from "../demo/server.mjs";
+import { startObservedFmp4Demo } from "./support/fmp4-observed-demo.mjs";
 import { createFmp4Fixture } from "./support/fmp4-fixture.mjs";
 import { installMediaDiagnostics } from "./support/browser-media-diagnostics.mjs";
 
+import { cap, bounded, journal } from "./support/account-browser-guard.mjs";
+const guardInput = process.env.RELAYSWARM_FMP4_INPUT ? JSON.parse(await readFile(process.env.RELAYSWARM_FMP4_INPUT, "utf8")) : null;
+if (guardInput) await new Promise((resolve) => {
+  process.once("disconnect", () => process.exit(1));
+  process.once("message", (message) => { if (message?.start === true) resolve(); else process.exit(1); });
+  process.send({ ready: true });
+});
 const { values } = parseArgs({ options: { chrome: { type: "string", default: process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" }, resultsDir: { type: "string", default: "artifacts/fmp4-browser" } } });
+if (guardInput) Object.assign(values, guardInput.values);
 const receipt = { v: 1, kind: "relayswarm-fmp4-abr-browser", at: new Date().toISOString(), ok: false, failures: [],
   scope: { browser: "Chrome", network: "loopback", media: "H.264/AAC fMP4 with EXT-X-MAP", playlistTimingChanged: false, physicalDevices: false,
     adaptivePlayback: "hls.js automatic levels, actual CDP network throttle; no manual quality selection on adaptive baseline" }, checkpoints: [] };
 const pages = [];
 let fixture, demo, browser;
-const watchdog = setTimeout(() => { receipt.expired = true; void browser?.close().catch(() => {}); }, 180000); watchdog.unref();
+const watchdog = setTimeout(() => { receipt.expired = true; void browser?.close().catch(() => {}); }, guardInput ? cap(guardInput.clock, "work", 150000) : 180000); watchdog.unref();
 const report = (page) => page.evaluate(() => window.relaySwarmDemo.report());
 const log = (message) => console.error(`[fmp4-browser] ${message}`);
 await mkdir(values.resultsDir, { recursive: true });
 try {
-  fixture = await createFmp4Fixture(); demo = await startDemoServer({ mediaDir: fixture.directory, iceServers: [] });
-  browser = await chromium.launch({ executablePath: values.chrome, headless: true, args: ["--autoplay-policy=no-user-gesture-required", "--disable-features=WebRtcHideLocalIpsWithMdns", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] });
+  fixture = await createFmp4Fixture(); demo = await startObservedFmp4Demo({ mediaDir: fixture.directory, iceServers: [] });
+  receipt.scope.startupObservation = demo.observation;
+  if (guardInput) {
+    const resource = JSON.parse(await readFile(guardInput.resourcePath, "utf8"));
+    assert.ok(resource.ok && Date.now() - resource.atMs >= 0 && Date.now() - resource.atMs <= 5000 && Date.now() - resource.pressureAtMs <= 15000);
+    cap(guardInput.clock, "work", 1); journal(guardInput.chromeIntent, { nonce: guardInput.nonce });
+  }
+  browser = await chromium.launch({ executablePath: guardInput?.chromeWrapper ?? values.chrome, headless: true, args: ["--autoplay-policy=no-user-gesture-required", "--disable-features=WebRtcHideLocalIpsWithMdns", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] });
   receipt.scope.browserVersion = browser.version();
   async function viewer(name, mode, upload, level = null) {
     const context = await browser.newContext(), page = await context.newPage(); page.setDefaultTimeout(20000);
@@ -68,9 +82,17 @@ try {
 } catch (error) { receipt.failures.push(error.stack || error.message); log(error.message); }
 finally {
   clearTimeout(watchdog);
-  receipt.viewers = await Promise.all(pages.map(async ({ name, page, network, errors }) => ({ name, network, errors, report: await report(page).catch(() => null), diagnostics: await page.evaluate(() => window.relaySwarmMediaDiagnostics).catch(() => null) })));
-  await browser?.close(); await demo?.close(); await fixture?.close();
+  receipt.viewers = await Promise.all(pages.map(async ({ name, page, network, errors }) => ({ name, network, errors, report: await report(page).catch(() => null), startup: await page.evaluate(() => window.relaySwarmFmp4Startup?.()).catch(() => null), diagnostics: await page.evaluate(() => window.relaySwarmMediaDiagnostics).catch(() => null) })));
+  receipt.cleanup = {};
+  for (const [name, resource] of [["browserClosed", browser], ["demoClosed", demo], ["fixtureRemoved", fixture]]) {
+    receipt.cleanup[name] = resource ? false : null;
+    if (!resource) continue;
+    try { if (guardInput) await bounded(() => resource.close(), guardInput.clock, "grace", 12000); else await resource.close(); receipt.cleanup[name] = true; } catch { receipt.cleanup[name] = false; }
+  }
+  receipt.ok &&= Object.values(receipt.cleanup).every((value) => value === true);
+  if (guardInput) await writeFile(guardInput.workerReceipt, JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
   await writeFile(join(values.resultsDir, "fmp4-browser.json"), `${JSON.stringify(receipt, null, 2)}\n`);
   console.log(JSON.stringify({ ok: receipt.ok, failures: receipt.failures, receipt: join(values.resultsDir, "fmp4-browser.json"), checkpoints: receipt.checkpoints.map(({ name }) => name) }, null, 2));
 }
 process.exitCode = receipt.ok ? 0 : 1;
+if (guardInput) process.exit(process.exitCode);

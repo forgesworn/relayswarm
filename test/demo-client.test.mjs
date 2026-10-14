@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { installFmp4StartupObserver } from "./support/fmp4-startup-observer.mjs";
+import { observedFmp4Client } from "./support/fmp4-observed-demo.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
@@ -509,4 +512,33 @@ test("real HTTP invalid policy and hidden page cancel both owned pair requests",
   p.visibility("hidden"); await pending; await waitForHTTP(() => f.open.size === 0);
   assert.equal(p.context.window.relaySwarmDemo.report().policyRenewal.fresh, false);
   assert(records.filter(x => x.phase === "hidden").every(x => x.ended === null));
+});
+
+function fmp4ObserverFixture() {
+ const callbacks = new Map(), quality = new EventTarget(), media = new EventTarget();
+ quality.value = '1'; Object.assign(media,{currentTime:0,readyState:0,networkState:2,paused:false,ended:false,error:null,buffered:{length:0}});
+ const hls = {streamController:{state:'FRAG_LOADING',level:1,startFragRequested:true,fragCurrent:{sn:0,level:1,cc:0,start:0,duration:2,loader:{stats:{aborted:true,loaded:0}},url:'PRIVATE_URL'}},levelController:{currentLevelIndex:1,manualLevelIndex:1},on(name,cb){callbacks.set(name,cb)}};
+ const events = new Proxy({}, { get: (_, key)=>key });
+ const observer = installFmp4StartupObserver(()=>hls,media,quality,()=>10);observer.attach(hls,events);return{observer,hls,quality,media,callbacks};
+}
+test('fMP4 observer: read-only startup observations retain aborted init/media ordering and redact payloads',()=>{
+ const f=fmp4ObserverFixture();f.quality.dispatchEvent(new Event('change'));f.callbacks.get('FRAG_LOADING')('',{frag:{sn:'initSegment',level:1,url:'PRIVATE_URL',decryptdata:'PRIVATE_KEY'}});f.callbacks.get('ERROR')('',{details:'aborted',fatal:false,frag:f.hls.streamController.fragCurrent,error:Error('PRIVATE_MESSAGE')});
+ const x=f.observer.snapshot();assert.equal(x.records[1].event,'quality-change');assert.equal(x.records[2].fragment.sequence,'init');assert.equal(x.records[3].detail,'aborted');assert.equal(x.state.stream.current.aborted,true);assert.equal(x.state.media.currentTime,0);assert.ok(!JSON.stringify(x).includes('PRIVATE'));
+});
+test('fMP4 observer: ring is bounded, snapshots independent, unknown values stay unknown, getter failures contained',()=>{
+ const f=fmp4ObserverFixture();for(let i=0;i<140;i++)f.callbacks.get('FRAG_LOADING')('',{frag:{sn:i,level:1}});let x=f.observer.snapshot();assert.equal(x.records.length,128);assert.equal(x.dropped,13);x.records[0].fragment.level=99;assert.equal(f.observer.snapshot().records[0].fragment.level,1);f.hls.streamController.state='PRIVATE_STATE';assert.equal(f.observer.snapshot().state.stream.state,'unknown');
+ Object.defineProperty(f.hls,'streamController',{get(){throw Error('PRIVATE')}});assert.equal(f.observer.snapshot().state.unavailable,true);assert.doesNotThrow(()=>f.callbacks.get('ERROR')('',{get frag(){throw Error('PRIVATE')}}));assert.equal(f.observer.snapshot().records.at(-1).event,'observation-unavailable');
+});
+test('fMP4 observer: only asserted observation seams transform; original source reconstructs exactly',async()=>{
+ const source=await readFile(new URL('../demo/client.mjs',import.meta.url),'utf8');const out=observedFmp4Client(source);let restored=out.replace('import { installFmp4StartupObserver } from "../test/support/fmp4-startup-observer.mjs";\n','').replace('\nconst startupObserver = installFmp4StartupObserver(() => hls, video, byId("quality"));','').replace('\n      startupObserver.attach(hls, Hls.Events);','').replace('\nObject.defineProperty(window, "relaySwarmFmp4Startup", { value: () => startupObserver.snapshot() });\n','');assert.equal(restored,source);assert.throws(()=>observedFmp4Client(''));assert.throws(()=>observedFmp4Client(source+source));
+});
+
+test('fMP4 observer: observations never invoke computed Hls level getters or accessor-backed raw level fields',()=>{
+ const f=fmp4ObserverFixture();let calls=0;
+ for(const key of ['loadLevel','nextLoadLevel','startLevel','autoLevelEnabled'])Object.defineProperty(f.hls,key,{get(){calls++;throw Error('computed getter must remain untouched')}});
+ f.quality.dispatchEvent(new Event('change'));f.callbacks.get('FRAG_LOADING')('',{});
+ const x=f.observer.snapshot();assert.equal(calls,0);assert.equal(x.state.loadLevel,1);assert.equal(x.state.autoLevel,false);assert.equal('nextLoadLevel' in x.state,false);assert.equal('startLevel' in x.state,false);
+ Object.defineProperty(f.hls.levelController,'currentLevelIndex',{get(){calls++;return 9}});
+ Object.defineProperty(f.hls.levelController,'manualLevelIndex',{get(){calls++;return -1}});
+ const y=f.observer.snapshot();assert.equal(y.state.loadLevel,null);assert.equal(y.state.autoLevel,null);assert.equal(calls,0);
 });
