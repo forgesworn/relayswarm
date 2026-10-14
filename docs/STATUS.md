@@ -116,10 +116,51 @@ identity, helper/input pins and start/cleanup journal receipt hashes; the revers
 review did not independently reread the raw remote journal. VPN Connected was
 observed before and after each run only, not continuously. Bounded local transport
 metrics are now deployed; they add observation without changing transport policy.
-The earlier ordinary sharing reds below remain unexplained. Fourteen-role
-preparation remains unlaunched/unqualified; sustained 7,200-second/22-churn,
+The earlier ordinary sharing reds below remain unexplained.
+[Distributed fourteen-role qualification](../spikes/results/f393abf-distributed-qualification-20261014.json)
+remains RED; sustained 7,200-second/22-churn,
 physical/native-input, hard-NAT, matched field-benefit, cost and immutable-release
 gates remain open across the full P01–P12 and 37-review-item scope.
+
+The first distributed attempt (R2) stopped before measurement after a resource
+assertion whose rejected numeric sample was not retained; original cleanup errors
+and independent stage recovery remain separate. R3 retained an endpoint subtree
+RSS rejection of 2,318,106,624 bytes against 2 GiB, at 20 processes and reported
+free memory 35%. This summed RSS is neither unique RAM nor a simultaneous outer
+tree peak, and does not retroactively explain R2. R3 actor/source cleanup passed.
+
+A separately reviewed R4 changed only M1's complete-tree RSS cap to 3 GiB,
+keeping the 25% headroom guard, process limits and all admission/authority/deadline
+gates. All fourteen players started and decoded; measurement stopped RED after
+57.222 s on two admission-verification requests without HTTP status. The
+1,046 observations retained zero HTTP refusals/429s, two failed unknown-status
+verifications, 790 accounted detail evictions and no pending overflow. The
+underlying cancellation/network cause remains unproved. Latest rows precede
+those failures: seven of eight contributors had positive accepted/reserved
+upload accounting, two of four receivers had verified payload, and all fourteen
+had frame/audio decode progress without recorded fatal/native/integrity/policy
+errors. Aggregate readiness is not complete per-actor qualification.
+
+The R4 complete M1 tree sampled at most 2,753,413,120 bytes and M4 endpoint tree
+6,650,544,128 bytes, within their declared limits. All browser/context/CDP,
+endpoint/controller/provider/outer group and stage cleanup passed. Actual source
+cleanup v2 removed its source, retaining exit 255; a 35-check independent retained
+proof audit passed, with raw remote journal bodies not independently reread.
+VPN Connected was observed before and after only. No fourteen-role, two-hour,
+churn or production-readiness pass follows from these partial results.
+
+The R5 diagnostic successor retained seven status-unknown verification failures,
+zero HTTP refusals and 19.404 s of measurement before stopping RED. Its first
+failed request was browser-labelled aborted after 3,001 ms; the local fetch record
+was cancelled after 3,004.9 ms without headers/status. The subsequent own-page
+snapshot still had the same active swarm, no archived sessions, serving enabled
+and fresh policy. Exact executed-code review excludes the monotonic stopped
+lifecycle for this first call, leaving its three-second bounded-operation timer
+as the inferred abort source. The signal reason itself was not recorded. Why
+headers had not arrived, and whether all seven cancellations share that source,
+remain unproved. Resources and all owned/source-v2 cleanup passed; exit 255 is
+retained. The original conservative audit and separate code-inference addendum
+remain distinct. No long or production-readiness pass is claimed.
 
 Earlier deployed `0e688470b6746b3a9afe80e1192ac4d46fa6aaea` passed all nine
 required jobs on its first attempt in

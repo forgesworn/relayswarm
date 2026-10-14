@@ -43,8 +43,9 @@ identity, helper/input pins and start/cleanup journal receipt hashes; the revers
 review did not independently reread the raw remote journal. VPN Connected was
 observed before and after each run only, not continuously. Bounded local transport
 metrics are now deployed; they add observation without changing transport policy.
-The earlier ordinary sharing reds below remain unexplained. Fourteen-role
-preparation remains unlaunched/unqualified; sustained 7,200-second/22-churn,
+The earlier ordinary sharing reds below remain unexplained.
+[Distributed fourteen-role qualification](../spikes/results/f393abf-distributed-qualification-20261014.json)
+remains RED; sustained 7,200-second/22-churn,
 physical/native-input, hard-NAT, matched field-benefit, cost and immutable-release
 gates remain open across the full P01–P12 and 37-review-item scope.
 
@@ -258,7 +259,7 @@ records the later short/partial-long, TCP relay and Android checks separately.
 | P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-f393 offline production-only package, ten documented exports, rebuilt standalone ESM, installed CLI and independent-process verified native transfer/HTTP fallback pass; downloaded immutable release assets remain open; WAN success and timeout retain separate scope |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
 | P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Actual deployed f393 passed all nine required CI jobs first attempt, fresh local consumer/rebuilt ESM, non-root image preflight and normal-TLS client/fresh-media attestation; EE permanent H1 provenance remains independent; both ordinary cross-machine short checks and owned cleanup/source-v2 checks pass; local assets remain unpublished and downloaded-release/full production acceptance pending |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Separate real OBS/private YouTube and installed Firefox journeys pass; f393 ordinary cross-machine short checks pass in both role directions with recorded request/dial failures retained; prior 0e sharing, two-hour contribution, Safari/Pixel peer and iPhone background reds remain; fourteen-role preparation is unlaunched/unqualified; complete physical/native application/input, hard NAT, sustained churn and billed-cost gates remain open |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Separate real OBS/private YouTube and installed Firefox journeys pass; f393 ordinary cross-machine short checks pass in both role directions with recorded request/dial failures retained; prior 0e sharing, two-hour contribution, Safari/Pixel peer and iPhone background reds remain; fourteen-role R4/R5 stopped RED after 57.222/19.404 s on status-unknown verification failures; no HTTP refusals; first R5 three-second timer inferred, missing-header cause unproved; complete cleanup; complete physical/native application/input, hard NAT, sustained churn and billed-cost gates remain open |
 
 ## Evidence rules
 
