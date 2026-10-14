@@ -395,6 +395,21 @@ Keep receipts local unless the viewer explicitly agrees to reporting. The
 current demo's optional reporting endpoint accepts a numeric summary rather
 than this full snapshot; see [operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md).
 
+The next diagnostic candidate adds `transportDiagnostics` within metrics version
+2; it is absent from the currently deployed 0e client. It contains fixed-enum
+`counters`, a ring of at most 64 `records`, `capacity` and an eviction `dropped`
+count. Records contain a page-local, per-swarm numeric connection `id` (0 when
+no PC is allocated/correlated), elapsed milliseconds in `atMs`, and fixed `event`/
+`detail` values for gathering, native states, signalling stages and close reasons.
+Unreadable native state uses the fixed `unknown` classification.
+Local-description records may add `candidates` (count only, capped at 256) and
+`candidatesCapped`; they contain no addresses, SDP, peer keys or request IDs.
+`signal-send` means local signalling acceptance, not relay delivery or remote
+receipt. The ring and counters remain readable after `stop()`; native listeners
+are detached when their dial/link ends. No automatic reporting, signalling change
+or connectivity fix is implied. Keep this diagnostic receipt local under the same
+reporting-consent boundary as other metrics.
+
 `inTimeShare` remains conditional on having peers. `sampledInTimeShare`
 includes sampled fragments with no peers; its byte equivalent weights by
 fragment size. The `observed` shares divide verified in-time samples by all
@@ -1218,7 +1233,15 @@ served client is 729,998 bytes, SHA-256
 These results bind the deployed 0e source; a subsequent documentation commit does
 not change its runtime identity or inherit its exact-source CI proof.
 
-Its fresh offline production-only consumer passed all ten documented imports,
+The later documentation checkpoint `8c09478830e80f781dd01779181174e2cf8693be`
+passed all nine required jobs in
+[CI run 38506350320](https://github.com/forgesworn/relayswarm/actions/runs/38506350320).
+It did not replace deployed 0e. The next diagnostic candidate adds
+local bounded transport-state/close-reason metrics; it is not deployed and makes
+no connectivity-fix claim. Its contract is described in
+[integration metrics](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md#metrics).
+
+Deployed 0e’s fresh offline production-only consumer passed all ten documented imports,
 exact packaged demo modules, installed CLI help, independent-process verified
 native transfer and verified HTTP fallback. The unpublished package is 877,977
 bytes/192 files, SHA-256
@@ -1298,6 +1321,34 @@ actual SDP. Both apps remained unstarted with no media, admission or upload
 consent; all owned cleanup passed. These raw cases do not reproduce the hosted
 HLS rendezvous/admission journey or identify its failed phase; investigation
 continues.
+
+A later instrumented restored-VPN cross-machine check passed all three gates
+for 60.074 s, with 22 verified peer loads/10,151,436 bytes across both qualities
+and zero recorded stalls/errors/withdrawals. Its whole-heap PC-state sampling
+could affect timing. The subsequent ordinary check on the same finite source
+remained red for sharing over 60.020 s: only four high loads/2,697,988 verified
+bytes (three unique contexts, one completed twice), low zero. Both contributors
+retained consent/serving. High's 4,038,428-byte/6-served/1-refused counters measure
+accepted/reserved accounting, not verified receiver delivery or wire bytes.
+All recorded stalls/fatal/native/page errors/freezes/withdrawals were zero.
+Of 357 controls, 356 finished; one receiver commitment aborted after HTTP 200/H1
+headers. No policy/session failure was recorded. VPN service observations were
+Connected before ordinary at 04:11:36.953324 UTC and afterward at 04:17:22.016533.
+These finite, sequential observations establish neither a heap-instrumentation
+cause nor a VPN mechanism. Named evidence is
+`independent-ordinary-restored-vpn-0e-analysis-20261014` and
+`public-passive-hls-restored-vpn-analysis-20261014`.
+
+A separate same-M4, two-process raw comparison passed in 6.517 s while the owner
+had disconnected the VPN, then failed in 27.113 s after confirmed restoration.
+The pass exchanged one verified 8,192-byte message each way; gathering completed
+in both cases and ICE error 701 occurred even in the pass. Literal loopback
+origins, no HLS/Nostr/admission, one attempt per state and owner-managed setting
+changes limit the result; no sole-cause or public-HLS qualification follows.
+Receipts are retained in `m4-raw-vpn-restoration-comparison-20261014`. The ordinary
+run's browser/controller/provider cleanup and actual source cleanup-v2 all passed,
+including 34 independent retained identity/helper/input/journal checks. This does
+not upgrade raw remote journal digest claims to an independent host rehash.
 
 All owned browsers, readers, test services and finite sources for these completed
 checks are closed. Renewal source cleanup-v2 matched actual source identity,
@@ -2347,6 +2398,24 @@ its failure cause; investigation continues. All owned completed-run browsers/rea
 installed app awaits ingest. Fourteen-role/7,200-second/22-churn, complete
 physical journeys, hard NAT, cost and immutable release/download gates remain open.
 
+The latest ordinary restored-VPN cross-machine HLS check remained sharing-red
+for 60.020 s: four high-only verified loads/2,697,988 bytes, low zero, despite
+both contributors retaining consent/serving; playback and all recorded error/
+stall/withdrawal counts passed. High's 4,038,428 accepted/reserved bytes are not
+receiver delivery or wire bytes. A preceding whole-heap-instrumented 60.074 s
+check on the same finite source passed with 22 loads/10,151,436 bytes across
+both qualities. These sequential results establish no heap/VPN cause. Separate
+same-M4 raw RTC passed with the owner-disconnected VPN (6.517 s/8,192 bytes each
+way), then failed after restoration (27.113 s); it is not HLS/admission/NAT proof.
+Both ordinary-run VPN observations were Connected; all browser/provider/source
+cleanup passed. Named receipts and precise counters are in [status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md).
+
+Documentation checkpoint `8c09478` passed all nine required CI jobs in
+[run 38506350320](https://github.com/forgesworn/relayswarm/actions/runs/38506350320);
+actual deployed application remains 0e. Next-candidate bounded local transport
+metrics are diagnostic code, not deployed or a connectivity fix; see
+[integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md#metrics). All earlier reds and full scope remain.
+
 The earlier deployed application was `fa79c2260431cf7901921fab4eaca251c4988f4b`,
 with independent EE proxy provenance and all nine jobs green in
 [CI run 38496983011](https://github.com/forgesworn/relayswarm/actions/runs/38496983011).
@@ -2523,6 +2592,9 @@ device identifiers, credentials and personal filesystem paths.
 | 0e cross-machine public HLS 60.060 s | Playback/video/native-audio decode green, recorded stalls/fatal/native/page errors zero; contributors consented/serving but uploaded zero; receiver two timeouts/zero opened links/zero peer bytes | Sharing red; 323 controls ultimately HTTP 200/H1 does not prove every admission accepted; ICE/SDP phase and cause unproved; both-machine browser/provider/source cleanup passed |
 | 0e public-origin raw RTC M1-offer → M4-answer | One verified 8,192-byte message each way in 7.972 s; exact deployed client loaded at both endpoints, complete gathering, each SDP one mDNS-form/one IPv4-form candidate; owned cleanup passed | Apps unstarted, no media/Nostr/admission/upload consent; VPN still connected/no settings changed; does not resolve cross-HLS red or prove a named cause |
 | 0e public-origin raw RTC M4-offer → M1-answer | Separate reverse case passed in 7.566 s; one hash-matched 8,192-byte message each way, complete gathering, every actual SDP one mDNS-form/one IPv4-form candidate; all owned cleanup passed | Apps unstarted, no media/admission/upload consent; not the hosted HLS rendezvous/admission journey, does not close its sharing red or establish cause |
+| 0e restored-VPN instrumented public HLS 60.074 s | Three gates green; 22 verified loads/10,151,436 bytes across both qualities, zero recorded stalls/errors/withdrawals | Whole-heap PC-state sampling; finite Connected observations; sequential pass does not establish heap or VPN causation; same-source ordinary red retained |
+| 0e restored-VPN ordinary public HLS 60.020 s | Playback green; receiver four high-only verified loads/2,697,988 bytes, low zero; zero recorded stalls/fatal/native/page/freezes/withdrawals | Sharing red; high 4,038,428 accepted/reserved bytes/6 served/1 refused are not delivered wire bytes; one post-header commitment abort; all actors/provider/source-v2 cleanup passed |
+| Same-M4 raw RTC owner VPN comparison | Disconnected: 6.517 s pass/8,192 verified bytes each way; restored Connected: 27.113 s red; complete gathering in both, error 701 also in pass | Owner changed/restored setting, fixture did not; literal loopback/no HLS/Nostr/admission; one case per state does not prove mechanism/sole cause or qualify public peers; owned cleanup passed |
 | Raw RTC topology comparison | Literal loopback-origin cross-machine M1/M4 exchanged 8,192 verified bytes each way; same-M4 single/separate-process cases transferred zero despite complete gathering | Different topology/Chrome patch versions; no HLS/Nostr/admission or public-origin proof; error 701 also present in pass; no named network/browser/NAT cause; owned cleanup completed, including explicit historical scratch recovery |
 | 2e1 ordinary public 60.013 s | Requested video/native-audio decode green; both contributor uploads and receiver peer bytes zero; fatal/native/page/stall counts zero | Sharing red; expiry timing retained, underlying transport cause unproved |
 | 2e1 same-source HTTP/1 browser diagnostic versus default | Chrome 155.0.8059.41: 60.009 s diagnostic accepted 2,806,464 verified peer bytes across both qualities; fresh 60.015 s default check accepted zero | Browser `--disable-http2` diagnostic only; high's one stall retained; sequential same-source/default comparison; later ordinary server-H1 trial partial red; no sustained/physical/hard-NAT/cost proof |
@@ -3746,6 +3818,24 @@ its failure cause; investigation continues. All owned completed-run browsers/rea
 installed app awaits ingest. Fourteen-role/7,200-second/22-churn, complete
 physical journeys, hard NAT, cost and immutable release/download gates remain open.
 
+The latest ordinary restored-VPN cross-machine HLS check remained sharing-red
+for 60.020 s: four high-only verified loads/2,697,988 bytes, low zero, despite
+both contributors retaining consent/serving; playback and all recorded error/
+stall/withdrawal counts passed. High's 4,038,428 accepted/reserved bytes are not
+receiver delivery or wire bytes. A preceding whole-heap-instrumented 60.074 s
+check on the same finite source passed with 22 loads/10,151,436 bytes across
+both qualities. These sequential results establish no heap/VPN cause. Separate
+same-M4 raw RTC passed with the owner-disconnected VPN (6.517 s/8,192 bytes each
+way), then failed after restoration (27.113 s); it is not HLS/admission/NAT proof.
+Both ordinary-run VPN observations were Connected; all browser/provider/source
+cleanup passed. Named receipts and precise counters are in [status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md).
+
+Documentation checkpoint `8c09478` passed all nine required CI jobs in
+[run 38506350320](https://github.com/forgesworn/relayswarm/actions/runs/38506350320);
+actual deployed application remains 0e. Next-candidate bounded local transport
+metrics are diagnostic code, not deployed or a connectivity fix; see
+[integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md#metrics). All earlier reds and full scope remain.
+
 The earlier deployed application was `fa79c2260431cf7901921fab4eaca251c4988f4b`,
 with independent EE proxy provenance and all nine jobs green in
 [CI run 38496983011](https://github.com/forgesworn/relayswarm/actions/runs/38496983011).
@@ -3888,7 +3978,7 @@ records the later short/partial-long, TCP relay and Android checks separately.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Deployed 0e/independent EE permanent H1, ordinary 60.013 s all-three-gate and 180.015 s all-four-gate renewal checks pass; latter delivered 39,608,780 verified peer bytes across both qualities with pre-measurement stalls retained; later cross-machine 60.060 s playback passed but sharing failed; fourteen-role/two-hour stability and matched field benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Deployed 0e/independent EE permanent H1, ordinary 60.013 s all-three-gate and 180.015 s all-four-gate renewal checks pass; latter delivered 39,608,780 verified peer bytes across both qualities with pre-measurement stalls retained; later cross-machine 60.060 s and ordinary restored-VPN 60.020 s sharing failed (latest high-only 2,697,988 verified bytes); separate instrumented pass does not establish cause; fourteen-role/two-hour stability and matched field benefit remain open |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/exact-source CI and 0e in-place own-ticket renewal pass with unchanged expiry, authority, admission and quota limits; all three peer actors retained sampled session/link/consent state across renewal; prior fourteen-viewer address-limit 429/authority-expiry reds remain unresolved operational capacity evidence under P12 |

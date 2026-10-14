@@ -287,6 +287,24 @@ its failure cause; investigation continues. All owned completed-run browsers/rea
 installed app awaits ingest. Fourteen-role/7,200-second/22-churn, complete
 physical journeys, hard NAT, cost and immutable release/download gates remain open.
 
+The latest ordinary restored-VPN cross-machine HLS check remained sharing-red
+for 60.020 s: four high-only verified loads/2,697,988 bytes, low zero, despite
+both contributors retaining consent/serving; playback and all recorded error/
+stall/withdrawal counts passed. High's 4,038,428 accepted/reserved bytes are not
+receiver delivery or wire bytes. A preceding whole-heap-instrumented 60.074 s
+check on the same finite source passed with 22 loads/10,151,436 bytes across
+both qualities. These sequential results establish no heap/VPN cause. Separate
+same-M4 raw RTC passed with the owner-disconnected VPN (6.517 s/8,192 bytes each
+way), then failed after restoration (27.113 s); it is not HLS/admission/NAT proof.
+Both ordinary-run VPN observations were Connected; all browser/provider/source
+cleanup passed. Named receipts and precise counters are in [status](STATUS.md).
+
+Documentation checkpoint `8c09478` passed all nine required CI jobs in
+[run 38506350320](https://github.com/forgesworn/relayswarm/actions/runs/38506350320);
+actual deployed application remains 0e. Next-candidate bounded local transport
+metrics are diagnostic code, not deployed or a connectivity fix; see
+[integration](../INTEGRATION.md#metrics). All earlier reds and full scope remain.
+
 The earlier deployed application was `fa79c2260431cf7901921fab4eaca251c4988f4b`,
 with independent EE proxy provenance and all nine jobs green in
 [CI run 38496983011](https://github.com/forgesworn/relayswarm/actions/runs/38496983011).
@@ -463,6 +481,9 @@ device identifiers, credentials and personal filesystem paths.
 | 0e cross-machine public HLS 60.060 s | Playback/video/native-audio decode green, recorded stalls/fatal/native/page errors zero; contributors consented/serving but uploaded zero; receiver two timeouts/zero opened links/zero peer bytes | Sharing red; 323 controls ultimately HTTP 200/H1 does not prove every admission accepted; ICE/SDP phase and cause unproved; both-machine browser/provider/source cleanup passed |
 | 0e public-origin raw RTC M1-offer → M4-answer | One verified 8,192-byte message each way in 7.972 s; exact deployed client loaded at both endpoints, complete gathering, each SDP one mDNS-form/one IPv4-form candidate; owned cleanup passed | Apps unstarted, no media/Nostr/admission/upload consent; VPN still connected/no settings changed; does not resolve cross-HLS red or prove a named cause |
 | 0e public-origin raw RTC M4-offer → M1-answer | Separate reverse case passed in 7.566 s; one hash-matched 8,192-byte message each way, complete gathering, every actual SDP one mDNS-form/one IPv4-form candidate; all owned cleanup passed | Apps unstarted, no media/admission/upload consent; not the hosted HLS rendezvous/admission journey, does not close its sharing red or establish cause |
+| 0e restored-VPN instrumented public HLS 60.074 s | Three gates green; 22 verified loads/10,151,436 bytes across both qualities, zero recorded stalls/errors/withdrawals | Whole-heap PC-state sampling; finite Connected observations; sequential pass does not establish heap or VPN causation; same-source ordinary red retained |
+| 0e restored-VPN ordinary public HLS 60.020 s | Playback green; receiver four high-only verified loads/2,697,988 bytes, low zero; zero recorded stalls/fatal/native/page/freezes/withdrawals | Sharing red; high 4,038,428 accepted/reserved bytes/6 served/1 refused are not delivered wire bytes; one post-header commitment abort; all actors/provider/source-v2 cleanup passed |
+| Same-M4 raw RTC owner VPN comparison | Disconnected: 6.517 s pass/8,192 verified bytes each way; restored Connected: 27.113 s red; complete gathering in both, error 701 also in pass | Owner changed/restored setting, fixture did not; literal loopback/no HLS/Nostr/admission; one case per state does not prove mechanism/sole cause or qualify public peers; owned cleanup passed |
 | Raw RTC topology comparison | Literal loopback-origin cross-machine M1/M4 exchanged 8,192 verified bytes each way; same-M4 single/separate-process cases transferred zero despite complete gathering | Different topology/Chrome patch versions; no HLS/Nostr/admission or public-origin proof; error 701 also present in pass; no named network/browser/NAT cause; owned cleanup completed, including explicit historical scratch recovery |
 | 2e1 ordinary public 60.013 s | Requested video/native-audio decode green; both contributor uploads and receiver peer bytes zero; fatal/native/page/stall counts zero | Sharing red; expiry timing retained, underlying transport cause unproved |
 | 2e1 same-source HTTP/1 browser diagnostic versus default | Chrome 155.0.8059.41: 60.009 s diagnostic accepted 2,806,464 verified peer bytes across both qualities; fresh 60.015 s default check accepted zero | Browser `--disable-http2` diagnostic only; high's one stall retained; sequential same-source/default comparison; later ordinary server-H1 trial partial red; no sustained/physical/hard-NAT/cost proof |

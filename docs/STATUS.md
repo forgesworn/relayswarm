@@ -74,7 +74,15 @@ served client is 729,998 bytes, SHA-256
 These results bind the deployed 0e source; a subsequent documentation commit does
 not change its runtime identity or inherit its exact-source CI proof.
 
-Its fresh offline production-only consumer passed all ten documented imports,
+The later documentation checkpoint `8c09478830e80f781dd01779181174e2cf8693be`
+passed all nine required jobs in
+[CI run 38506350320](https://github.com/forgesworn/relayswarm/actions/runs/38506350320).
+It did not replace deployed 0e. The next diagnostic candidate adds
+local bounded transport-state/close-reason metrics; it is not deployed and makes
+no connectivity-fix claim. Its contract is described in
+[integration metrics](../INTEGRATION.md#metrics).
+
+Deployed 0e’s fresh offline production-only consumer passed all ten documented imports,
 exact packaged demo modules, installed CLI help, independent-process verified
 native transfer and verified HTTP fallback. The unpublished package is 877,977
 bytes/192 files, SHA-256
@@ -154,6 +162,34 @@ actual SDP. Both apps remained unstarted with no media, admission or upload
 consent; all owned cleanup passed. These raw cases do not reproduce the hosted
 HLS rendezvous/admission journey or identify its failed phase; investigation
 continues.
+
+A later instrumented restored-VPN cross-machine check passed all three gates
+for 60.074 s, with 22 verified peer loads/10,151,436 bytes across both qualities
+and zero recorded stalls/errors/withdrawals. Its whole-heap PC-state sampling
+could affect timing. The subsequent ordinary check on the same finite source
+remained red for sharing over 60.020 s: only four high loads/2,697,988 verified
+bytes (three unique contexts, one completed twice), low zero. Both contributors
+retained consent/serving. High's 4,038,428-byte/6-served/1-refused counters measure
+accepted/reserved accounting, not verified receiver delivery or wire bytes.
+All recorded stalls/fatal/native/page errors/freezes/withdrawals were zero.
+Of 357 controls, 356 finished; one receiver commitment aborted after HTTP 200/H1
+headers. No policy/session failure was recorded. VPN service observations were
+Connected before ordinary at 04:11:36.953324 UTC and afterward at 04:17:22.016533.
+These finite, sequential observations establish neither a heap-instrumentation
+cause nor a VPN mechanism. Named evidence is
+`independent-ordinary-restored-vpn-0e-analysis-20261014` and
+`public-passive-hls-restored-vpn-analysis-20261014`.
+
+A separate same-M4, two-process raw comparison passed in 6.517 s while the owner
+had disconnected the VPN, then failed in 27.113 s after confirmed restoration.
+The pass exchanged one verified 8,192-byte message each way; gathering completed
+in both cases and ICE error 701 occurred even in the pass. Literal loopback
+origins, no HLS/Nostr/admission, one attempt per state and owner-managed setting
+changes limit the result; no sole-cause or public-HLS qualification follows.
+Receipts are retained in `m4-raw-vpn-restoration-comparison-20261014`. The ordinary
+run's browser/controller/provider cleanup and actual source cleanup-v2 all passed,
+including 34 independent retained identity/helper/input/journal checks. This does
+not upgrade raw remote journal digest claims to an independent host rehash.
 
 All owned browsers, readers, test services and finite sources for these completed
 checks are closed. Renewal source cleanup-v2 matched actual source identity,

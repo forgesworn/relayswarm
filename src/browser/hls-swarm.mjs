@@ -117,14 +117,39 @@ function onCellular() {
   return Boolean(connection && (connection.type === "cellular" || connection.saveData));
 }
 
-function gathered(pc, capMs = 1_200, signal) {
+// Local-only, fixed vocabulary: never retain signalling or peer identity here.
+const TRANSPORT_EVENTS = Object.freeze({
+  created: ["outgoing", "incoming"],
+  gathering: ["new", "gathering", "complete", "unknown"],
+  ice: ["new", "checking", "connected", "completed", "failed", "disconnected", "closed", "unknown"],
+  connection: ["new", "connecting", "connected", "disconnected", "failed", "closed", "unknown"],
+  "local-offer": ["complete", "capped", "aborted", "unknown"],
+  "local-answer": ["complete", "capped", "aborted", "unknown"],
+  "offer-received": ["authenticated"], "answer-received": ["authenticated"],
+  "offer-admitted": ["accepted"], "answer-admitted": ["accepted"],
+  "remote-installed": ["offer", "answer"],
+  "signal-send": ["offer", "answer"], "signal-failed": ["offer", "answer"],
+  "channel-open": ["accepted", "stale"],
+  "dial-end": ["timeout", "failed", "rejected", "superseded", "admission", "host-stop"],
+  "link-close": ["host", "host-stop", "admission", "rotation", "integrity", "request-timeout", "request-abort",
+    "native-failed", "native-closed", "native-disconnected", "channel-close", "channel-error",
+    "protocol", "send-error", "serve-error", "upload-queue", "upload-drain-timeout"],
+});
+const increment = (value) => Math.min(Number.MAX_SAFE_INTEGER, value + 1);
+
+function gathered(pc, capMs = 1_200, signal, observed) {
   return new Promise((resolve) => {
-    if (pc.iceGatheringState === "complete" || signal?.aborted) return resolve();
+    const done = (outcome) => { try { observed?.(outcome); } catch {} resolve(outcome); };
+    if (pc.iceGatheringState === "complete" || signal?.aborted) return done(signal?.aborted ? "aborted" : "complete");
     const finish = () => {
       clearTimeout(cap);
       pc.removeEventListener("icegatheringstatechange", changed);
       signal?.removeEventListener("abort", finish);
-      resolve();
+      // Classification is diagnostic only. A getter failure must not prevent
+      // the original timer/abort completion from resolving its wait.
+      let outcome = "unknown";
+      try { outcome = signal?.aborted ? "aborted" : pc.iceGatheringState === "complete" ? "complete" : "capped"; } catch {}
+      done(outcome);
     };
     const changed = () => { if (pc.iceGatheringState === "complete") finish(); };
     const cap = setTimeout(finish, capMs);
@@ -227,6 +252,13 @@ class HlsSwarm {
   constructor(options) {
     this.options = { ...DEFAULTS, ...options };
     this.startedAt = Date.now();
+    this.transportStartedAt = now();
+    this.transportSequence = 0;
+    this.transportRecords = [];
+    this.transportDropped = 0;
+    this.transportCounters = Object.fromEntries(Object.entries(TRANSPORT_EVENTS).map(([event, values]) =>
+      [event, Object.fromEntries(values.map((value) => [value, 0]))]));
+    this.transportConnections = new WeakMap();
     this.disabledReason = this.#validate();
     this.stopped = false;
     this.lifecycle = new AbortController();
@@ -387,10 +419,11 @@ class HlsSwarm {
     for (const waiter of this.haveWaiters) waiter();
     this.haveWaiters.clear();
     for (const dial of this.dials.values()) {
+      this.#endTransport(dial.pc, "dial-end", "host-stop");
       try { dial.pc.close(); } catch {}
     }
     this.dials.clear();
-    for (const link of [...this.links.values()]) link.close();
+    for (const link of [...this.links.values()]) link.close("host-stop");
     this.links.clear();
     this.held.clear();
     this.heldBytes = 0;
@@ -439,6 +472,16 @@ class HlsSwarm {
         firstLinkAtMs: this.firstLinkAtMs,
         candidatePairs: { ...this.pairTypes },
         deliveryMeasurements: [...this.links.values()].map((link) => ({ pubkey: link.pubkey, ...this.peerSelection.summary(link) })),
+      },
+      // IDs are per swarm instance; 0 means no PC allocated/correlated. Signal
+      // send records local acceptance, not relay delivery or remote receipt.
+      // Additive metrics-v2 field; retained after stop for local receipts. No
+      // automatic reporting or new wire data is introduced by this projection.
+      transportDiagnostics: {
+        capacity: 64,
+        dropped: this.transportDropped,
+        counters: Object.fromEntries(Object.entries(this.transportCounters).map(([event, values]) => [event, { ...values }])),
+        records: this.transportRecords.map((record) => ({ ...record })),
       },
       signalling: {
         samples: this.signallingSamples.length,
@@ -818,7 +861,7 @@ class HlsSwarm {
         this.peerSelection.record(link, now() - requestedAt);
         this.counters.peerCorrupt += 1;
         this.banned.add(link.pubkey);
-        link.close();
+        link.close("integrity");
         continue;
       }
       if (commitment.expiresAt <= Math.floor(Date.now() / 1000)) return null;
@@ -1051,7 +1094,7 @@ class HlsSwarm {
       this.peerSelection.record(race.peerLink, race.requestMs);
       c.peerCorrupt += 1;
       this.banned.add(race.peerLink.pubkey);
-      race.peerLink.close();
+      race.peerLink.close("integrity");
       return;
     }
     const latency = race.peerAt - race.t0;
@@ -1099,7 +1142,7 @@ class HlsSwarm {
   async #serveRequest(link, key) {
     if (this.options.admit && !(await this.#admits(link.pubkey, this.admitted.get(link.pubkey)?.ticket))) {
       this.counters.uploadsRefused += 1;
-      link.close();
+      link.close("admission");
       return null;
     }
     const bytes = this.held.get(key);
@@ -1252,7 +1295,7 @@ class HlsSwarm {
     if (!link) return null;
     this.lastEvictionAt = Date.now();
     this.counters.evicted += 1;
-    link.close();
+    link.close("rotation");
     return link;
   }
 
@@ -1404,9 +1447,58 @@ class HlsSwarm {
     });
   }
 
-  #newPeerConnection() {
+  #transport(pc, event, detail, candidates) {
+    // Diagnostics cannot affect admission, delivery, or native state handling.
+    try {
+      if (!TRANSPORT_EVENTS[event]?.includes(detail)) return;
+      const meta = this.transportConnections.get(pc);
+      if (meta?.ended) return;
+      const elapsed = now() - this.transportStartedAt;
+      const record = { id: meta?.id ?? 0, atMs: Number.isFinite(elapsed) ? Math.max(0, Math.round(elapsed)) : 0, event, detail };
+      if (Number.isSafeInteger(candidates) && candidates >= 0 && candidates <= 256) { record.candidates = candidates; record.candidatesCapped = candidates === 256; }
+      this.transportCounters[event][detail] = increment(this.transportCounters[event][detail]);
+      if (this.transportRecords.length === 64) { this.transportRecords.shift(); this.transportDropped = increment(this.transportDropped); }
+      this.transportRecords.push(record);
+    } catch {}
+  }
+
+  #localDescription(pc, type, outcome) {
+    // Only count lines, never parse/store addresses or other SDP fields. Native
+    // descriptions above this bound are deliberately reported without a count.
+    try {
+      let candidates;
+      const sdp = pc.localDescription?.sdp;
+      if (typeof sdp === "string" && sdp.length <= 256 * 1024) {
+        candidates = 0;
+        for (const match of sdp.matchAll(/^a=candidate:/gm)) { if (++candidates === 256) break; }
+      }
+      this.#transport(pc, `local-${type}`, outcome, candidates);
+    } catch { this.#transport(pc, `local-${type}`, outcome); }
+  }
+
+  #endTransport(pc, event, reason) {
+    this.#transport(pc, event, reason);
+    const meta = this.transportConnections.get(pc);
+    if (!meta || meta.ended) return;
+    meta.ended = true;
+    for (const [name, listener] of meta.listeners) { try { pc.removeEventListener?.(name, listener); } catch {} }
+    meta.listeners.length = 0;
+  }
+
+  #newPeerConnection(outgoing) {
     const Impl = this.options.RTCPeerConnectionImpl || globalThis.RTCPeerConnection;
-    return new Impl({ iceServers: this.options.iceServers });
+    const pc = new Impl({ iceServers: this.options.iceServers });
+    const meta = { id: this.transportSequence < Number.MAX_SAFE_INTEGER ? ++this.transportSequence : 0, listeners: [], ended: false };
+    this.transportConnections.set(pc, meta);
+    this.#transport(pc, "created", outgoing ? "outgoing" : "incoming");
+    for (const [event, property, nativeEvent] of [["gathering", "iceGatheringState", "icegatheringstatechange"], ["ice", "iceConnectionState", "iceconnectionstatechange"], ["connection", "connectionState", "connectionstatechange"]]) {
+      const listener = () => {
+        try { const value = pc[property]; this.#transport(pc, event, TRANSPORT_EVENTS[event].includes(value) ? value : "unknown"); }
+        catch { this.#transport(pc, event, "unknown"); }
+      };
+      try { pc.addEventListener(nativeEvent, listener); meta.listeners.push([nativeEvent, listener]); listener(); } catch {}
+    }
+    return pc;
   }
 
   async #dial(pubkey) {
@@ -1417,7 +1509,7 @@ class HlsSwarm {
     } finally { this.dialChecks.delete(pubkey); }
     if (this.stopped || this.links.has(pubkey) || this.dials.has(pubkey) || !this.#hasCapacity()
       || [...this.dials.values()].filter((dial) => dial.outgoing).length >= this.options.maxDialsInFlight) return;
-    const pc = this.#newPeerConnection();
+    const pc = this.#newPeerConnection(true);
     const requestId = randomRequestId();
     const dial = { pubkey, pc, requestId, outgoing: true, startedAt: now(), offerSentAt: 0 };
     this.dials.set(pubkey, dial);
@@ -1427,26 +1519,29 @@ class HlsSwarm {
     channel.addEventListener("open", () => this.#guard("link-open", () => this.#linkOpened(dial, channel)));
     try {
       await pc.setLocalDescription(await pc.createOffer());
-      await gathered(pc, 1_200, this.lifecycle.signal);
+      await gathered(pc, 1_200, this.lifecycle.signal, (outcome) => this.#localDescription(pc, "offer", outcome));
       if (this.stopped || this.dials.get(pubkey) !== dial) return;
-      if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.ticket))) return this.#failDial(dial, "failed");
+      if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.ticket))) return this.#failDial(dial, "failed", 0, "admission");
       if (this.stopped || this.dials.get(pubkey) !== dial) return;
       dial.offerSentAt = now();
       // The offer says how alone the caller is: a peer with none at all is the
       // only one worth rotating somebody out for.
       const ticket = this.#ownTicket();
-      if (!this.#sendSignal(pubkey, "offer", requestId, { sdp: pc.localDescription.sdp, peers: this.links.size, ...(ticket ? { ticket } : {}) })) this.#failDial(dial, "failed");
+      const sent = this.#sendSignal(pubkey, "offer", requestId, { sdp: pc.localDescription.sdp, peers: this.links.size, ...(ticket ? { ticket } : {}) });
+      this.#transport(pc, sent ? "signal-send" : "signal-failed", "offer");
+      if (!sent) this.#failDial(dial, "failed");
     } catch (error) {
       this.#noteError("dial", error);
       this.#failDial(dial, "failed");
     }
   }
 
-  #failDial(dial, reason, cooldownMs = 0) {
+  #failDial(dial, reason, cooldownMs = 0, diagnosticReason = reason) {
     if (this.dials.get(dial.pubkey) !== dial) return;
     this.dials.delete(dial.pubkey);
     clearTimeout(dial.timer);
     this.timers.delete(dial.timer);
+    this.#endTransport(dial.pc, "dial-end", diagnosticReason);
     try { dial.pc.close(); } catch {}
     if (reason === "timeout") this.counters.dialsTimedOut += 1;
     else if (reason === "rejected") this.counters.dialsRejected += 1;
@@ -1464,14 +1559,17 @@ class HlsSwarm {
     if (payload.type === "answer") {
       const dial = this.dials.get(from);
       if (!dial?.outgoing || dial.requestId !== payload.requestId || !sdp) return;
+      this.#transport(dial.pc, "answer-received", "authenticated");
       if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) {
-        this.#failDial(dial, "failed");
+        this.#failDial(dial, "failed", 0, "admission");
         return;
       }
       if (this.stopped || this.dials.get(from) !== dial) return;
+      this.#transport(dial.pc, "answer-admitted", "accepted");
       dial.answerAt = now();
       try {
         await dial.pc.setRemoteDescription({ type: "answer", sdp });
+        this.#transport(dial.pc, "remote-installed", "answer");
       } catch (error) {
         this.#noteError("answer", error);
         this.#failDial(dial, "failed");
@@ -1489,6 +1587,7 @@ class HlsSwarm {
     }
     if (payload.type !== "offer" || !sdp) return;
     if (this.banned.has(from) || this.links.has(from)) return;
+    this.#transport(this.dials.get(from)?.pc, "offer-received", "authenticated");
     // Checked before anything is answered: the answer's SDP carries this
     // viewer's address. An unadmitted offer is dropped without a reply.
     if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null)) || this.stopped || this.links.has(from)) return;
@@ -1504,7 +1603,8 @@ class HlsSwarm {
       this.#sendSignal(from, "reject", payload.requestId, this.#refusalPayload(from));
       return;
     }
-    const pc = this.#newPeerConnection();
+    const pc = this.#newPeerConnection(false);
+    this.#transport(pc, "offer-admitted", "accepted");
     const dial = { pubkey: from, pc, requestId: payload.requestId, outgoing: false, startedAt: now(), offerSentAt: now() };
     this.dials.set(from, dial);
     dial.timer = this.#after(this.options.dialTimeoutMs, () => this.#failDial(dial, "timeout"));
@@ -1515,14 +1615,17 @@ class HlsSwarm {
     });
     try {
       await pc.setRemoteDescription({ type: "offer", sdp });
+      this.#transport(pc, "remote-installed", "offer");
       if (this.stopped || this.dials.get(from) !== dial) return;
       await pc.setLocalDescription(await pc.createAnswer());
-      await gathered(pc, 1_200, this.lifecycle.signal);
+      await gathered(pc, 1_200, this.lifecycle.signal, (outcome) => this.#localDescription(pc, "answer", outcome));
       if (this.stopped || this.dials.get(from) !== dial) return;
-      if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) return this.#failDial(dial, "failed");
+      if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) return this.#failDial(dial, "failed", 0, "admission");
       if (this.stopped || this.dials.get(from) !== dial) return;
       const ticket = this.#ownTicket();
-      if (this.#sendSignal(from, "answer", payload.requestId, { sdp: pc.localDescription.sdp, ...(ticket ? { ticket } : {}) })) this.counters.offersAccepted += 1;
+      const sent = this.#sendSignal(from, "answer", payload.requestId, { sdp: pc.localDescription.sdp, ...(ticket ? { ticket } : {}) });
+      this.#transport(pc, sent ? "signal-send" : "signal-failed", "answer");
+      if (sent) this.counters.offersAccepted += 1;
       else this.#failDial(dial, "failed");
     } catch (error) {
       this.#noteError("offer", error);
@@ -1532,9 +1635,11 @@ class HlsSwarm {
 
   async #linkOpened(dial, channel) {
     if (this.dials.get(dial.pubkey) !== dial || this.stopped) {
+      this.#endTransport(dial.pc, "channel-open", "stale");
       try { dial.pc.close(); } catch {}
       return;
     }
+    this.#transport(dial.pc, "channel-open", "accepted");
     this.dials.delete(dial.pubkey);
     clearTimeout(dial.timer);
     this.timers.delete(dial.timer);
@@ -1552,6 +1657,7 @@ class HlsSwarm {
       },
       onScheduleChange: () => { for (const waiter of [...this.haveWaiters]) waiter(); },
       onClose: (closed) => {
+        this.#endTransport(dial.pc, "link-close", closed.closeReason);
         if (this.links.get(closed.pubkey) === closed) {
           this.links.delete(closed.pubkey);
           this.counters.linksClosed += 1;

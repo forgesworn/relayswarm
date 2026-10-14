@@ -18,8 +18,14 @@ const CHUNK_BYTES = 16 * 1024;
 const HIGH_WATER_BYTES = 1024 * 1024;
 const LOW_WATER_BYTES = 256 * 1024;
 const MAX_HAVE_KEYS = 256;
+const CLOSE_REASONS = new Set([
+  "host", "host-stop", "admission", "rotation", "integrity", "request-timeout", "request-abort",
+  "native-failed", "native-closed", "native-disconnected", "channel-close", "channel-error",
+  "protocol", "send-error", "serve-error", "upload-queue", "upload-drain-timeout",
+]);
 
 export class PeerLink {
+  #uploadDrainTimedOut = false;
   constructor({ pubkey, pc, channel, maxSegmentBytes, onRequest, onHaveChange, onScheduleChange, onClose, maxQueuedRequests = 4, drainTimeoutMs = 3_000 }) {
     this.pubkey = pubkey;
     this.pc = pc;
@@ -52,12 +58,13 @@ export class PeerLink {
     channel.binaryType = "arraybuffer";
     channel.bufferedAmountLowThreshold = LOW_WATER_BYTES;
     channel.addEventListener("message", (event) => {
-      try { this.#onMessage(event.data); } catch { this.close(); }
+      try { this.#onMessage(event.data); } catch { this.close("protocol"); }
     });
-    channel.addEventListener("close", () => this.close());
-    channel.addEventListener("error", () => this.close());
+    channel.addEventListener("close", () => this.close("channel-close"));
+    channel.addEventListener("error", () => this.close("channel-error"));
     pc.addEventListener("connectionstatechange", () => {
-      if (["failed", "closed", "disconnected"].includes(pc.connectionState)) this.close();
+      const state = pc.connectionState;
+      if (["failed", "closed", "disconnected"].includes(state)) this.close(`native-${state}`);
     });
   }
 
@@ -107,16 +114,18 @@ export class PeerLink {
       };
       // Binary chunks carry no request id. Close on cancellation or timeout so
       // late chunks cannot be mistaken for a subsequent response.
-      const cancel = () => { finish(null); this.close(); };
-      this.pending = { id, key, expectedSize, size: -1, parts: [], received: 0, finish, timer: setTimeout(cancel, Math.max(1, timeoutMs)) };
+      const cancel = () => { finish(null); this.close("request-abort"); };
+      const timeout = () => { finish(null); this.close("request-timeout"); };
+      this.pending = { id, key, expectedSize, size: -1, parts: [], received: 0, finish, timer: setTimeout(timeout, Math.max(1, timeoutMs)) };
       signal?.addEventListener("abort", cancel, { once: true });
       if (!this.#sendText({ t: "want", id, k: key })) finish(null);
     });
   }
 
-  close() {
+  close(reason = "host") {
     if (this.closed) return;
     this.closed = true;
+    this.closeReason = CLOSE_REASONS.has(reason) ? reason : "host";
     this.fetching.clear();
     this.renditions.clear();
     this.pending?.finish(null);
@@ -131,7 +140,7 @@ export class PeerLink {
       this.channel.send(JSON.stringify(message));
       return true;
     } catch {
-      this.close();
+      this.close("send-error");
       return false;
     }
   }
@@ -142,14 +151,14 @@ export class PeerLink {
       const pending = this.pending;
       if (!pending || pending.size < 0) return;
       const chunk = new Uint8Array(data);
-      if (!chunk.byteLength || chunk.byteLength > CHUNK_BYTES || pending.parts.length >= this.maxChunks) return this.close();
+      if (!chunk.byteLength || chunk.byteLength > CHUNK_BYTES || pending.parts.length >= this.maxChunks) return this.close("protocol");
       pending.received += chunk.byteLength;
       this.bytesIn += chunk.byteLength;
       if (pending.received > pending.size) return pending.finish(null);
       pending.parts.push(chunk);
       return;
     }
-    if (data.length > 64 * 1024) return this.close();
+    if (data.length > 64 * 1024) return this.close("protocol");
     const message = JSON.parse(data);
     if (!message || typeof message !== "object") return;
     switch (message.t) {
@@ -177,8 +186,8 @@ export class PeerLink {
       case "meta": {
         const pending = this.pending;
         if (!pending || message.id !== pending.id) return;
-        if (pending.size !== -1) return this.close();
-        if (pending.expectedSize !== undefined && message.size !== pending.expectedSize) return this.close();
+        if (pending.size !== -1) return this.close("protocol");
+        if (pending.expectedSize !== undefined && message.size !== pending.expectedSize) return this.close("protocol");
         if (!Number.isSafeInteger(message.size) || message.size < 1 || message.size > this.maxSegmentBytes) return pending.finish(null);
         pending.size = message.size;
         return;
@@ -222,11 +231,11 @@ export class PeerLink {
 
   #onWant(message) {
     if (!Number.isSafeInteger(message.id) || typeof message.k !== "string" || !HEX64.test(message.k)) return;
-    if (this.outboundInFlight >= this.maxQueuedRequests) return this.close();
+    if (this.outboundInFlight >= this.maxQueuedRequests) return this.close("upload-queue");
     this.outboundInFlight += 1;
     this.serving = this.serving
       .then(() => this.#serve(message.id, message.k))
-      .catch(() => this.close())
+      .catch(() => this.close(this.#uploadDrainTimedOut ? "upload-drain-timeout" : "serve-error"))
       .finally(() => { this.outboundInFlight = Math.max(0, this.outboundInFlight - 1); });
   }
 
@@ -249,6 +258,7 @@ export class PeerLink {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         cleanup();
+        this.#uploadDrainTimedOut = true;
         reject(new Error("Peer upload stalled."));
       }, this.drainTimeoutMs);
       const cleanup = () => {

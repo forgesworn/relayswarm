@@ -50,6 +50,24 @@ its failure cause; investigation continues. All owned completed-run browsers/rea
 installed app awaits ingest. Fourteen-role/7,200-second/22-churn, complete
 physical journeys, hard NAT, cost and immutable release/download gates remain open.
 
+The latest ordinary restored-VPN cross-machine HLS check remained sharing-red
+for 60.020 s: four high-only verified loads/2,697,988 bytes, low zero, despite
+both contributors retaining consent/serving; playback and all recorded error/
+stall/withdrawal counts passed. High's 4,038,428 accepted/reserved bytes are not
+receiver delivery or wire bytes. A preceding whole-heap-instrumented 60.074 s
+check on the same finite source passed with 22 loads/10,151,436 bytes across
+both qualities. These sequential results establish no heap/VPN cause. Separate
+same-M4 raw RTC passed with the owner-disconnected VPN (6.517 s/8,192 bytes each
+way), then failed after restoration (27.113 s); it is not HLS/admission/NAT proof.
+Both ordinary-run VPN observations were Connected; all browser/provider/source
+cleanup passed. Named receipts and precise counters are in [status](STATUS.md).
+
+Documentation checkpoint `8c09478` passed all nine required CI jobs in
+[run 38506350320](https://github.com/forgesworn/relayswarm/actions/runs/38506350320);
+actual deployed application remains 0e. Next-candidate bounded local transport
+metrics are diagnostic code, not deployed or a connectivity fix; see
+[integration](../INTEGRATION.md#metrics). All earlier reds and full scope remain.
+
 The earlier deployed application was `fa79c2260431cf7901921fab4eaca251c4988f4b`,
 with independent EE proxy provenance and all nine jobs green in
 [CI run 38496983011](https://github.com/forgesworn/relayswarm/actions/runs/38496983011).
@@ -192,7 +210,7 @@ records the later short/partial-long, TCP relay and Android checks separately.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Deployed 0e/independent EE permanent H1, ordinary 60.013 s all-three-gate and 180.015 s all-four-gate renewal checks pass; latter delivered 39,608,780 verified peer bytes across both qualities with pre-measurement stalls retained; later cross-machine 60.060 s playback passed but sharing failed; fourteen-role/two-hour stability and matched field benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Deployed 0e/independent EE permanent H1, ordinary 60.013 s all-three-gate and 180.015 s all-four-gate renewal checks pass; latter delivered 39,608,780 verified peer bytes across both qualities with pre-measurement stalls retained; later cross-machine 60.060 s and ordinary restored-VPN 60.020 s sharing failed (latest high-only 2,697,988 verified bytes); separate instrumented pass does not establish cause; fourteen-role/two-hour stability and matched field benefit remain open |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/exact-source CI and 0e in-place own-ticket renewal pass with unchanged expiry, authority, admission and quota limits; all three peer actors retained sampled session/link/consent state across renewal; prior fourteen-viewer address-limit 429/authority-expiry reds remain unresolved operational capacity evidence under P12 |

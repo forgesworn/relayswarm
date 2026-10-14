@@ -74,7 +74,7 @@ async function linkedFixture(options = {}, LoaderImpl = Loader) {
   };
   const load = () => new Promise((resolve) => new hls.config.fLoader({}).load(context, {}, { onSuccess: resolve }));
   const close = async () => { swarm.stop(); for (const peer of peers) peer.close(); pool.close(); await relay.close(); };
-  return { swarm, hls, addPeer, load, close, peers, pool };
+  return { swarm, hls, addPeer, load, close, peers, pool, connections };
 }
 
 test("concurrent accepted uploads reserve the full session allowance and withdraw availability", async () => {
@@ -1008,4 +1008,195 @@ test("a revoked connected peer loses media access before any new accepted upload
     assert.equal(fixture.swarm.metrics().bytes.uploaded, 0);
     assert.equal(peer.sent.filter((frame) => frame.t === "meta").length, 0);
   } finally { await fixture.close(); }
+});
+
+test("transport diagnostics retain bounded redacted real session phases and detach on stop", async () => {
+  const fixture = await linkedFixture({ admit: () => true });
+  try {
+    await fixture.addPeer();
+    const pc = fixture.connections[0];
+    const before = fixture.swarm.metrics().transportDiagnostics;
+    const events = before.records.map((r) => r.event);
+    for (const event of ["created", "offer-received", "offer-admitted", "remote-installed", "local-answer", "signal-send", "channel-open"]) assert.ok(events.includes(event), event);
+    assert.ok(events.indexOf("offer-received") < events.indexOf("offer-admitted"));
+    assert.ok(events.indexOf("offer-admitted") < events.indexOf("remote-installed"));
+    assert.ok(events.indexOf("remote-installed") < events.indexOf("local-answer"));
+    assert.ok(events.indexOf("local-answer") < events.indexOf("signal-send"));
+    assert.equal(before.records.find((r) => r.event === "local-answer").detail, "complete");
+    assert.equal(before.records.find((r) => r.event === "local-answer").candidates, 0);
+    for (let i = 0; i < 90; i++) {
+      pc.iceConnectionState = i % 2 ? "checking" : "private-address-and-ticket";
+      pc.dispatchEvent(new Event("iceconnectionstatechange"));
+    }
+    const metrics = fixture.swarm.metrics(), trace = metrics.transportDiagnostics;
+    assert.equal(metrics.v, 2); assert.equal(trace.records.length, 64); assert.ok(trace.dropped > 0);
+    assert.equal(trace.counters.ice.checking, 45); assert.equal(trace.counters.ice.unknown, 46);
+    const text = JSON.stringify(trace);
+    for (const denied of ["private-address-and-ticket", "address-bearing-sdp", "fixture-ticket", fixture.peers[0].pubkey, metrics.pubkey]) assert.ok(!text.includes(denied));
+    for (const row of trace.records) {
+      assert.deepEqual(Object.keys(row).sort(), ["atMs", "detail", "event", "id"]);
+      assert.ok(Number.isSafeInteger(row.id) && row.id >= 0 && Number.isFinite(row.atMs) && row.atMs >= 0);
+    }
+    trace.records[0].detail = "mutated"; trace.counters.ice.checking = -1;
+    assert.equal(fixture.swarm.metrics().transportDiagnostics.counters.ice.checking, 45);
+    fixture.swarm.stop();
+    const stopped = fixture.swarm.metrics().transportDiagnostics;
+    assert.equal(stopped.records.at(-1).event, "link-close"); assert.equal(stopped.records.at(-1).detail, "host-stop");
+    pc.iceConnectionState = "failed"; pc.dispatchEvent(new Event("iceconnectionstatechange"));
+    await sleep(10);
+    assert.deepEqual(fixture.swarm.metrics().transportDiagnostics, stopped, "stopped receipt remains bounded and stable");
+  } finally { await fixture.close(); }
+});
+
+test("PeerLink closure distinguishes request timeout, caller abort, native and protocol failure without leaking reason", async () => {
+  for (const expected of ["request-timeout", "request-abort", "native-disconnected", "channel-error", "protocol", "host"]) {
+    const channel = new Channel(), pc = new PC(); let closes = 0;
+    const link = new PeerLink({ pubkey: "private-peer", pc, channel, maxSegmentBytes: 1024, onClose: () => closes++ });
+    if (expected === "request-timeout") assert.equal(await link.request("a".repeat(64), 5), null);
+    else if (expected === "request-abort") {
+      const controller = new AbortController(), pending = link.request("a".repeat(64), 2000, { signal: controller.signal });
+      controller.abort(); assert.equal(await pending, null);
+    } else if (expected === "native-disconnected") { pc.connectionState = "disconnected"; pc.dispatchEvent(new Event("connectionstatechange")); }
+    else if (expected === "channel-error") channel.dispatchEvent(new Event("error"));
+    else if (expected === "protocol") channel.receive("{private-invalid-json");
+    else link.close("private-error-message");
+    assert.equal(link.closeReason, expected); assert.equal(link.closed, true); assert.equal(pc.closed, true); assert.equal(closes, 1);
+    link.close("request-timeout"); assert.equal(link.closeReason, expected); assert.equal(closes, 1);
+  }
+});
+
+async function transportFixture({ gathering = "complete", ...options } = {}) {
+  const relay = await startLocalRelay(), connections = [];
+  class TracePC extends PC {
+    constructor() { super(); this.iceGatheringState = gathering; connections.push(this); }
+    localDescription = { sdp: "a=ice-pwd:PRIVATE\r\na=candidate:1 1 udp 1 private.local 5 typ host\r\n" };
+    createDataChannel() { this.channel = new Channel(); return this.channel; }
+  }
+  const swarm = createHlsSwarm({ ...base, RTCPeerConnectionImpl: TracePC, relays: [relay.url], ...options });
+  const pool = new RelayPool([relay.url]);
+  const peer = new RelaySwarmSession({ pool, swarmId: base.swarmId });
+  try {
+    swarm.attach({ config: { loader: Loader } }); await pool.connect(); peer.start(); await until(() => swarm.metrics().pubkey);
+  } catch (error) { swarm.stop(); peer.close(); pool.close(); await relay.close(); throw error; }
+  return { swarm, peer, connections, async close() { swarm.stop(); peer.close(); pool.close(); await relay.close(); } };
+}
+
+test("transport trace distinguishes outgoing authenticated answer, admission and installed description", async () => {
+  let admitted = true;
+  const f = await transportFixture({ admit: () => admitted, ticket: "own-private" });
+  try {
+    const offers = []; f.peer.onSignal(({ payload }) => offers.push(payload));
+    f.peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: f.peer.pubkey }], ticket: "remote-private", have: [], open: true });
+    await until(() => offers.some((p) => p.type === "offer"));
+    const offer = offers.find((p) => p.type === "offer");
+    f.peer.sendSignal(f.swarm.metrics().pubkey, { type: "answer", transport: "webrtc", requestId: offer.requestId, payload: { sdp: "private-answer", ticket: "remote-private" } });
+    await until(() => f.swarm.metrics().transportDiagnostics.counters["remote-installed"].answer === 1);
+    f.connections[0].channel.dispatchEvent(new Event("open")); await until(() => f.swarm.metrics().peers.connected === 1);
+    const trace = f.swarm.metrics().transportDiagnostics, rows = trace.records;
+    for (const event of ["local-offer", "signal-send", "answer-received", "answer-admitted", "remote-installed", "channel-open"]) assert.ok(rows.some((r) => r.event === event));
+    assert.equal(rows.find((r) => r.event === "local-offer").candidates, 1);
+    assert.equal(rows.find((r) => r.event === "local-offer").candidatesCapped, false);
+    assert.ok(rows.findIndex((r) => r.event === "answer-received") < rows.findIndex((r) => r.event === "answer-admitted"));
+    assert.equal(new Set(rows.map((r) => r.id)).size, 1);
+    for (const denied of [f.peer.pubkey, offer.requestId, "private-answer", "own-private", "remote-private", "PRIVATE", "private.local"]) assert.ok(!JSON.stringify(trace).includes(denied));
+  } finally { await f.close(); }
+});
+
+test("transport trace keeps rejected admission separate from an authenticated answer and keeps existing timeout", async () => {
+  let admitted = true;
+  const f = await transportFixture({ admit: () => admitted, dialTimeoutMs: 500 });
+  try {
+    const offers = []; f.peer.onSignal(({ payload }) => offers.push(payload));
+    f.peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: f.peer.pubkey }], ticket: "valid-then-revoked", have: [], open: true });
+    await until(() => offers.some((p) => p.type === "offer")); admitted = false;
+    f.peer.sendSignal(f.swarm.metrics().pubkey, { type: "answer", transport: "webrtc", requestId: offers[0].requestId, payload: { sdp: "private-answer", ticket: "valid-then-revoked" } });
+    await until(() => f.swarm.metrics().peers.dialsFailed === 1);
+    const trace = f.swarm.metrics().transportDiagnostics;
+    assert.equal(trace.counters["answer-received"].authenticated, 1);
+    assert.equal(trace.counters["answer-admitted"].accepted, 0);
+    assert.equal(trace.counters["remote-installed"].answer, 0);
+    assert.equal(trace.records.at(-1).detail, "admission");
+  } finally { await f.close(); }
+  const timeout = await transportFixture({ dialTimeoutMs: 100 });
+  try {
+    timeout.peer.sendSignal(timeout.swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: "timeout-test", payload: { sdp: "private-offer" } });
+    await until(() => timeout.swarm.metrics().peers.dialsTimedOut === 1);
+    assert.equal(timeout.swarm.metrics().transportDiagnostics.records.at(-1).detail, "timeout");
+  } finally { await timeout.close(); }
+});
+
+test("gather cap and lifecycle abort are observed without extending the native1200ms envelope", async () => {
+  for (const abort of [false, true]) {
+    const f = await transportFixture({ gathering: "gathering" });
+    try {
+      f.peer.sendSignal(f.swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: "gather-test", payload: { sdp: "private-offer" } });
+      await until(() => f.connections.length === 1); await sleep(20);
+      if (abort) f.swarm.stop();
+      await until(() => f.swarm.metrics().transportDiagnostics.records.some((r) => r.event === "local-answer"));
+      const trace = f.swarm.metrics().transportDiagnostics, local = trace.records.find((r) => r.event === "local-answer"), created = trace.records.find((r) => r.event === "created");
+      assert.equal(local.detail, abort ? "aborted" : "capped");
+      if (!abort) assert.ok(local.atMs - created.atMs >= 1100 && local.atMs - created.atMs < 3000);
+      if (abort) { assert.equal(trace.counters["signal-send"].answer, 0); assert.equal(trace.records.at(-1).detail, "host-stop"); }
+    } finally { await f.close(); }
+  }
+});
+
+test("diagnostic getters cannot add errors after abort or during native state events", async () => {
+  const f = await transportFixture({ gathering: "gathering" });
+  try {
+    f.peer.sendSignal(f.swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: "getter-test", payload: { sdp: "private-offer" } });
+    await until(() => f.connections.length === 1); await sleep(20);
+    const pc = f.connections[0], before = f.swarm.metrics().errors.total;
+    Object.defineProperty(pc, "iceConnectionState", { get() { throw Error("private-native-getter"); } });
+    pc.dispatchEvent(new Event("iceconnectionstatechange"));
+    Object.defineProperty(pc, "localDescription", { get() { throw Error("private-closed-description"); } });
+    f.swarm.stop(); await sleep(10);
+    const m = f.swarm.metrics(); assert.equal(m.errors.total, before);
+    assert.ok(m.transportDiagnostics.records.some((r) => r.event === "local-answer" && r.detail === "aborted" && !("candidates" in r)));
+    assert.equal(m.transportDiagnostics.records.at(-1).detail, "host-stop");
+    assert.ok(!JSON.stringify(m.transportDiagnostics).includes("private-"));
+  } finally { await f.close(); }
+});
+
+test("upload drain diagnostics preserve rejection then microtask close ordering", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const channel = new Channel(); channel.bufferedAmount = 2_000_000;
+  const link = new PeerLink({ pubkey: "peer", pc: new PC(), channel, maxSegmentBytes: 1024, drainTimeoutMs: 20, onRequest: () => new Uint8Array(32) });
+  try {
+    channel.receive(JSON.stringify({ t: "want", id: 1, k: "a".repeat(64) }));
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    t.mock.timers.tick(20);
+    assert.equal(link.closed, false, "the timer only rejects; serving.catch still owns closure");
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    assert.equal(link.closed, true); assert.equal(link.closeReason, "upload-drain-timeout");
+  } finally { link.close(); t.mock.timers.reset(); }
+});
+
+test("superseded pending connections retain a distinct local ID and remove native diagnostics", async () => {
+  const f = await transportFixture();
+  try {
+    const offer = (requestId) => f.peer.sendSignal(f.swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId, payload: { sdp: "private-offer" } });
+    offer("first-private-request"); await until(() => f.swarm.metrics().peers.offersAccepted === 1);
+    offer("second-private-request"); await until(() => f.swarm.metrics().peers.offersAccepted === 2);
+    const before = f.swarm.metrics().transportDiagnostics;
+    assert.equal(before.counters["dial-end"].superseded, 1);
+    assert.deepEqual(before.records.filter((r) => r.event === "created").map((r) => r.id), [1, 2]);
+    assert.equal(f.swarm.metrics().peers.dialsFailed, 0);
+    f.connections[0].iceConnectionState = "failed"; f.connections[0].dispatchEvent(new Event("iceconnectionstatechange"));
+    assert.deepEqual(f.swarm.metrics().transportDiagnostics, before);
+  } finally { await f.close(); }
+});
+
+test("a throwing gathering getter at the cap cannot prevent original wait completion", async () => {
+  const f = await transportFixture({ gathering: "gathering" });
+  try {
+    f.peer.sendSignal(f.swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: "capped-getter-test", payload: { sdp: "private-offer" } });
+    await until(() => f.connections.length === 1); await sleep(20);
+    Object.defineProperty(f.connections[0], "iceGatheringState", { get() { throw Error("private-gathering-getter"); } });
+    await until(() => f.swarm.metrics().peers.offersAccepted === 1);
+    const metrics = f.swarm.metrics(), local = metrics.transportDiagnostics.records.find((r) => r.event === "local-answer");
+    assert.equal(local.detail, "unknown"); assert.equal(metrics.errors.total, 0);
+    assert.equal(metrics.transportDiagnostics.counters["signal-send"].answer, 1);
+    assert.ok(!JSON.stringify(metrics.transportDiagnostics).includes("private-gathering-getter"));
+  } finally { await f.close(); }
 });

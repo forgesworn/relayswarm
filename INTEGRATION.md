@@ -158,6 +158,21 @@ Keep receipts local unless the viewer explicitly agrees to reporting. The
 current demo's optional reporting endpoint accepts a numeric summary rather
 than this full snapshot; see [operations](docs/OPERATIONS.md).
 
+The next diagnostic candidate adds `transportDiagnostics` within metrics version
+2; it is absent from the currently deployed 0e client. It contains fixed-enum
+`counters`, a ring of at most 64 `records`, `capacity` and an eviction `dropped`
+count. Records contain a page-local, per-swarm numeric connection `id` (0 when
+no PC is allocated/correlated), elapsed milliseconds in `atMs`, and fixed `event`/
+`detail` values for gathering, native states, signalling stages and close reasons.
+Unreadable native state uses the fixed `unknown` classification.
+Local-description records may add `candidates` (count only, capped at 256) and
+`candidatesCapped`; they contain no addresses, SDP, peer keys or request IDs.
+`signal-send` means local signalling acceptance, not relay delivery or remote
+receipt. The ring and counters remain readable after `stop()`; native listeners
+are detached when their dial/link ends. No automatic reporting, signalling change
+or connectivity fix is implied. Keep this diagnostic receipt local under the same
+reporting-consent boundary as other metrics.
+
 `inTimeShare` remains conditional on having peers. `sampledInTimeShare`
 includes sampled fragments with no peers; its byte equivalent weights by
 fragment size. The `observed` shares divide verified in-time samples by all
