@@ -1050,6 +1050,11 @@ The returned object contains:
   real local filename. It does not serve HTTP itself.
 - `await commitment(context)`: signs a kind-24172 commitment derived from a
   matching playlist record and the exact bytes on disk.
+- `await playlistSnapshot(path, {fresh = false})`: returns a copied playlist
+  buffer, its canonical file, presentation paths and media-playlist texts from
+  the bounded authorised catalogue. `fresh` settles any earlier shared refresh
+  before starting or joining the next one; it supports watch-before-read HTTP
+  handling without exposing media or encryption-key bodies.
 - `getMetrics()`: request, cache, streamed hashing, signing, renewal, eviction,
   changed-read, bounded playlist-retry and concurrency counters. A playlist
   rejected by the byte/stat change guard gets one fresh full-catalogue retry;
@@ -1068,6 +1073,33 @@ playlist are rejected. The signed expiry is 60 seconds after the publisher clock
 errors. Filesystem failures can also occur; a public server should mask internal
 paths as the demo does. Catalogue/signing bounds and the exact supported HLS
 subset are in [FIELD-TEST.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#publish-your-own-media).
+
+## Example origin HTTP playlists
+
+`startDemoServer` supports blocking reload of compatible complete live media
+playlists with target durations from one to three seconds. Its
+`blockingPlaylistReload` option defaults to `true`; setting it to `false` retains
+conventional playlist polling. Capability advertising is
+presentation-wide: unsupported parts, delta, ended or mixed presentations do
+not receive a partial blocking-reload promise. Raw pipeline files and media
+bytes are unchanged.
+
+A valid `_HLS_msn` request waits for a fresh authorised playlist containing that
+sequence or a later one. Requests for sequences already removed return the
+latest full playlist. Malformed directives and excessive future sequences are
+rejected; ended playlists ignore sequence and part directives. Blocking has a
+deadline of three initial target durations, cancellation on disconnect/shutdown
+and a 24-waiter limit within the existing 32-media-request ceiling. It does not
+change the loader's peer budget, origin reserve, segment durations or playback holdback.
+See the [HLS blocking-reload draft contract](https://datatracker.ietf.org/doc/html/draft-pantos-hls-rfc8216bis-22#section-6.2.5.2).
+
+The focused suite includes actual HTTP publication, capacity, timeout, abort
+and shutdown checks. Paired browser acceptance remains pending; these checks
+do not relabel retained initial-peer or restart-sharing failures.
+
+`demo.playlistReloadMetrics()` exposes the policy, waiter limit, current blocked
+requests/watchers and numeric start, release, abort, timeout, watcher-error and
+rejection counts. These counters do not prove browser use or media delivery.
 
 ## Private publisher state
 
@@ -1284,7 +1316,27 @@ Checkpoint: 14 October 2026. The published experimental release is
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
 
-## Current source checkpoint: 7a on 14 October 2026
+## Complete-playlist blocking reload candidate
+
+The example origin now supports bounded blocking reload for compatible complete
+live playlists, consistently across all renditions. The [API contract](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md#example-origin-http-playlists)
+keeps raw media, peer deadlines, origin reserve and playback holdback unchanged.
+Independent review addressed shared directory-watch replacement/rearm races,
+observed-change reauthorisation and response-slot retention until transmission
+finishes. All 49 focused tests pass, including five actual loopback HTTP cases;
+worker reaping and group/birth absence passed. This focused guard has no resource
+sampler. The [source-check summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/blocking-playlist-reload-source-checks-20261014.json)
+records exact file hashes and scope. Paired real broadcast acceptance is pending.
+
+The preceding exact `fc39e32` check passed eight of nine required jobs in
+[CI 38640084885](https://github.com/forgesworn/relayswarm/actions/runs/38640084885).
+The broadcast failed initial low-quality peer delivery, before high-quality or
+restart checkpoints. Healthy connections and late donor availability did not
+establish a runtime fault or a polling cause. That failure remains separate
+from the older all-green 7a check below; this capability is not yet a proved fix.
+Release, deployment and the remaining field gates stay open.
+
+## Earlier source checkpoint: 7a on 14 October 2026
 
 Exact `7a5de06a97baf14c00e3a420944b75a730042c85` passed all nine required
 jobs on attempt 1 of
@@ -2991,9 +3043,8 @@ const event = await publisher.commitment({
 ```
 
 Omit both range fields for whole-segment media. The helper derives a fresh,
-60 s commitment from the exact file bytes and its playlist records. It reloads
-the catalogue at most once per 200 ms and allows at most eight concurrent
-signing operations. It caps playlists at 256 KiB, variants at eight, fragments
+60 s commitment from the exact file bytes and its playlist records. It coalesces
+concurrent catalogue reads and allows at most eight concurrent signing operations. It caps playlists at 256 KiB, variants at eight, fragments
 at 4,096 per variant and signed segments at 16 MiB. hls.js level order is height
 then bitrate within the supported single codec/frame-rate family.
 
@@ -3003,6 +3054,11 @@ AES-128 ciphertext requires explicit opt-in; keys and init maps stay on HTTP.
 Remote/query assets, DRM/SAMPLE-AES, subtitles, I-frame variants and cold delta
 reconstruction remain unsupported. See [production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md)
 for exact schema 2 contexts and the scope of actual Chrome media tests.
+
+The example origin can hold complete live playlist reloads until the requested
+sequence is published, using the [bounded HTTP contract](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md#example-origin-http-playlists).
+This changes HTTP playlist representations only; imported parts/deltas, ended
+streams and mixed unsupported presentations receive no added capability.
 
 Keys are ephemeral by default and in v0.1.0's CLI. Current source optionally
 accepts `--publisher-state /private/path/publisher.json`; preserve this 0600
@@ -3893,6 +3949,13 @@ unique participants or complete Sybil resistance. Receipts
 stay in the browser until downloaded; optional reporting requires viewer
 opt-in and accepts only bounded numeric summaries, without a swarm public key.
 These controls do not establish unique participants or net cost.
+
+The example origin's [complete-playlist blocking reload](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md#example-origin-http-playlists)
+uses the current authorised catalogue and a fixed deadline of three initial
+target durations. At most 24 requests may wait inside the existing 32-media
+request limit. Disconnect/shutdown releases waiters and shared directory
+watchers; media bytes, signing scope and peer deadlines are unchanged. These
+limits do not establish Internet capacity or hard cancellation of kernel I/O.
 
 The optional [account allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md) introduces a separate
 private trust boundary: its service learns a stable Nostr identity or the host's
@@ -5055,7 +5118,27 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
-## Current source checkpoint: 7a
+## Complete-playlist blocking reload candidate
+
+The example origin now supports bounded blocking reload for compatible complete
+live playlists, consistently across all renditions. The [API contract](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md#example-origin-http-playlists)
+keeps raw media, peer deadlines, origin reserve and playback holdback unchanged.
+Independent review addressed shared directory-watch replacement/rearm races,
+observed-change reauthorisation and response-slot retention until transmission
+finishes. All 49 focused tests pass, including five actual loopback HTTP cases;
+worker reaping and group/birth absence passed. This focused guard has no resource
+sampler. The [source-check summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/blocking-playlist-reload-source-checks-20261014.json)
+records exact file hashes and scope. Paired real broadcast acceptance is pending.
+
+The preceding exact `fc39e32` check passed eight of nine required jobs in
+[CI 38640084885](https://github.com/forgesworn/relayswarm/actions/runs/38640084885).
+The broadcast failed initial low-quality peer delivery, before high-quality or
+restart checkpoints. Healthy connections and late donor availability did not
+establish a runtime fault or a polling cause. That failure remains separate
+from the older all-green 7a check below; this capability is not yet a proved fix.
+Release, deployment and the remaining field gates stay open.
+
+## Earlier source checkpoint: 7a
 
 Exact `7a5de06a97baf14c00e3a420944b75a730042c85` passed all nine required
 jobs on attempt 1 of

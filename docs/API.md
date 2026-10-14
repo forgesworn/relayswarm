@@ -150,6 +150,11 @@ The returned object contains:
   real local filename. It does not serve HTTP itself.
 - `await commitment(context)`: signs a kind-24172 commitment derived from a
   matching playlist record and the exact bytes on disk.
+- `await playlistSnapshot(path, {fresh = false})`: returns a copied playlist
+  buffer, its canonical file, presentation paths and media-playlist texts from
+  the bounded authorised catalogue. `fresh` settles any earlier shared refresh
+  before starting or joining the next one; it supports watch-before-read HTTP
+  handling without exposing media or encryption-key bodies.
 - `getMetrics()`: request, cache, streamed hashing, signing, renewal, eviction,
   changed-read, bounded playlist-retry and concurrency counters. A playlist
   rejected by the byte/stat change guard gets one fresh full-catalogue retry;
@@ -168,6 +173,33 @@ playlist are rejected. The signed expiry is 60 seconds after the publisher clock
 errors. Filesystem failures can also occur; a public server should mask internal
 paths as the demo does. Catalogue/signing bounds and the exact supported HLS
 subset are in [FIELD-TEST.md](FIELD-TEST.md#publish-your-own-media).
+
+## Example origin HTTP playlists
+
+`startDemoServer` supports blocking reload of compatible complete live media
+playlists with target durations from one to three seconds. Its
+`blockingPlaylistReload` option defaults to `true`; setting it to `false` retains
+conventional playlist polling. Capability advertising is
+presentation-wide: unsupported parts, delta, ended or mixed presentations do
+not receive a partial blocking-reload promise. Raw pipeline files and media
+bytes are unchanged.
+
+A valid `_HLS_msn` request waits for a fresh authorised playlist containing that
+sequence or a later one. Requests for sequences already removed return the
+latest full playlist. Malformed directives and excessive future sequences are
+rejected; ended playlists ignore sequence and part directives. Blocking has a
+deadline of three initial target durations, cancellation on disconnect/shutdown
+and a 24-waiter limit within the existing 32-media-request ceiling. It does not
+change the loader's peer budget, origin reserve, segment durations or playback holdback.
+See the [HLS blocking-reload draft contract](https://datatracker.ietf.org/doc/html/draft-pantos-hls-rfc8216bis-22#section-6.2.5.2).
+
+The focused suite includes actual HTTP publication, capacity, timeout, abort
+and shutdown checks. Paired browser acceptance remains pending; these checks
+do not relabel retained initial-peer or restart-sharing failures.
+
+`demo.playlistReloadMetrics()` exposes the policy, waiter limit, current blocked
+requests/watchers and numeric start, release, abort, timeout, watcher-error and
+rejection counts. These counters do not prove browser use or media delivery.
 
 ## Private publisher state
 

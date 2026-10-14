@@ -8,6 +8,7 @@ import { pipeline } from "node:stream/promises";
 import { parseArgs } from "node:util";
 import { build } from "esbuild";
 import { createHlsPublisher, PublisherError } from "../src/hls-publisher.mjs";
+import { createBlockingPlaylistReload, sendPlaylistResponse } from "./blocking-playlist-reload.mjs";
 import { createOperatorControls, readOperatorTokenFile } from "./operator.mjs";
 import { createAdmissionControls } from "./admission.mjs";
 import { loadPublisherState } from "../src/publisher-state.mjs";
@@ -33,7 +34,8 @@ export function httpRange(header, size) {
 
 export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host = "127.0.0.1", port = 0, publicUrl, tlsKey, tlsCert, relays = [], iceServers,
   publisherState, operatorToken, operatorTokenFile, operatorState, telemetry = false, reportCapacity, reportTtlMs, operatorExtraStatus, beforeListen,
-  admissionOptions, accountBudget, turnCredentials, mediaCapabilities = { parts: false }, allowEncryptedMedia = false, commitmentSecretKey, delegation, revokedDelegationIds = [], delegationRevocations = [] } = {}) {
+  admissionOptions, accountBudget, turnCredentials, blockingPlaylistReload = true, mediaCapabilities = { parts: false }, allowEncryptedMedia = false, commitmentSecretKey, delegation, revokedDelegationIds = [], delegationRevocations = [] } = {}) {
+  if (typeof blockingPlaylistReload !== "boolean") throw new Error("Invalid blocking playlist policy.");
   if (turnCredentials !== undefined) {
     if (!turnCredentials || typeof turnCredentials !== "object" || Array.isArray(turnCredentials) || iceServers !== undefined) throw new Error("Supply either static ICE servers or a TURN credential issuer.");
     validateTurnCredentialsUrl(turnCredentials.url);
@@ -49,6 +51,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
   const token = operatorTokenFile ? await readOperatorTokenFile(operatorTokenFile) : operatorToken;
   const state = publisherState ? await loadPublisherState(publisherState, { manifest }) : {};
   const publisher = await createHlsPublisher({ mediaDir, manifest, ...state, allowEncryptedMedia, commitmentSecretKey, delegation, revokedDelegationIds, delegationRevocations });
+  const playlistReload = createBlockingPlaylistReload({ publisher, enabled: blockingPlaylistReload });
   const [page, css, bundle] = await Promise.all([
     readFile(join(here, "index.html")), readFile(join(here, "style.css")),
     build({ entryPoints: [join(here, "client.mjs")], bundle: true, format: "esm", platform: "browser", write: false, minify: true, logLevel: "silent" }),
@@ -60,6 +63,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
   let base, activeMedia = 0;
   const signingBudget = { count: 0, since: Date.now() };
   const handler = async (request, response) => {
+    const requestStartedAt = performance.now();
     requestDiagnostics.observe(request, response);
     const connect = ["'self'", ...relays.map((value) => new URL(value).origin), base?.replace(/^http/u, "ws")].filter(Boolean).join(" ");
     response.setHeader("content-security-policy", `default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; connect-src ${connect}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`);
@@ -106,7 +110,17 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
       const cancellation = new AbortController();
       const cancel = () => cancellation.abort();
       response.once("close", cancel);
+      request.once("aborted", cancel);
       try {
+        if (extname(url.pathname) === ".m3u8") {
+          const bytes = await playlistReload.read(url.pathname, url.searchParams, { signal: cancellation.signal, startedAt: requestStartedAt });
+          if (response.destroyed || request.aborted) return;
+          let range;
+          try { range = httpRange(request.headers.range, bytes.length); }
+          catch (error) { response.setHeader("content-range", `bytes */${bytes.length}`); throw error; }
+          await sendPlaylistResponse(response, bytes, { range, head: request.method === "HEAD", signal: cancellation.signal });
+          return;
+        }
         const path = await publisher.media(url.pathname);
         if (response.destroyed || request.aborted) return;
         handle = await open(path, "r");
@@ -128,6 +142,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
         if (!cancellation.signal.aborted && !response.destroyed && !request.aborted) throw error;
       } finally {
         response.off("close", cancel);
+        request.off("aborted", cancel);
         stream?.destroy();
         try { await handle?.close(); } finally { activeMedia--; }
       }
@@ -167,12 +182,12 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
       advertisementPool.connect().then(() => { if (!closing) { advertisementPool.publish(publisher.streamEvent); advertisementPool.publish(advertisement); } }).catch(() => {});
     }
     renewal = setInterval(() => { try { advertise(); } catch { /* HTTP remains available if advertisement refresh fails. */ } }, 60000); renewal.unref();
-    return { base, publisher, relay, admission, advertisement: () => structuredClone(advertisement), close() {
+    return { base, publisher, relay, admission, playlistReloadMetrics: () => playlistReload.snapshot(), advertisement: () => structuredClone(advertisement), close() {
       if (closing) return closing;
       closing = (async () => {
         clearInterval(renewal); try { advertise("ended"); } catch {}
         const failures = [];
-        for (const cleanup of [() => advertisementPool?.close(), () => relay?.close(), () => turnControls?.close(), () => accountControls?.close(),
+        for (const cleanup of [() => playlistReload.close(), () => advertisementPool?.close(), () => relay?.close(), () => turnControls?.close(), () => accountControls?.close(),
           () => server.closeAllConnections(), () => new Promise((done, reject) => server.close((error) => error ? reject(error) : done())),
           () => controls.close(), () => requestDiagnostics.close()]) {
           try { await cleanup(); } catch (error) { failures.push(error); }
@@ -183,7 +198,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
     } };
   } catch (error) {
     clearInterval(renewal); requestDiagnostics?.close(); advertisementPool?.close();
-    await Promise.allSettled([Promise.resolve().then(() => relay?.close()), Promise.resolve().then(() => server?.close()), Promise.resolve().then(() => controls.close()), Promise.resolve().then(() => accountControls?.close()), Promise.resolve().then(() => turnControls?.close())]);
+    await Promise.allSettled([Promise.resolve().then(() => playlistReload.close()), Promise.resolve().then(() => relay?.close()), Promise.resolve().then(() => server?.close()), Promise.resolve().then(() => controls.close()), Promise.resolve().then(() => accountControls?.close()), Promise.resolve().then(() => turnControls?.close())]);
     throw error;
   }
 }

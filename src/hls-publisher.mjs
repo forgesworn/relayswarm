@@ -92,17 +92,20 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
       if (size > MAX_PLAYLIST) throw new PublisherError("Excessive playlist.");
       await unchanged(handle, file, before, true);
       if (BigInt(size) !== before.size) throw changed(true);
-      return bytes.subarray(0, size).toString("utf8");
+      return { file, bytes: bytes.subarray(0, size), text: bytes.subarray(0, size).toString("utf8") };
     } finally { await handle.close(); }
   }
   async function catalogue() {
-    const text = await playlist(manifestPath);
+    const initial = await playlist(manifestPath), text = initial.text;
+    const playlists = new Map([[manifestPath, initial]]);
     const master = parseHlsMaster(text, manifestPath);
     const entries = master.variants.length ? [...master.variants, ...master.audio] : [{ path: manifestPath, mediaType: "main" }];
     const records = [], assets = new Set([manifestPath]), keys = new Set(), mediaCatalogues = new Map();
     for (const [level, entry] of entries.entries()) {
       assets.add(entry.path);
-      const media = parseHlsMedia(master.variants.length ? await playlist(entry.path) : text, entry.path, level,
+      const body = master.variants.length ? await playlist(entry.path) : initial;
+      playlists.set(entry.path, body);
+      const media = parseHlsMedia(body.text, entry.path, level,
         { mediaType: entry.mediaType, allowEncryptedMedia, previousCatalogue: snapshot?.mediaCatalogues.get(entry.path) });
       mediaCatalogues.set(entry.path, media);
       records.push(...media.records);
@@ -113,7 +116,7 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
     for (const key of keys) if (assets.has(key)) throw new PublisherError("Encryption keys cannot be media assets.");
     const contexts = new Map(records.map((record) => [contextKey(record), record]));
     const authorisedAssets = new Set(records.map(assetKey));
-    return { records, assets, contexts, authorisedAssets, keys, mediaCatalogues, wide: master.wide };
+    return { records, assets, contexts, authorisedAssets, keys, mediaCatalogues, playlists, wide: master.wide };
   }
   async function refresh() {
     if (pendingRefresh) return pendingRefresh;
@@ -180,6 +183,18 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
     },
     getMetrics() { return { ...metrics, hashCacheEntries: hashes.size, commitmentCacheEntries: commitments.size,
       maxConcurrent, maxCacheEntries }; },
+    // HTTP playlist representations reuse the same bounded, stat-checked reads
+    // as authorisation. No segment/key body is exposed through this snapshot.
+    async playlistSnapshot(path, { fresh = false } = {}) {
+      // A directory watch may have been installed after a shared refresh began.
+      // Settle that read before starting/joining the next coalesced catalogue.
+      if (fresh && pendingRefresh) await pendingRefresh;
+      const next = await refresh(), body = next.playlists.get(path);
+      if (!body || !next.assets.has(path)) throw new PublisherError("Unknown playlist.", 404);
+      if (await localFile(path) !== body.file) throw changed(true);
+      return { file: body.file, bytes: Buffer.from(body.bytes), playlistFiles: [...next.playlists.values()].map(entry => entry.file), isMedia: next.mediaCatalogues.has(path),
+        mediaPlaylists: [...next.mediaCatalogues.keys()].map((key) => ({ file: next.playlists.get(key).file, text: next.playlists.get(key).text })) };
+    },
     async media(path) {
       const catalogue = await refresh();
       if (catalogue.keys.has(path)) {

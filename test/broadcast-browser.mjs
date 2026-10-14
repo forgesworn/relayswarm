@@ -17,7 +17,7 @@ import { startBroadcastPipeline, broadcastEncoderArgs } from "../src/broadcast-p
 import { startObservedDemo } from "./support/broadcast-observed-demo.mjs";
 import { extractFinal } from "./support/broadcast-final-extraction.mjs";
 
-const { values } = parseArgs({ options: { chrome: { type: "string", default: process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" }, resultsDir: { type: "string", default: "artifacts/broadcast-browser" }, mediamtx: { type: "string", default: process.env.MEDIAMTX_PATH || process.env.MEDIAMTX_BINARY || "artifacts/tools/mediamtx-v1.21.2/mediamtx" }, "verify-mediamtx-only": { type: "boolean", default: false } } });
+const { values } = parseArgs({ options: { chrome: { type: "string", default: process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" }, resultsDir: { type: "string", default: "artifacts/broadcast-browser" }, mediamtx: { type: "string", default: process.env.MEDIAMTX_PATH || process.env.MEDIAMTX_BINARY || "artifacts/tools/mediamtx-v1.21.2/mediamtx" }, "verify-mediamtx-only": { type: "boolean", default: false }, "legacy-playlist-reload": { type: "boolean", default: false } } });
 const pinnedArchives = {
   "darwin-arm64": "7d0d0c5c11527cbd10bde1c3d728864eb0334a9b653566cd73c0259750cbf093",
   "darwin-x64": "87a00062b6a588aa1158f875504a3b56c80d62e2611dc450b83d0534e1b49198",
@@ -53,11 +53,27 @@ if (values["verify-mediamtx-only"]) {
   console.log(JSON.stringify(await verifyRouter(resolve(values.mediamtx)), null, 2));
   process.exit(0);
 }
+// Synchronous server counters only; no requests, page reads or inferred zeros.
+function capturePlaylistReloadMetrics(server) {
+  try {
+    if (typeof server?.playlistReloadMetrics !== "function") return { available: false, reason: "unavailable", counters: null };
+    const value = server.playlistReloadMetrics();
+    const counters = {};
+    if (typeof value?.enabled !== "boolean") return { available: false, reason: "invalid", counters: null };
+    counters.enabled = value.enabled;
+    for (const name of ["blockedLimit", "activeBlocked", "started", "released", "aborted", "timedOut", "watchers", "watchErrors", "rejected"]) {
+      if (!Number.isSafeInteger(value[name]) || value[name] < 0) return { available: false, reason: "invalid", counters: null };
+      counters[name] = value[name];
+    }
+    return { available: true, reason: null, counters };
+  } catch { return { available: false, reason: "unavailable", counters: null }; }
+}
 const log = (message) => console.error(`[broadcast-browser] ${message}`);
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const children = [], pages = [], pageErrors = [], consoleErrors = [];
 const receipt = { v: 1, kind: "relayswarm-broadcast-browser-test", at: new Date().toISOString(), ok: false, failures: [], scope: { network: "loopback", producer: "FFmpeg synthetic real-time H.264/AAC", router: "MediaMTX", ingress: "RTMP", pipelineInput: "RTSP over TCP", output: "two-rendition live HLS", browser: "Chrome", OBS: false, YouTube: false, physicalDevices: false }, checkpoints: [] };
 Object.assign(receipt.scope, { automatedHeadlessChrome: true, autoplayUserGestureOverride: true, fakeMediaDeviceAndPermissionUI: true, getUserMediaWarmup: true, mdnsHidingDisabled: true,
+  blockingPlaylistReload: !values["legacy-playlist-reload"], playlistReloadProfile: values["legacy-playlist-reload"] ? "legacy-nonblocking" : "complete-segment-blocking",
   ordinaryDefaultTransportEvidence: false, requestTimingMetadataOnly: true, additionalMediaRequestsOrBodyReads: false,
   diagnosticOnly: true, injectedTestBundle: true, ordinaryQualificationEvidence: false, availabilityTimeline: true });
 let root, router, producer, pipeline, demo, browser, requestTimings, closingBrowser = false;
@@ -132,7 +148,7 @@ try {
     throw new Error(`${error.message} Loopback encoder diagnostic: ${diagnostic.stderr}`);
   }
   const state = join(root, "publisher.json");
-  demo = await startObservedDemo({ mediaDir: pipeline.mediaDir, publisherState: state, operatorToken: "broadcast-browser-loopback-token-32-characters", iceServers: [], operatorExtraStatus: () => pipeline.metrics() });
+  demo = await startObservedDemo({ blockingPlaylistReload: !values["legacy-playlist-reload"], mediaDir: pipeline.mediaDir, publisherState: state, operatorToken: "broadcast-browser-loopback-token-32-characters", iceServers: [], operatorExtraStatus: () => pipeline.metrics() });
   receipt.observationBuild = demo.observation;
   requestTimings = createBroadcastRequestTimings({ origin: demo.base, epochMs: Date.parse(receipt.at) });
   const session = async () => { const response = await fetch(`${demo.base}/session.json`, { signal: AbortSignal.timeout(5000) }); assert.equal(response.status, 200); return response.json(); };
@@ -214,9 +230,18 @@ finally {
   receipt.extraction = extracted.extraction;
   if (!extracted.extraction.ok) { receipt.ok = false; receipt.failures.push("Availability observation unavailable"); }
   if (pipeline) receipt.playlists = Object.fromEntries(await Promise.all(["master.m3u8", "low/index.m3u8", "high/index.m3u8"].map(async (path) => [path, await readFile(join(pipeline.mediaDir, path), "utf8").catch(() => null)])));
+  receipt.playlistReloadObservation = { beforeClose: capturePlaylistReloadMetrics(demo), afterClose: null, actualDemoCloseCompleted: false, complete: false };
   receipt.requestTimingsBeforeBrowserClose = requestTimings?.snapshot();
   closingBrowser = true;
-  try { await browser?.close(); await demo?.close(); await pipeline?.close(); await stop(producer); await stop(router); }
+  try {
+    await browser?.close(); await demo?.close();
+    if (demo) {
+      receipt.playlistReloadObservation.actualDemoCloseCompleted = true;
+      receipt.playlistReloadObservation.afterClose = capturePlaylistReloadMetrics(demo);
+      receipt.playlistReloadObservation.complete = receipt.playlistReloadObservation.beforeClose.available && receipt.playlistReloadObservation.afterClose.available;
+    }
+    await pipeline?.close(); await stop(producer); await stop(router);
+  }
   finally { receipt.requestTimingsAfterBrowserClose = requestTimings?.close(); }
   receipt.childProcesses = children.map(({ code, signal, error, stderr, stdout }) => ({ code, signal, error, ...(receipt.ok ? {} : { stderr, stdout }) }));
   const payload = `${JSON.stringify(receipt, null, 2)}\n`;

@@ -36,6 +36,13 @@ stay in the browser until downloaded; optional reporting requires viewer
 opt-in and accepts only bounded numeric summaries, without a swarm public key.
 These controls do not establish unique participants or net cost.
 
+The example origin's [complete-playlist blocking reload](API.md#example-origin-http-playlists)
+uses the current authorised catalogue and a fixed deadline of three initial
+target durations. At most 24 requests may wait inside the existing 32-media
+request limit. Disconnect/shutdown releases waiters and shared directory
+watchers; media bytes, signing scope and peer deadlines are unchanged. These
+limits do not establish Internet capacity or hard cancellation of kernel I/O.
+
 The optional [account allowance](ACCOUNT-UPLOAD-BUDGET.md) introduces a separate
 private trust boundary: its service learns a stable Nostr identity or the host's
 authenticated website subject and can correlate participating devices. Explicit

@@ -85,9 +85,8 @@ const event = await publisher.commitment({
 ```
 
 Omit both range fields for whole-segment media. The helper derives a fresh,
-60 s commitment from the exact file bytes and its playlist records. It reloads
-the catalogue at most once per 200 ms and allows at most eight concurrent
-signing operations. It caps playlists at 256 KiB, variants at eight, fragments
+60 s commitment from the exact file bytes and its playlist records. It coalesces
+concurrent catalogue reads and allows at most eight concurrent signing operations. It caps playlists at 256 KiB, variants at eight, fragments
 at 4,096 per variant and signed segments at 16 MiB. hls.js level order is height
 then bitrate within the supported single codec/frame-rate family.
 
@@ -97,6 +96,11 @@ AES-128 ciphertext requires explicit opt-in; keys and init maps stay on HTTP.
 Remote/query assets, DRM/SAMPLE-AES, subtitles, I-frame variants and cold delta
 reconstruction remain unsupported. See [production features](PRODUCTION-FEATURES.md)
 for exact schema 2 contexts and the scope of actual Chrome media tests.
+
+The example origin can hold complete live playlist reloads until the requested
+sequence is published, using the [bounded HTTP contract](API.md#example-origin-http-playlists).
+This changes HTTP playlist representations only; imported parts/deltas, ended
+streams and mixed unsupported presentations receive no added capability.
 
 Keys are ephemeral by default and in v0.1.0's CLI. Current source optionally
 accepts `--publisher-state /private/path/publisher.json`; preserve this 0600

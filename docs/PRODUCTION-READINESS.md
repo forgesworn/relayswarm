@@ -5,7 +5,27 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
-## Current source checkpoint: 7a
+## Complete-playlist blocking reload candidate
+
+The example origin now supports bounded blocking reload for compatible complete
+live playlists, consistently across all renditions. The [API contract](API.md#example-origin-http-playlists)
+keeps raw media, peer deadlines, origin reserve and playback holdback unchanged.
+Independent review addressed shared directory-watch replacement/rearm races,
+observed-change reauthorisation and response-slot retention until transmission
+finishes. All 49 focused tests pass, including five actual loopback HTTP cases;
+worker reaping and group/birth absence passed. This focused guard has no resource
+sampler. The [source-check summary](../spikes/results/blocking-playlist-reload-source-checks-20261014.json)
+records exact file hashes and scope. Paired real broadcast acceptance is pending.
+
+The preceding exact `fc39e32` check passed eight of nine required jobs in
+[CI 38640084885](https://github.com/forgesworn/relayswarm/actions/runs/38640084885).
+The broadcast failed initial low-quality peer delivery, before high-quality or
+restart checkpoints. Healthy connections and late donor availability did not
+establish a runtime fault or a polling cause. That failure remains separate
+from the older all-green 7a check below; this capability is not yet a proved fix.
+Release, deployment and the remaining field gates stay open.
+
+## Earlier source checkpoint: 7a
 
 Exact `7a5de06a97baf14c00e3a420944b75a730042c85` passed all nine required
 jobs on attempt 1 of
