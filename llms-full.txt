@@ -1312,6 +1312,19 @@ the standalone ESM is 120,957 bytes, SHA-256
 `50647647b96a0ce4a89fdfb0a42b053601d2cd5b10c2525cc57e283af2900c63`.
 These local assets do not prove downloaded immutable-release acceptance.
 
+The later documentation checkpoint `e144b8c` recorded a macOS CI test failure:
+one eligibility case expected two peer requests but observed one. Its real
+60 ms branch budget competed with cryptographic work, while identical fixture
+origin/peer bytes could conceal fallback. A test-only correction retains real
+signatures/hashes and the same 60 ms budget, drives virtual time at observed
+phases, and requires two peer deliveries plus exactly one origin fallback.
+Four focused cases and the full 92-case swarm suite pass locally. Real timers
+are restored before closing the fixture; an intermediate delayed exit remains
+recorded. No production code or deployed runtime changed, and the exact CI
+scheduling cause was not reproduced locally. See the
+[retained failure and correction](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/e144b8c-ci-test-timing-20261014.json);
+new-head hosted checks are a separate result.
+
 The ordinary four-role check remains **RED** over 60.110 s: requested video and
 native audio progressed, but no peer channel opened and verified peer/upload
 bytes were zero. All 91 measured eligibility decisions had a positive 1,500 ms

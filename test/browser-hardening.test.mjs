@@ -705,16 +705,36 @@ test("peer eligibility preserves origin errors and pending loader aborts without
   } finally { await fixture.close(); }
 });
 
-test("peer eligibility observes existing coordination outcomes and matching HAVE without extra requests", async () => {
+test("peer eligibility observes existing coordination outcomes and matching HAVE without extra requests", async (t) => {
   const playback = peerPlaybackOptions(60), requested = [];
   const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket() });
+  const realSetTimeout = setTimeout;
+  // Keep real signing/hash work, but do not make its host scheduling consume
+  // this branch test's 60ms playback budget. Advance only at observed phases.
+  const phase = async (predicate) => {
+    const deadline = Date.now() + 5000;
+    while (!predicate()) {
+      assert.ok(Date.now() < deadline, "expected loader phase did not occur");
+      await new Promise((resolve) => realSetTimeout(resolve, 1));
+    }
+  };
   try {
     const peer = await fixture.addPeer(new ServingChannel(playback.bytes, 1, requested, "existing-peer"));
     peer.receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:0" }));
-    await fixture.load();
+    let clock = performance.now();
+    t.mock.method(performance, "now", () => clock);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const advance = (ms) => { clock += ms; t.mock.timers.tick(ms); };
+    const missing = fixture.load();
+    await phase(() => fixture.swarm.metrics().peerEligibilityDiagnostics.counters["no-have-wait"] === 1);
+    advance(60);
+    await missing;
     // The loader's original fallback timer can abort the pending wait at its
     // deadline; that is cancellation, not a fabricated still-missing HAVE read.
-    await sleep(10);
+    await phase(() => {
+      const counters = fixture.swarm.metrics().peerEligibilityDiagnostics.counters;
+      return counters["wait-aborted"] + counters["wait-expired"] === 1;
+    });
     const ended = fixture.swarm.metrics().peerEligibilityDiagnostics;
     assert.equal(ended.counters["no-have-wait"], 1);
     assert.equal(ended.counters["wait-aborted"] + ended.counters["wait-expired"], 1);
@@ -722,14 +742,29 @@ test("peer eligibility observes existing coordination outcomes and matching HAVE
     assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 0);
     assert.deepEqual(requested, []);
     const pending = fixture.load();
+    await phase(() => fixture.swarm.metrics().peerEligibilityDiagnostics.counters["no-have-wait"] === 2);
     setTimeout(() => peer.receive(JSON.stringify({ t: "have", keys: [playback.key] })), 10);
+    advance(10);
+    await phase(() => requested.length === 1);
+    advance(1);
+    await phase(() => fixture.swarm.metrics().segments.peerFirstLoaded === 1);
     assert.deepEqual(new Uint8Array((await pending).data), playback.bytes);
     assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.counters["have-after-wait"], 1);
-    await fixture.load();
+    const present = fixture.load();
+    await phase(() => requested.length === 2);
+    advance(1);
+    await phase(() => fixture.swarm.metrics().segments.peerFirstLoaded === 2);
+    assert.deepEqual(new Uint8Array((await present).data), playback.bytes);
     assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.counters["have-at-entry"], 1);
     assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 2);
     assert.deepEqual(requested, ["existing-peer", "existing-peer"]);
-  } finally { await fixture.close(); }
+    assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 2);
+    assert.equal(fixture.swarm.metrics().segments.originFallbacks, 1);
+  } finally {
+    // Restore clearTimeout before stopping timers created during real setup.
+    t.mock.timers.reset();
+    await fixture.close();
+  }
 });
 
 test("peer-first explores a cold link, then prefers its measured faster verified delivery", async () => {
