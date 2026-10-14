@@ -123,7 +123,28 @@ export async function runNativeGlareWorker(input) {
       && view.peers.connected === 1 && view.peers.linksOpened === 1 && view.peers.linksClosed === 0 && view.counts.peakOpen === 1 && view.counts.dropped === 0);
     receipt.payload = { bytes: 8192, sha256: expectedHash, seedRequests: served, verifiedPeerLoads: 1 };
     receipt.relay = relay.snapshot(); receipt.ok = !stopped;
-  } catch { receipt.failures.push({ stage, category: "assertion-or-operation-failed" }); }
+  } catch (error) {
+    // Retain the original gate first. Diagnostic failure cannot replace it.
+    let errorName = "unknown";
+    try { const value = error?.name; if (["TimeoutError", "AssertionError", "Error", "TypeError"].includes(value)) errorName = value; } catch {}
+    receipt.failures.push({ stage, category: "assertion-or-operation-failed", errorName });
+    const observation = { viewers: Array.from({ length: 2 }, (_, index) => ({ page: index + 1,
+      status: pages[index] ? "pending" : "not-created", snapshot: null })), relay: { status: "not-created", snapshot: null } };
+    receipt.failureObservation = observation;
+    if (relay) {
+      try { cap(clock, "work", 1); observation.relay = { status: "retained", snapshot: relay.snapshot() }; }
+      catch { observation.relay.status = "refused-or-unavailable"; }
+    }
+    await Promise.all(pages.map(async (page, index) => {
+      const entry = observation.viewers[index];
+      try { cap(clock, "work", 1); }
+      catch { entry.status = "refused-original-deadline"; return; }
+      try {
+        entry.snapshot = await bounded(() => page.evaluate(() => window.nativeGlare.snapshot(true)), clock, "work", 1000);
+        entry.status = "retained";
+      } catch { entry.status = "unavailable-or-timeout"; }
+    }));
+  }
   finally {
     clearTimeout(alarm); process.removeListener("disconnect", stop);
     const close = async (name, exists, action) => {

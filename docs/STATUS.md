@@ -43,7 +43,7 @@ only that peer's still-pending outgoing connection, with serial native operation
 negotiation-generation fences and the original absolute deadline/capacity slot.
 Admission is checked before and after asynchronous rollback and before answering;
 unsupported/failed rollback falls back without a replacement connection. Its
-reviewed source/test SHA-256 pins are:
+initial reviewed source/test SHA-256 pins are:
 
 | File | SHA-256 |
 |---|---|
@@ -57,6 +57,30 @@ passed. This is stateful fake-RTC/in-memory-signalling unit qualification;
 native browser rollback/SCTP/channel reuse and genuine Internet renewal/media
 remain unproved. The exact-CF CI/package results above do not cover this pending
 source. Evidence: `artifacts/glare-reuse-r2-unit-validation-20261015/analysis`.
+
+A subsequent real Chrome 155.0.8059.41 collision test on exact `b9a9be4`
+remains RED. Both pages reached native local offers on one connection each,
+with fresh admission and over 11.839 s left on their original dial deadlines.
+The link checkpoint then failed. The receipt retained no failure-state snapshot,
+so rollback, ICE, channel and admission causes remain unproved. All six worker
+and six supervisor cleanup flags passed in 16.972 s; sampled resources stayed
+within the original bounds. The retained audit is in
+`artifacts/native-chrome-glare-b9a9be4-run-20261015/analysis`. The follow-up
+fixture retains bounded read-only failure snapshots and passive native-state
+counts; this instrumentation is no runtime repair.
+
+Exact-b9a Windows CI separately passed 120 of 121 swarm tests, then failed the
+existing own-ticket-renewal test's second-upload EOF wait. Its readiness predicate
+observed an HTTP request rather than accepted admission. A fixture correction
+holds that response and waits for a public acceptance marker within the same
+five-second budget, preserving the original upload and revocation assertions.
+The actual Windows response order and failure cause were not retained. Product
+admission/presence code is unchanged from exact CF. The corrected full local
+swarm suite passes 121 tests with no failures, cancellations or skips; syntax
+passes for 141 modules. The combined outer run completed in 20.962 s within the
+original guard, with recorded worker/group/birth and probe reaping. Windows CI
+qualification remains pending. These follow-up results are recorded in the
+[browser and admission checkpoint](../spikes/results/glare-browser-and-admission-checkpoint-20261015.json).
 
 Separately, 30 pure observer/model tests passed in 355 ms, preserving unknown
 selected-pair counters as null/status rather than zero and retaining the strict

@@ -7,6 +7,8 @@ const config = await fetch("/configuration").then(response => response.json());
 const secret = generateSecretKey(), pubkey = getPublicKey(secret), pcs = [], channels = [], listeners = [], loaders = new Set();
 const rows = [], counts = { pc: 0, pcRefused: 0, offer: 0, answer: 0, remoteOffer: 0, remoteAnswer: 0,
   rollback: 0, rollbackCompleted: 0, operationFailed: 0, channelOpen: 0, peakOpen: 0, dropped: 0 };
+const candidateTypes = { host: 0, srflx: 0, prflx: 0, relay: 0, unknown: 0 };
+let candidateEnds = 0, candidateCountOverflow = false;
 let hls, swarm, stopped = false, started = false, trustedStart = false, ticket, expiresAt = 0, monotonicExpiry = 0, lastWall = Date.now(), expiryTimer;
 let matchingHave = false, hlsDestroyed = null, setupFailed = false;
 const hex = bytes => Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, "0")).join("");
@@ -15,6 +17,22 @@ const expectedKey = await digest(new TextEncoder().encode(`${config.swarmId}\n/m
 const record = (event, value) => {
   if (rows.length >= 64) { counts.dropped++; return; }
   rows.push({ atMs: Math.round(performance.now()), event, value });
+};
+const nativeState = (pc, property, allowed) => {
+  if (!pc) return null;
+  try { const value = pc[property]; return allowed.includes(value) ? value : "unknown"; } catch { return "unknown"; }
+};
+const iceState = pc => nativeState(pc, "iceConnectionState", ["new", "checking", "connected", "completed", "failed", "disconnected", "closed"]);
+const gatheringState = pc => nativeState(pc, "iceGatheringState", ["new", "gathering", "complete"]);
+const nativeFailure = (operation, type, error) => {
+  counts.operationFailed++;
+  let name = "unknown";
+  try {
+    const value = error?.name;
+    if (["OperationError", "InvalidStateError", "InvalidAccessError", "InvalidModificationError", "NotSupportedError",
+      "TypeError", "AbortError", "UnknownError", "SyntaxError", "NetworkError", "SecurityError"].includes(value)) name = value;
+  } catch { /* Error properties are not trusted diagnostic text. */ }
+  record("native-operation-failed", `${operation}:${["offer", "answer", "rollback"].includes(type) ? type : "unknown"}:${name}`);
 };
 const listen = (target, event, callback) => { target.addEventListener(event, callback); listeners.push(() => target.removeEventListener(event, callback)); };
 const fresh = () => {
@@ -58,25 +76,46 @@ class WitnessPC extends RTCPeerConnection {
     super(options); counts.pc++; pcs.push({ pc: this, created: performance.now() });
     listen(this, "signalingstatechange", () => record("signaling", this.signalingState));
     listen(this, "connectionstatechange", () => record("connection", this.connectionState));
+    listen(this, "iceconnectionstatechange", () => record("ice", iceState(this)));
+    listen(this, "icegatheringstatechange", () => record("gathering", gatheringState(this)));
+    listen(this, "icecandidate", event => {
+      let type = "unknown";
+      try {
+        if (event.candidate === null) {
+          if (candidateEnds < Number.MAX_SAFE_INTEGER) candidateEnds++; else candidateCountOverflow = true;
+          return;
+        }
+        // Read the native type property only; never inspect candidate strings.
+        const value = event.candidate?.type;
+        if (["host", "srflx", "prflx", "relay"].includes(value)) type = value;
+      } catch { /* Unknown candidate classification stays explicit. */ }
+      if (candidateTypes[type] < Number.MAX_SAFE_INTEGER) candidateTypes[type]++; else candidateCountOverflow = true;
+    });
     listen(this, "datachannel", event => observeChannel(event.channel, "incoming"));
   }
   createDataChannel(...args) { const channel = super.createDataChannel(...args); observeChannel(channel, "local"); return channel; }
   setLocalDescription(description) {
     const type = description?.type;
     if (type === "rollback") counts.rollback++;
-    return super.setLocalDescription(description).then(value => {
+    let pending;
+    try { pending = super.setLocalDescription(description); }
+    catch (error) { nativeFailure("local", type, error); throw error; }
+    return pending.then(value => {
       if (type === "offer") counts.offer++;
       if (type === "answer") counts.answer++;
       if (type === "rollback") counts.rollbackCompleted++;
       record("local-installed", type); return value;
-    }, error => { counts.operationFailed++; throw error; });
+    }, error => { nativeFailure("local", type, error); throw error; });
   }
   setRemoteDescription(description) {
-    return super.setRemoteDescription(description).then(value => {
+    let pending;
+    try { pending = super.setRemoteDescription(description); }
+    catch (error) { nativeFailure("remote", description?.type, error); throw error; }
+    return pending.then(value => {
       if (description.type === "offer") counts.remoteOffer++;
       if (description.type === "answer") counts.remoteAnswer++;
       record("remote-installed", description.type); return value;
-    }, error => { counts.operationFailed++; throw error; });
+    }, error => { nativeFailure("remote", description?.type, error); throw error; });
   }
 }
 async function json(path, body, signal) {
@@ -124,13 +163,19 @@ async function start(event) {
 document.querySelector("#start").addEventListener("click", start);
 window.nativeGlare = {
   identify: () => pubkey, // Ephemeral public key is used by the Node relay in memory only.
-  snapshot() {
+  snapshot(readOnly = false) {
     const metrics = swarm?.metrics(), pc = pcs[0]?.pc;
     const transport = metrics?.transportDiagnostics?.counters ?? {};
-    return { started, trustedStart, uploadChecked: document.querySelector("#upload").checked, stopped, setupFailed, authorityFresh: fresh(), pcCount: counts.pc, offerInstalled: counts.offer,
+    const wall = Date.now();
+    const authorityFresh = readOnly ? wall >= lastWall && !stopped && document.visibilityState === "visible"
+      && wall < expiresAt && performance.now() < monotonicExpiry : fresh();
+    return { started, trustedStart, uploadChecked: document.querySelector("#upload").checked, stopped, setupFailed, authorityFresh, pcCount: counts.pc, offerInstalled: counts.offer,
       offerSent: transport["signal-send"]?.offer ?? 0,
       signalsReceived: (transport["offer-received"]?.authenticated ?? 0) + (transport["answer-received"]?.authenticated ?? 0),
       signalingState: pc?.signalingState ?? "unallocated", remainingDialMs: pcs.length ? Math.max(0, 12000 - (performance.now() - pcs[0].created)) : 0,
+      connectionState: nativeState(pc, "connectionState", ["new", "connecting", "connected", "disconnected", "failed", "closed"]),
+      iceConnectionState: iceState(pc), iceGatheringState: gatheringState(pc),
+      candidateTypes: { ...candidateTypes }, candidateEnds, candidateCountOverflow,
       counts: { ...counts }, rows: rows.map(row => ({ ...row })), matchingHave,
       channels: channels.map((channel, index) => ({ id: index + 1, state: channel.readyState })),
       pcClosed: !!pc && pc.signalingState === "closed", hlsDestroyed,

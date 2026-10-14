@@ -379,10 +379,15 @@ test("dialling heartbeats and cooldowns skip checks but changed tickets and answ
 
 test("own ticket renewal preserves a live relay peer, verified media, held bytes and spent allowance", async () => {
   const verified = [], reservations = [], trace = [], announcements = [];
-  let allowed = true;
+  let allowed = true, remoteRefreshHeld = false, releaseRemoteRefresh;
+  const remoteRefresh = new Promise(resolve => { releaseRemoteRefresh = resolve; });
   const http = createServer(async (request, response) => {
     const chunks = []; for await (const chunk of request) chunks.push(chunk);
-    verified.push(JSON.parse(Buffer.concat(chunks)));
+    const input = JSON.parse(Buffer.concat(chunks)); verified.push(input);
+    if (input.ticket === "remote-after" && !remoteRefreshHeld) {
+      remoteRefreshHeld = true;
+      await remoteRefresh;
+    }
     response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ admitted: allowed }));
   });
   http.listen(0, "127.0.0.1"); await once(http, "listening");
@@ -414,8 +419,19 @@ test("own ticket renewal preserves a live relay peer, verified media, held bytes
     await sleep(10); assert.equal(fixture.swarm.metrics().relays.presenceSent, presence, "same-ticket updates do not announce");
     assert.equal(fixture.swarm.updateTicket("own-after"), true);
     await until(() => announcements.includes("own-after"));
-    peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }], ticket: "remote-after" });
-    await until(() => verified.some((input) => input.ticket === "remote-after"));
+    assert.equal(fixture.swarm.metrics().peers.openPeersKnown, 0);
+    const refreshedBy = Date.now() + 5_000;
+    const refreshRemaining = () => { const left = refreshedBy - Date.now(); assert.ok(left > 0, "Changed-ticket admission exceeded its original 5s wait"); return left; };
+    peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }], ticket: "remote-after", open: true });
+    await until(() => remoteRefreshHeld && verified.some((input) => input.ticket === "remote-after"), refreshRemaining());
+    const pending = fixture.swarm.metrics();
+    assert.equal(pending.peers.openPeersKnown, 0, "A received HTTP request is not an accepted presence refresh");
+    assert.equal(pending.peers.connected, before.peers.connected); assert.equal(pending.peers.linksOpened, before.peers.linksOpened);
+    assert.equal(pending.peers.linksClosed, before.peers.linksClosed); assert.equal(channel.readyState, "open");
+    assert.equal(pending.bytes.held, before.bytes.held); assert.equal(pending.bytes.uploaded, before.bytes.uploaded);
+    assert.equal(pending.bytes.uploadRemaining, before.bytes.uploadRemaining); assert.deepEqual(reservations, [32]);
+    releaseRemoteRefresh();
+    await until(() => fixture.swarm.metrics().peers.openPeersKnown === 1, refreshRemaining());
     await upload(1002);
     assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
     const after = fixture.swarm.metrics();
@@ -429,7 +445,7 @@ test("own ticket renewal preserves a live relay peer, verified media, held bytes
     await until(() => channel.readyState === "closed");
     assert.equal(fixture.swarm.metrics().bytes.uploaded, 64);
     fixture.swarm.stop(); assert.equal(fixture.swarm.updateTicket("late"), false);
-  } finally { await fixture.close(); http.closeAllConnections(); await new Promise((resolve) => http.close(resolve)); }
+  } finally { releaseRemoteRefresh(); await fixture.close(); http.closeAllConnections(); await new Promise((resolve) => http.close(resolve)); }
 });
 
 test("ticket updates reject unusable swarms and bounded invalid credentials", () => {
