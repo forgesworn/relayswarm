@@ -1343,6 +1343,19 @@ class HlsSwarm {
   async #onPresence({ from, payload }) {
     if (this.stopped || payload.role !== "viewer") return;
     if (!payload.transports.some((transport) => transport.type === TRANSPORT)) return;
+    const active = this.links.has(from) || this.dials.has(from);
+    const admitted = this.admitted.get(from);
+    const knownCredential = !this.#gated() || admitted && admitted.ticket === payload.ticket;
+    if (active && knownCredential) {
+      if (payload.open !== null) this.#rememberOpen(from, payload.open);
+      return;
+    }
+    // An unchanged heartbeat grants no new access. Check authority when using
+    // SDP or serving bytes, and refresh changed credentials on active links.
+    if (!active && (this.#coolingDown(from) || !this.#hasCapacity())) {
+      if (knownCredential && payload.open !== null) this.#rememberOpen(from, payload.open);
+      return;
+    }
     if (!(await this.#admits(from, payload.ticket)) || this.stopped) return;
     if (payload.open !== null) this.#rememberOpen(from, payload.open);
     if (this.links.has(from) || this.dials.has(from) || this.#coolingDown(from) || !this.#hasCapacity()) return;

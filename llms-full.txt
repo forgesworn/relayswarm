@@ -1186,7 +1186,57 @@ merged source do not establish production readiness.
 
 ## Current source acceptance on 14 October
 
-The deployed checkpoint is source `2e1bdeb724eb45e37f7b97604e4f396a73985719`. All nine required jobs passed in
+The deployed application and permanent HTTP/1.1 proxy checkpoint is
+`ee1510d429ac85f3738c03f10a09b753ec4eb037`. All nine required jobs passed in
+[CI run 38492003110](https://github.com/forgesworn/relayswarm/actions/runs/38492003110)
+after one failed-job retry. The original fMP4 startup timeout remains recorded;
+its cancellation owner is unproved. A preceding Windows cache-hit fixture failure
+was corrected by measuring expiry renewal relative to its own baseline, preserving
+the single-read and deduplication assertions. Runtime code was unchanged by that
+fixture correction.
+
+Permanent proxy commit/audit preserved the original inode and shared services.
+App deployment passed the 51-file non-root preflight, clean writer drain, stable
+identity/lease checks and normal-TLS client/fresh-media attestation. The image is
+`sha256:b42b383fbd95bcf6628ade7d0e0acc803b1bb393e210b4c3b9b900f7737b4275`;
+the public client remains 728,315 bytes, SHA-256
+`c264287acad81090c8952f99946f75f844e8f5fa718e907899dc77cacf04ef59`.
+
+The [fresh permanent-deployment short check](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/ee1510d-permanent-public-short-20261014.json)
+passed all three original gates over 60.014 s in ordinary Chrome 155.0.8059.41:
+13,188,200 verified peer bytes in 30 loads, comprising 15 low loads
+(3,151,256 bytes) and 15 high loads (10,036,944 bytes). Both contributors retained
+consent/serving. Fatal/native/page errors and sampled frame freezes were zero.
+The high contributor retained one 143 ms stall before measurement; no new stall
+was recorded during measurement. All 405 completed fixed-route CDP responses
+used HTTP/1.1. Dropdowns were programmatic; Start/upload clicks had trusted
+witnesses. Browser/provider/group cleanup and exact finite-source removal passed.
+This short desktop result does not close sustained, physical/NAT or cost gates.
+
+A separate fourteen-viewer M4 qualification remains red. The fresh 300 s attempt
+stopped after 98.945 s when admission HTTP 429 responses prevented ticket renewal
+and authority expired. Policy/session responses stayed fast. Summed RSS peaked at
+8,987,213,824 bytes below its declared 12 GiB cap; all 13 memory-pressure probes
+reported at least 80% free. Summed RSS is not unique physical memory. The earlier
+8 GiB resource-stop result is retained separately. Admission heartbeat traffic
+and the shared-address limiter are under investigation; no limiter or authority
+deadline has been relaxed. All owned qualification resources were removed.
+
+The loader now skips redundant admission requests for unchanged credentials on
+connected/dialling peers and for unknown peers while full or cooling down.
+Changed credentials on active peers still refresh. Every SDP/retry and served
+object retains its online admission check; no positive-authority cache is added.
+The new source requires fresh cohort and deployment acceptance before this
+qualification failure can be considered resolved.
+
+Fresh offline consumption of the deployed head passed ten imports, packaged demo,
+installed CLI, separate-process verified native transfer and HTTP fallback. Its
+unpublished 190-file tarball is 859,013 bytes, SHA-256
+`575e443e3bbe73fa811151ff8ae73c421067e65fa653faeb3523eaf226ec5490`.
+The unchanged standalone ESM hash is recorded below. Downloaded-release acceptance
+and v0.2.0 publication remain pending.
+
+The preceding deployed checkpoint was source `2e1bdeb724eb45e37f7b97604e4f396a73985719`. All nine required jobs passed in
 [CI run 38483497575](https://github.com/forgesworn/relayswarm/actions/runs/38483497575);
 the optional long soak was skipped. Fresh offline production-only consumption
 passed ten documented imports, exact packaged demo/renewal/recovery bytes,
@@ -1203,7 +1253,7 @@ and normal-TLS exact-client/fresh-playlist attestation. Image is
 SHA-256 `c264287acad81090c8952f99946f75f844e8f5fa718e907899dc77cacf04ef59`. Reporting remained off.
 
 The maintained no-store real-HTTP renewal regression passed, but the deployed
-ordinary four-role Chrome 155.0.8059.40 check remains red for contribution and
+ordinary four-role Chrome 155.0.8059.40 check recorded red for contribution and
 verified peers: 60.013 s of requested video/native-audio decode passed, with
 zero fatal/native/page errors or stalls, while both contributors uploaded zero
 and the receiver verified zero peer bytes. Authority-expiry timing is retained;
@@ -2091,7 +2141,18 @@ Chrome tests.
 
 ## Current field checkpoint: 14 October 2026
 
-The deployed checkpoint is source `2e1bdeb724eb45e37f7b97604e4f396a73985719`. All nine required jobs passed in
+The current deployed checkpoint is `ee1510d429ac85f3738c03f10a09b753ec4eb037`,
+with permanently committed HTTP/1.1 and all nine required jobs green in
+[CI run 38492003110](https://github.com/forgesworn/relayswarm/actions/runs/38492003110)
+after one failed-job retry. The [fresh ordinary short check](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/ee1510d-permanent-public-short-20261014.json)
+passed all three gates over 60.014 s with 13,188,200 verified peer bytes across
+both qualities. The high contributor retained one 143 ms pre-measurement stall;
+all owned actors/source were cleaned. A separate fourteen-viewer local check
+stopped red after admission 429s blocked ticket renewal; the new heartbeat
+optimisation still needs fresh cohort/deployment acceptance. Two-hour, physical,
+varied-network, cost and release gates remain open. See [current status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md).
+
+The preceding deployed checkpoint was source `2e1bdeb724eb45e37f7b97604e4f396a73985719`. All nine required jobs passed in
 [CI run 38483497575](https://github.com/forgesworn/relayswarm/actions/runs/38483497575);
 the optional long soak was skipped. Fresh offline production-only consumption
 passed ten documented imports, exact packaged demo/renewal/recovery bytes,
@@ -2108,7 +2169,7 @@ and normal-TLS exact-client/fresh-playlist attestation. Image is
 SHA-256 `c264287acad81090c8952f99946f75f844e8f5fa718e907899dc77cacf04ef59`. Reporting remained off.
 
 The maintained no-store real-HTTP renewal regression passed, but the deployed
-ordinary four-role Chrome 155.0.8059.40 check remains red for contribution and
+ordinary four-role Chrome 155.0.8059.40 check recorded red for contribution and
 verified peers: 60.013 s of requested video/native-audio decode passed, with
 zero fatal/native/page errors or stalls, while both contributors uploaded zero
 and the receiver verified zero peer bytes. Authority-expiry timing is retained;
@@ -2243,7 +2304,9 @@ device identifiers, credentials and personal filesystem paths.
 | 2e1 ordinary public 60.013 s | Requested video/native-audio decode green; both contributor uploads and receiver peer bytes zero; fatal/native/page/stall counts zero | Sharing red; expiry timing retained, underlying transport cause unproved |
 | 2e1 same-source HTTP/1 browser diagnostic versus default | Chrome 155.0.8059.41: 60.009 s diagnostic accepted 2,806,464 verified peer bytes across both qualities; fresh 60.015 s default check accepted zero | Browser `--disable-http2` diagnostic only; high's one stall retained; sequential same-source/default comparison; later ordinary server-H1 trial partial red; no sustained/physical/hard-NAT/cost proof |
 | 2e1 temporary server-H1 ordinary 60.009 s | Consent/serving held; high delivered 10,082,816 verified bytes/15 loads, low zero; playback green, all 385 completed control responses HTTP/1.1 | Partial red for contribution/both-quality peers; high one stall retained; exact H1/H2 runtime/inode restored, watchdog absent/source removed; no permanent change |
-| 2e1 r3 temporary server-H1 ordinary 60.010 s | All three gates green; 13,205,308 verified bytes/30 loads across low/high, consent/serving held, all stalls/errors/withdrawals zero | One-minute same-desktop trial, exact H1/H2 runtime restored; permanent mitigation requires new exact-source CI/apply and fresh short/two-hour gates; physical/NAT/cost/publication remain open |
+| 2e1 r3 temporary server-H1 ordinary 60.010 s | All three gates green; 13,205,308 verified bytes/30 loads across low/high, consent/serving held, all stalls/errors/withdrawals zero | One-minute same-desktop trial, exact H1/H2 runtime restored; later permanent deployment remains separate evidence |
+| EE permanent H1/app ordinary 60.014 s | All three short gates green; 13,188,200 verified bytes/30 loads across both qualities, consent/serving held, fatal/native/page errors zero; 405 completed controls HTTP/1.1 | High retained one 143 ms pre-measurement stall; programmatic dropdowns/trusted Start and upload; full owned cleanup; two-hour/physical/NAT/cost/publication remain open; [summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/ee1510d-permanent-public-short-20261014.json) |
+| EE fourteen-viewer local M4 qualification | Fresh 300 s plan stopped red after 98.945 s: admission 429s prevented ticket renewal while policy/session remained fast; RSS below declared 12 GiB cap | Same-address synthetic local workload with 22 accelerated churn cycles; not public peer or cost proof; earlier 8 GiB resource red retained, full owned cleanup |
 | bb90 ordinary public 60.010 s | Requested video/native-audio decode green; contribution and verified peer red, both contributors uploaded zero/receiver peer zero, all fatal/native/page errors zero | Authority-expiry timing and delayed sends retained; underlying cause unproved; short desktop scope, historical reds remain |
 | CI two-hour load/churn | Twelve honest roles, 22 replacements, zero retained stalls/fatal hls.js errors and clean resource stops | Loopback flags and host candidates; native media errors not separately instrumented |
 | Deployed 7,205 s four-context run | Completed but red: policy timeout withdrew contribution before quota exhaustion; 34 zero-frame intervals and stalls retained | Same Mac/headless contexts; separate support audiences prevent controlled traffic attribution |
@@ -3415,7 +3478,18 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
-The deployed checkpoint is source `2e1bdeb724eb45e37f7b97604e4f396a73985719`. All nine required jobs passed in
+The current deployed checkpoint is `ee1510d429ac85f3738c03f10a09b753ec4eb037`,
+with permanently committed HTTP/1.1 and all nine required jobs green in
+[CI run 38492003110](https://github.com/forgesworn/relayswarm/actions/runs/38492003110)
+after one failed-job retry. The [fresh ordinary short check](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/ee1510d-permanent-public-short-20261014.json)
+passed all three gates over 60.014 s with 13,188,200 verified peer bytes across
+both qualities. The high contributor retained one 143 ms pre-measurement stall;
+all owned actors/source were cleaned. A separate fourteen-viewer local check
+stopped red after admission 429s blocked ticket renewal; the new heartbeat
+optimisation still needs fresh cohort/deployment acceptance. Two-hour, physical,
+varied-network, cost and release gates remain open. See [current status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md).
+
+The preceding deployed checkpoint was source `2e1bdeb724eb45e37f7b97604e4f396a73985719`. All nine required jobs passed in
 [CI run 38483497575](https://github.com/forgesworn/relayswarm/actions/runs/38483497575);
 the optional long soak was skipped. Fresh offline production-only consumption
 passed ten documented imports, exact packaged demo/renewal/recovery bytes,
@@ -3432,7 +3506,7 @@ and normal-TLS exact-client/fresh-playlist attestation. Image is
 SHA-256 `c264287acad81090c8952f99946f75f844e8f5fa718e907899dc77cacf04ef59`. Reporting remained off.
 
 The maintained no-store real-HTTP renewal regression passed, but the deployed
-ordinary four-role Chrome 155.0.8059.40 check remains red for contribution and
+ordinary four-role Chrome 155.0.8059.40 check recorded red for contribution and
 verified peers: 60.013 s of requested video/native-audio decode passed, with
 zero fatal/native/page errors or stalls, while both contributors uploaded zero
 and the receiver verified zero peer bytes. Authority-expiry timing is retained;
@@ -3535,17 +3609,17 @@ records the later short/partial-long, TCP relay and Android checks separately.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | 2e1 CI/deployment/no-store regression pass; ordinary public contribution/peer gate remains red; same-source Chrome HTTP/1 browser diagnostic passes both qualities but default HTTP/2 comparison remains red; r2 server-H1 trial partial red followed by r3 ordinary short all-three-gate pass; permanent H1 mitigation selected but not deployed, transport cause unproved; prior two-hour reds, sustained delivery and matched field benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | EE permanent H1 and app deployment pass; fresh ordinary 60.014 s check passes all three short gates with 13,188,200 verified peer bytes across both qualities; prior default-H2 and partial-trial reds retained, transport cause unproved; fourteen-viewer admission renewal red, two-hour stability and matched field benefit remain open |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
-| P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/Chrome and exact-source CI evidence pass within the documented threat/resource bounds; operational capacity is recorded under P12 |
+| P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/Chrome and exact-source CI pass; fourteen-viewer shared-address qualification hit admission 429s and lost ticket renewal despite fast policy/session responses; redundant heartbeat checks are under investigation, limits remain unchanged; operational capacity is recorded under P12 |
 | P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Deployed 768 ordinary-Chrome trusted opt-in, real process restart, duplicate handling and natural five-minute expiry pass; reporting-off/policy/lease preservation and source cleanup pass; first deployed 219 timeout remains separately retained; backend component evidence does not replace new-client opt-in/reporting validation |
 | P06 | Upload budgets across reloads and tabs | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; uploading still requires new consent | Chrome reload/tab and installed Firefox durable quota/fresh-consent evidence pass; complete physical upload journeys remain open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
 | P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-2e1 offline production-only package/ten documented imports/unchanged standalone ESM/installed directory-alias ICE CLI/separate-process verified transfer and origin fallback pass; downloaded release assets remain open; WAN success and timeout retain their separate scope |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed 2e1 passed all nine required CI jobs, fresh local consumer/unchanged ESM, non-root runtime byte/entrypoint preflight, guarded app-only drain/replacement and normal-TLS exact client/fresh playlists; ordinary short playback passes but sharing remains red, while the HTTP/1 browser-only diagnostic passes; earlier proxy/image rollback/reporting evidence retained; v0.2.0 immutable publication, downloaded consumers and full production acceptance remain pending |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Deployed EE passed all nine required CI jobs after one failed-job retry, fresh local consumer/unchanged ESM, permanent H1 commit/audit, non-root image preflight, clean app drain/replacement and normal-TLS client/fresh playlists; fresh ordinary short all-three-gate pass and full owned cleanup; original startup red retained; v0.2.0 publication, downloaded consumers and full production acceptance remain pending |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Separate real OBS and private YouTube video/audio/end/deletion pass; installed Firefox ordinary-actor journey passes; deployed two-hour contribution gate red, Safari/Pixel peer gates red, iPhone origin owner pass but background owner red; partial network/resource counters do not prove billing, varied/hard NAT or full device acceptance |
 
 ## Evidence rules

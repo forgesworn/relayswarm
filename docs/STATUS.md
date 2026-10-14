@@ -62,7 +62,57 @@ merged source do not establish production readiness.
 
 ## Current source acceptance on 14 October
 
-The deployed checkpoint is source `2e1bdeb724eb45e37f7b97604e4f396a73985719`. All nine required jobs passed in
+The deployed application and permanent HTTP/1.1 proxy checkpoint is
+`ee1510d429ac85f3738c03f10a09b753ec4eb037`. All nine required jobs passed in
+[CI run 38492003110](https://github.com/forgesworn/relayswarm/actions/runs/38492003110)
+after one failed-job retry. The original fMP4 startup timeout remains recorded;
+its cancellation owner is unproved. A preceding Windows cache-hit fixture failure
+was corrected by measuring expiry renewal relative to its own baseline, preserving
+the single-read and deduplication assertions. Runtime code was unchanged by that
+fixture correction.
+
+Permanent proxy commit/audit preserved the original inode and shared services.
+App deployment passed the 51-file non-root preflight, clean writer drain, stable
+identity/lease checks and normal-TLS client/fresh-media attestation. The image is
+`sha256:b42b383fbd95bcf6628ade7d0e0acc803b1bb393e210b4c3b9b900f7737b4275`;
+the public client remains 728,315 bytes, SHA-256
+`c264287acad81090c8952f99946f75f844e8f5fa718e907899dc77cacf04ef59`.
+
+The [fresh permanent-deployment short check](../spikes/results/ee1510d-permanent-public-short-20261014.json)
+passed all three original gates over 60.014 s in ordinary Chrome 155.0.8059.41:
+13,188,200 verified peer bytes in 30 loads, comprising 15 low loads
+(3,151,256 bytes) and 15 high loads (10,036,944 bytes). Both contributors retained
+consent/serving. Fatal/native/page errors and sampled frame freezes were zero.
+The high contributor retained one 143 ms stall before measurement; no new stall
+was recorded during measurement. All 405 completed fixed-route CDP responses
+used HTTP/1.1. Dropdowns were programmatic; Start/upload clicks had trusted
+witnesses. Browser/provider/group cleanup and exact finite-source removal passed.
+This short desktop result does not close sustained, physical/NAT or cost gates.
+
+A separate fourteen-viewer M4 qualification remains red. The fresh 300 s attempt
+stopped after 98.945 s when admission HTTP 429 responses prevented ticket renewal
+and authority expired. Policy/session responses stayed fast. Summed RSS peaked at
+8,987,213,824 bytes below its declared 12 GiB cap; all 13 memory-pressure probes
+reported at least 80% free. Summed RSS is not unique physical memory. The earlier
+8 GiB resource-stop result is retained separately. Admission heartbeat traffic
+and the shared-address limiter are under investigation; no limiter or authority
+deadline has been relaxed. All owned qualification resources were removed.
+
+The loader now skips redundant admission requests for unchanged credentials on
+connected/dialling peers and for unknown peers while full or cooling down.
+Changed credentials on active peers still refresh. Every SDP/retry and served
+object retains its online admission check; no positive-authority cache is added.
+The new source requires fresh cohort and deployment acceptance before this
+qualification failure can be considered resolved.
+
+Fresh offline consumption of the deployed head passed ten imports, packaged demo,
+installed CLI, separate-process verified native transfer and HTTP fallback. Its
+unpublished 190-file tarball is 859,013 bytes, SHA-256
+`575e443e3bbe73fa811151ff8ae73c421067e65fa653faeb3523eaf226ec5490`.
+The unchanged standalone ESM hash is recorded below. Downloaded-release acceptance
+and v0.2.0 publication remain pending.
+
+The preceding deployed checkpoint was source `2e1bdeb724eb45e37f7b97604e4f396a73985719`. All nine required jobs passed in
 [CI run 38483497575](https://github.com/forgesworn/relayswarm/actions/runs/38483497575);
 the optional long soak was skipped. Fresh offline production-only consumption
 passed ten documented imports, exact packaged demo/renewal/recovery bytes,
@@ -79,7 +129,7 @@ and normal-TLS exact-client/fresh-playlist attestation. Image is
 SHA-256 `c264287acad81090c8952f99946f75f844e8f5fa718e907899dc77cacf04ef59`. Reporting remained off.
 
 The maintained no-store real-HTTP renewal regression passed, but the deployed
-ordinary four-role Chrome 155.0.8059.40 check remains red for contribution and
+ordinary four-role Chrome 155.0.8059.40 check recorded red for contribution and
 verified peers: 60.013 s of requested video/native-audio decode passed, with
 zero fatal/native/page errors or stalls, while both contributors uploaded zero
 and the receiver verified zero peer bytes. Authority-expiry timing is retained;

@@ -74,7 +74,7 @@ async function linkedFixture(options = {}, LoaderImpl = Loader) {
   };
   const load = () => new Promise((resolve) => new hls.config.fLoader({}).load(context, {}, { onSuccess: resolve }));
   const close = async () => { swarm.stop(); for (const peer of peers) peer.close(); pool.close(); await relay.close(); };
-  return { swarm, hls, addPeer, load, close };
+  return { swarm, hls, addPeer, load, close, peers, pool };
 }
 
 test("concurrent accepted uploads reserve the full session allowance and withdraw availability", async () => {
@@ -253,6 +253,133 @@ test("a retry rechecks admission before publishing any more SDP", async () => {
     assert.equal(offers, 1);
     assert.equal(swarm.metrics().peers.dialsStarted, 1);
   } finally { swarm.stop(); peer.close(); pool.close(); await relay.close(); }
+});
+
+test("a full cohort's unchanged heartbeats skip HTTP admission while ticket changes and serving recheck it", async () => {
+  let allowed = true;
+  const verified = [], completed = [];
+  const http = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const input = JSON.parse(Buffer.concat(chunks));
+    verified.push(input);
+    response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ admitted: allowed }));
+  });
+  http.listen(0, "127.0.0.1"); await once(http, "listening");
+  const fixture = await linkedFixture({ maxPeers: 1, serve: true, admit: async (pubkey, ticket, { signal }) => {
+    const response = await fetch(`http://127.0.0.1:${http.address().port}/verify`, { method: "POST", body: JSON.stringify({ pubkey, ticket }), signal });
+    const admitted = (await response.json()).admitted;
+    completed.push(ticket);
+    return admitted;
+  } });
+  const extras = [];
+  try {
+    const channel = await fixture.addPeer(), known = fixture.peers[0];
+    const witness = new RelaySwarmSession({ pool: fixture.pool, swarmId: base.swarmId }); witness.start(); extras.push(witness);
+    let observed = 0;
+    witness.onPresence(({ from, payload }) => { if (from !== fixture.swarm.metrics().pubkey && payload.have.length) observed++; });
+    const unknown = Array.from({ length: 11 }, () => {
+      const peer = new RelaySwarmSession({ pool: fixture.pool, swarmId: base.swarmId }); peer.start(); extras.push(peer); return peer;
+    });
+    const before = verified.length;
+    let announcement = 0;
+    const announce = (peer, ticket = "fixture-ticket", open = true) => peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }], ticket, open,
+      have: [createHash("sha256").update(String(++announcement)).digest("hex")] });
+    // Twelve signed identities, three distinct heartbeats each; every event is
+    // delivered by the real relay, rather than collapsed by event-ID deduplication.
+    for (let round = 0; round < 3; round++) for (const peer of [known, ...unknown]) announce(peer);
+    await until(() => observed === 36); await sleep(50);
+    assert.equal(verified.length, before, "connected same-ticket and unknown full-capacity presence grants no new access");
+    assert.equal(fixture.swarm.metrics().peers.dialsStarted, 0);
+
+    announce(known, "rotated-ticket");
+    await until(() => completed.includes("rotated-ticket")); await sleep(0);
+    assert.equal(verified.length, before + 1);
+    assert.equal(verified.at(-1).ticket, "rotated-ticket", "active peers refresh changed credentials even when full");
+    await fixture.load(); await until(() => fixture.swarm.metrics().bytes.held === 32);
+    const key = channel.sent.find((frame) => frame.t === "have" && frame.add?.length).add[0];
+    channel.receive(JSON.stringify({ t: "want", id: 900, k: key }));
+    await until(() => fixture.swarm.metrics().bytes.uploaded === 32);
+    assert.equal(verified.at(-1).ticket, "rotated-ticket", "serving uses the refreshed ticket and a new online check");
+
+    const beforeRevoked = verified.length;
+    allowed = false; announce(known, "rotated-ticket");
+    await until(() => observed === 38); await sleep(30);
+    assert.equal(verified.length, beforeRevoked, "a heartbeat does not cache or extend authority");
+    channel.receive(JSON.stringify({ t: "want", id: 901, k: key }));
+    await until(() => channel.readyState === "closed");
+    assert.equal(verified.length, beforeRevoked + 1, "revocation is checked before sending another payload");
+    assert.equal(fixture.swarm.metrics().bytes.uploaded, 32);
+  } finally {
+    for (const peer of extras) peer.close();
+    await fixture.close(); http.closeAllConnections(); await new Promise((resolve) => http.close(resolve));
+  }
+});
+
+test("dialling heartbeats and cooldowns skip checks but changed tickets and answer expiry do not", async () => {
+  const relay = await startLocalRelay();
+  const checks = [], offers = [];
+  let allowed = true;
+  const swarm = createHlsSwarm({ ...base, relays: [relay.url], maxRetriesPerPeer: 0,
+    admit: (_pubkey, ticket) => { checks.push(ticket); return allowed; } });
+  const pool = new RelayPool([relay.url]); const peer = new RelaySwarmSession({ pool, swarmId: base.swarmId });
+  let observed = 0, announcement = 0;
+  const announce = (ticket) => peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }], ticket,
+    have: [createHash("sha256").update(String(++announcement)).digest("hex")] });
+  try {
+    swarm.attach({ config: { loader: Loader } }); await until(() => swarm.metrics().pubkey);
+    await pool.connect(); peer.start(); peer.onSignal(({ payload }) => { if (payload.type === "offer") offers.push(payload); });
+    const witness = new RelaySwarmSession({ pool, swarmId: base.swarmId }); witness.start(); witness.onPresence(({ from }) => { if (from === peer.pubkey) observed++; });
+    announce("original"); await until(() => offers.length === 1);
+    const before = checks.length;
+    announce("original"); announce("original");
+    await until(() => observed === 3); await sleep(30);
+    assert.equal(checks.length, before, "an already pending dial discloses no additional SDP from presence");
+    announce("renewed"); await until(() => checks.length === before + 1);
+    assert.equal(checks.at(-1), "renewed");
+    allowed = false;
+    const sent = swarm.metrics().relays.signalsSent;
+    peer.sendSignal(swarm.metrics().pubkey, { type: "answer", transport: "webrtc", requestId: offers[0].requestId, payload: { sdp: "expired-answer", ticket: "renewed" } });
+    await until(() => swarm.metrics().peers.dialsFailed === 1);
+    assert.equal(checks.length, before + 2, "an expired or revoked ticket is checked again before accepting SDP");
+    assert.equal(swarm.metrics().relays.signalsSent, sent);
+    const coolingChecks = checks.length;
+    announce("fresh-but-cooling"); announce("fresh-but-cooling");
+    await until(() => observed === 6); await sleep(30);
+    assert.equal(checks.length, coolingChecks, "presence cannot spend admission checks on a peer that cannot be dialled yet");
+    assert.equal(swarm.metrics().peers.dialsStarted, 1);
+    witness.close();
+  } finally { swarm.stop(); peer.close(); pool.close(); await relay.close(); }
+});
+
+test("unchanged active credentials keep advisory open hints without trusting unknown full-capacity peers", async () => {
+  let checks = 0;
+  const fixture = await linkedFixture({ maxPeers: 1, admit: () => { checks++; return true; } });
+  const strangers = [];
+  try {
+    await fixture.addPeer();
+    const known = fixture.peers[0];
+    const requester = new RelaySwarmSession({ pool: fixture.pool, swarmId: base.swarmId }); requester.start(); strangers.push(requester);
+    const unknown = new RelaySwarmSession({ pool: fixture.pool, swarmId: base.swarmId }); unknown.start(); strangers.push(unknown);
+    let presences = 0;
+    requester.onPresence(({ from }) => { if (from === known.pubkey || from === unknown.pubkey) presences++; });
+    const refusals = [];
+    requester.onSignal(({ payload }) => { if (payload.type === "reject") refusals.push(payload.payload); });
+    const announce = (peer, open) => peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }], ticket: "fixture-ticket", open });
+    const offer = (id) => requester.sendSignal(fixture.swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: id, payload: { sdp: "offer", ticket: "fixture-ticket" } });
+    const before = checks;
+    announce(known, true); announce(unknown, true);
+    await until(() => presences === 2); await sleep(0);
+    assert.equal(checks, before);
+    offer("open-hint"); await until(() => refusals.length === 1);
+    assert.deepEqual(refusals[0].referrals, [known.pubkey], "only the previously admitted identity supplies the open referral");
+    const afterOffer = checks;
+    announce(known, false);
+    await until(() => presences === 3); await sleep(0);
+    assert.equal(checks, afterOffer);
+    offer("closed-hint"); await until(() => refusals.length === 2);
+    assert.deepEqual(refusals[1].referrals, [], "the unchanged known ticket still updates a closed hint");
+  } finally { for (const peer of strangers) peer.close(); await fixture.close(); }
 });
 
 test("delayed admission cannot create a peer after stop", async () => {

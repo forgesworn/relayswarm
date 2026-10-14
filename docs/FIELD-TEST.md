@@ -242,7 +242,18 @@ Chrome tests.
 
 ## Current field checkpoint: 14 October 2026
 
-The deployed checkpoint is source `2e1bdeb724eb45e37f7b97604e4f396a73985719`. All nine required jobs passed in
+The current deployed checkpoint is `ee1510d429ac85f3738c03f10a09b753ec4eb037`,
+with permanently committed HTTP/1.1 and all nine required jobs green in
+[CI run 38492003110](https://github.com/forgesworn/relayswarm/actions/runs/38492003110)
+after one failed-job retry. The [fresh ordinary short check](../spikes/results/ee1510d-permanent-public-short-20261014.json)
+passed all three gates over 60.014 s with 13,188,200 verified peer bytes across
+both qualities. The high contributor retained one 143 ms pre-measurement stall;
+all owned actors/source were cleaned. A separate fourteen-viewer local check
+stopped red after admission 429s blocked ticket renewal; the new heartbeat
+optimisation still needs fresh cohort/deployment acceptance. Two-hour, physical,
+varied-network, cost and release gates remain open. See [current status](STATUS.md).
+
+The preceding deployed checkpoint was source `2e1bdeb724eb45e37f7b97604e4f396a73985719`. All nine required jobs passed in
 [CI run 38483497575](https://github.com/forgesworn/relayswarm/actions/runs/38483497575);
 the optional long soak was skipped. Fresh offline production-only consumption
 passed ten documented imports, exact packaged demo/renewal/recovery bytes,
@@ -259,7 +270,7 @@ and normal-TLS exact-client/fresh-playlist attestation. Image is
 SHA-256 `c264287acad81090c8952f99946f75f844e8f5fa718e907899dc77cacf04ef59`. Reporting remained off.
 
 The maintained no-store real-HTTP renewal regression passed, but the deployed
-ordinary four-role Chrome 155.0.8059.40 check remains red for contribution and
+ordinary four-role Chrome 155.0.8059.40 check recorded red for contribution and
 verified peers: 60.013 s of requested video/native-audio decode passed, with
 zero fatal/native/page errors or stalls, while both contributors uploaded zero
 and the receiver verified zero peer bytes. Authority-expiry timing is retained;
@@ -394,7 +405,9 @@ device identifiers, credentials and personal filesystem paths.
 | 2e1 ordinary public 60.013 s | Requested video/native-audio decode green; both contributor uploads and receiver peer bytes zero; fatal/native/page/stall counts zero | Sharing red; expiry timing retained, underlying transport cause unproved |
 | 2e1 same-source HTTP/1 browser diagnostic versus default | Chrome 155.0.8059.41: 60.009 s diagnostic accepted 2,806,464 verified peer bytes across both qualities; fresh 60.015 s default check accepted zero | Browser `--disable-http2` diagnostic only; high's one stall retained; sequential same-source/default comparison; later ordinary server-H1 trial partial red; no sustained/physical/hard-NAT/cost proof |
 | 2e1 temporary server-H1 ordinary 60.009 s | Consent/serving held; high delivered 10,082,816 verified bytes/15 loads, low zero; playback green, all 385 completed control responses HTTP/1.1 | Partial red for contribution/both-quality peers; high one stall retained; exact H1/H2 runtime/inode restored, watchdog absent/source removed; no permanent change |
-| 2e1 r3 temporary server-H1 ordinary 60.010 s | All three gates green; 13,205,308 verified bytes/30 loads across low/high, consent/serving held, all stalls/errors/withdrawals zero | One-minute same-desktop trial, exact H1/H2 runtime restored; permanent mitigation requires new exact-source CI/apply and fresh short/two-hour gates; physical/NAT/cost/publication remain open |
+| 2e1 r3 temporary server-H1 ordinary 60.010 s | All three gates green; 13,205,308 verified bytes/30 loads across low/high, consent/serving held, all stalls/errors/withdrawals zero | One-minute same-desktop trial, exact H1/H2 runtime restored; later permanent deployment remains separate evidence |
+| EE permanent H1/app ordinary 60.014 s | All three short gates green; 13,188,200 verified bytes/30 loads across both qualities, consent/serving held, fatal/native/page errors zero; 405 completed controls HTTP/1.1 | High retained one 143 ms pre-measurement stall; programmatic dropdowns/trusted Start and upload; full owned cleanup; two-hour/physical/NAT/cost/publication remain open; [summary](../spikes/results/ee1510d-permanent-public-short-20261014.json) |
+| EE fourteen-viewer local M4 qualification | Fresh 300 s plan stopped red after 98.945 s: admission 429s prevented ticket renewal while policy/session remained fast; RSS below declared 12 GiB cap | Same-address synthetic local workload with 22 accelerated churn cycles; not public peer or cost proof; earlier 8 GiB resource red retained, full owned cleanup |
 | bb90 ordinary public 60.010 s | Requested video/native-audio decode green; contribution and verified peer red, both contributors uploaded zero/receiver peer zero, all fatal/native/page errors zero | Authority-expiry timing and delayed sends retained; underlying cause unproved; short desktop scope, historical reds remain |
 | CI two-hour load/churn | Twelve honest roles, 22 replacements, zero retained stalls/fatal hls.js errors and clean resource stops | Loopback flags and host candidates; native media errors not separately instrumented |
 | Deployed 7,205 s four-context run | Completed but red: policy timeout withdrew contribution before quota exhaustion; 34 zero-frame intervals and stalls retained | Same Mac/headless contexts; separate support audiences prevent controlled traffic attribution |
