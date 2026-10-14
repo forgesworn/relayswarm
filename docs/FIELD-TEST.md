@@ -42,7 +42,7 @@ explicit action using a Nostr signer or the host's signed-in website account.
 It adds the service's cumulative cap to this browser's allowance and leaves
 uploading off until a fresh Apply. See [shared upload allowance](ACCOUNT-UPLOAD-BUDGET.md)
 for linking, resetting, reconnecting after reload and the service's privacy
-boundary. The deployed `df51cbe` pilot offers Nostr sign-in; its host website
+boundary. The deployed `8f482b4` pilot offers Nostr sign-in; its host website
 account resolver is unconfigured.
 
 The player checks operator policy and publisher identity every two seconds,
@@ -250,12 +250,32 @@ These field gates remain outstanding until their actual receipts are recorded.
 No new physical-device or internet-network result is claimed by the automated
 Chrome tests.
 
-## Current field checkpoint: df51 on 14 October 2026
+## Current field checkpoint: 8f on 14 October 2026
+
+The deployed source is `8f482b4528a671acfe9f1afc336cce5743aaaefd`; all nine required
+CI jobs, fresh local consumer/ESM checks and guarded deployment pass. See
+[status](STATUS.md#current-deployed-checkpoint-8f-on-14-october-2026) and the
+[8f summary](../spikes/results/8f482b4-current-checkpoint-20261014.json).
+
+Ordinary cross-Mac playback passed over 60.119 s, but contribution and both-quality
+peer delivery failed: no channel opened and verified peer bytes were zero. All
+120 populated retained buffer geometries matched the existing calculation.
+Original cleanup failed its 0.5 s process probe and strict M4 watcher command
+comparison; later exact absence/removal and source cleanup are separate proofs.
+A further prelaunch interpreter capture refused a remote timestamp 68 ms ahead;
+no workload, clock change, timeout extension or repair is claimed by that result.
+
+The earlier TURN test used an SSH tunnel and its temporary server was removed.
+Fresh Till metadata confirms no known running TURN service; public Internet TURN
+and hard-NAT acceptance remain open. Physical/Safari, same-topology 300 s,
+7,200 s/22 churn, matched wire/cost and release/download gates also remain open.
+
+## Previous field checkpoint: df51 on 14 October 2026
 
 The deployed source is `df51cbed1ebb3bd09ef1b521c451d6b47989a664`, with all nine
 required CI jobs and guarded pilot deployment passing. Both shared account
 methods are implemented; the pilot offers Nostr, while a website supplies its
-own authenticated resolver. See [status](STATUS.md#current-deployed-checkpoint-df51-on-14-october-2026)
+own authenticated resolver. See [status](STATUS.md#previous-deployed-checkpoint-df51-on-14-october-2026)
 and the [df51 evidence summary](../spikes/results/df51cbe-current-checkpoint-20261014.json).
 
 The ordinary 60.110 s four-role check passed playback but opened no peer channel

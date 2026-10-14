@@ -9,7 +9,7 @@ devices, supporting Nostr sign-in and host website accounts. The
 passes both methods, real peer uploads, renewal, linking, restart persistence
 and fresh consent. It uses disposable signatures and an owned website session
 on loopback; physical devices and actual owner authentication remain separate
-acceptance gates under P06/P12. The deployed `df51cbe` pilot offers Nostr sign-in
+acceptance gates under P06/P12. The deployed `8f482b4` pilot offers Nostr sign-in
 and preserves the private durable ledger. Integrating websites supply their own
 authenticated account resolver; none is configured on this pilot.
 

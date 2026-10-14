@@ -143,7 +143,7 @@ Devices explicitly connect using the same Nostr identity or an account
 authenticated by the host website, and use one durable ledger. Both methods
 are supported; linking them requires fresh proof of both. Their recorded spend
 is added and the lower cap is retained. Local browser allowances still apply,
-and each page separately requests upload consent. The deployed `df51cbe` pilot
+and each page separately requests upload consent. The deployed `8f482b4` pilot
 offers Nostr sign-in; integrating sites supply their own website resolver.
 Actual owner and complete physical acceptance remain open. The allowance counts
 reserved media payload rather than total device traffic.

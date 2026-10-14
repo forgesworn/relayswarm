@@ -36,13 +36,13 @@ The final guard waits for explicit absence within the unchanged deadline, and
 the corrected full suite passes. Original failures are not replaced by later
 passes.
 
-The deployed `df51cbe` checkpoint below includes this account service. All nine
+The deployed `8f482b4` checkpoint below includes this account service. All nine
 required CI jobs, clean package consumption and guarded pilot deployment pass.
 The pilot offers Nostr sign-in; integrating sites supply their own authenticated
 website resolver. Actual owner authentication, complete physical journeys and
 network/sustained/release acceptance remain open.
 
-## Later source checks: restart sharing remains open
+## Earlier source checks: restart sharing failures
 
 Checkpoint `a2c99a9` finished attempt 1 of
 [CI run 38569064323](https://github.com/forgesworn/relayswarm/actions/runs/38569064323)
@@ -61,7 +61,7 @@ cause. Per-load buffer geometry and actual request start timings were absent.
 The [original failure summary](../spikes/results/a2c99a9-ci-restart-failure-20261014.json)
 retains that failure and its cleanup limits. Later observations are separate
 results. Playback policy, fallback cap and origin reserve remain unchanged;
-the deployed pilot remains `df51cbe`.
+at that checkpoint the deployed pilot was still `df51cbe`.
 
 Current source adds bounded numeric `budgetGeometry` to the existing local
 eligibility records using only values already read by the calculation. Wait
@@ -97,9 +97,82 @@ and all deadlines. All four focused real HTTP cases pass locally, and an
 independent source review passes. The
 [d283 observation and correction summary](../spikes/results/d283071-ci-observations-20261014.json)
 retains both original failures, exact inputs and limitations. Neither correction
-nor later CI removes the restart-sharing gate or changes the deployed pilot.
+nor later CI removes the restart-sharing gate; these checks did not change the then-deployed pilot.
 
-## Current deployed checkpoint: df51 on 14 October 2026
+## Current deployed checkpoint: 8f on 14 October 2026
+
+The deployed application is `8f482b4528a671acfe9f1afc336cce5743aaaefd`.
+All nine required jobs passed on attempt 1 of
+[CI run 38578315372](https://github.com/forgesworn/relayswarm/actions/runs/38578315372);
+the optional soak was skipped. The non-root image passed 54 runtime-file checks
+before guarded replacement, preserving publisher identity, permanent leases,
+private account state and the independent EE HTTP/1.1 proxy. The normal-TLS
+public client is 746,875 bytes, SHA-256
+`70e92c18234375ae437b0ad3d9c1ba47d4ecbd6a12836e15540b1ce34111a87f`.
+The image is
+`sha256:c89bbed80eaa89b750f91f594a7c2c08940ccfa9b7188cf7e4264a8225b27cfd`.
+Both fresh rendition playlists were attested. Reporting and forwarding remain
+off, and the verification source was removed. The pilot offers Nostr sign-in;
+its website account resolver remains unconfigured.
+
+Fresh production-only consumption passed eleven documented imports, durable
+ledger replay, the installed CLI and separate-process verified native transfer
+and HTTP fallback. The unpublished package is 1,024,043 bytes/219 files,
+SHA-256 `3505d8b086c4be44a414bee829872915fb4383ae94251f44e24b856fcdef9198`.
+The archive is 3,758,080 bytes, SHA-256
+`591ea9994fcc7a03d77f8820c50b31bf6820ea29408ba547abfca91a51201cf2`;
+the standalone ESM is 121,478 bytes, SHA-256
+`612f5f502964462d8eba8909e5041db1030da96edbaea7dd5caa1088d1eac171`.
+These local proofs do not establish published/downloaded-release acceptance.
+
+The CI broadcast fixture verified both peer renditions before producer restart,
+then one 819,868-byte high-quality fragment afterwards. Receiver and origin
+baseline recorded no stalls, fatal/native errors or append failures. Explicit
+RTC/fake-media fixture flags and loopback topology limit that result; earlier
+restart-sharing failures remain separate.
+
+The ordinary cross-Mac R2 check measured 60.119 s: playback passed, contribution
+and both-quality peer delivery failed, with zero peer channels or verified peer
+bytes. Six dials installed remote SDP and reached ICE checking before timeout.
+All 335 retained control requests finished HTTP 200 over HTTP/1.1; status alone
+does not prove an admitted response body. Across the retained whole journey,
+all 120 buffer geometries matched the existing budget formula; three startup
+rows remained unknown. No peer wait entered or expired. The two measured
+high-donor zero budgets had less playable time than the actual dynamic reserve.
+This does not establish a scheduler or connectivity defect or justify changing
+playback policy, origin reserve or deadlines.
+
+Original execution cleanup remains red. The outer ownership probe exceeded its
+unchanged 0.5 s limit; M4 refused watcher termination because the full command
+changed while birth and process group matched. The actual differing command was
+not retained, so the canonical interpreter pin has not proved a repair. Later
+exact owned process/group/path absence and helper-stage removal are separate
+proofs; they do not reconstruct original watcher reaping. Source cleanup v2
+matched all five provenance guards and removed the finite encoder, retaining
+its observed exit 255. A preceding R1 capture refusal launched no browser;
+its original cause remains unknown.
+
+A separate R3 attempt stopped before source or browser workload: its authenticated
+interpreter capture exited normally, but the freshness validator rejected a
+remote timestamp 68 ms ahead of this Mac's clock. That specific refusal is
+recorded; it does not establish the earlier R1 cause or a completed correction.
+No system clock or freshness limit changed.
+
+The earlier temporary coturn fixture passed two verified segments through an
+owned SSH tunnel, then its service and credentials were removed. A fresh
+read-only Till observation found no known TURN service or standard TURN
+listeners, while the pinned image remains cached. This is not public Internet
+TURN or hard-NAT proof. Provider firewall inventory, actual browser egress and
+public exposure approval remain unverified; no new public TURN service started.
+
+The [8f checkpoint summary](../spikes/results/8f482b4-current-checkpoint-20261014.json)
+records exact artifacts, separate cleanup results and retained local receipt
+hashes. All P01–P12 acceptance remains open, including the same-topology 300 s
+qualifier, two-hour/churn, physical/Safari, hard NAT, matched wire/cost and final
+release/download checks. PR 8 remains open; v0.1.0 remains the published release.
+This documentation checkpoint does not change the deployed runtime source.
+
+## Previous deployed checkpoint: df51 on 14 October 2026
 
 The deployed application is `df51cbed1ebb3bd09ef1b521c451d6b47989a664`.
 All nine required jobs passed on attempt 1 of

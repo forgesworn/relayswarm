@@ -1,0 +1,548 @@
+{
+  "v": 1,
+  "checkpointDate": "2026-10-14",
+  "runtimeSourceSha": "8f482b4528a671acfe9f1afc336cce5743aaaefd",
+  "documentationCommitIsNotRuntimeSource": true,
+  "ci": {
+    "databaseId": 38578315372,
+    "attempt": 1,
+    "requiredJobsSuccessful": 9,
+    "optionalSoak": "SKIPPED"
+  },
+  "deployment": {
+    "image": "sha256:c89bbed80eaa89b750f91f594a7c2c08940ccfa9b7188cf7e4264a8225b27cfd",
+    "client": {
+      "bytes": 746875,
+      "sha256": "70e92c18234375ae437b0ad3d9c1ba47d4ecbd6a12836e15540b1ce34111a87f"
+    },
+    "independentProxySourceSha": "ee1510d429ac85f3738c03f10a09b753ec4eb037",
+    "normalTLSAndFreshPlaylistsAttested": true,
+    "identityAndPrivateStatePreserved": true,
+    "nostrOffered": true,
+    "websiteResolverConfigured": false,
+    "reportingEnabled": false,
+    "forwardingEnabled": false,
+    "verificationSourceRemoved": true,
+    "ongoingLiveIngestClaimed": false
+  },
+  "localUnpublishedAssets": {
+    "package": {
+      "bytes": 1024043,
+      "files": 219,
+      "sha256": "3505d8b086c4be44a414bee829872915fb4383ae94251f44e24b856fcdef9198"
+    },
+    "archive": {
+      "bytes": 3758080,
+      "sha256": "591ea9994fcc7a03d77f8820c50b31bf6820ea29408ba547abfca91a51201cf2"
+    },
+    "standaloneESM": {
+      "bytes": 121478,
+      "sha256": "612f5f502964462d8eba8909e5041db1030da96edbaea7dd5caa1088d1eac171"
+    },
+    "documentedImports": 11,
+    "productionOnlyConsumer": true,
+    "separateProcessNativeAndFallback": true,
+    "published": false
+  },
+  "ordinaryFourRoleR2": {
+    "sourceSha": "8f482b4528a671acfe9f1afc336cce5743aaaefd",
+    "scenarioResult": "RED",
+    "scope": {
+      "ordinaryBrowserConfiguration": true,
+      "heapInspection": false,
+      "nativeStatsInspection": false,
+      "fourRoles": true,
+      "longOrFourteenRoleQualification": false,
+      "M1": "low and high contributors",
+      "M4": "receiver and origin baseline",
+      "programmaticDropdownSelection": true,
+      "nativeConsentControls": true
+    },
+    "measurementMs": 60119,
+    "gates": {
+      "playback": "green",
+      "contribution": "red",
+      "verifiedPeerPayload": "red"
+    },
+    "roles": {
+      "contributor-low": {
+        "availableSamples": 15,
+        "totalsFinal": {
+          "peerFirstBytes": 0,
+          "uploaded": 0,
+          "peerFirstLoads": 0
+        },
+        "totalsMeasuredDelta": {
+          "peerFirstBytes": 0,
+          "uploaded": 0,
+          "peerFirstLoads": 0
+        },
+        "peersFinal": {
+          "connected": 0,
+          "dialling": 0,
+          "dialsStarted": 2,
+          "dialsAccepted": 0,
+          "dialsFailed": 0,
+          "dialsTimedOut": 2,
+          "dialsRejected": 0,
+          "offersAccepted": 1,
+          "offersRefused": 0,
+          "admitRefused": 0,
+          "linksOpened": 0,
+          "linksClosed": 0
+        },
+        "segmentsFinal": {
+          "originLoaded": 43,
+          "peerFirstLoaded": 0,
+          "originFallbacks": 43,
+          "coordinatedWaits": 0,
+          "coordinatedPeerLoads": 0,
+          "commitmentRequests": 0,
+          "commitmentRejected": 0,
+          "commitmentUnavailable": 0
+        },
+        "eligibilityFinalCounters": {
+          "no-budget": 2,
+          "aborted-before-eligibility": 0,
+          "no-have-no-wait": 41,
+          "no-have-wait": 0,
+          "wait-no-longer-eligible": 0,
+          "wait-aborted": 0,
+          "wait-expired": 0,
+          "have-at-entry": 0,
+          "have-after-wait": 0
+        },
+        "eligibilityMeasuredCounterDelta": {
+          "no-budget": 0,
+          "aborted-before-eligibility": 0,
+          "no-have-no-wait": 30,
+          "no-have-wait": 0,
+          "wait-no-longer-eligible": 0,
+          "wait-aborted": 0,
+          "wait-expired": 0,
+          "have-at-entry": 0,
+          "have-after-wait": 0
+        }
+      },
+      "contributor-high": {
+        "availableSamples": 15,
+        "totalsFinal": {
+          "peerFirstBytes": 0,
+          "uploaded": 0,
+          "peerFirstLoads": 0
+        },
+        "totalsMeasuredDelta": {
+          "peerFirstBytes": 0,
+          "uploaded": 0,
+          "peerFirstLoads": 0
+        },
+        "peersFinal": {
+          "connected": 0,
+          "dialling": 0,
+          "dialsStarted": 2,
+          "dialsAccepted": 0,
+          "dialsFailed": 0,
+          "dialsTimedOut": 2,
+          "dialsRejected": 0,
+          "offersAccepted": 1,
+          "offersRefused": 0,
+          "admitRefused": 0,
+          "linksOpened": 0,
+          "linksClosed": 0
+        },
+        "segmentsFinal": {
+          "originLoaded": 43,
+          "peerFirstLoaded": 0,
+          "originFallbacks": 43,
+          "coordinatedWaits": 0,
+          "coordinatedPeerLoads": 0,
+          "commitmentRequests": 0,
+          "commitmentRejected": 0,
+          "commitmentUnavailable": 0
+        },
+        "eligibilityFinalCounters": {
+          "no-budget": 4,
+          "aborted-before-eligibility": 0,
+          "no-have-no-wait": 39,
+          "no-have-wait": 0,
+          "wait-no-longer-eligible": 0,
+          "wait-aborted": 0,
+          "wait-expired": 0,
+          "have-at-entry": 0,
+          "have-after-wait": 0
+        },
+        "eligibilityMeasuredCounterDelta": {
+          "no-budget": 2,
+          "aborted-before-eligibility": 0,
+          "no-have-no-wait": 28,
+          "no-have-wait": 0,
+          "wait-no-longer-eligible": 0,
+          "wait-aborted": 0,
+          "wait-expired": 0,
+          "have-at-entry": 0,
+          "have-after-wait": 0
+        }
+      },
+      "origin-baseline-low": {
+        "availableSamples": 13,
+        "totalsFinal": {
+          "peerFirstBytes": 0,
+          "uploaded": 0,
+          "peerFirstLoads": 0
+        },
+        "totalsMeasuredDelta": {
+          "peerFirstBytes": 0,
+          "uploaded": 0,
+          "peerFirstLoads": 0
+        },
+        "peersFinal": {
+          "connected": 0,
+          "dialling": 0,
+          "dialsStarted": 0,
+          "dialsAccepted": 0,
+          "dialsFailed": 0,
+          "dialsTimedOut": 0,
+          "dialsRejected": 0,
+          "offersAccepted": 0,
+          "offersRefused": 0,
+          "admitRefused": 0,
+          "linksOpened": 0,
+          "linksClosed": 0
+        },
+        "segmentsFinal": {
+          "originLoaded": 0,
+          "peerFirstLoaded": 0,
+          "originFallbacks": 0,
+          "coordinatedWaits": 0,
+          "coordinatedPeerLoads": 0,
+          "commitmentRequests": 0,
+          "commitmentRejected": 0,
+          "commitmentUnavailable": 0
+        },
+        "eligibilityFinalCounters": {
+          "no-budget": 0,
+          "aborted-before-eligibility": 0,
+          "no-have-no-wait": 0,
+          "no-have-wait": 0,
+          "wait-no-longer-eligible": 0,
+          "wait-aborted": 0,
+          "wait-expired": 0,
+          "have-at-entry": 0,
+          "have-after-wait": 0
+        },
+        "eligibilityMeasuredCounterDelta": {
+          "no-budget": 0,
+          "aborted-before-eligibility": 0,
+          "no-have-no-wait": 0,
+          "no-have-wait": 0,
+          "wait-no-longer-eligible": 0,
+          "wait-aborted": 0,
+          "wait-expired": 0,
+          "have-at-entry": 0,
+          "have-after-wait": 0
+        }
+      },
+      "receive-only": {
+        "availableSamples": 13,
+        "totalsFinal": {
+          "peerFirstBytes": 0,
+          "uploaded": 0,
+          "peerFirstLoads": 0
+        },
+        "totalsMeasuredDelta": {
+          "peerFirstBytes": 0,
+          "uploaded": 0,
+          "peerFirstLoads": 0
+        },
+        "peersFinal": {
+          "connected": 0,
+          "dialling": 0,
+          "dialsStarted": 1,
+          "dialsAccepted": 0,
+          "dialsFailed": 0,
+          "dialsTimedOut": 2,
+          "dialsRejected": 0,
+          "offersAccepted": 1,
+          "offersRefused": 0,
+          "admitRefused": 0,
+          "linksOpened": 0,
+          "linksClosed": 0
+        },
+        "segmentsFinal": {
+          "originLoaded": 37,
+          "peerFirstLoaded": 0,
+          "originFallbacks": 37,
+          "coordinatedWaits": 0,
+          "coordinatedPeerLoads": 0,
+          "commitmentRequests": 0,
+          "commitmentRejected": 0,
+          "commitmentUnavailable": 0
+        },
+        "eligibilityFinalCounters": {
+          "no-budget": 2,
+          "aborted-before-eligibility": 0,
+          "no-have-no-wait": 35,
+          "no-have-wait": 0,
+          "wait-no-longer-eligible": 0,
+          "wait-aborted": 0,
+          "wait-expired": 0,
+          "have-at-entry": 0,
+          "have-after-wait": 0
+        },
+        "eligibilityMeasuredCounterDelta": {
+          "no-budget": 0,
+          "aborted-before-eligibility": 0,
+          "no-have-no-wait": 35,
+          "no-have-wait": 0,
+          "wait-no-longer-eligible": 0,
+          "wait-aborted": 0,
+          "wait-expired": 0,
+          "have-at-entry": 0,
+          "have-after-wait": 0
+        }
+      }
+    },
+    "eligibility": {
+      "lifetimeRows": 123,
+      "noHaveNoWait": 115,
+      "noBudget": 8,
+      "otherReasonCounts": 0,
+      "positiveBudgetAt1500Ms": 113,
+      "positiveBudgetBelow1500Ms": 2,
+      "zeroBudgetHaveObservation": null,
+      "bufferGeometryRows": 120,
+      "formulaMismatches": 0,
+      "unknownNoBufferGeometryRows": 3,
+      "ringDropped": 0,
+      "initialBudgetOnly": true
+    },
+    "transport": {
+      "events": 102,
+      "createdPageLocalPCs": 8,
+      "remoteSDPInstalledThenCheckingThenDialTimeout": 6,
+      "creationToTimeoutMsRange": [
+        12000,
+        12007
+      ],
+      "supersededBeforeRemoteDescription": 2,
+      "allLocalGatherComplete": true,
+      "candidatesPerLocalDescription": 2,
+      "channelsOpened": 0,
+      "linksOpened": 0,
+      "verifiedPeerBytes": 0,
+      "nativeFailedOrDisconnectedObserved": false,
+      "pageLocalIdsDoNotIdentifyCounterpart": true
+    },
+    "controls": {
+      "observed": 335,
+      "dropped": 0,
+      "expired": 0,
+      "pending": 0,
+      "byRouteStatusOutcome": [
+        {
+          "route": "admissionChallenge",
+          "status": 200,
+          "outcome": "finished",
+          "count": 3
+        },
+        {
+          "route": "admissionTicket",
+          "status": 200,
+          "outcome": "finished",
+          "count": 3
+        },
+        {
+          "route": "admissionVerify",
+          "status": 200,
+          "outcome": "finished",
+          "count": 25
+        },
+        {
+          "route": "policy",
+          "status": 200,
+          "outcome": "finished",
+          "count": 150
+        },
+        {
+          "route": "session",
+          "status": 200,
+          "outcome": "finished",
+          "count": 154
+        }
+      ],
+      "protocolCounts": {
+        "http/1.1": 335
+      },
+      "maximumDurationMs": 501,
+      "scope": "HTTP200 and finished network lifecycle are not response-body admission booleans; accepted engine stages are separate evidence"
+    },
+    "playback": {
+      "allRolesVideoAndNativeAudioDecodeProgress": true,
+      "receiverBothQualitiesDecoded": true,
+      "fatalNativePageErrors": 0,
+      "stalls": 0,
+      "zeroFrameIntervals": 0,
+      "contributorConsentWithdrawals": 0,
+      "audibleOutputProved": false
+    },
+    "cleanup": {
+      "reviewVerdict": "PASS evidence consistency; original execution remains RED",
+      "original": {
+        "outerOK": false,
+        "outerElapsedSeconds": 146.49158512498252,
+        "outerWorkerReaped": true,
+        "outerOwnedGroupAbsent": true,
+        "outerFailureReportedByRoot": {
+          "operation": "ownership-ps",
+          "timeoutSeconds": 0.5,
+          "independentExceptionRecordAvailable": false
+        },
+        "M1": {
+          "ok": true,
+          "runnerReaped": true,
+          "scenarioResourcesOK": true,
+          "stageRemoved": true
+        },
+        "M4Controller": {
+          "ok": false,
+          "runnerReaped": true,
+          "failureClass": "AssertionError"
+        },
+        "M4EndpointCleanup": {
+          "resourceWatchReaped": false,
+          "resourceWatchGroupGone": false,
+          "httpClosed": true,
+          "guardianReaped": true,
+          "chromeGroupGone": true,
+          "chromeLeaderStopped": true,
+          "identityGuarded": true,
+          "profileRemoved": true,
+          "childTmpRemoved": true,
+          "profileTmpRemoved": true
+        },
+        "M4EndpointCleanupOK": false,
+        "M4WatcherFailure": {
+          "phase": "identity-before-term",
+          "errorClass": "AssertionError",
+          "identity": {
+            "ownerPresent": true,
+            "birthEqual": true,
+            "pgidEqual": true,
+            "commandEqual": false
+          }
+        }
+      },
+      "resources": {
+        "M1CompleteOuterTree": {
+          "samples": 127,
+          "rssHighwater": 1971617792,
+          "processHighwater": 37,
+          "minimumFreePercent": 30
+        },
+        "M4EndpointScenario": {
+          "samples": 125,
+          "rssHighwater": 2565029888,
+          "processHighwater": 21,
+          "minimumFreePercent": 76
+        },
+        "M4LaterWatcherHealth": {
+          "samples": 214,
+          "rssHighwater": 2565029888,
+          "processHighwater": 21,
+          "minimumFreePercent": 75
+        },
+        "RSSScope": "summed process RSS; not unique physical memory"
+      },
+      "laterRecovery": {
+        "ownerBirthAbsenceCount": 4,
+        "groupAbsenceCount": 3,
+        "temporaryPathsAbsentCount": 2,
+        "stageRemoved": true,
+        "noSignalsSent": true,
+        "originalEndpointReapingProved": false
+      },
+      "source": {
+        "receiptVersion": 2,
+        "startAndCleanupStableIdentityEqual": true,
+        "executionAndHelperPinsMatch": true,
+        "reviewedInputsHashMatches": true,
+        "beforeJournalMatchesStart": true,
+        "afterJournalChanged": true,
+        "guardWitnesses": {
+          "inspectedBeforeRemoval": true,
+          "journalOwnedSourceMatched": true,
+          "createdSourceMatched": true,
+          "appAndProxyGuardMatched": true,
+          "birthImageMountsMatched": true
+        },
+        "finiteSeconds": 600,
+        "termSeconds": 595,
+        "killAfterSeconds": 5,
+        "removed": true,
+        "observedExitCode": 255,
+        "privateLedgerContentsRead": false
+      },
+      "limits": [
+        "Retained receipts only; no live verification or actor execution by reviewer.",
+        "Later process absence/removal does not establish original parent reaping.",
+        "Original controller M4 refusal and endpoint watcher cleanup failure remain unchanged."
+      ]
+    },
+    "interpretation": "Observed failure is before any open peer channel, not expiry of a positive peer wait. Positive budget without advisory HAVE does not establish remote cache absence. No connectivity cause or code fix is established.",
+    "environment": {
+      "VPNConnectedBeforeAndAfterOnly": true,
+      "continuousRouteStateProved": false,
+      "settingsChangedByFixture": false
+    },
+    "counting": "Final no-drop rings counted once; measured counters are final minus measurement-start, never sums of cumulative snapshots."
+  },
+  "turn": {
+    "historicalSSHFixture": "Two verified segments/224096 bytes over5.036s; stopped and removed after test. Original strict cleanup failure and later guarded resolution remain separate.",
+    "internetOrHardNATProof": false,
+    "knownTURNServiceRunning": false,
+    "standardTCPAndUDP3478And5349Listeners": 0,
+    "pinnedImageCached": true,
+    "actualProviderFirewallInventoryReviewed": false,
+    "actualBrowserEgressVerified": false,
+    "publicExposureAuthorised": false,
+    "newInternetTURNServiceStarted": false,
+    "serviceObservationUTC": "2026-10-14T15:49:25.427731+00:00",
+    "hostMetadataObservationUTC": "2026-10-14T15:57:34.794321+00:00"
+  },
+  "openScope": {
+    "allP01toP12Retained": true,
+    "separate37RowLedgerLocated": false,
+    "sameSourceTopology300sQualifier": true,
+    "7200sAnd22Churn": true,
+    "completePhysicalAndroidIPhoneSafari": true,
+    "ownerAccountAndWebsiteAuthentication": true,
+    "hardNATSeparateNetworks": true,
+    "matchedTotalWireAndActualCost": true,
+    "immutableReleaseAndDownloadAcceptance": true,
+    "productionReady": false
+  },
+  "evidenceSHA256": {
+    "artifacts/candidate-8f482b4-ci-20261014/attempt1-terminal.json": "b1a9f0ff50fe5558312cafb7597d0058c78c0e9f131ef8e7124e38b59bc3068d",
+    "artifacts/clean-consumer-8f482b4-20261014/receipt.json": "27a662f0c70d5c3d4659a9f96019e6f0c5513192fd321ad2109652f9c1213950",
+    "artifacts/clean-consumer-8f482b4-20261014/execution-receipt.json": "299e08e4bdc78023f1284830ed5cddd715e7add5476e52f9775dd63d1eaee0cc",
+    "artifacts/clean-consumer-8f482b4-20261014/standalone/validation.json": "a03ef99dd37d14870cf735f107b0ae78e9954812d7ab7f5e08f1454c262d88b1",
+    "artifacts/independent-clean-consumer-8f482b4-20261014/review.json": "4ff7b65fc1772713312ce43cf89a22e06a658ed57e605feeb52733b0c701c9e7",
+    "artifacts/deployment-8f482b4-bound-20261014/runtime-contract.json": "240843a4b50bb9853e727e0b2e4826a2653d488dd89923d44a273446a5ddefef",
+    "artifacts/independent-deployment-8f482b4-actual-review-20261014/review.json": "a8188ec067e9d45567a2101003b7e04142caf4132351d0103f97196b41f5798d",
+    "artifacts/public-cross-hls-eligibility-8f482b4-r2-analysis-20261014/EVIDENCE-MANIFEST.json": "99975635328ab5d11f574c0ff8c474adca54b270c10a8fd1cc20a9edd662aeff",
+    "artifacts/turn-current-service-observation-20261014/result.private.json": "db44c5f05d0e4b7836e9b46611e7751dc22f9348539b3c857afa797ffec02d15",
+    "artifacts/turn-current-host-metadata-20261014/result.private.json": "35ce3a0805826745dd371e215f673bbd5c993a4bd2078ae01818a6901277334c"
+  },
+  "evidenceAvailability": "This public summary reports named retained local receipts; raw private receipts are not public release assets.",
+  "separateR3PrelaunchRefusal": {
+    "fieldWorkloadStarted": false,
+    "sourceStarted": false,
+    "sshExitedAndReaped": true,
+    "phase": "validate-observation",
+    "observedRemoteAgeMs": -68,
+    "cause": "R3 timestamp compared across Mac clocks was future by68ms; historical R1 cause remains unknown",
+    "receiptSHA256": "89755fb186ce85568d3e22293823bbef49184a72bfb8c673519fe78086871f89",
+    "noClockSettingsOrFreshnessLimitChanged": true,
+    "laterCorrectionOrRetestProved": false
+  }
+}

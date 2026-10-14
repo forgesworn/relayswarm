@@ -5,11 +5,11 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
-Later source `a2c99a9` passed eight of nine required CI jobs; its loopback
+Earlier source `a2c99a9` passed eight of nine required CI jobs; its loopback
 broadcast test recovered playback after producer restart but failed the
 unchanged new-discontinuity peer-fragment gate. The
 [retained failure](../spikes/results/a2c99a9-ci-restart-failure-20261014.json)
-and [current observations](STATUS.md#later-source-checks-restart-sharing-remains-open)
+and [current observations](STATUS.md#earlier-source-checks-restart-sharing-failures)
 are separate from the deployed checkpoint below. No playback-latency or
 deadline change has been made to increase sharing.
 The instrumented `d283071` run also failed the unchanged sharing gate. Native
@@ -17,7 +17,35 @@ request timings confirm matched donor requests started after receiver completion
 the [summary](../spikes/results/d283071-ci-observations-20261014.json) separates
 that result from its macOS cancellation-test precondition correction.
 
-## Current deployed checkpoint: df51
+## Current deployed checkpoint: 8f
+
+The deployed application is `8f482b4528a671acfe9f1afc336cce5743aaaefd`. All nine
+required jobs passed on attempt 1 of
+[CI run 38578315372](https://github.com/forgesworn/relayswarm/actions/runs/38578315372);
+the optional soak was skipped. Fresh production-only package/standalone proofs
+and guarded deployment passed, preserving private state and the independent
+EE HTTP/1.1 proxy. The pilot offers Nostr; a host supplies its website resolver.
+Exact assets and receipts are in [status](STATUS.md#current-deployed-checkpoint-8f-on-14-october-2026)
+and the [8f summary](../spikes/results/8f482b4-current-checkpoint-20261014.json).
+
+The ordinary 60.119 s cross-Mac check passed playback but failed contribution
+and both-quality peer payload, with zero peer channels/bytes. Six dials reached
+remote SDP installation and ICE checking before timeout. The 120 populated
+whole-journey budget geometries matched the existing formula. Original cleanup
+failures, later exact absence/removal and successful source cleanup remain
+separate. A further interpreter capture refused before workload because its
+remote clock was 68 ms ahead; no clock or freshness limit changed.
+
+The temporary SSH TURN fixture was removed after its scoped test. Fresh Till
+metadata found no known running TURN service while the image remains cached;
+public Internet TURN, provider policy and actual browser egress remain unproved.
+No current same-topology 300 s qualifier, two-hour/churn, complete physical/Safari,
+hard-NAT, matched wire/cost or immutable-release/download pass exists. Full
+P01–P12 remains open, PR 8 is open and v0.1.0 remains published. Documentation
+updates do not change the deployed application source. No separate 37-row
+ledger was located and no 37-item completion is asserted.
+
+## Previous deployed checkpoint: df51
 
 The deployed application is `df51cbed1ebb3bd09ef1b521c451d6b47989a664`. All nine
 required jobs passed on attempt 1 of
@@ -26,7 +54,7 @@ the optional soak was skipped. Fresh production-only package/standalone checks
 and guarded pilot deployment passed. Both shared account methods are implemented;
 the pilot offers Nostr sign-in, while integrating websites supply their own
 authenticated account resolver. Private state and the independent EE H1 proxy
-were preserved. Exact assets and evidence are in [status](STATUS.md#current-deployed-checkpoint-df51-on-14-october-2026)
+were preserved. Exact assets and evidence are in [status](STATUS.md#previous-deployed-checkpoint-df51-on-14-october-2026)
 and the [df51 summary](../spikes/results/df51cbe-current-checkpoint-20261014.json).
 
 The ordinary 60.110 s check passed playback but failed contribution and
@@ -318,18 +346,18 @@ records the later short/partial-long, TCP relay and Android checks separately.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Current df51 ordinary 60.110 s playback passed but sharing/both-quality payload failed with zero peer bytes/channels. Separate native ICE diagnostics narrow the unanswered-check boundary without proving cause or a repair. Earlier fourteen-role R7/R9/R10/R11 remain RED; same-topology 300 s, two-hour/churn stability and matched benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Deployed 8f ordinary 60.119 s playback passed but contribution/both-quality payload failed with zero peer channels/bytes. All 120 populated whole-journey geometries matched the existing budget formula; connection cause remains unknown. Earlier fourteen-role REDs, same-topology 300 s, two-hour/churn and matched benefit remain open |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/exact-source CI and 0e in-place own-ticket renewal pass with unchanged expiry, authority, admission and quota limits; all three peer actors retained sampled session/link/consent state across renewal; prior fourteen-viewer address-limit 429/authority-expiry reds remain unresolved operational capacity evidence under P12 |
 | P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Deployed 768 ordinary-Chrome trusted opt-in, real process restart, duplicate handling and natural five-minute expiry pass; reporting-off/policy/lease preservation and source cleanup pass; first deployed 219 timeout remains separately retained; backend component evidence does not replace new-client opt-in/reporting validation |
-| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Private durable ledger supports both Nostr and host website authentication. Controlled 55.780 s Chrome acceptance, 177 local publisher cases, 92 swarm cases, exact-source CI and df51 pilot deployment pass. Pilot Nostr is offered; website resolver is unconfigured. Real owner authentication and complete physical upload journeys remain open. Charges are reserved media payload, not an OS-wide meter |
+| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Private durable ledger supports both Nostr and host website authentication. Controlled 55.780 s Chrome acceptance, 177 local publisher cases, 92 swarm cases, exact-source CI and 8f pilot deployment pass. Pilot Nostr is offered; website resolver is unconfigured. Real owner authentication and complete physical upload journeys remain open. Charges are reserved media payload, not an OS-wide meter |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-df51 offline production-only package, eleven documented imports, durable account-ledger replay, rebuilt standalone ESM, installed CLI and separate-process verified native transfer/HTTP fallback pass; unpublished local assets do not close downloaded immutable-release acceptance |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-8f offline production-only package, eleven documented imports, durable account-ledger replay, rebuilt standalone ESM, installed CLI and separate-process verified native transfer/HTTP fallback pass; unpublished local assets do not close downloaded immutable-release acceptance |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Actual df51 passed all nine required CI jobs attempt 1 (38554223220), fresh local consumer/ESM, guarded deployment and normal-TLS exact client/media attestation; independent EE permanent H1 retained. Ordinary sharing and earlier fourteen-role qualification remain RED; local assets unpublished and final release/production acceptance open |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Earlier dated Kit/OBS/private YouTube/Firefox evidence retained. Current df51 ordinary sharing remains RED; native diagnostic is not ordinary qualification. Earlier fourteen-role R7/R9/R10/R11 remain RED. Safari 17 R2/R4/R5 bootstrap-only; iPhone USB R2 no evaluation/unknown lockdown close. Original cleanup unknowns and later absence are separate. Complete physical/native input, hard NAT, 7200 s/22 churn, matched wire/billed cost and release gates remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Actual 8f passed all nine required CI jobs attempt 1 (38578315372), fresh local consumer/ESM, guarded deployment and normal-TLS exact client/media attestation; independent EE permanent H1 retained. Ordinary sharing and earlier fourteen-role qualification remain RED; local assets unpublished and final release/production acceptance open |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Earlier Kit/OBS/private YouTube/Firefox evidence retained. Current 8f ordinary sharing and earlier fourteen-role qualification remain RED. Original cleanup failures and later absence remain separate. SSH TURN is not public Internet/hard-NAT proof; no permanent public TURN is deployed. Complete physical/Safari, 7200 s/22 churn, matched wire/billed cost and release gates remain open |
 
 ## Evidence rules
 
