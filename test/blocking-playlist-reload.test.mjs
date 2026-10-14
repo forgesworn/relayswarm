@@ -2,9 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { renameSync, watch } from "node:fs";
 import { EventEmitter } from "node:events";
-import { mkdtemp, writeFile, rename, rm, readFile, mkdir } from "node:fs/promises";
+import { mkdtemp, realpath, writeFile, rename, rm, readFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as pause } from "node:timers/promises";
 import { createHlsPublisher } from "../src/hls-publisher.mjs";
 import { completePlaylist, createBlockingPlaylistReload, sendPlaylistResponse } from "../demo/blocking-playlist-reload.mjs";
 import { httpRange } from "../demo/server.mjs";
@@ -14,27 +15,90 @@ const params = (msn) => new URLSearchParams({ _HLS_msn: String(msn) });
 const flush = () => new Promise(resolve => setImmediate(resolve));
 async function until(predicate) { for (let i = 0; i < 100; i++) { if (predicate()) return; await flush(); } assert.fail("Bounded test checkpoint not reached."); }
 async function fixture(t, master = false) {
-  const directory = await mkdtemp(join(tmpdir(), "relayswarm-block-reload-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const deadline = performance.now() + 5000; // Original real-FS test envelope.
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "relayswarm-block-reload-")));
+  const reloads = new Set(), pending = new Set(), readiness = new Map(), publications = new AbortController();
+  const observe = (promise) => {
+    pending.add(promise); promise.then(() => pending.delete(promise), () => pending.delete(promise));
+    return promise; // Observe immediately; the caller still receives the original rejection.
+  };
+  t.after(async () => {
+    let failure;
+    try {
+      publications.abort();
+      const drained = Promise.allSettled([...pending]);
+      const closed = await Promise.allSettled([...reloads].map(reload => reload.close()));
+      await drained;
+      failure = closed.find(result => result.status === "rejected")?.reason;
+    } catch (error) { failure = error; }
+    finally {
+      try { await rm(directory, { recursive: true, force: true }); }
+      catch (error) { failure ??= error; }
+    }
+    if (failure) throw failure;
+  });
   await writeFile(join(directory, "index.m3u8"), master ? '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nlow.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2\nhigh.m3u8\n' : playlist());
   if (master) for (const name of ["low", "high"]) await writeFile(join(directory, `${name}.m3u8`), playlist());
   const publisher = await createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8" });
-  const reload = createBlockingPlaylistReload({ publisher }); t.after(() => reload.close());
-  return { directory, publisher, reload };
+  function createReload(options = {}) {
+    const events = new EventEmitter();
+    const reload = createBlockingPlaylistReload({ publisher, ...options, setTimer(callback, delay) {
+      const timer = setTimeout(callback, delay);
+      events.emit("waiting"); // Existing production pause has registered its actual waiter.
+      return timer;
+    } });
+    const read = reload.read.bind(reload);
+    reload.read = (...args) => {
+      const promise = observe(read(...args));
+      promise.catch(error => events.emit("readFailure", error));
+      return promise;
+    };
+    reloads.add(reload); readiness.set(reload, events); return reload;
+  }
+  const reload = createReload();
+  function blocked(count, instance = reload) {
+    const events = readiness.get(instance);
+    return new Promise((resolve, reject) => {
+      const done = error => { events.off("waiting", check); events.off("readFailure", failed); if (error) reject(error); else resolve(); };
+      const check = () => { if (instance.snapshot().activeBlocked >= count) done(); };
+      const failed = error => done(error);
+      events.on("waiting", check); events.on("readFailure", failed); check();
+    });
+  }
+  function publish(sequence, text = playlist(sequence)) {
+    return observe((async () => {
+      if (publications.signal.aborted || performance.now() >= deadline) throw new Error("Fixture publication expired.");
+      await writeFile(join(directory, "next.m3u8"), text);
+      let refusal;
+      for (;;) {
+        if (publications.signal.aborted) throw new Error("Fixture publication cancelled.");
+        if (performance.now() >= deadline) throw refusal ?? new Error("Fixture publication expired.");
+        try { await rename(join(directory, "next.m3u8"), join(directory, "index.m3u8")); return; }
+        catch (error) {
+          if (process.platform !== "win32" || error.code !== "EPERM") throw error;
+          refusal ??= error;
+          const remaining = deadline - performance.now();
+          if (remaining <= 0) throw refusal;
+          await pause(Math.min(5, remaining), undefined, { signal: publications.signal });
+        }
+      }
+    })());
+  }
+  return { directory, publisher, reload, createReload, blocked, publish };
 }
 function fake(t, { text = playlist(), beforeRead, ...options } = {}) {
   let current = text, reads = 0, at = 0; const events = [], timers = new Map();
   const publisher = { async playlistSnapshot(_path, options) {
     reads++; const captured = current;
-    await beforeRead?.(reads, () => { for (const event of events) event.emitChange(); }, options);
+    await beforeRead?.(reads, () => { for (const event of events) event.emitChange("change", "index.m3u8"); }, options);
     return { file: "/fixture/index.m3u8", bytes: Buffer.from(captured), isMedia: true,
       playlistFiles: ["/fixture/index.m3u8"], mediaPlaylists: [{ file: "/fixture/index.m3u8", text: captured }] };
   } };
-  const reload = createBlockingPlaylistReload({ publisher, now: () => at, directoryIdentity: async directory => directory,
-    watchDirectory(_directory, _options, changed) { const event = new EventEmitter(); event.closed = false; event.close = () => { event.closed = true; }; event.emitChange = changed; events.push(event); return event; },
+  const reload = createBlockingPlaylistReload({ publisher, platform: "darwin", now: () => at, directoryIdentity: async directory => directory,
+    watchDirectory(directory, _options, changed) { const event = new EventEmitter(); event.directory = directory; event.closed = false; event.close = () => { event.closed = true; }; event.emitChange = changed; events.push(event); return event; },
     setTimer(callback, delay) { const timer = {}; timers.set(timer, { callback, due: at + delay }); return timer; }, clearTimer(timer) { timers.delete(timer); }, ...options });
   t.after(() => reload.close());
-  return { reload, timers, events, publisher, get reads() { return reads; }, set(body) { current = body; for (const event of events) if (!event.closed) event.emitChange(); },
+  return { reload, timers, events, publisher, get reads() { return reads; }, set(body) { current = body; for (const event of events) if (!event.closed) event.emitChange("change", "index.m3u8"); },
     advance(ms) { at += ms; for (const { callback, due } of [...timers.values()]) if (due <= at) callback(); } };
 }
 
@@ -52,11 +116,10 @@ test("complete-live representation preserves media entries/version/CRLF and merg
 });
 
 test("real atomic publication wakes a waiter and returns the ready snapshot; raw files stay unchanged", { timeout: 5000 }, async t => {
-  const { directory, reload } = await fixture(t);
+  const { directory, reload, blocked, publish } = await fixture(t);
   const pending = reload.read("/media/index.m3u8", params(5));
-  await until(() => reload.snapshot().activeBlocked === 1);
-  await writeFile(join(directory, "next.m3u8"), playlist(5));
-  await rename(join(directory, "next.m3u8"), join(directory, "index.m3u8"));
+  await blocked(1);
+  await publish(5);
   const ready = await pending;
   assert.match(ready.toString(), /MEDIA-SEQUENCE:5/u);
   assert.match(ready.toString(), /CAN-BLOCK-RELOAD=YES/u);
@@ -141,8 +204,8 @@ test("watch failures and lost catalogue authorisation fail closed without old sn
   await rejected; assert.equal(state.reload.snapshot().watchErrors, 1); assert.equal(state.reload.snapshot().watchers, 0);
   const real = await fixture(t, true), waiting = real.reload.read("/media/low.m3u8", params(5));
   const absent = assert.rejects(waiting, { status: 404 });
-  await until(() => real.reload.snapshot().activeBlocked === 1);
-  await writeFile(join(real.directory, "index.m3u8"), '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2\nhigh.m3u8\n');
+  await real.blocked(1);
+  await real.publish(0, '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2\nhigh.m3u8\n');
   await absent;
 });
 
@@ -182,31 +245,29 @@ test("HEAD and HTTP ranges describe the same transformed bytes, including bare p
 
 
 test("same-path directory inode replacement rearms a shared watcher before later atomic publication", { timeout: 5000 }, async t => {
-  const { directory, publisher } = await fixture(t);
+  const { directory, createReload, blocked, publish } = await fixture(t);
   let watches = 0, secondWatchCreated;
   const rearmed = new Promise(resolve => { secondWatchCreated = resolve; });
-  const reload = createBlockingPlaylistReload({ publisher, watchDirectory(...args) { const watcher = watch(...args); if (++watches === 2) secondWatchCreated(); return watcher; } });
-  t.after(() => reload.close());
+  const reload = createReload({ watchDirectory(...args) { const watcher = watch(...args); if (args[0] === directory && ++watches === 2) secondWatchCreated(); return watcher; } });
   const replacement = `${directory}-replacement`, previous = `${directory}-previous`;
   t.after(async () => { await rm(replacement, { recursive: true, force: true }); await rm(previous, { recursive: true, force: true }); });
   await mkdir(replacement); await writeFile(join(replacement, "index.m3u8"), playlist());
   const pending = [reload.read("/media/index.m3u8", params(5)), reload.read("/media/index.m3u8", params(5))];
-  const results = Promise.all(pending);
-  await until(() => reload.snapshot().activeBlocked === 2);
+  const results = Promise.all(pending); results.catch(() => {});
+  await blocked(2, reload);
   // Consecutive synchronous renames prevent a test-only absent-path gap.
   renameSync(directory, previous); renameSync(replacement, directory);
   await rearmed;
   assert.equal(reload.snapshot().activeBlocked, 2);
-  await writeFile(join(directory, "next.m3u8"), playlist(5));
-  await rename(join(directory, "next.m3u8"), join(directory, "index.m3u8"));
+  await publish(5);
   for (const bytes of await results) assert.match(bytes.toString(), /MEDIA-SEQUENCE:5/u);
   assert.equal(reload.snapshot().released, 2); assert.equal(reload.snapshot().watchers, 0);
 });
 
 test("a ready snapshot is reauthorised after a concurrent master removal, not returned from stale membership", async t => {
-  const { directory, publisher } = await fixture(t, true);
+  const { directory, publisher, createReload } = await fixture(t, true);
   let calls = 0, changed;
-  const reload = createBlockingPlaylistReload({ publisher: { async playlistSnapshot(...args) {
+  const reload = createReload({ publisher: { async playlistSnapshot(...args) {
     const snapshot = await publisher.playlistSnapshot(...args);
     if (++calls === 2) {
       await writeFile(join(directory, "index.m3u8"), '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2\nhigh.m3u8\n');
@@ -214,7 +275,6 @@ test("a ready snapshot is reauthorised after a concurrent master removal, not re
     }
     return snapshot;
   } }, watchDirectory(_path, _options, callback) { changed = callback; const event = new EventEmitter(); event.close = () => {}; return event; } });
-  t.after(() => reload.close());
   await assert.rejects(reload.read("/media/low.m3u8", params(4)), { status: 404 });
   assert.equal(calls, 2); // The third fresh publisher read itself refuses membership.
   assert.equal(reload.snapshot().watchers, 0);
@@ -289,5 +349,36 @@ test("a delayed matching old directory stat joins an in-progress shared replacem
     assert.equal(state.reload.snapshot().watchers, 0); assert.equal(state.timers.size, 0);
   } finally {
     releaseOld(); releaseInstall(); state.set(playlist(5)); await Promise.allSettled(pending);
+  }
+});
+
+
+test("Windows shallow parent coverage observes directory replacement and ignores unrelated siblings", async t => {
+  let identity = "before";
+  const state = fake(t, { platform: "win32", directoryIdentity: async directory => directory === "/fixture" ? identity : directory });
+  const pending = state.reload.read("/media/index.m3u8", params(5));
+  const observed = pending.catch(error => error);
+  await until(() => state.reload.snapshot().activeBlocked === 1);
+  const parent = state.events.find(event => event.directory === "/");
+  assert.ok(parent); const before = state.reads;
+  parent.emitChange("rename", "unrelated-fixture"); await flush();
+  assert.equal(state.reads, before, "A parent-only watch must ignore other temporary directories.");
+  identity = "after"; parent.emitChange("rename", "fixture");
+  await until(() => state.events.filter(event => event.directory === "/fixture").length === 2);
+  state.set(playlist(5));
+  assert.match((await observed).toString(), /seg5.ts/u);
+  assert.equal(state.reload.snapshot().watchers, 0); assert.equal(state.timers.size, 0);
+});
+
+test("Windows excess shallow coverage declines capability for the whole presentation without losing HTTP bytes", async t => {
+  const files = Array.from({ length: 21 }, (_, index) => `/root${index}/leaf/index.m3u8`);
+  for (const platform of ["win32", "darwin"]) {
+    const state = fake(t, { platform });
+    state.publisher.playlistSnapshot = async () => ({ file: files[0], bytes: Buffer.from(playlist()), isMedia: true,
+      playlistFiles: files, mediaPlaylists: files.map(file => ({ file, text: playlist() })) });
+    const bytes = await state.reload.read("/media/index.m3u8", params(4));
+    if (platform === "win32") { assert.equal(bytes.toString(), playlist()); assert.equal(state.events.length, 0); }
+    else assert.match(bytes.toString(), /CAN-BLOCK-RELOAD=YES/u);
+    assert.equal(state.reload.snapshot().watchers, 0);
   }
 });

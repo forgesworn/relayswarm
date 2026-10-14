@@ -184,6 +184,11 @@ presentation-wide: unsupported parts, delta, ended or mixed presentations do
 not receive a partial blocking-reload promise. Raw pipeline files and media
 bytes are unchanged.
 
+On Windows, shallow watches of immediate parents also observe playlist-directory
+moves and ignore unrelated siblings. If a presentation requires more than
+41 watched directories, it retains its original bytes without added blocking
+capability. Arbitrary ancestor-tree moves are outside this coverage.
+
 A valid `_HLS_msn` request waits for a fresh authorised playlist containing that
 sequence or a later one. Requests for sequences already removed return the
 latest full playlist. Malformed directives and excessive future sequences are

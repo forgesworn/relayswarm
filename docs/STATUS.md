@@ -9,6 +9,47 @@ Checkpoint: 14 October 2026. The published experimental release is
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
 
+## Current correction checkpoint
+
+Exact `4aa87c76e6dde08ab7a2f14a6ac23625a59a6edc` finished
+[CI 38646569729](https://github.com/forgesworn/relayswarm/actions/runs/38646569729)
+with five required jobs passing. Three native matrix jobs failed in the
+publisher suite. The dependent
+live-relay job and optional soak were skipped. The failed publisher assertions
+included a stale source-extraction fixture and real-filesystem publication
+readiness; these are separate from the passing media/browser job.
+
+The follow-up correction preserves the original deadlines and request limits.
+It uses the actual blocked-wait registration as the filesystem fixture's ready
+signal, canonicalises fixture paths, and adds shallow parent watches on Windows
+for directory replacement. Independent source review found no blockers in that
+correction. The initial local full publisher run completed in 11.992 s with 260 passing,
+one failing and two skipped tests, without cancellations. All blocking-reload
+and teardown cases passed; the existing guardian descendant-cleanup test failed
+to obtain a clean-shutdown acknowledgement. Its cause remains unproved.
+The sampled resource bounds held and the outer runner group was reaped; that
+does not establish detached test-group or scratch absence.
+
+The guardian now retains its first observed failure using fixed stage/reason
+values, sanitised again by the controller. Unknown stages remain unknown;
+private error messages, paths and worker stderr are excluded. Shutdown signals,
+deadlines and the durable fence are unchanged. Independent review found no
+blockers. All five focused tests then passed in 3.942 s; the full maintained
+publisher suite passed in 10.643 s with 263 passing, two skipped and no failed
+or cancelled tests. Sampled resource bounds and outer runner reaping passed.
+The earlier failure did not recur, which does not identify its cause. The
+[correction evidence](../spikes/results/playlist-ci-and-guardian-correction-20261014.json)
+records the source hashes and separate results. Exact-source hosted CI, release
+and deployment remain pending for this correction.
+
+Fresh offline consumption of exact `4aa87c7` separately passed all 245 package
+members against committed source, eleven documented imports, the installed CLI,
+durable ledger replay, separate-process verified native transfer/HTTP fallback,
+and rebuilt browser ESM. The 1,114,939-byte unpublished tarball has SHA-256
+`a5d8698675c0d31859f3b523cacf654299c5be373b0a8ac8a0f54c84a73e8c0b`.
+Owned phase groups, sampled probe children and scratch cleanup passed. This
+source-bound result does not cover the uncommitted correction or published assets.
+
 ## Complete-playlist blocking reload candidate
 
 The example origin now supports bounded blocking reload for compatible complete

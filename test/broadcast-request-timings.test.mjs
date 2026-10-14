@@ -104,18 +104,45 @@ test("malformed cached getters never escape event handlers or fabricate a termin
 });
 
 test("actual fixture teardown always releases recorder and preserves the first teardown rejection and sequence", async () => {
-  const source = await readFile(new URL("./broadcast-browser.mjs", import.meta.url), "utf8");
-  const block = source.match(/  try \{ await browser\?\.close\(\);[^\n]+\n  finally \{ receipt\.requestTimingsAfterBrowserClose = requestTimings\?\.close\(\); \}/u)?.[0];
+  const source = (await readFile(new URL("./broadcast-browser.mjs", import.meta.url), "utf8")).replaceAll("\r\n", "\n");
+  const block = source.match(/  try \{\n    await browser\?\.close\(\); await demo\?\.close\(\);[\s\S]*?\n  \}\n  finally \{ receipt\.requestTimingsAfterBrowserClose = requestTimings\?\.close\(\); \}/u)?.[0];
+  const capture = source.match(/function capturePlaylistReloadMetrics\(server\) \{[\s\S]*?\n\}/u)?.[0];
   assert.ok(block, "Execute the fixture's actual teardown block");
-  const run = new (Object.getPrototypeOf(async function () {}).constructor)("browser", "demo", "pipeline", "stop", "producer", "router", "receipt", "requestTimings", block);
+  assert.ok(capture, "Execute the fixture's actual metrics projection");
+  const run = new (Object.getPrototypeOf(async function () {}).constructor)("browser", "demo", "pipeline", "stop", "producer", "router", "receipt", "requestTimings", `${capture}\n${block}`);
   for (const failAt of [null, "browser", "demo", "pipeline", "producer", "router"]) {
-    const calls = [], failure = Error("teardown failure"), result = {};
+    const calls = [], failure = Error("teardown failure");
+    const result = { playlistReloadObservation: { beforeClose: { available: true }, afterClose: null, actualDemoCloseCompleted: false, complete: false } };
     const close = async (name) => { calls.push(name); if (name === failAt) throw failure; };
-    const target = (name) => ({ close: () => close(name) });
+    const target = (name) => ({ close: () => close(name), playlistReloadMetrics() {
+      calls.push("metrics");
+      return { enabled: true, blockedLimit: 24, activeBlocked: 0, started: 1, released: 1, aborted: 0, timedOut: 0, watchers: 0, watchErrors: 0, rejected: 0 };
+    } });
     const pending = run(target("browser"), target("demo"), target("pipeline"), close, "producer", "router", result, { close() { calls.push("recorder"); return { pending: 1 }; } });
     if (failAt) await assert.rejects(pending, (error) => error === failure); else await pending;
     const sequence = ["browser", "demo", "pipeline", "producer", "router"];
-    assert.deepEqual(calls, [...sequence.slice(0, failAt ? sequence.indexOf(failAt) + 1 : sequence.length), "recorder"]);
+    const expected = sequence.slice(0, failAt ? sequence.indexOf(failAt) + 1 : sequence.length);
+    const demoClosed = failAt !== "browser" && failAt !== "demo";
+    if (demoClosed) expected.splice(2, 0, "metrics");
+    assert.deepEqual(calls, [...expected, "recorder"]);
     assert.deepEqual(result.requestTimingsAfterBrowserClose, { pending: 1 });
+    assert.equal(result.playlistReloadObservation.actualDemoCloseCompleted, demoClosed);
+    assert.equal(result.playlistReloadObservation.complete, demoClosed);
+    assert.equal(result.playlistReloadObservation.afterClose?.available ?? false, demoClosed);
   }
+});
+
+test("fixture reload observations retain unavailable measurements and exclude extra private fields", async () => {
+  const source = (await readFile(new URL("./broadcast-browser.mjs", import.meta.url), "utf8")).replaceAll("\r\n", "\n");
+  const capture = source.match(/function capturePlaylistReloadMetrics\(server\) \{[\s\S]*?\n\}/u)?.[0];
+  assert.ok(capture);
+  const project = new Function("server", `${capture}\nreturn capturePlaylistReloadMetrics(server);`);
+  for (const server of [undefined, {}, { playlistReloadMetrics() { throw Error("PRIVATE"); } }, { playlistReloadMetrics: () => ({ enabled: true, started: -1 }) }]) {
+    const value = project(server);
+    assert.equal(value.available, false); assert.equal(value.counters, null);
+    assert.doesNotMatch(JSON.stringify(value), /PRIVATE/u);
+  }
+  const value = project({ playlistReloadMetrics: () => ({ enabled: false, blockedLimit: 24, activeBlocked: 0, started: 0, released: 0, aborted: 0, timedOut: 0, watchers: 0, watchErrors: 0, rejected: 0, privateField: "PRIVATE" }) });
+  assert.equal(value.available, true); assert.equal(value.counters.enabled, false);
+  assert.doesNotMatch(JSON.stringify(value), /PRIVATE|privateField/u);
 });

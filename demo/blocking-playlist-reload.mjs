@@ -1,6 +1,6 @@
 import { watch } from "node:fs";
 import { stat } from "node:fs/promises";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import { PublisherError } from "../src/hls-publisher.mjs";
 
 const MAX_BYTES = 256 * 1024, BLOCKED_LIMIT = 24;
@@ -77,7 +77,7 @@ export async function sendPlaylistResponse(response, bytes, { range = null, head
 /** No polling or seed fetches: one shared parent-directory watch per directory,
  * armed before a fresh publisher catalogue read. Every wake reauthorises the
  * current presentation and returns the very buffer whose sequence was checked. */
-export function createBlockingPlaylistReload({ publisher, enabled = true, watchDirectory = watch, directoryIdentity = async directory => {
+export function createBlockingPlaylistReload({ publisher, enabled = true, platform = process.platform, watchDirectory = watch, directoryIdentity = async directory => {
   const value = await stat(directory, { bigint: true });
   if (!value.isDirectory()) throw unavailable();
   return `${value.dev}:${value.ino}`;
@@ -92,13 +92,31 @@ export function createBlockingPlaylistReload({ publisher, enabled = true, watchD
     if (!watcher) return;
     watcher.close(); watcher.removeAllListeners(); liveWatchers.delete(watcher);
   }
-  function acquire(directory) {
+  function coverage(files) {
+    const result = new Map();
+    const entry = directory => { if (!result.has(directory)) result.set(directory, { direct: false, children: new Set() }); return result.get(directory); };
+    for (const file of files) entry(dirname(file)).direct = true;
+    if (platform === "win32") for (const [directory] of [...result]) {
+      const parent = dirname(directory);
+      if (parent !== directory) entry(parent).children.add(basename(directory).toLowerCase());
+    }
+    return result;
+  }
+  function notify(entry, _event, filename) {
+    const subscriptions = [...entry.subscriptions.values()];
+    if (subscriptions.some(value => value.direct)) { wake(); return; }
+    // A Windows shallow ancestor sees child-directory moves even when the
+    // directory's own watcher does not. Ignore unrelated sibling activity.
+    if (typeof filename !== "string" || filename.length > 4096) { entry.failed = true; counts.watchErrors++; wake(); return; }
+    if (subscriptions.some(value => value.children.has(filename.toLowerCase()))) wake();
+  }
+  function acquire(directory, token, subscription) {
     let entry = directories.get(directory);
     if (!entry) {
-      entry = { users: 0, failed: false, watcher: null, identity: null, rearming: null };
+      entry = { users: 0, failed: false, watcher: null, identity: null, rearming: null, subscriptions: new Map() };
       directories.set(directory, entry);
     }
-    entry.users++; return entry;
+    entry.users++; entry.subscriptions.set(token, subscription); return entry;
   }
   async function ensureWatch(directory, entry) {
     if (entry.failed) throw unavailable();
@@ -113,7 +131,7 @@ export function createBlockingPlaylistReload({ publisher, enabled = true, watchD
         const before = await directoryIdentity(directory);
         let candidate, failed = false;
         try {
-          candidate = watchDirectory(directory, { persistent: false }, wake);
+          candidate = watchDirectory(directory, { persistent: false }, (event, filename) => notify(entry, event, filename));
           liveWatchers.add(candidate);
           candidate.on("error", () => { failed = true; counts.watchErrors++; if (candidate === entry.watcher) entry.failed = true; wake(); });
           const after = await directoryIdentity(directory);
@@ -130,8 +148,9 @@ export function createBlockingPlaylistReload({ publisher, enabled = true, watchD
     })();
     try { await entry.rearming; return true; } finally { entry.rearming = null; }
   }
-  function release(directory) {
+  function release(directory, token) {
     const entry = directories.get(directory);
+    entry?.subscriptions.delete(token);
     if (entry && --entry.users === 0) { closeWatch(entry.watcher); directories.delete(directory); }
   }
   function check(signal) {
@@ -151,7 +170,7 @@ export function createBlockingPlaylistReload({ publisher, enabled = true, watchD
     if (tasks.size >= 32) { counts.rejected++; throw unavailable(); }
     let settle;
     const task = new Promise(resolve => { settle = resolve; }); tasks.add(task);
-    const held = new Map(); let blocked = false, deadline;
+    const held = new Map(), token = Symbol(); let blocked = false, deadline;
     try {
       check(signal);
       let readRevision = revision;
@@ -162,11 +181,16 @@ export function createBlockingPlaylistReload({ publisher, enabled = true, watchD
       let changes = 0;
       for (;;) {
         check(signal);
-        const wanted = new Set(snapshot.playlistFiles.map(dirname));
-        if (wanted.size > 41) throw unavailable();
+        const scopes = coverage(snapshot.playlistFiles), wanted = new Set(scopes.keys());
+        // Eligibility is presentation-wide and independent of concurrent load.
+        // Unsupported Windows coverage keeps valid HTTP bytes, without a claim.
+        if (wanted.size > 41) return snapshot.bytes;
         const pathsChanged = [...wanted].some(directory => !held.has(directory)) || [...held.keys()].some(directory => !wanted.has(directory));
-        for (const directory of wanted) if (!held.has(directory)) held.set(directory, acquire(directory));
-        for (const directory of held.keys()) if (!wanted.has(directory)) { release(directory); held.delete(directory); }
+        for (const directory of wanted) {
+          if (!held.has(directory)) held.set(directory, acquire(directory, token, scopes.get(directory)));
+          else held.get(directory).subscriptions.set(token, scopes.get(directory));
+        }
+        for (const directory of held.keys()) if (!wanted.has(directory)) { release(directory, token); held.delete(directory); }
         let rearmed = false;
         for (const [directory, entry] of held) if (await ensureWatch(directory, entry)) rearmed = true;
         check(signal);
@@ -205,7 +229,7 @@ export function createBlockingPlaylistReload({ publisher, enabled = true, watchD
       throw error;
     } finally {
       if (blocked) counts.activeBlocked--;
-      for (const directory of held.keys()) release(directory);
+      for (const directory of held.keys()) release(directory, token);
       tasks.delete(task); settle();
     }
   }
