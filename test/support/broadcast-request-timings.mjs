@@ -43,7 +43,12 @@ export function createBroadcastRequestTimings({ origin, epochMs, now = Date.now,
       classificationUnknown: 0, metadataUnknown: 0, rangeUnknown: 0, statusUnknownAtTerminal: 0, timingUnknownAtTerminal: 0 };
     const statusClasses = { informational: 0, success: 0, redirect: 0, clientError: 0, serverError: 0, unknown: 0 };
     function timing(request, row) {
-      try { const value = request.timing(); row.timing = Object.fromEntries(TIMING_FIELDS.map((field) => [field, number(value?.[field])])); }
+      try { const value = request.timing(); row.timing = Object.fromEntries(TIMING_FIELDS.map((field) => {
+        const observed = value?.[field];
+        // Playwright uses zero as the not-yet-populated epoch placeholder;
+        // zero remains valid for relative request/response durations.
+        return [field, field === "startTime" && observed === 0 ? null : number(observed)];
+      })); }
       catch { row.timing = Object.fromEntries(TIMING_FIELDS.map((field) => [field, null])); totals.metadataUnknown++; }
     }
     function request(request) {

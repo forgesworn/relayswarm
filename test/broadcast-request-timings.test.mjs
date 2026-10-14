@@ -69,6 +69,11 @@ test("failed or missing metadata remains null and fixed numeric unknown counts, 
   const malformed = request("/media/b.ts", "PRIVATE-BAD-RANGE", { timing: () => ({ startTime: Infinity, requestStart: -1, responseEnd: NaN }) }); p.request(malformed); p.response(response(malformed, 999)); p.finished(malformed);
   s = p.snapshot(); assert.equal(s.rows[1].status, null); assert.equal(s.statusClasses.unknown, 1); assert.equal(s.rows[1].timing.startTime, null);
   assert.doesNotMatch(JSON.stringify(f.recorder.snapshot()), /PRIVATE|RangeError|TypeError|NaN|Infinity/u);
+  const pending = request("/media/pending.ts", undefined, { timing: () => ({ startTime: 0, requestStart: 0, responseEnd: -1 }) });
+  p.request(pending); const unknown = p.snapshot().rows.at(-1);
+  assert.equal(unknown.timing.startTime, null, "Unpopulated native epoch is unknown, rather than 1970");
+  assert.equal(unknown.timing.requestStart, 0, "A populated relative zero remains valid");
+  assert.equal(unknown.timing.responseEnd, null); assert.equal(unknown.outcome, "pending");
 });
 
 test("snapshots are copies; close detaches all four handlers and preserves pending without claiming cancellation", () => {

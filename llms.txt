@@ -58,6 +58,9 @@ diagnostic narrows the unanswered-check boundary without proving its cause or
 ordinary qualification. Later a2c99a9 CI passed eight of nine required jobs:
 post-restart playback recovered, but its new-discontinuity peer-fragment gate
 failed. Current numeric budget observations retain the original playback policy.
+Instrumented d283071 CI remains RED: donor HTTP requests began after receivers
+completed the matched segments. A separate cancellation-test phase correction
+preserves real HTTP start/cancellation checks and all deadlines.
 Earlier fourteen-role REDs, Safari bootstrap and
 no-evaluation iPhone USB checks do not close acceptance. Full P01–P12, long/churn,
 physical/NAT, cost and release gates remain open. No separate 37-row ledger was

@@ -77,6 +77,28 @@ startup, waits, launch flags and peer assertions are preserved. The
 [broadcasting guide](BROADCASTING.md#verification-boundary) describes the bounds
 and diagnostic scope.
 
+The instrumented `d283071` attempt of
+[CI run 38575462650](https://github.com/forgesworn/relayswarm/actions/runs/38575462650)
+finished with six required jobs passing, two failing and the dependent live-relay
+job skipped; the optional soak was also skipped. The unchanged post-restart
+peer assertion failed again. Its 31 initial waits had 2,268.463–2,329.467 ms
+of playable buffer and the unchanged 2,000 ms reserve, leaving 268.463–329.467 ms.
+For all 30 matched high-quality segment objects, cached native request timings
+place the donor request start 46.694–102.418 ms after consumer response completion.
+These donor HTTP intervals did not overlap the receiver's origin interval;
+the newly loaded bytes were too late for the preceding peer wait. This does
+not identify the exact playlist scheduling cause or a lost HAVE notification.
+
+The other failure was an existing macOS HTTP cancellation test: immediate
+invalid policy could legally cancel a session before server ingress, while
+the assertion required ingress first. A test-only phase gate establishes that
+precondition, preserving the real start/cancellation checks, hidden-page phase
+and all deadlines. All four focused real HTTP cases pass locally, and an
+independent source review passes. The
+[d283 observation and correction summary](../spikes/results/d283071-ci-observations-20261014.json)
+retains both original failures, exact inputs and limitations. Neither correction
+nor later CI removes the restart-sharing gate or changes the deployed pilot.
+
 ## Current deployed checkpoint: df51 on 14 October 2026
 
 The deployed application is `df51cbed1ebb3bd09ef1b521c451d6b47989a664`.

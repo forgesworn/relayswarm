@@ -93,6 +93,8 @@ pathname/range within one run; they do not reveal paths, queries or parsed
 playlist sequence/continuity. Fixed media/rendition categories and numeric cached
 Playwright timings distinguish request start, response and completion. Unavailable
 values remain null; evictions, overflow and pending requests remain explicit.
+The unpopulated native epoch placeholder is null; zero remains valid for
+relative timings.
 Snapshots before and after browser close are separate observations. The recorder
 adds no requests or body reads and changes no playback deadline or assertion.
 It is diagnostic evidence, not ordinary network or physical-device qualification.

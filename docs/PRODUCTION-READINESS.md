@@ -12,6 +12,10 @@ unchanged new-discontinuity peer-fragment gate. The
 and [current observations](STATUS.md#later-source-checks-restart-sharing-remains-open)
 are separate from the deployed checkpoint below. No playback-latency or
 deadline change has been made to increase sharing.
+The instrumented `d283071` run also failed the unchanged sharing gate. Native
+request timings confirm matched donor requests started after receiver completion;
+the [summary](../spikes/results/d283071-ci-observations-20261014.json) separates
+that result from its macOS cancellation-test precondition correction.
 
 ## Current deployed checkpoint: df51
 

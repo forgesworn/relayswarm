@@ -410,27 +410,32 @@ test("OFF followed by failed session validation remains off and marks authority 
 // Only the policy/session transport is real here. The maintained bundled client
 // runs with fixture media/swarm, real issuance clocks and no browser process.
 async function policyHTTP(t) {
-  const state = { phase: "bootstrap", policyDelay: 0, sessionDelay: 0, holdSession: false, sessionStatus: 200,
+  const state = { phase: "bootstrap", policyDelay: 0, sessionDelay: 0, holdSession: false, sessionStatus: 200, policyAfterSessionIngress: false,
     policy: { mode: null, revision: 0, telemetry: false },
     session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment" } };
-  const records = [], open = new Set(), timers = new Set(); let p;
+  const records = [], open = new Set(), timers = new Set(), gatedPolicies = new Map(); let p;
   const server = http.createServer((request, response) => {
     const route = request.url === "/delivery-policy.json" ? "policy" : request.url === "/session.json" ? "session" : null;
     if (!route) { response.writeHead(404).end(); return; }
     const record = { route, phase: state.phase, arrived: performance.now(), ended: null, closed: null };
     records.push(record); open.add(response); let timer;
-    response.once("close", () => { open.delete(response); record.closed = performance.now(); clearTimeout(timer); timers.delete(timer); });
+    response.once("close", () => { open.delete(response); record.closed = performance.now(); clearTimeout(timer); timers.delete(timer); gatedPolicies.delete(record); });
+    if (route === "session") for (const [policy, send] of gatedPolicies) if (policy.phase === record.phase) { gatedPolicies.delete(policy); send(); }
     if (route === "session" && state.holdSession) return;
     const send = () => {
       timers.delete(timer); if (response.destroyed) return;
       record.ended = performance.now(); response.writeHead(route === "session" ? state.sessionStatus : 200, { "content-type": "application/json", "cache-control": "no-store" });
       response.end(JSON.stringify(state[route]));
     };
+    const sendAfterIngress = () => {
+      if (route === "policy" && state.policyAfterSessionIngress && !records.some(item => item.phase === record.phase && item.route === "session")) gatedPolicies.set(record, send);
+      else send();
+    };
     const wait = route === "policy" ? state.policyDelay : state.sessionDelay;
-    if (wait) { timer = setTimeout(send, wait); timers.add(timer); } else send();
+    if (wait) { timer = setTimeout(sendAfterIngress, wait); timers.add(timer); } else sendAfterIngress();
   });
   t.after(async () => {
-    p?.close(); for (const timer of timers) clearTimeout(timer); for (const response of open) response.destroy();
+    p?.close(); for (const timer of timers) clearTimeout(timer); for (const response of open) response.destroy(); gatedPolicies.clear();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
@@ -493,11 +498,12 @@ test("real HTTP early session503 cannot suppress delayed eligible OFF", { timeou
 
 test("real HTTP invalid policy and hidden page cancel both owned pair requests", { timeout: 6000 }, async t => {
   const f = await policyHTTP(t), { p, state, records } = f;
-  state.phase = "invalid-policy"; state.policy = { mode: "invalid", revision: 1, telemetry: false }; state.holdSession = true;
+  state.phase = "invalid-policy"; state.policy = { mode: "invalid", revision: 1, telemetry: false }; state.holdSession = true; state.policyAfterSessionIngress = true;
   await p.poll();
   await waitForHTTP(() => f.open.size === 0);
   assert(records.some(x => x.phase === "invalid-policy" && x.route === "session" && x.ended === null), "Unused session must have started and then been cancelled");
-  state.phase = "hidden"; state.policy = { mode: null, revision: 2, telemetry: false }; state.policyDelay = 4000;
+  assert(records.find(x => x.phase === "invalid-policy" && x.route === "policy").ended >= records.find(x => x.phase === "invalid-policy" && x.route === "session").arrived);
+  state.phase = "hidden"; state.policy = { mode: null, revision: 2, telemetry: false }; state.policyDelay = 4000; state.policyAfterSessionIngress = false;
   const pending = p.poll();
   await waitForHTTP(() => records.filter(x => x.phase === "hidden").length === 2);
   p.visibility("hidden"); await pending; await waitForHTTP(() => f.open.size === 0);
