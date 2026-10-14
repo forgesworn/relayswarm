@@ -130,6 +130,7 @@ const TRANSPORT_EVENTS = Object.freeze({
   "remote-installed": ["offer", "answer"],
   "signal-send": ["offer", "answer"], "signal-failed": ["offer", "answer"],
   "channel-open": ["accepted", "stale"],
+  negotiation: ["glare-yield"],
   "dial-end": ["timeout", "failed", "rejected", "superseded", "admission", "host-stop"],
   "link-close": ["host", "host-stop", "admission", "rotation", "integrity", "request-timeout", "request-abort",
     "native-failed", "native-closed", "native-disconnected", "channel-close", "channel-error",
@@ -279,6 +280,7 @@ class HlsSwarm {
     this.links = new Map();
     this.peerSelection = new PeerSelection();
     this.dials = new Map();
+    this.receivedOffers = new Set();
     this.cooldowns = new Map();
     this.retries = new Map();
     this.openPeers = new Map();
@@ -427,10 +429,12 @@ class HlsSwarm {
     for (const waiter of this.haveWaiters) waiter();
     this.haveWaiters.clear();
     for (const dial of this.dials.values()) {
+      this.#retireNegotiation(dial);
       this.#endTransport(dial.pc, "dial-end", "host-stop");
       try { dial.pc.close(); } catch {}
     }
     this.dials.clear();
+    this.receivedOffers.clear();
     for (const link of [...this.links.values()]) link.close("host-stop");
     this.links.clear();
     this.held.clear();
@@ -1568,6 +1572,56 @@ class HlsSwarm {
     return pc;
   }
 
+  #currentNegotiation(dial, negotiation) {
+    return !this.stopped && this.dials.get(dial.pubkey) === dial && dial.negotiation === negotiation && !negotiation.controller.signal.aborted;
+  }
+
+  #retireNegotiation(dial, closeChannel = true) {
+    const negotiation = dial.negotiation;
+    if (!negotiation) return;
+    negotiation.controller.abort();
+    if (negotiation.onDataChannel) dial.pc.removeEventListener("datachannel", negotiation.onDataChannel);
+    if (negotiation.channel && negotiation.onOpen) negotiation.channel.removeEventListener("open", negotiation.onOpen);
+    if (closeChannel) { try { negotiation.channel?.close(); } catch {} }
+  }
+
+  #beginNegotiation(dial, requestId, outgoing) {
+    if (dial.negotiation) dial.negotiation.superseded = true;
+    this.#retireNegotiation(dial);
+    dial.requestId = requestId; dial.outgoing = outgoing;
+    const negotiation = { controller: new AbortController(), channel: null, ready: false };
+    dial.negotiation = negotiation;
+    return negotiation;
+  }
+
+  #serialNegotiation(dial, negotiation, operation) {
+    // Native calls already in flight cannot be cancelled. A superseding
+    // negotiation waits for them, then rechecks its generation before mutation.
+    const task = (dial.operations ?? Promise.resolve()).then(() => {
+      if (this.#currentNegotiation(dial, negotiation)) return operation();
+    });
+    dial.operations = task.catch(() => {});
+    return task;
+  }
+
+  #dialChannel(dial, negotiation, channel) {
+    // Retiring a channel must never close a PC adopted by another negotiation.
+    if (negotiation.channel === channel) return;
+    if (!this.#currentNegotiation(dial, negotiation) || negotiation.channel) { try { channel.close(); } catch {} return; }
+    negotiation.channel = channel;
+    negotiation.onOpen = () => {
+      if (negotiation.ready) this.#guard("link-open", () => this.#linkOpened(dial, negotiation, channel));
+    };
+    channel.addEventListener("open", negotiation.onOpen);
+    if (channel.readyState === "open") negotiation.onOpen();
+  }
+
+  #readyDial(dial, negotiation) {
+    if (!this.#currentNegotiation(dial, negotiation)) return;
+    negotiation.ready = true;
+    if (negotiation.channel?.readyState === "open") negotiation.onOpen();
+  }
+
   async #dial(pubkey) {
     if (this.stopped || this.links.has(pubkey) || this.dials.has(pubkey) || this.dialChecks.has(pubkey) || this.#coolingDown(pubkey) || !this.#hasCapacity() || !this.#hasOutgoingSlot()) return;
     this.dialChecks.add(pubkey);
@@ -1578,26 +1632,35 @@ class HlsSwarm {
       || [...this.dials.values()].filter((dial) => dial.outgoing).length >= this.options.maxDialsInFlight) return;
     const pc = this.#newPeerConnection(true);
     const requestId = randomRequestId();
-    const dial = { pubkey, pc, requestId, outgoing: true, startedAt: now(), offerSentAt: 0 };
+    const dial = { pubkey, pc, startedAt: now(), offerSentAt: 0 };
     this.dials.set(pubkey, dial);
+    const negotiation = this.#beginNegotiation(dial, requestId, true);
     this.counters.dialsStarted += 1;
-    const channel = pc.createDataChannel("relayswarm", { ordered: true });
     dial.timer = this.#after(this.options.dialTimeoutMs, () => this.#failDial(dial, "timeout"));
-    channel.addEventListener("open", () => this.#guard("link-open", () => this.#linkOpened(dial, channel)));
     try {
-      await pc.setLocalDescription(await pc.createOffer());
-      await gathered(pc, 1_200, this.lifecycle.signal, (outcome) => this.#localDescription(pc, "offer", outcome));
-      if (this.stopped || this.dials.get(pubkey) !== dial) return;
-      if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.ticket))) return this.#failDial(dial, "failed", 0, "admission");
-      if (this.stopped || this.dials.get(pubkey) !== dial) return;
-      dial.offerSentAt = now();
-      // The offer says how alone the caller is: a peer with none at all is the
-      // only one worth rotating somebody out for.
-      const ticket = this.#ownTicket();
-      const sent = this.#sendSignal(pubkey, "offer", requestId, { sdp: pc.localDescription.sdp, peers: this.links.size, ...(ticket ? { ticket } : {}) });
-      this.#transport(pc, sent ? "signal-send" : "signal-failed", "offer");
-      if (!sent) this.#failDial(dial, "failed");
+      this.#dialChannel(dial, negotiation, pc.createDataChannel("relayswarm", { ordered: true }));
+      await this.#serialNegotiation(dial, negotiation, async () => {
+        const offer = await pc.createOffer();
+        if (!this.#currentNegotiation(dial, negotiation)) return;
+        await pc.setLocalDescription(offer);
+        if (!this.#currentNegotiation(dial, negotiation)) return;
+        await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "offer", outcome); });
+        if (!this.#currentNegotiation(dial, negotiation)) return;
+        if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.ticket))) {
+          if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
+          return;
+        }
+        if (!this.#currentNegotiation(dial, negotiation)) return;
+        dial.offerSentAt = now();
+        // The offer says how alone the caller is: a peer with none at all is the
+        // only one worth rotating somebody out for.
+        const ticket = this.#ownTicket();
+        const sent = this.#sendSignal(pubkey, "offer", requestId, { sdp: pc.localDescription.sdp, peers: this.links.size, ...(ticket ? { ticket } : {}) });
+        this.#transport(pc, sent ? "signal-send" : "signal-failed", "offer");
+        if (!sent) this.#failDial(dial, "failed");
+      });
     } catch (error) {
+      if (!this.#currentNegotiation(dial, negotiation)) return;
       this.#noteError("dial", error);
       this.#failDial(dial, "failed");
     }
@@ -1606,6 +1669,7 @@ class HlsSwarm {
   #failDial(dial, reason, cooldownMs = 0, diagnosticReason = reason) {
     if (this.dials.get(dial.pubkey) !== dial) return;
     this.dials.delete(dial.pubkey);
+    this.#retireNegotiation(dial);
     clearTimeout(dial.timer);
     this.timers.delete(dial.timer);
     this.#endTransport(dial.pc, "dial-end", diagnosticReason);
@@ -1626,20 +1690,27 @@ class HlsSwarm {
     if (payload.type === "answer") {
       const dial = this.dials.get(from);
       if (!dial?.outgoing || dial.requestId !== payload.requestId || !sdp) return;
+      const negotiation = dial.negotiation;
+      if (negotiation.answerPending) return;
       this.#transport(dial.pc, "answer-received", "authenticated");
       if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) {
-        this.#failDial(dial, "failed", 0, "admission");
+        if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
         return;
       }
-      if (this.stopped || this.dials.get(from) !== dial) return;
+      if (!this.#currentNegotiation(dial, negotiation) || !dial.outgoing || dial.requestId !== payload.requestId) return;
+      if (negotiation.answerPending) return;
+      negotiation.answerPending = true;
       this.#transport(dial.pc, "answer-admitted", "accepted");
       dial.answerAt = now();
       try {
-        await dial.pc.setRemoteDescription({ type: "answer", sdp });
-        this.#transport(dial.pc, "remote-installed", "answer");
+        await this.#serialNegotiation(dial, negotiation, async () => {
+          await dial.pc.setRemoteDescription({ type: "answer", sdp });
+          if (!this.#currentNegotiation(dial, negotiation)) return;
+          this.#transport(dial.pc, "remote-installed", "answer");
+          this.#readyDial(dial, negotiation);
+        });
       } catch (error) {
-        this.#noteError("answer", error);
-        this.#failDial(dial, "failed");
+        if (this.#currentNegotiation(dial, negotiation)) { this.#noteError("answer", error); this.#failDial(dial, "failed"); }
       }
       return;
     }
@@ -1659,54 +1730,106 @@ class HlsSwarm {
     // viewer's address. An unadmitted offer is dropped without a reply.
     if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null)) || this.stopped || this.links.has(from)) return;
     const existing = this.dials.get(from);
-    if (existing) {
+    const offerKey = `${from}:${payload.requestId}`;
+    if ((existing && !existing.outgoing && existing.requestId === payload.requestId) || this.receivedOffers.has(offerKey)) return;
+    // Retain only admitted request IDs, never SDP. A replay cannot replace the
+    // active dial or reset its timer. History is private to this swarm lifetime.
+    this.receivedOffers.add(offerKey);
+    if (this.receivedOffers.size > 256) this.receivedOffers.delete(this.receivedOffers.values().next().value);
+    let dial, reuse = false;
+    if (existing?.outgoing) {
+      if (existing.negotiation.answerPending) return;
       // Both sides dialled at once: the lower public key keeps its offer.
-      if (existing.outgoing && this.session.pubkey < from) return;
-      this.#failDial(existing, "superseded");
+      if (this.session.pubkey < from) return;
+      // Keep only an existing permitted pending slot. Native failure, closure
+      // or an incompatible state is never treated as a recovered connection.
+      if (this.links.size + this.dials.size > this.options.maxPeers
+        || !["new", "connecting"].includes(existing.pc.connectionState)
+        || !["new", "checking"].includes(existing.pc.iceConnectionState)
+        || !["stable", "have-local-offer"].includes(existing.pc.signalingState)) {
+        this.#failDial(existing, "failed"); return;
+      }
+      dial = existing; reuse = true;
+    } else {
+      if (existing) this.#failDial(existing, "superseded");
+      if (!this.#hasCapacity() && !this.#evictForOffer(payload.payload?.peers)) {
+        this.counters.offersRefused += 1;
+        this.counters.evictionsUnavailable += 1;
+        this.#sendSignal(from, "reject", payload.requestId, this.#refusalPayload(from));
+        return;
+      }
+      const pc = this.#newPeerConnection(false);
+      dial = { pubkey: from, pc, startedAt: now(), offerSentAt: now() };
+      this.dials.set(from, dial);
+      dial.timer = this.#after(this.options.dialTimeoutMs, () => this.#failDial(dial, "timeout"));
     }
-    if (!this.#hasCapacity() && !this.#evictForOffer(payload.payload?.peers)) {
-      this.counters.offersRefused += 1;
-      this.counters.evictionsUnavailable += 1;
-      this.#sendSignal(from, "reject", payload.requestId, this.#refusalPayload(from));
-      return;
-    }
-    const pc = this.#newPeerConnection(false);
+    const pc = dial.pc, negotiation = this.#beginNegotiation(dial, payload.requestId, false);
+    if (reuse) this.#transport(pc, "negotiation", "glare-yield");
     this.#transport(pc, "offer-admitted", "accepted");
-    const dial = { pubkey: from, pc, requestId: payload.requestId, outgoing: false, startedAt: now(), offerSentAt: now() };
-    this.dials.set(from, dial);
-    dial.timer = this.#after(this.options.dialTimeoutMs, () => this.#failDial(dial, "timeout"));
-    pc.addEventListener("datachannel", (event) => {
-      const channel = event.channel;
-      if (channel.readyState === "open") this.#guard("link-open", () => this.#linkOpened(dial, channel));
-      else channel.addEventListener("open", () => this.#guard("link-open", () => this.#linkOpened(dial, channel)));
-    });
+    negotiation.onDataChannel = (event) => this.#dialChannel(dial, negotiation, event.channel);
+    pc.addEventListener("datachannel", negotiation.onDataChannel);
     try {
-      await pc.setRemoteDescription({ type: "offer", sdp });
-      this.#transport(pc, "remote-installed", "offer");
-      if (this.stopped || this.dials.get(from) !== dial) return;
-      await pc.setLocalDescription(await pc.createAnswer());
-      await gathered(pc, 1_200, this.lifecycle.signal, (outcome) => this.#localDescription(pc, "answer", outcome));
-      if (this.stopped || this.dials.get(from) !== dial) return;
-      if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) return this.#failDial(dial, "failed", 0, "admission");
-      if (this.stopped || this.dials.get(from) !== dial) return;
-      const ticket = this.#ownTicket();
-      const sent = this.#sendSignal(from, "answer", payload.requestId, { sdp: pc.localDescription.sdp, ...(ticket ? { ticket } : {}) });
-      this.#transport(pc, sent ? "signal-send" : "signal-failed", "answer");
-      if (sent) this.counters.offersAccepted += 1;
-      else this.#failDial(dial, "failed");
+      await this.#serialNegotiation(dial, negotiation, async () => {
+        if (reuse) {
+          // Admission at receipt cannot authorise mutation after waiting for an
+          // old native call. Keep the same deadline while checking again.
+          if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) {
+            if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
+            return;
+          }
+          if (!this.#currentNegotiation(dial, negotiation)) return;
+          if (this.links.size + this.dials.size > this.options.maxPeers
+            || !["new", "connecting"].includes(pc.connectionState) || !["new", "checking"].includes(pc.iceConnectionState)) throw new Error("Pending connection unavailable.");
+          if (pc.signalingState === "have-local-offer") {
+            await pc.setLocalDescription({ type: "rollback" });
+            if (!this.#currentNegotiation(dial, negotiation)) return;
+          }
+          if (this.links.size + this.dials.size > this.options.maxPeers || pc.signalingState !== "stable"
+            || !["new", "connecting"].includes(pc.connectionState) || !["new", "checking"].includes(pc.iceConnectionState)) throw new Error("Pending negotiation unavailable.");
+          // Rollback is itself asynchronous: authority may expire or be revoked
+          // while it runs. Recheck before installing the remote description.
+          if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) {
+            if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
+            return;
+          }
+          if (!this.#currentNegotiation(dial, negotiation)) return;
+          if (this.links.size + this.dials.size > this.options.maxPeers || pc.signalingState !== "stable"
+            || !["new", "connecting"].includes(pc.connectionState) || !["new", "checking"].includes(pc.iceConnectionState)) throw new Error("Pending negotiation unavailable.");
+        }
+        await pc.setRemoteDescription({ type: "offer", sdp });
+        if (!this.#currentNegotiation(dial, negotiation)) return;
+        this.#transport(pc, "remote-installed", "offer");
+        const answer = await pc.createAnswer();
+        if (!this.#currentNegotiation(dial, negotiation)) return;
+        await pc.setLocalDescription(answer);
+        if (!this.#currentNegotiation(dial, negotiation)) return;
+        await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "answer", outcome); });
+        if (!this.#currentNegotiation(dial, negotiation)) return;
+        if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) {
+          if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
+          return;
+        }
+        if (!this.#currentNegotiation(dial, negotiation)) return;
+        const ticket = this.#ownTicket();
+        const sent = this.#sendSignal(from, "answer", payload.requestId, { sdp: pc.localDescription.sdp, ...(ticket ? { ticket } : {}) });
+        this.#transport(pc, sent ? "signal-send" : "signal-failed", "answer");
+        if (sent) { this.counters.offersAccepted += 1; this.#readyDial(dial, negotiation); }
+        else this.#failDial(dial, "failed");
+      });
     } catch (error) {
-      this.#noteError("offer", error);
-      this.#failDial(dial, "failed");
+      if (this.#currentNegotiation(dial, negotiation)) { this.#noteError("offer", error); this.#failDial(dial, "failed"); }
     }
   }
 
-  async #linkOpened(dial, channel) {
-    if (this.dials.get(dial.pubkey) !== dial || this.stopped) {
-      this.#endTransport(dial.pc, "channel-open", "stale");
-      try { dial.pc.close(); } catch {}
+  async #linkOpened(dial, negotiation, channel) {
+    if (!this.#currentNegotiation(dial, negotiation) || negotiation.channel !== channel || !negotiation.ready) {
+      if (this.links.get(dial.pubkey)?.channel !== channel) { try { channel.close(); } catch {} }
       return;
     }
     this.#transport(dial.pc, "channel-open", "accepted");
+    this.#retireNegotiation(dial, false);
+    const rejectExtraChannel = (event) => { if (event.channel !== channel) { try { event.channel.close(); } catch {} } };
+    dial.pc.addEventListener("datachannel", rejectExtraChannel);
     this.dials.delete(dial.pubkey);
     clearTimeout(dial.timer);
     this.timers.delete(dial.timer);
@@ -1724,6 +1847,7 @@ class HlsSwarm {
       },
       onScheduleChange: () => { for (const waiter of [...this.haveWaiters]) waiter(); },
       onClose: (closed) => {
+        dial.pc.removeEventListener("datachannel", rejectExtraChannel);
         this.#endTransport(dial.pc, "link-close", closed.closeReason);
         if (this.links.get(closed.pubkey) === closed) {
           this.links.delete(closed.pubkey);

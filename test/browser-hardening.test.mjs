@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { generateSecretKey, finalizeEvent } from "nostr-tools/pure";
+import { generateSecretKey, finalizeEvent, getPublicKey } from "nostr-tools/pure";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 import { PeerLink } from "../src/browser/peer-link.mjs";
 import { RelayPool, RelaySwarmSession } from "../src/relay-session.mjs";
@@ -1573,4 +1573,255 @@ test("a stopped swarm retains an already accepted charge without committing publ
     assert.equal(fixture.swarm.metrics().bytes.uploadRemaining, 32);
     assert.equal(peer.sent.filter((frame) => frame.t === "meta" || frame.t === "eof").length, 0);
   } finally { await fixture.close(); }
+});
+
+
+// Native signalling state is deliberately strict here. The older PC stub is
+// useful for loader tests but cannot establish rollback or mutation ordering.
+const glareFlush = async () => { for (let i = 0; i < 80; i++) await Promise.resolve(); };
+function glareDeferred() { let release; const promise = new Promise(resolve => { release = resolve; }); return { promise, release }; }
+class GlareChannel extends EventTarget {
+  readyState = "connecting";
+  bufferedAmount = 0;
+  sent = [];
+  openCallbacks = [];
+  addEventListener(type, callback, options) { if (type === "open") this.openCallbacks.push(callback); super.addEventListener(type, callback, options); }
+  send(value) { assert.equal(this.readyState, "open"); this.sent.push(value); }
+  close() { if (this.readyState === "closed") return; this.readyState = "closed"; this.dispatchEvent(new Event("close")); }
+  open() { this.readyState = "open"; this.dispatchEvent(new Event("open")); }
+}
+async function glareFixture(t, { polite = true, hold, gathering = false, rollbackSupported = true, timeout = 12000 } = {}) {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const secretKeys = [1, 2].map(value => { const key = new Uint8Array(32); key[31] = value; return key; })
+    .sort((a, b) => getPublicKey(a) < getPublicKey(b) ? -1 : 1);
+  const secretKey = secretKeys[polite ? 1 : 0], remoteKey = secretKeys[polite ? 0 : 1];
+  const connections = [], received = [], gates = new Map();
+  if (hold) gates.set(hold, glareDeferred());
+  const state = { allow: true, onNative: () => {}, checks: [] };
+  class StatefulPC extends EventTarget {
+    signalingState = "stable";
+    connectionState = "new";
+    iceConnectionState = "new";
+    iceGatheringState = gathering ? "gathering" : "complete";
+    localDescription = null;
+    remoteDescription = null;
+    trace = [];
+    closes = 0;
+    busy = 0;
+    constructor() { super(); connections.push(this); }
+    async native(name, operation) {
+      this.trace.push(name); assert.equal(++this.busy, 1, "Native negotiation operations must never overlap");
+      try {
+        await gates.get(name)?.promise;
+        assert.notEqual(this.signalingState, "closed", "A completed native operation cannot mutate a closed PC");
+        const result = operation(); state.onNative(name, this); return result;
+      } finally { this.busy--; }
+    }
+    createDataChannel() { assert.equal(this.signalingState, "stable"); this.localChannel = new GlareChannel(); return this.localChannel; }
+    createOffer() { return this.native("createOffer", () => { assert.equal(this.signalingState, "stable"); return { type: "offer", sdp: "native-local-offer" }; }); }
+    createAnswer() { return this.native("createAnswer", () => { assert.equal(this.signalingState, "have-remote-offer"); return { type: "answer", sdp: "native-local-answer" }; }); }
+    setLocalDescription(description) {
+      return this.native(`local:${description.type}`, () => {
+        if (description.type === "rollback") { assert.ok(rollbackSupported, "Native rollback unavailable"); assert.equal(this.signalingState, "have-local-offer"); this.signalingState = "stable"; this.localDescription = null; }
+        else if (description.type === "offer") { assert.equal(this.signalingState, "stable"); this.signalingState = "have-local-offer"; this.localDescription = description; }
+        else { assert.equal(description.type, "answer"); assert.equal(this.signalingState, "have-remote-offer"); this.signalingState = "stable"; this.localDescription = description; this.iceGatheringState = "complete"; }
+      });
+    }
+    setRemoteDescription(description) {
+      return this.native(`remote:${description.type}`, () => {
+        assert.equal(this.signalingState, description.type === "offer" ? "stable" : "have-local-offer");
+        this.signalingState = description.type === "offer" ? "have-remote-offer" : "stable";
+        this.remoteDescription = description;
+      });
+    }
+    incoming(channel = new GlareChannel()) { const event = new Event("datachannel"); event.channel = channel; this.dispatchEvent(event); return channel; }
+    close() { this.closes++; this.signalingState = "closed"; this.connectionState = "closed"; }
+    async getStats() { return new Map(); }
+  }
+  const Socket = memoryRelaySocket(), relayURL = "wss://glare-memory.example";
+  const pool = new RelayPool([relayURL], { WebSocketImpl: Socket });
+  await pool.connect();
+  const peer = new RelaySwarmSession({ pool, swarmId: base.swarmId, secretKey: remoteKey }); peer.start();
+  peer.onSignal(({ payload }) => received.push(payload));
+  const swarm = createHlsSwarm({ ...base, secretKey, WebSocketImpl: Socket, RTCPeerConnectionImpl: StatefulPC,
+    relays: [relayURL], maxPeers: 1, maxDialsInFlight: 1, dialTimeoutMs: timeout, ticket: "local-ticket", maxRetriesPerPeer: 0,
+    admit(_pubkey, ticket) { state.checks.push(ticket); connections[0]?.trace.push(`admit:${ticket}`); return state.allow; } });
+  swarm.attach({ config: { loader: Loader } });
+  await glareFlush(); assert.equal(swarm.metrics().pubkey, getPublicKey(secretKey));
+  const signal = (type, requestId, sdp = `native-remote-${type}`, ticket = "remote-ticket") => peer.sendSignal(swarm.metrics().pubkey,
+    { type, transport: "webrtc", requestId, payload: { sdp, ticket } });
+  const offer = (requestId = "winning-offer", ticket) => signal("offer", requestId, "native-remote-offer", ticket);
+  const start = async () => {
+    peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }], ticket: "remote-ticket" });
+    await glareFlush(); t.mock.timers.tick(1500); await glareFlush();
+    assert.equal(connections.length, 1); assert.equal(swarm.metrics().peers.dialling, 1);
+    return connections[0];
+  };
+  t.after(async () => {
+    swarm.stop(); for (const gate of gates.values()) gate.release(); await glareFlush();
+    peer.close(); pool.close(); t.mock.timers.reset();
+  });
+  return { swarm, peer, state, connections, received, signal, offer, start,
+    release(name) { gates.get(name)?.release(); }, async tick(ms) { t.mock.timers.tick(ms); await glareFlush(); } };
+}
+
+test("polite glare reuses the pending PC and original slot with one winning channel and request ID", async t => {
+  const f = await glareFixture(t), pc = await f.start();
+  const outgoing = f.received.find(value => value.type === "offer"); assert.ok(outgoing);
+  const abandoned = pc.localChannel, staleOpen = abandoned.openCallbacks[0];
+  f.offer(); await glareFlush();
+  assert.equal(f.connections.length, 1); assert.equal(pc.closes, 0); assert.equal(abandoned.readyState, "closed");
+  assert.deepEqual(pc.trace.filter(value => !value.startsWith("admit:")), ["createOffer", "local:offer", "local:rollback", "remote:offer", "createAnswer", "local:answer"]);
+  assert.deepEqual(f.received.filter(value => value.type === "answer").map(value => value.requestId), ["winning-offer"]);
+  f.signal("answer", outgoing.requestId); staleOpen(); await glareFlush();
+  assert.equal(pc.trace.filter(value => value === "remote:answer").length, 0); assert.equal(pc.closes, 0);
+  const channel = pc.incoming(); channel.open(); await glareFlush();
+  assert.equal(f.swarm.metrics().peers.connected, 1); assert.equal(f.swarm.metrics().peers.linksOpened, 1);
+  const acceptedCallback = channel.openCallbacks[0]; acceptedCallback(); staleOpen(); await glareFlush();
+  assert.equal(channel.readyState, "open"); assert.equal(pc.closes, 0);
+  const extra = pc.incoming(); await glareFlush();
+  assert.equal(extra.readyState, "closed"); assert.equal(f.swarm.metrics().peers.linksOpened, 1);
+  f.swarm.stop(); assert.equal(pc.closes, 1); assert.equal(channel.readyState, "closed");
+});
+
+test("impolite glare keeps the lower-key offer and waits for its admitted answer before accepting a channel", async t => {
+  const f = await glareFixture(t, { polite: false }), pc = await f.start();
+  const outgoing = f.received.find(value => value.type === "offer"); assert.ok(outgoing);
+  f.offer(); pc.localChannel.open(); await glareFlush();
+  assert.equal(f.swarm.metrics().peers.connected, 0); assert.equal(pc.closes, 0);
+  assert.equal(pc.trace.includes("local:rollback"), false); assert.equal(f.received.some(value => value.type === "answer"), false);
+  f.signal("answer", outgoing.requestId); f.signal("answer", outgoing.requestId); await glareFlush();
+  assert.equal(f.connections.length, 1); assert.equal(f.swarm.metrics().peers.connected, 1);
+  assert.equal(pc.trace.filter(value => value === "remote:answer").length, 1);
+});
+
+for (const phase of ["createOffer", "local:offer", "gather"]) test(`polite glare fences an abandoned ${phase} continuation without overlapping native mutations`, async t => {
+  const f = await glareFixture(t, { hold: phase === "gather" ? undefined : phase, gathering: phase === "gather" }), pc = await f.start();
+  f.offer(); await glareFlush();
+  if (phase !== "gather") {
+    assert.equal(pc.trace.includes("remote:offer"), false, "The winning offer waits for the in-flight native call");
+    f.release(phase); await glareFlush();
+  }
+  assert.equal(f.connections.length, 1); assert.equal(pc.closes, 0);
+  assert.equal(f.received.filter(value => value.type === "offer").length, 0, "The abandoned outgoing offer must not be published");
+  assert.equal(f.received.filter(value => value.type === "answer").length, 1);
+  assert.equal(pc.trace.filter(value => value === "local:rollback").length, phase === "createOffer" ? 0 : 1);
+  assert.equal(f.swarm.metrics().transportDiagnostics.counters["local-offer"].aborted, 0, "Superseded gathering must not be mislabelled on the adopted PC");
+});
+
+test("glare and same-request replays cannot reset the original absolute dial timeout", async t => {
+  const f = await glareFixture(t, { timeout: 100 }), pc = await f.start();
+  await f.tick(70); f.offer(); await glareFlush();
+  const before = [...pc.trace]; f.offer(); f.offer(); await glareFlush();
+  assert.deepEqual(pc.trace.filter(value => !value.startsWith("admit:")), before.filter(value => !value.startsWith("admit:")));
+  assert.equal(f.connections.length, 1); await f.tick(29); assert.equal(pc.closes, 0);
+  await f.tick(1); assert.equal(pc.closes, 1); assert.equal(f.swarm.metrics().peers.dialsTimedOut, 1);
+  f.offer(); await glareFlush(); assert.equal(f.connections.length, 1, "A recently admitted request cannot allocate again after timeout");
+});
+
+test("incoming distinct requests retain supersession while duplicate or superseded request IDs do not allocate", async t => {
+  const f = await glareFixture(t);
+  f.offer("first-incoming"); await glareFlush(); assert.equal(f.connections.length, 1);
+  f.offer("first-incoming"); await glareFlush(); assert.equal(f.connections.length, 1);
+  f.offer("second-incoming"); await glareFlush(); assert.equal(f.connections.length, 2);
+  assert.equal(f.connections[0].closes, 1); assert.equal(f.connections[1].closes, 0);
+  f.offer("first-incoming"); await glareFlush(); assert.equal(f.connections.length, 2);
+  assert.equal(f.swarm.metrics().transportDiagnostics.counters["dial-end"].superseded, 1);
+});
+
+for (const phase of ["createOffer", "local:offer", "local:rollback", "remote:offer"]) test(`stop fences a late ${phase} completion after glare and closes its PC once`, async t => {
+  const f = await glareFixture(t, { hold: phase }), pc = await f.start();
+  f.offer(); await glareFlush(); f.swarm.stop(); f.release(phase); await glareFlush();
+  assert.equal(pc.closes, 1); assert.equal(f.connections.length, 1);
+  assert.equal(f.swarm.metrics().peers.connected, 0); assert.equal(f.swarm.metrics().peers.dialling, 0);
+  assert.equal(f.received.filter(value => value.type === "answer").length, 0);
+  assert.equal(f.swarm.metrics().errors.total, 0, "An abandoned native rejection must not fail another generation");
+});
+
+test("glare admission is rechecked before remote SDP and before publishing the winning answer", async t => {
+  const f = await glareFixture(t), pc = await f.start();
+  f.state.allow = false; f.offer("accepted-then-revoked"); await glareFlush();
+  assert.equal(pc.trace.includes("remote:offer"), false); assert.equal(pc.localChannel.readyState, "connecting");
+  f.state.allow = true;
+  f.state.onNative = (name, connection) => { if (name === "local:answer") { connection.incoming().open(); f.state.allow = false; } };
+  f.offer("accepted-then-revoked"); await glareFlush();
+  assert.equal(pc.trace.includes("remote:offer"), true); assert.equal(pc.trace.includes("local:answer"), true);
+  assert.equal(f.received.filter(value => value.type === "answer").length, 0);
+  assert.equal(f.connections.length, 1); assert.equal(pc.closes, 1); assert.equal(f.swarm.metrics().peers.connected, 0);
+  assert.equal(f.swarm.metrics().transportDiagnostics.counters["dial-end"].admission, 1);
+});
+
+test("unsupported rollback fails closed without replacement allocation or an accepted link", async t => {
+  const f = await glareFixture(t, { rollbackSupported: false }), pc = await f.start();
+  f.offer(); await glareFlush();
+  assert.equal(f.connections.length, 1); assert.equal(pc.closes, 1);
+  assert.equal(f.swarm.metrics().peers.dialsFailed, 1); assert.equal(f.swarm.metrics().peers.connected, 0);
+  assert.equal(f.received.filter(value => value.type === "answer").length, 0);
+});
+
+
+for (const polite of [false, true]) test(`same-ID simultaneous offers still use the key tie-break (${polite ? "polite" : "impolite"})`, async t => {
+  const f = await glareFixture(t, { polite }), pc = await f.start();
+  const ownOffer = f.received.find(value => value.type === "offer"); assert.ok(ownOffer);
+  f.offer(ownOffer.requestId); await glareFlush();
+  assert.equal(f.connections.length, 1); assert.equal(pc.closes, 0);
+  assert.equal(pc.trace.includes("local:rollback"), polite);
+  assert.equal(f.received.filter(value => value.type === "answer").length, polite ? 1 : 0);
+  if (polite) assert.equal(f.received.find(value => value.type === "answer").requestId, ownOffer.requestId);
+});
+
+test("queued glare cannot use admission revoked while the original native mutation was pending", async t => {
+  const f = await glareFixture(t, { hold: "local:offer" }), pc = await f.start();
+  f.offer(); await glareFlush(); assert.equal(pc.trace.includes("remote:offer"), false);
+  const admittedAtReceipt = f.state.checks.length; f.state.allow = false;
+  f.release("local:offer"); await glareFlush();
+  assert.ok(f.state.checks.length > admittedAtReceipt, "Queued mutation needs a fresh online check");
+  assert.equal(pc.trace.includes("local:rollback"), false); assert.equal(pc.trace.includes("remote:offer"), false);
+  assert.equal(pc.closes, 1); assert.equal(f.connections.length, 1);
+  assert.equal(f.swarm.metrics().transportDiagnostics.counters["dial-end"].admission, 1);
+});
+
+for (const state of ["connected", "failed", "closed", "disconnected", "unknown"]) test(`glare never reuses a transport whose native connection state is ${state}`, async t => {
+  const f = await glareFixture(t), pc = await f.start();
+  pc.connectionState = state; f.offer(); await glareFlush();
+  assert.equal(f.connections.length, 1); assert.equal(pc.closes, 1);
+  assert.equal(pc.trace.includes("remote:offer"), false); assert.equal(pc.trace.includes("local:rollback"), false);
+});
+
+test("a queued native connection becoming established cannot be adopted after its call settles", async t => {
+  const f = await glareFixture(t, { hold: "local:offer" }), pc = await f.start();
+  f.offer(); await glareFlush(); pc.connectionState = "connected";
+  f.release("local:offer"); await glareFlush();
+  assert.equal(pc.closes, 1); assert.equal(pc.trace.includes("remote:offer"), false);
+  assert.equal(f.connections.length, 1); assert.equal(f.swarm.metrics().peers.connected, 0);
+});
+
+
+test("a transport becoming established during rollback is not reused for remote SDP", async t => {
+  const f = await glareFixture(t, { hold: "local:rollback" }), pc = await f.start();
+  f.offer(); await glareFlush(); assert.ok(pc.trace.includes("local:rollback"));
+  pc.connectionState = "connected"; f.release("local:rollback"); await glareFlush();
+  assert.equal(pc.trace.includes("remote:offer"), false); assert.equal(pc.closes, 1);
+  assert.equal(f.connections.length, 1); assert.equal(f.swarm.metrics().peers.connected, 0);
+});
+
+for (const signalingState of [undefined, "have-remote-pranswer", "have-local-pranswer"]) test(`glare refuses unsupported signalling state ${String(signalingState)}`, async t => {
+  const f = await glareFixture(t), pc = await f.start(); pc.signalingState = signalingState;
+  f.offer(); await glareFlush();
+  assert.equal(pc.trace.includes("local:rollback"), false); assert.equal(pc.trace.includes("remote:offer"), false);
+  assert.equal(pc.closes, 1); assert.equal(f.connections.length, 1);
+});
+
+
+test("glare rechecks revocation after a held rollback before installing remote SDP", async t => {
+  const f = await glareFixture(t, { hold: "local:rollback" }), pc = await f.start();
+  f.offer(); await glareFlush(); assert.ok(pc.trace.includes("local:rollback"));
+  const admittedBeforeRollback = f.state.checks.length;
+  f.state.allow = false; f.release("local:rollback"); await glareFlush();
+  assert.ok(f.state.checks.length > admittedBeforeRollback, "A completed rollback cannot retain earlier authority");
+  assert.equal(pc.trace.includes("remote:offer"), false);
+  assert.equal(f.received.filter(value => value.type === "answer").length, 0);
+  assert.equal(f.swarm.metrics().peers.connected, 0); assert.equal(f.swarm.metrics().peers.dialling, 0);
+  assert.equal(f.connections.length, 1); assert.equal(pc.closes, 1);
+  assert.equal(f.swarm.metrics().transportDiagnostics.counters["dial-end"].admission, 1);
 });

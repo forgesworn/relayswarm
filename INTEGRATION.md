@@ -111,6 +111,22 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 
+The pending glare-reuse correction keeps the existing lower-public-key offer
+when both peers dial simultaneously. The yielding peer may adopt only its
+still-pending outgoing connection for the winning admitted offer. Native
+operations are serialised and old negotiation/channel callbacks are fenced;
+the same capacity slot and original absolute `dialTimeoutMs` deadline remain.
+The host admission check runs again before rollback, after asynchronous rollback
+immediately before remote SDP, and before answer publication. These checks share
+the existing dial deadline and bounded admission policy. Established, failed or
+unsupported native states are not reused; failure retains normal origin fallback.
+Recent admitted offer IDs are retained privately up to 256 entries per swarm;
+active incoming duplicates do not allocate or restart a timer. Incoming distinct
+requests still supersede pending incoming connections. Wire version, public
+options and existing limits stay unchanged. The correction has passed 121 unit
+tests; native rollback/SCTP and Internet renewal remain unproved. See the
+[current checkpoint](docs/STATUS.md#current-correction-checkpoint).
+
 ## Cost, and what to tell viewers
 
 Shadow mode downloads a raced fragment **twice**: once from the origin for the
@@ -209,6 +225,13 @@ the remote role. Union sampled records by `(id, atMs, event, detail)` within eac
 swarm instance; never sum repeated ring snapshots as new events. A request-timeout
 close identifies the branch, not the request start, available budget or reason
 bytes missed it.
+
+The pending correction adds fixed `negotiation` / `glare-yield` observations
+for adoption of a pending outgoing connection. Its numeric connection ID remains
+the same: this is neither a new native construction nor a completed link.
+Superseded negotiation callbacks cannot label the adopted connection's later
+description as an earlier offer. Existing close reasons and reporting consent
+remain unchanged; this event does not prove successful native rollback or media.
 
 `inTimeShare` remains conditional on having peers. `sampledInTimeShare`
 includes sampled fragments with no peers; its byte equivalent weights by

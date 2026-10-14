@@ -362,6 +362,22 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 
+The pending glare-reuse correction keeps the existing lower-public-key offer
+when both peers dial simultaneously. The yielding peer may adopt only its
+still-pending outgoing connection for the winning admitted offer. Native
+operations are serialised and old negotiation/channel callbacks are fenced;
+the same capacity slot and original absolute `dialTimeoutMs` deadline remain.
+The host admission check runs again before rollback, after asynchronous rollback
+immediately before remote SDP, and before answer publication. These checks share
+the existing dial deadline and bounded admission policy. Established, failed or
+unsupported native states are not reused; failure retains normal origin fallback.
+Recent admitted offer IDs are retained privately up to 256 entries per swarm;
+active incoming duplicates do not allocate or restart a timer. Incoming distinct
+requests still supersede pending incoming connections. Wire version, public
+options and existing limits stay unchanged. The correction has passed 121 unit
+tests; native rollback/SCTP and Internet renewal remain unproved. See the
+[current checkpoint](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#current-correction-checkpoint).
+
 ## Cost, and what to tell viewers
 
 Shadow mode downloads a raced fragment **twice**: once from the origin for the
@@ -460,6 +476,13 @@ the remote role. Union sampled records by `(id, atMs, event, detail)` within eac
 swarm instance; never sum repeated ring snapshots as new events. A request-timeout
 close identifies the branch, not the request start, available budget or reason
 bytes missed it.
+
+The pending correction adds fixed `negotiation` / `glare-yield` observations
+for adoption of a pending outgoing connection. Its numeric connection ID remains
+the same: this is neither a new native construction nor a completed link.
+Superseded negotiation callbacks cannot label the adopted connection's later
+description as an earlier offer. Existing close reasons and reporting consent
+remain unchanged; this event does not prove successful native rollback or media.
 
 `inTimeShare` remains conditional on having peers. `sampledInTimeShare`
 includes sampled fragments with no peers; its byte equivalent weights by
@@ -624,6 +647,9 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 - Added complete live-playlist blocking reload across compatible renditions,
   with bounded waits, disconnect/shutdown cleanup, directory replacement
   revalidation and snapshot-consistent HEAD/range responses.
+- Reuse the pending browser connection when simultaneous offers require it to
+  yield, with fresh admission checks, fenced callbacks and its original dial
+  deadline. Native browser and Internet qualification remain separate gates.
 
 - Added an optional durable account upload allowance supporting Nostr sign-in,
   host website accounts, explicit linking and short-lived page authority.
@@ -1323,7 +1349,7 @@ Source: [docs/STATUS.md](https://raw.githubusercontent.com/forgesworn/relayswarm
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Field-test guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md) ·
 [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md)
 
-Checkpoint: 14 October 2026. The published experimental release is
+Checkpoint: 15 October 2026. The published experimental release is
 [v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0), which points to
 `3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. The 0.2.0 production feature
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
@@ -1331,64 +1357,75 @@ on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current correction checkpoint
 
-The follow-up to exact `83f72de4752ad284e9482eba7ba92f0920595930` narrows
-Windows parent-only watches to child-entry changes. Named metadata notifications
-are ignored; missing names and unknown event types still fail closed. Direct
-watches and all limits are unchanged. The master-removal fixture now sends a
-real event shape to its canonical direct watcher, retaining its 404 assertion.
-Independent review found no blockers. The full local publisher suite passes in
-15.954 s: 264 passing, two skipped, none failed or cancelled, within the original
-sampled resource limits and with outer runner reaping. Injected platform cases
-do not establish Windows OS acceptance.
+Exact `cf479ebd7bd42df3a08a0fba6bc2ed0fb6f42b44` completed all nine required
+jobs in [CI 38651823241](https://github.com/forgesworn/relayswarm/actions/runs/38651823241),
+including Windows, both HLS modes and the media/broadcast journey. The optional
+twelve-viewer soak was skipped. The retained broadcast receipt passes all four
+original checkpoints with six verified peer fragments/3,249,204 bytes, including
+post-restart high sequence 9/discontinuity 1 at 738,464 bytes. Peer deadlines and
+the 2,000 ms origin reserve were unchanged; the smallest observed completion
+margin was 35.506 ms. Each role retained one recoverable playlist HTTP 503;
+both donors stalled once, baseline/consumer had no stalls, and fatal/native/
+append errors were zero. Actual server close left zero blocked reloads/watchers.
+This injected headless loopback result has no independent OS resource/reaping
+journal and does not qualify ordinary public, physical-device or sustained use.
+The offline audit is retained in
+`artifacts/candidate-cf479eb-ci-observation-20261014/analysis`.
 
-At this checkpoint, [83f CI 38650769463](https://github.com/forgesworn/relayswarm/actions/runs/38650769463)
-has six required jobs passing, including both POSIX suites, Swift and both HLS
-modes. Windows native/swarm checks passed before two publisher tests failed:
-directory replacement exhausted the unchanged revalidation budget, and the
-master-removal mock selected the parent watcher without a filename. The media
-job is still running; dependent live relays and optional soak were skipped.
-Pinned Node 24.21.0 event mapping supports the narrower parent subscription;
-the native fourth-pass event chronology was not retained and remains unproved.
-Exact corrected-source CI, release and deployment remain pending.
+Fresh offline production-only consumption of the same exact source passed all
+247 package members against committed bytes, eleven documented imports, the
+installed CLI/demo, durable ledger replay, separate-process verified native
+transfer/HTTP fallback and rebuilt browser ESM. The unpublished tarball is
+1,124,565 bytes, SHA-256
+`d1d2125e8e4641a67f0f78ea562a7f13a4143511640309d4a7639ab2377a0a5c`.
+Owned phase groups, sampled probe children and recorded scratch cleanup passed.
+Receipts are in `artifacts/clean-consumer-cf479eb-diagnostics-preparation-20261014`.
+Publication, downloaded-release consumption and final deployment acceptance
+remain pending.
 
-Exact `4aa87c76e6dde08ab7a2f14a6ac23625a59a6edc` finished
+The pending glare-reuse correction builds on that source. When simultaneous
+offers make a viewer yield under the existing public-key tie-break, it reuses
+only that peer's still-pending outgoing connection, with serial native operations,
+negotiation-generation fences and the original absolute deadline/capacity slot.
+Admission is checked before and after asynchronous rollback and before answering;
+unsupported/failed rollback falls back without a replacement connection. Its
+reviewed source/test SHA-256 pins are:
+
+| File | SHA-256 |
+|---|---|
+| `src/browser/hls-swarm.mjs` | `bf729d7fcc08d3d1e599053e5eff789e98195878130c037ad24cb2fa08d49004` |
+| `test/browser-hardening.test.mjs` | `71187521d2d50738577c59c82419c06bb3a133ff6f84e35039bf0f0d9d7f9188` |
+
+All 121 maintained swarm tests passed with no failures, cancellations or skips
+in a 19.781 s outer run, within the original 40/60 s and sampled
+3 GiB/64-process/minimum-25%-free bounds. Worker/group/birth and probe reaping
+passed. This is stateful fake-RTC/in-memory-signalling unit qualification;
+native browser rollback/SCTP/channel reuse and genuine Internet renewal/media
+remain unproved. The exact-CF CI/package results above do not cover this pending
+source. Evidence: `artifacts/glare-reuse-r2-unit-validation-20261015/analysis`.
+
+Separately, 30 pure observer/model tests passed in 355 ms, preserving unknown
+selected-pair counters as null/status rather than zero and retaining the strict
+positive selected relay/TLS gate. Evidence:
+`artifacts/turn-selected-pair-observation-r2-pure-validation-20261015`.
+The actual Internet R4 remains RED: accepted refreshed credentials and preserved
+consent/spend did not prove post-renewal TLS/media, and its selected-pair counter
+ambiguity cannot be repaired retrospectively. Native browser, Internet renewal,
+ordinary public contribution, sustained/churn and full field gates remain open.
+
+Earlier failures remain separate. Exact `83f72de` Windows native/swarm passed
+before two publisher failures: directory replacement exhausted the unchanged
+revalidation budget, and the master-removal mock selected a parent watcher
+without a filename. The correction narrowed Windows parent metadata events and
+fixed the mock; its local publisher suite passed 264 tests with two skips.
+The native fourth-pass event chronology remains unproved. Exact `4aa87c7`
 [CI 38646569729](https://github.com/forgesworn/relayswarm/actions/runs/38646569729)
-with five required jobs passing. Three native matrix jobs failed in the
-publisher suite. The dependent
-live-relay job and optional soak were skipped. The failed publisher assertions
-included a stale source-extraction fixture and real-filesystem publication
-readiness; these are separate from the passing media/browser job.
-
-The follow-up correction preserves the original deadlines and request limits.
-It uses the actual blocked-wait registration as the filesystem fixture's ready
-signal, canonicalises fixture paths, and adds shallow parent watches on Windows
-for directory replacement. Independent source review found no blockers in that
-correction. The initial local full publisher run completed in 11.992 s with 260 passing,
-one failing and two skipped tests, without cancellations. All blocking-reload
-and teardown cases passed; the existing guardian descendant-cleanup test failed
-to obtain a clean-shutdown acknowledgement. Its cause remains unproved.
-The sampled resource bounds held and the outer runner group was reaped; that
-does not establish detached test-group or scratch absence.
-
-The guardian now retains its first observed failure using fixed stage/reason
-values, sanitised again by the controller. Unknown stages remain unknown;
-private error messages, paths and worker stderr are excluded. Shutdown signals,
-deadlines and the durable fence are unchanged. Independent review found no
-blockers. All five focused tests then passed in 3.942 s; the full maintained
-publisher suite passed in 10.643 s with 263 passing, two skipped and no failed
-or cancelled tests. Sampled resource bounds and outer runner reaping passed.
-The earlier failure did not recur, which does not identify its cause. The
+retains three publisher-matrix failures. An intervening local 260-pass/one-fail/
+two-skip run failed guardian descendant cleanup; later diagnostics and the
+263-pass/two-skip suite did not identify that failure's cause. The
 [correction evidence](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/playlist-ci-and-guardian-correction-20261014.json)
-records the source hashes and separate results. Exact-source hosted CI, release
-and deployment remain pending for this correction.
-
-Fresh offline consumption of exact `83f72de` separately passed all 247 package
-members against committed source, eleven documented imports, the installed CLI,
-durable ledger replay, separate-process verified native transfer/HTTP fallback,
-and rebuilt browser ESM. The 1,121,981-byte unpublished tarball has SHA-256
-`4088a9997fa1774d63a5d68076180285d32d32c6d33d9a517b856ba0c8737131`.
-Owned phase groups, sampled probe children and scratch cleanup passed. This
-source-bound result does not cover the later event-filter correction or published assets.
+retains those source hashes and outcomes. No prior RED is reclassified by the
+current passes.
 
 ## Complete-playlist blocking reload candidate
 
