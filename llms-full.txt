@@ -1325,6 +1325,16 @@ scheduling cause was not reproduced locally. See the
 [retained failure and correction](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/e144b8c-ci-test-timing-20261014.json);
 new-head hosted checks are a separate result.
 
+Checkpoint `18729eb` then passed all 92 swarm cases on macOS, including that
+eligibility case. Its publisher suite exposed a different test assumption: two
+concurrent HTTP reservations returned one refusal and one acceptance in the
+opposite order to the assertion. The correction requires exactly one acceptance,
+70 bytes reserved/spent and an unchanged replay decision, without requiring an
+HTTP arrival order. All ten account HTTP cases pass locally. Production code,
+limits and deployment are unchanged; the
+[original failure and test correction](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/18729eb-ci-account-http-order-20261014.json)
+remain distinct from later CI.
+
 The ordinary four-role check remains **RED** over 60.110 s: requested video and
 native audio progressed, but no peer channel opened and verified peer/upload
 bytes were zero. All 91 measured eligibility decisions had a positive 1,500 ms

@@ -47,9 +47,12 @@ test("real HTTP Nostr authorisation requires both exact proofs; independent page
   assert.equal(a.body.delegationExpiresAt, JSON.parse(a.challenge.event.content).delegationExpiresAt);
   assert.equal((await f.post("/account-budget/authorize", a.input)).status, 403);
   const [x, y] = await Promise.all([f.post("/account-budget/reserve", f.request(a.body.grant, a.pageKey, "reserve", op(1), 70)), f.post("/account-budget/reserve", f.request(b.body.grant, b.pageKey, "reserve", op(2), 70))]);
-  assert.deepEqual([x.body.accepted, y.body.accepted], [true, false]);
+  assert.deepEqual([x.status, y.status], [200, 200]);
+  assert.deepEqual([x.body.accepted, y.body.accepted].sort(), [false, true], "exactly one concurrent reservation fits, regardless of HTTP arrival order");
+  assert.equal(x.body.reservedBytes + y.body.reservedBytes, 70);
+  assert.equal(x.body.snapshot.spent, 70); assert.equal(y.body.snapshot.spent, 70);
   const replay = await f.post("/account-budget/reserve", f.request(a.body.grant, a.pageKey, "reserve", op(1), 70));
-  assert.equal(replay.body.duplicate, true); assert.equal(replay.body.snapshot.spent, 70);
+  assert.equal(replay.body.duplicate, true); assert.equal(replay.body.accepted, x.body.accepted); assert.equal(replay.body.snapshot.spent, 70);
   assert.equal((await f.post("/account-budget/reserve", f.request(a.body.grant, generateSecretKey(), "reserve", op(3), 1))).status, 403);
   assert.equal((await f.post("/account-budget/reserve", f.request(a.body.grant, a.pageKey, "reserve", op(1), 71))).status, 409);
   const snapshot = await f.post("/account-budget/status", f.request(b.body.grant, b.pageKey, "status", op(4)));

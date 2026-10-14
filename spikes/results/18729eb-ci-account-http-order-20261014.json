@@ -1,0 +1,56 @@
+{
+  "v": 1,
+  "kind": "HTTP-concurrency-test-ordering-correction",
+  "applicationSourceSha": "df51cbed1ebb3bd09ef1b521c451d6b47989a664",
+  "failedCI": {
+    "headSha": "18729ebbca527b53f672f2106f152712b38efdac",
+    "runId": 38568137166,
+    "attempt": 1,
+    "jobId": 115866009378,
+    "job": "native (macos-latest)",
+    "testFile": "test/account-budget-http.test.mjs",
+    "testLine": 43,
+    "assertionLine": 50,
+    "swarmTestsPassed": 92,
+    "correctedEligibilityPassed": true,
+    "publisherTestsPassed": 176,
+    "publisherTestsFailed": 1,
+    "publisherPlatformSkips": 2,
+    "actualAcceptanceOrder": [
+      false,
+      true
+    ],
+    "expectedAcceptanceOrder": [
+      true,
+      false
+    ],
+    "rawLogSHA256": "9eebdd906b330c9bcfeea7a2ee8f9c6c4123c18a396cdcc6d478de51fa0aabdf"
+  },
+  "testContract": {
+    "concurrentRequests": 2,
+    "requestedBytesEach": 70,
+    "sharedLimitBytes": 100,
+    "HTTPArrivalOrderSpecified": false,
+    "exactlyOneAcceptedRequired": true,
+    "reservedTotalBytesRequired": 70,
+    "bothReturnedSpentBytesRequired": 70,
+    "originalPageReplayAcceptedMustMatchOriginalDecision": true,
+    "duplicateSpentRemainsBytes": 70,
+    "wrongKeyAndOperationConflictAssertionsRetained": true
+  },
+  "change": {
+    "testOnly": true,
+    "productionCodeAndLimitsUnchanged": true,
+    "networkSettingsUnchanged": true,
+    "existingRequestsRemainConcurrent": true,
+    "inferredNetworkOrLedgerDefect": false
+  },
+  "localValidation": {
+    "accountHTTPTestsPassed": 10,
+    "durationMs": 2808.292208,
+    "terminalExitCode": 0,
+    "logSHA256": "2e548efc04cc6041dd38aa7b35f1e36671940033a0c23470eb809d28e7594221"
+  },
+  "originalFailurePreserved": true,
+  "newHeadCINotInferred": true
+}
