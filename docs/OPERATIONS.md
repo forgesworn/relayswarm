@@ -102,4 +102,6 @@ Preserve the dedicated state directory/volume to retain publisher identity and o
 
 On supported local POSIX storage, permanent publication/worker lease inodes and a guardian permit automatic parent-crash recovery after all worker groups are reaped. A dirty guardian marker or legacy pre-lease lock requires explicit operator inspection. Never delete lease database files to force acquisition. A namespace-local PID is insufficient evidence; retain private backups and leave uncertain ownership closed. The [deployment guide](../deploy/README.md#exclusive-volume-ownership-and-crash-recovery) describes the recovery boundary.
 
+macOS durable state requires a writable APFS or HFS block filesystem with ownership enabled. RelaySwarm checks the exact directory and device identities through the system `df`, `diskutil` and `plutil` tools under one five-second deadline. Unsupported or changing identities, unavailable metadata and unconfirmed tool exit refuse acquisition.
+
 Publisher state contains the signing secret; a whole-volume backup can also contain generated media. Use access-controlled encrypted backups. Forwarding credentials live in a separate private file and are read at launch; trusted process administrators can inspect ffmpeg's full URL arguments. Never put these secrets in a browser receipt, repository, public status response or issue attachment.

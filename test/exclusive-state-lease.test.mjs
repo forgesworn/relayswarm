@@ -11,7 +11,7 @@ test("permanent lease rejects symlinks, hardlinks, permissive files and unsafe s
   await writeFile(outside, "", { mode: 0o600 }); await symlink(outside, target);
   await assert.rejects(acquireExclusiveStateLease(target), /private/u); await rm(target);
   await link(outside, target); await assert.rejects(acquireExclusiveStateLease(target), /private/u); await rm(target);
-  await writeFile(target, "", { mode: 0o644 }); await assert.rejects(acquireExclusiveStateLease(target), /private/u);
+  await writeFile(target, "", { mode: 0o644 }); await chmod(target, 0o644); await assert.rejects(acquireExclusiveStateLease(target), /private/u);
   await chmod(target, 0o600); await symlink(outside, `${target}-journal`); await assert.rejects(acquireExclusiveStateLease(target), /sidecar/u);
   await rm(`${target}-journal`); const lease = await acquireExclusiveStateLease(target);
   await assert.rejects(acquireExclusiveStateLease(target), /locked/u); lease.close(); lease.close();
