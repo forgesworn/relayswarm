@@ -18,8 +18,11 @@ export function transform(kind, original) {
   assert.ok(Object.hasOwn(SEAMS, kind));
   let value = original;
   const changes = [];
-  for (const [needle, addition] of SEAMS[kind]) {
-    assert.equal(value.split(needle).length, 2, `Unique ${kind} observation seam required`);
+  for (const [lfNeedle, addition] of SEAMS[kind]) {
+    const variants = lfNeedle.includes("\n") ? [lfNeedle, lfNeedle.replaceAll("\n", "\r\n")] : [lfNeedle];
+    const matches = variants.map(needle => ({ needle, count: value.split(needle).length - 1 }));
+    assert.equal(matches.reduce((total, match) => total + match.count, 0), 1, `Unique ${kind} observation seam required`);
+    const { needle } = matches.find(match => match.count === 1);
     if (!addition) continue;
     let replacement;
     if (kind === "swarm") { const at = needle.indexOf("\n") + 1; replacement = needle.slice(0, at) + addition + needle.slice(at); }

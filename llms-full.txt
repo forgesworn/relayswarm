@@ -1310,6 +1310,15 @@ The run used two headless pages, local synthetic HLS/Nostr and injected relay
 policy, with trusted Start/upload and programmatic dropdowns. Server quotas,
 shared allocation absence and matched wire/billing remain unproved.
 
+Both CLIs read `--ice-config` once; session responses reuse that array and new
+outgoing/incoming peer connections use captured options. No supported ICE
+credential renewal exists. The observed issuer TTL is 3,600 s against the
+7,200 s goal, so fresh allocations/reconnections after expiry remain unproved;
+this does not establish that existing allocations die at that TTL. An optional
+server-owned credential endpoint and expiry-aware client refresh remain
+follow-up work, retaining consent, admission and durable spend, with origin
+fallback on failure.
+
 Client/worker/group/scratch cleanup passed, and the issued private ICE file and
 directory were removed separately. The existing service and network rules were
 unchanged; no new infrastructure or Till/provider exposure was created. The
@@ -3002,6 +3011,14 @@ active PC while video/time continued. Recorded stall/fatal/native projections
 were zero, with missing-field zero defaults retained as a limitation. The
 fixed low-quality control did not retain per-fragment level identifiers; this
 is not both-rendition or continuous 90 s TLS evidence.
+
+The CLIs read `--ice-config` once, session responses repeat the initial array,
+and new peer connections use captured options. There is no supported ICE
+refresh path. The observed 3,600 s issuer TTL leaves fresh allocations or
+reconnections during a 7,200 s session unproved, without establishing that
+already-created allocations die at credential expiry. The 90 s result does not
+close that gap; an optional server-owned, expiry-aware refresh path remains
+follow-up work with consent/admission/spend retained and origin fallback.
 
 Client/group/scratch cleanup and separate issued private ICE file/directory
 removal passed. The shared service, firewall and provider settings were not
@@ -4842,6 +4859,11 @@ quota or matched-cost acceptance. Client cleanup and separate issued-credential
 removal passed; the shared service and network rules were unchanged. See
 [status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#latest-source-checkpoint-426-on-14-october-2026) and the
 [scope summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/42608f7-source-and-tls-checkpoint-20261014.json).
+Static ICE configuration has no supported credential renewal: the observed
+3,600 s issuer TTL does not prove fresh allocations/reconnections throughout the
+7,200 s goal. Existing-allocation behaviour at expiry is unproved; the short TLS
+pass does not close this lifecycle gate.
+
 The deployed pilot remains 8f; all P01–P12 and release gates remain open.
 
 ## Current deployed checkpoint: 8f

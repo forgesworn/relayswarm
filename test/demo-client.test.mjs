@@ -551,11 +551,16 @@ test('fMP4 observer: observations never invoke computed Hls level getters or acc
 const ROOT = new URL("../", import.meta.url), key = "a".repeat(64);
 test("broadcast availability: current-source seams are unique and inverse recovers all three sources exactly", async () => {
   for (const [kind, path] of [["client", "demo/client.mjs"], ["swarm", "src/browser/hls-swarm.mjs"], ["peer", "src/browser/peer-link.mjs"]]) {
-    const original = await readFile(new URL(path, ROOT), "utf8"), changed = transform(kind, original);
-    assert.equal(changed.undo(changed.source), original); assert.equal(changed.undo(changed.source), original);
-    assert.throws(() => transform(kind, original + original)); assert.throws(() => transform(kind, ""));
-    const amended = "// legitimate future source edit\n" + original;
-    const next = transform(kind, amended); assert.equal(next.undo(next.source), amended);
+    const checkedOut = await readFile(new URL(path, ROOT), "utf8");
+    const lf = checkedOut.replaceAll("\r\n", "\n"), crlf = lf.replaceAll("\n", "\r\n");
+    for (const original of [lf, crlf]) {
+      const changed = transform(kind, original);
+      assert.equal(changed.undo(changed.source), original); assert.equal(changed.undo(changed.source), original);
+      assert.throws(() => transform(kind, original + original)); assert.throws(() => transform(kind, ""));
+      const amended = "// legitimate future source edit\n" + original;
+      const next = transform(kind, amended); assert.equal(next.undo(next.source), amended);
+    }
+    assert.throws(() => transform(kind, lf + crlf), /Unique/u);
   }
 });
 test("broadcast availability: existing PeerLink sends original once and only successful sends record queued HAVE", async () => {

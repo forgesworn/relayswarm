@@ -273,6 +273,14 @@ were zero, with missing-field zero defaults retained as a limitation. The
 fixed low-quality control did not retain per-fragment level identifiers; this
 is not both-rendition or continuous 90 s TLS evidence.
 
+The CLIs read `--ice-config` once, session responses repeat the initial array,
+and new peer connections use captured options. There is no supported ICE
+refresh path. The observed 3,600 s issuer TTL leaves fresh allocations or
+reconnections during a 7,200 s session unproved, without establishing that
+already-created allocations die at credential expiry. The 90 s result does not
+close that gap; an optional server-owned, expiry-aware refresh path remains
+follow-up work with consent/admission/spend retained and origin fallback.
+
 Client/group/scratch cleanup and separate issued private ICE file/directory
 removal passed. The shared service, firewall and provider settings were not
 changed. Its actual server quotas/allocation absence, physical devices, difficult

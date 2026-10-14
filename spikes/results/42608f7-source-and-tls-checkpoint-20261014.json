@@ -86,7 +86,19 @@
     "watcherInternalPsReapingInferred": false,
     "serverQuotasAttested": false,
     "physicalOrHardNATOrMatchedWireCostProof": false,
-    "issuedCredentialCleanupUTC": "2026-10-14T18:16:53.512773+00:00"
+    "issuedCredentialCleanupUTC": "2026-10-14T18:16:53.512773+00:00",
+    "staticCredentialLifecycleGap": {
+      "cliConfigurationReadOnce": true,
+      "sessionReusesInitialArray": true,
+      "newPeerConnectionsUseCapturedOptions": true,
+      "supportedCredentialRenewal": false,
+      "observedIssuerTtlSeconds": 3600,
+      "sustainedGoalSeconds": 7200,
+      "freshAllocationsOrReconnectAfterExpiryProved": false,
+      "existingAllocationsDieAtCredentialExpiryClaimed": false,
+      "optionalRefreshFollowUpImplemented": false,
+      "followUpBoundary": "Optional server-owned credential endpoint and expiry-aware client refresh, retaining consent/admission/durable spend and origin fallback on failure."
+    }
   },
   "openScope": {
     "allP01toP12Retained": true,

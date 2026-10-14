@@ -51,6 +51,15 @@ The run used two headless pages, local synthetic HLS/Nostr and injected relay
 policy, with trusted Start/upload and programmatic dropdowns. Server quotas,
 shared allocation absence and matched wire/billing remain unproved.
 
+Both CLIs read `--ice-config` once; session responses reuse that array and new
+outgoing/incoming peer connections use captured options. No supported ICE
+credential renewal exists. The observed issuer TTL is 3,600 s against the
+7,200 s goal, so fresh allocations/reconnections after expiry remain unproved;
+this does not establish that existing allocations die at that TTL. An optional
+server-owned credential endpoint and expiry-aware client refresh remain
+follow-up work, retaining consent, admission and durable spend, with origin
+fallback on failure.
+
 Client/worker/group/scratch cleanup passed, and the issued private ICE file and
 directory were removed separately. The existing service and network rules were
 unchanged; no new infrastructure or Till/provider exposure was created. The

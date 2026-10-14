@@ -38,6 +38,11 @@ quota or matched-cost acceptance. Client cleanup and separate issued-credential
 removal passed; the shared service and network rules were unchanged. See
 [status](STATUS.md#latest-source-checkpoint-426-on-14-october-2026) and the
 [scope summary](../spikes/results/42608f7-source-and-tls-checkpoint-20261014.json).
+Static ICE configuration has no supported credential renewal: the observed
+3,600 s issuer TTL does not prove fresh allocations/reconnections throughout the
+7,200 s goal. Existing-allocation behaviour at expiry is unproved; the short TLS
+pass does not close this lifecycle gate.
+
 The deployed pilot remains 8f; all P01–P12 and release gates remain open.
 
 ## Current deployed checkpoint: 8f
