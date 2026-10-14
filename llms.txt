@@ -38,6 +38,9 @@ Current source optionally persists a private publisher identity, caches verified
 file hashes/signatures, limits cumulative media upload, measures peer choice and
 provides authenticated operator policy, bounded admission and durable idempotent
 opt-in numeric reports. Upload budgets persist across reloads/tabs without consent.
+Optional Nostr or host website accounts share a private durable allowance across
+devices; account changes leave uploading off until fresh consent. The deployed
+df51 pilot offers Nostr; integrating websites supply their own account resolver.
 Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The v0.2.0 supervised broadcast bridge creates two live HLS renditions and
 can forward H.264/AAC separately to RTMPS with explicit TLS verification.
@@ -46,13 +49,16 @@ These additions belong to the current candidate and are absent from v0.1.0 downl
 Desktop Chrome regressions and a short twelve-viewer loopback soak are recorded;
 they do not establish physical-phone, varied-NAT or sustained operation readiness.
 Peer-first media loads/bytes avoided are not net connection-data savings, and
-upload counters measure quota consumption rather than acknowledged delivery.
+upload counters measure committed media payload rather than acknowledged delivery.
+Pending durable reservations can consume quota without entering those counters.
 Documentation on main can include corrections after the immutable releases.
-Current deployed source checkpoint 2dd156e passed nine required CI jobs and local
-package/deployment checks; its ordinary sharing and fourteen-role qualification
-remain RED. Safari bootstrap and no-evaluation iPhone USB checks do not close
-physical acceptance. Full P01–P12/37-item, long-run/churn, NAT, cost and release
-gates remain open; consult dated STATUS evidence rather than borrowing older passes.
+Current deployed source checkpoint df51cbe passed nine required CI jobs and local
+package/deployment checks; ordinary sharing remains RED. A separate native ICE
+diagnostic narrows the unanswered-check boundary without proving its cause or
+ordinary qualification. Earlier fourteen-role REDs, Safari bootstrap and
+no-evaluation iPhone USB checks do not close acceptance. Full P01–P12, long/churn,
+physical/NAT, cost and release gates remain open. No separate 37-row ledger was
+located; no 37-item completion is asserted. Consult dated STATUS evidence.
 
 ## Documentation
 
@@ -68,7 +74,7 @@ gates remain open; consult dated STATUS evidence rather than borrowing older pas
 - [Publisher/player field test](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md): Supported HLS subset, HTTPS trials, local receipts and device/network gates.
 - [Broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md): OBS/RTMP bridge, two-rendition HLS, persistent identity and separate optional RTMPS forwarding.
 - [Operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md): Private state, authenticated policy/status, upload consent, numeric reporting and recovery.
-- [Shared upload allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md): Durable account allowance across devices, optional Nostr or host website authentication, explicit linking and local Chrome acceptance; separate from the deployed browser-only cap.
+- [Shared upload allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md): Durable allowance across devices, Nostr or host website authentication, explicit linking and controlled Chrome acceptance; deployed pilot offers Nostr, with owner/physical acceptance open.
 - [Container pilot](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md): Isolated existing-server deployment, SSH ingest, HTTPS, health checks and rollback.
 - [Native transport](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NATIVE-TRANSPORT.md): HyperDHT/Noise protocol, one-use authorisation and trust/fallback boundaries.
 - [Threat model](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/THREAT-MODEL.md): Implemented integrity/resource/privacy boundaries and outstanding adversarial work.

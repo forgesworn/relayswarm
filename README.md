@@ -9,11 +9,11 @@ The 0.2.0 source candidate includes further production feature work; its
 [delivery requirements](docs/PRODUCTION-READINESS.md) remain open. MIT licensed,
 Node 22.13+; CI uses Node 24. The npm registry is unpublished.
 
-The [current deployed checkpoint](docs/STATUS.md#current-deployed-checkpoint-2dd-on-14-october-2026)
-is source `2dd156e`: all nine required CI jobs and exact local package/deployment
-checks passed, while ordinary sharing, fourteen-role qualification and physical/
-long-run acceptance remain open. The full P01–P12 and 37-item delivery scope is
-not a production-readiness or new release claim.
+The [current deployed checkpoint](docs/STATUS.md#current-deployed-checkpoint-df51-on-14-october-2026)
+is source `df51cbe`, including shared upload allowances through Nostr or a host
+website account. All nine required CI jobs and exact local package/deployment
+checks passed. Ordinary peer delivery remains red; physical, network and sustained
+acceptance and the full P01–P12 delivery checklist remain open.
 
 [Documentation](docs/README.md) · [Installation](docs/GETTING-STARTED.md) ·
 [hls.js integration](INTEGRATION.md) · [API reference](docs/API.md) ·
@@ -201,8 +201,8 @@ explicit Nostr sign-in or a host website account to coordinate media reservation
 across devices. Its private service can associate those devices; linking both
 identities also reveals their association to that service. Stable account
 identities and grants stay out of swarm traffic and receipts. Sign-in never
-enables uploading or reporting. This source feature is absent from the deployed
-`2dd156e` checkpoint.
+enables uploading or reporting. The deployed `df51cbe` pilot offers Nostr sign-in;
+integrating websites supply their own authenticated account resolver.
 
 The browser defaults to Google's public STUN server unless the host supplies
 `iceServers`; the native path uses HyperDHT bootstrap/routing nodes instead.

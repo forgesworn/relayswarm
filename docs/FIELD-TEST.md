@@ -42,7 +42,8 @@ explicit action using a Nostr signer or the host's signed-in website account.
 It adds the service's cumulative cap to this browser's allowance and leaves
 uploading off until a fresh Apply. See [shared upload allowance](ACCOUNT-UPLOAD-BUDGET.md)
 for linking, resetting, reconnecting after reload and the service's privacy
-boundary. The deployed `2dd156e` checkpoint predates this feature.
+boundary. The deployed `df51cbe` pilot offers Nostr sign-in; its host website
+account resolver is unconfigured.
 
 The player checks operator policy and publisher identity every two seconds,
 with at most three independent checks in flight. A stalled check cannot block
@@ -187,8 +188,10 @@ an origin fragment request. It excludes commitment traffic, signalling and
 peer protocol overhead, so it is **not net connection data saved**. Shadow
 results measure extra sampled transfers and cannot be labelled origin savings.
 The upload allowance counter (`bytes.uploaded`) counts full media payloads
-accepted for serving, including any transfer later interrupted. It measures
-the engine's quota consumption, not acknowledged bytes or total network data.
+accepted for serving, including any transfer later interrupted. Pending or
+refused reservations do not enter this counter; durable quota can retain charges
+for media never handed to the transport. Neither counter measures acknowledged
+bytes or total network data.
 Use device/network measurements for actual data cost.
 Resource timings count same-origin media requests, including init segments
 and cache hits. Native-HLS browsers use origin-only playback and report origin
@@ -247,7 +250,32 @@ These field gates remain outstanding until their actual receipts are recorded.
 No new physical-device or internet-network result is claimed by the automated
 Chrome tests.
 
-## Current field checkpoint: 2dd on 14 October 2026
+## Current field checkpoint: df51 on 14 October 2026
+
+The deployed source is `df51cbed1ebb3bd09ef1b521c451d6b47989a664`, with all nine
+required CI jobs and guarded pilot deployment passing. Both shared account
+methods are implemented; the pilot offers Nostr, while a website supplies its
+own authenticated resolver. See [status](STATUS.md#current-deployed-checkpoint-df51-on-14-october-2026)
+and the [df51 evidence summary](../spikes/results/df51cbe-current-checkpoint-20261014.json).
+
+The ordinary 60.110 s four-role check passed playback but opened no peer channel
+and received zero verified peer bytes. Positive 1,500 ms budgets and no matching
+HAVE were observed; a scheduler/cache cause was not proved. A separate 60.027 s
+heap/native-stats diagnostic retained in-progress UDP pairs with positive ICE
+request counters and zero observed replies. Repeated observations are not unique
+pairs or traffic deltas; eight completed latest snapshots remain unobserved.
+This identifies a connection-check boundary, without establishing a network cause
+or ordinary qualification. No phone, privacy or VPN setting was changed.
+
+Original M4 controller cleanup remains unknown and watcher cleanup false in
+both checks. The diagnostic's strict command comparison refused before TERM;
+birth/PGID matched, but the replacement command was not captured. Later exact
+process/group absence and stage removal are separate observations. M1 and both
+source-cleanup-v2 proofs passed; the finite sources are removed. Complete device,
+Safari, separate-network/hard-NAT, 300 s qualification, 7,200 s/22-churn, matched
+wire/cost and immutable-release gates remain open.
+
+## Previous field checkpoint: 2dd on 14 October 2026
 
 The deployed application checkpoint is `2dd156e64f86e6f18b616e7d87159aee1c43eac2`. All nine required
 jobs passed on attempt 1 of [CI run 38525990386](https://github.com/forgesworn/relayswarm/actions/runs/38525990386).

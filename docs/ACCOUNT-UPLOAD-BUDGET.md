@@ -8,9 +8,10 @@ devices, supporting Nostr sign-in and host website accounts. The
 [controlled Chrome journey](../spikes/results/account-budget-implementation-20261014.json)
 passes both methods, real peer uploads, renewal, linking, restart persistence
 and fresh consent. It uses disposable signatures and an owned website session
-on loopback; physical devices and deployed host authentication remain separate
-acceptance gates under P06/P12. The deployed `2dd156e` checkpoint has only the
-existing browser allowance.
+on loopback; physical devices and actual owner authentication remain separate
+acceptance gates under P06/P12. The deployed `df51cbe` pilot offers Nostr sign-in
+and preserves the private durable ledger. Integrating websites supply their own
+authenticated account resolver; none is configured on this pilot.
 
 The account service records cumulative media payload reservations. Every
 participating device uses the same service and durable ledger. The browser's

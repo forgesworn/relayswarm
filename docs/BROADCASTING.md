@@ -79,7 +79,7 @@ Trusted host/container administrators can inspect ffmpeg's process arguments, wh
 
 The source includes native process/publication tests and actual Chrome fixtures.
 The dated [status](STATUS.md) retains the authorised OBS and private YouTube
-tests; that YouTube broadcast was stopped and deleted. Current deployed `2dd156e`
+tests; that YouTube broadcast was stopped and deleted. Current deployed `df51cbe`
 playback passed its ordinary short check, while both-quality peer delivery and
 the fourteen-role qualification remain red. Complete physical-device,
 separate-network/hard-NAT, sustained-operation and final release acceptance

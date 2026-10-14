@@ -36,9 +36,68 @@ The final guard waits for explicit absence within the unchanged deadline, and
 the corrected full suite passes. Original failures are not replaced by later
 passes.
 
-These are local source results. Final-source CI, clean package consumption,
-deployment and physical/network/sustained/release acceptance remain open. The
-public app remains on `2dd156e` and predates this account service.
+The deployed `df51cbe` checkpoint below includes this account service. All nine
+required CI jobs, clean package consumption and guarded pilot deployment pass.
+The pilot offers Nostr sign-in; integrating sites supply their own authenticated
+website resolver. Actual owner authentication, complete physical journeys and
+network/sustained/release acceptance remain open.
+
+## Current deployed checkpoint: df51 on 14 October 2026
+
+The deployed application is `df51cbed1ebb3bd09ef1b521c451d6b47989a664`.
+All nine required jobs passed on attempt 1 of
+[CI run 38554223220](https://github.com/forgesworn/relayswarm/actions/runs/38554223220);
+the optional soak was skipped. The normal-TLS public client is 746,356 bytes,
+SHA-256 `875d1a24c90cac5ea0df5b9a1dd2557df606aa0c5ba75ff1a60216ad12b0c6dc`.
+The image is
+`sha256:bec569791de3ed2b077a83a79eb26d6a3741d051fda265336e97919b17f191c1`.
+Guarded deployment preserved publisher identity, private account state and the
+independent EE HTTP/1.1 proxy. Both fresh rendition playlists were attested;
+finite verification sources are now removed, so this is no ongoing-ingest claim.
+
+The fresh offline production-only consumer passed eleven documented imports,
+durable account-ledger replay, installed CLI and separate-process verified
+native transfer/HTTP fallback. The unpublished package is 993,652 bytes/212 files,
+SHA-256 `ad57ea048ba9f098aec5ecd9028f9b5a5c7d1168b21a9957ee1b53d4b3fc9db4`.
+The source archive is 3,645,440 bytes, SHA-256
+`b3607b6fc069a14330c75fd1426205f8e3c76df0f848af4d93df7e0f1c5880de`;
+the standalone ESM is 120,957 bytes, SHA-256
+`50647647b96a0ce4a89fdfb0a42b053601d2cd5b10c2525cc57e283af2900c63`.
+These local assets do not prove downloaded immutable-release acceptance.
+
+The ordinary four-role check remains **RED** over 60.110 s: requested video and
+native audio progressed, but no peer channel opened and verified peer/upload
+bytes were zero. All 91 measured eligibility decisions had a positive 1,500 ms
+budget and no matching advisory HAVE; none failed for zero budget. All 335
+controls finished HTTP 200/H1, which does not itself prove admitted bodies.
+Six dials timed out after remote SDP installation and ICE checking. Missing
+HAVE with no channel does not establish a cache defect or justify a budget change.
+
+A separate 60.027 s heap/native-stats diagnostic also passed playback and failed
+sharing. Twelve retained pair observations across four page-local PC labels
+showed UDP host/host or host/srflx pairs in progress, request counters 22–80 and
+zero observed received requests/responses. These include repeated snapshots,
+not twelve unique pairs or traffic deltas; selection was unknown. Fifty batches
+completed, but only 42 latest snapshots were retained; eight remain unobserved.
+All diagnostic handles were released and contexts closed. This narrows the
+observed failure to unanswered ICE checks, without identifying its network cause.
+Heap/native inspection means this is diagnostic evidence, not ordinary qualification.
+
+Original M4 controller cleanup timed out in both checks; recovered endpoint
+watcher cleanup was false. The diagnostic's guard refused before TERM because
+full command text differed despite matching birth/PGID. Its replacement command
+and cause were not captured. Later exact PID/group absence, profile/TMP removal
+and owned-stage removal were proved separately without signals. They do not
+prove original parent reaping. M1 cleanup and both separate source-cleanup-v2
+proofs passed; source exit 255 remains recorded. Private duplicate archives were
+removed; named originals and review evidence remain.
+
+See the [df51 evidence summary](../spikes/results/df51cbe-current-checkpoint-20261014.json).
+The full P01–P12 checklist remains open, including the same-source/topology
+300 s qualifier, 7,200 s/22 churn, complete physical/native-input/Safari journeys,
+hard NAT, matched wire/cost measurements and final release acceptance. Earlier
+references to 37 review items have no separately located row-by-row ledger;
+no 37-item completion is asserted. PR 8 remains open; no new release is published.
 
 ## Published v0.1.0 capabilities
 
@@ -91,7 +150,7 @@ The **0.2.0 source broadcaster candidate** includes the additions below.
 These changes are absent from v0.1.0's immutable release assets. Release and
 merged source do not establish production readiness.
 
-## Current deployed checkpoint: 2dd on 14 October 2026
+## Previous deployed checkpoint: 2dd on 14 October 2026
 
 The deployed application checkpoint is `2dd156e64f86e6f18b616e7d87159aee1c43eac2`. All nine required
 jobs passed on attempt 1 of [CI run 38525990386](https://github.com/forgesworn/relayswarm/actions/runs/38525990386).

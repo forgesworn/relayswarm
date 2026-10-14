@@ -21,11 +21,11 @@ The 0.2.0 source candidate includes further production feature work; its
 [delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) remain open. MIT licensed,
 Node 22.13+; CI uses Node 24. The npm registry is unpublished.
 
-The [current deployed checkpoint](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#current-deployed-checkpoint-2dd-on-14-october-2026)
-is source `2dd156e`: all nine required CI jobs and exact local package/deployment
-checks passed, while ordinary sharing, fourteen-role qualification and physical/
-long-run acceptance remain open. The full P01–P12 and 37-item delivery scope is
-not a production-readiness or new release claim.
+The [current deployed checkpoint](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#current-deployed-checkpoint-df51-on-14-october-2026)
+is source `df51cbe`, including shared upload allowances through Nostr or a host
+website account. All nine required CI jobs and exact local package/deployment
+checks passed. Ordinary peer delivery remains red; physical, network and sustained
+acceptance and the full P01–P12 delivery checklist remain open.
 
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Installation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) ·
 [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md) · [API reference](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) ·
@@ -213,8 +213,8 @@ explicit Nostr sign-in or a host website account to coordinate media reservation
 across devices. Its private service can associate those devices; linking both
 identities also reveals their association to that service. Stable account
 identities and grants stay out of swarm traffic and receipts. Sign-in never
-enables uploading or reporting. This source feature is absent from the deployed
-`2dd156e` checkpoint.
+enables uploading or reporting. The deployed `df51cbe` pilot offers Nostr sign-in;
+integrating websites supply their own authenticated account resolver.
 
 The browser defaults to Google's public STUN server unless the host supplies
 `iceServers`; the native path uses HyperDHT bootstrap/routing nodes instead.
@@ -1283,9 +1283,68 @@ The final guard waits for explicit absence within the unchanged deadline, and
 the corrected full suite passes. Original failures are not replaced by later
 passes.
 
-These are local source results. Final-source CI, clean package consumption,
-deployment and physical/network/sustained/release acceptance remain open. The
-public app remains on `2dd156e` and predates this account service.
+The deployed `df51cbe` checkpoint below includes this account service. All nine
+required CI jobs, clean package consumption and guarded pilot deployment pass.
+The pilot offers Nostr sign-in; integrating sites supply their own authenticated
+website resolver. Actual owner authentication, complete physical journeys and
+network/sustained/release acceptance remain open.
+
+## Current deployed checkpoint: df51 on 14 October 2026
+
+The deployed application is `df51cbed1ebb3bd09ef1b521c451d6b47989a664`.
+All nine required jobs passed on attempt 1 of
+[CI run 38554223220](https://github.com/forgesworn/relayswarm/actions/runs/38554223220);
+the optional soak was skipped. The normal-TLS public client is 746,356 bytes,
+SHA-256 `875d1a24c90cac5ea0df5b9a1dd2557df606aa0c5ba75ff1a60216ad12b0c6dc`.
+The image is
+`sha256:bec569791de3ed2b077a83a79eb26d6a3741d051fda265336e97919b17f191c1`.
+Guarded deployment preserved publisher identity, private account state and the
+independent EE HTTP/1.1 proxy. Both fresh rendition playlists were attested;
+finite verification sources are now removed, so this is no ongoing-ingest claim.
+
+The fresh offline production-only consumer passed eleven documented imports,
+durable account-ledger replay, installed CLI and separate-process verified
+native transfer/HTTP fallback. The unpublished package is 993,652 bytes/212 files,
+SHA-256 `ad57ea048ba9f098aec5ecd9028f9b5a5c7d1168b21a9957ee1b53d4b3fc9db4`.
+The source archive is 3,645,440 bytes, SHA-256
+`b3607b6fc069a14330c75fd1426205f8e3c76df0f848af4d93df7e0f1c5880de`;
+the standalone ESM is 120,957 bytes, SHA-256
+`50647647b96a0ce4a89fdfb0a42b053601d2cd5b10c2525cc57e283af2900c63`.
+These local assets do not prove downloaded immutable-release acceptance.
+
+The ordinary four-role check remains **RED** over 60.110 s: requested video and
+native audio progressed, but no peer channel opened and verified peer/upload
+bytes were zero. All 91 measured eligibility decisions had a positive 1,500 ms
+budget and no matching advisory HAVE; none failed for zero budget. All 335
+controls finished HTTP 200/H1, which does not itself prove admitted bodies.
+Six dials timed out after remote SDP installation and ICE checking. Missing
+HAVE with no channel does not establish a cache defect or justify a budget change.
+
+A separate 60.027 s heap/native-stats diagnostic also passed playback and failed
+sharing. Twelve retained pair observations across four page-local PC labels
+showed UDP host/host or host/srflx pairs in progress, request counters 22–80 and
+zero observed received requests/responses. These include repeated snapshots,
+not twelve unique pairs or traffic deltas; selection was unknown. Fifty batches
+completed, but only 42 latest snapshots were retained; eight remain unobserved.
+All diagnostic handles were released and contexts closed. This narrows the
+observed failure to unanswered ICE checks, without identifying its network cause.
+Heap/native inspection means this is diagnostic evidence, not ordinary qualification.
+
+Original M4 controller cleanup timed out in both checks; recovered endpoint
+watcher cleanup was false. The diagnostic's guard refused before TERM because
+full command text differed despite matching birth/PGID. Its replacement command
+and cause were not captured. Later exact PID/group absence, profile/TMP removal
+and owned-stage removal were proved separately without signals. They do not
+prove original parent reaping. M1 cleanup and both separate source-cleanup-v2
+proofs passed; source exit 255 remains recorded. Private duplicate archives were
+removed; named originals and review evidence remain.
+
+See the [df51 evidence summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/df51cbe-current-checkpoint-20261014.json).
+The full P01–P12 checklist remains open, including the same-source/topology
+300 s qualifier, 7,200 s/22 churn, complete physical/native-input/Safari journeys,
+hard NAT, matched wire/cost measurements and final release acceptance. Earlier
+references to 37 review items have no separately located row-by-row ledger;
+no 37-item completion is asserted. PR 8 remains open; no new release is published.
 
 ## Published v0.1.0 capabilities
 
@@ -1338,7 +1397,7 @@ The **0.2.0 source broadcaster candidate** includes the additions below.
 These changes are absent from v0.1.0's immutable release assets. Release and
 merged source do not establish production readiness.
 
-## Current deployed checkpoint: 2dd on 14 October 2026
+## Previous deployed checkpoint: 2dd on 14 October 2026
 
 The deployed application checkpoint is `2dd156e64f86e6f18b616e7d87159aee1c43eac2`. All nine required
 jobs passed on attempt 1 of [CI run 38525990386](https://github.com/forgesworn/relayswarm/actions/runs/38525990386).
@@ -2498,7 +2557,8 @@ explicit action using a Nostr signer or the host's signed-in website account.
 It adds the service's cumulative cap to this browser's allowance and leaves
 uploading off until a fresh Apply. See [shared upload allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md)
 for linking, resetting, reconnecting after reload and the service's privacy
-boundary. The deployed `2dd156e` checkpoint predates this feature.
+boundary. The deployed `df51cbe` pilot offers Nostr sign-in; its host website
+account resolver is unconfigured.
 
 The player checks operator policy and publisher identity every two seconds,
 with at most three independent checks in flight. A stalled check cannot block
@@ -2643,8 +2703,10 @@ an origin fragment request. It excludes commitment traffic, signalling and
 peer protocol overhead, so it is **not net connection data saved**. Shadow
 results measure extra sampled transfers and cannot be labelled origin savings.
 The upload allowance counter (`bytes.uploaded`) counts full media payloads
-accepted for serving, including any transfer later interrupted. It measures
-the engine's quota consumption, not acknowledged bytes or total network data.
+accepted for serving, including any transfer later interrupted. Pending or
+refused reservations do not enter this counter; durable quota can retain charges
+for media never handed to the transport. Neither counter measures acknowledged
+bytes or total network data.
 Use device/network measurements for actual data cost.
 Resource timings count same-origin media requests, including init segments
 and cache hits. Native-HLS browsers use origin-only playback and report origin
@@ -2703,7 +2765,32 @@ These field gates remain outstanding until their actual receipts are recorded.
 No new physical-device or internet-network result is claimed by the automated
 Chrome tests.
 
-## Current field checkpoint: 2dd on 14 October 2026
+## Current field checkpoint: df51 on 14 October 2026
+
+The deployed source is `df51cbed1ebb3bd09ef1b521c451d6b47989a664`, with all nine
+required CI jobs and guarded pilot deployment passing. Both shared account
+methods are implemented; the pilot offers Nostr, while a website supplies its
+own authenticated resolver. See [status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#current-deployed-checkpoint-df51-on-14-october-2026)
+and the [df51 evidence summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/df51cbe-current-checkpoint-20261014.json).
+
+The ordinary 60.110 s four-role check passed playback but opened no peer channel
+and received zero verified peer bytes. Positive 1,500 ms budgets and no matching
+HAVE were observed; a scheduler/cache cause was not proved. A separate 60.027 s
+heap/native-stats diagnostic retained in-progress UDP pairs with positive ICE
+request counters and zero observed replies. Repeated observations are not unique
+pairs or traffic deltas; eight completed latest snapshots remain unobserved.
+This identifies a connection-check boundary, without establishing a network cause
+or ordinary qualification. No phone, privacy or VPN setting was changed.
+
+Original M4 controller cleanup remains unknown and watcher cleanup false in
+both checks. The diagnostic's strict command comparison refused before TERM;
+birth/PGID matched, but the replacement command was not captured. Later exact
+process/group absence and stage removal are separate observations. M1 and both
+source-cleanup-v2 proofs passed; the finite sources are removed. Complete device,
+Safari, separate-network/hard-NAT, 300 s qualification, 7,200 s/22-churn, matched
+wire/cost and immutable-release gates remain open.
+
+## Previous field checkpoint: 2dd on 14 October 2026
 
 The deployed application checkpoint is `2dd156e64f86e6f18b616e7d87159aee1c43eac2`. All nine required
 jobs passed on attempt 1 of [CI run 38525990386](https://github.com/forgesworn/relayswarm/actions/runs/38525990386).
@@ -3546,9 +3633,10 @@ Devices explicitly connect using the same Nostr identity or an account
 authenticated by the host website, and use one durable ledger. Both methods
 are supported; linking them requires fresh proof of both. Their recorded spend
 is added and the lower cap is retained. Local browser allowances still apply,
-and each page separately requests upload consent. This feature is absent from
-the deployed `2dd156e` checkpoint; browser and field acceptance are tracked
-separately. It counts reserved media payload rather than total device traffic.
+and each page separately requests upload consent. The deployed `df51cbe` pilot
+offers Nostr sign-in; integrating sites supply their own website resolver.
+Actual owner and complete physical acceptance remain open. The allowance counts
+reserved media payload rather than total device traffic.
 
 ## Do the receipts measure money or data saved?
 
@@ -3719,9 +3807,10 @@ devices, supporting Nostr sign-in and host website accounts. The
 [controlled Chrome journey](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/account-budget-implementation-20261014.json)
 passes both methods, real peer uploads, renewal, linking, restart persistence
 and fresh consent. It uses disposable signatures and an owned website session
-on loopback; physical devices and deployed host authentication remain separate
-acceptance gates under P06/P12. The deployed `2dd156e` checkpoint has only the
-existing browser allowance.
+on loopback; physical devices and actual owner authentication remain separate
+acceptance gates under P06/P12. The deployed `df51cbe` pilot offers Nostr sign-in
+and preserves the private durable ledger. Integrating websites supply their own
+authenticated account resolver; none is configured on this pilot.
 
 The account service records cumulative media payload reservations. Every
 participating device uses the same service and durable ledger. The browser's
@@ -3927,7 +4016,7 @@ Trusted host/container administrators can inspect ffmpeg's process arguments, wh
 
 The source includes native process/publication tests and actual Chrome fixtures.
 The dated [status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md) retains the authorised OBS and private YouTube
-tests; that YouTube broadcast was stopped and deleted. Current deployed `2dd156e`
+tests; that YouTube broadcast was stopped and deleted. Current deployed `df51cbe`
 playback passed its ordinary short check, while both-quality peer delivery and
 the fourteen-role qualification remain red. Complete physical-device,
 separate-network/hard-NAT, sustained-operation and final release acceptance
@@ -4207,7 +4296,7 @@ The page polls policy and the publisher session every two seconds, with a single
 
 The page offers 10 MB, 100 MB (default) or 1 GB of cumulative **media payload** allowance, plus a separate upload rate choice. Web Locks and origin storage reserve payloads atomically across settings, rejoining, reloads and tabs. Interrupted sends are not refunded; oversized next segments do not spend the smaller balance. Exhaustion stops contribution while playback continues. Storage failure disables uploading. Consent is requested anew after reload; the viewer can explicitly raise or reset the allowance. This local allowance covers one browser profile at the origin.
 
-The current source also offers an optional [shared account allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md), using explicit Nostr sign-in or the integrating website's authenticated account. Devices using one identity and ledger share cumulative reservations in addition to their local allowances. Account connection, linking, settings changes and resets leave uploading off until fresh viewer consent. Keep the private ledger through upgrades; disconnecting or reloading does not refund its charges. Neither allowance counts complete physical wire traffic. The deployed `2dd156e` checkpoint predates the account service.
+The current source also offers an optional [shared account allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md), using explicit Nostr sign-in or the integrating website's authenticated account. Devices using one identity and ledger share cumulative reservations in addition to their local allowances. Account connection, linking, settings changes and resets leave uploading off until fresh viewer consent. Keep the private ledger through upgrades; disconnecting or reloading does not refund its charges. Neither allowance counts complete physical wire traffic. The deployed `df51cbe` pilot offers Nostr sign-in; no website resolver is configured there.
 
 The library option is `maxUploadBytesPerSession`; omission means unlimited and zero means no media uploads. Its metrics expose configured cap, remaining allowance and exhaustion. Host applications that recreate a swarm must carry their own cumulative allowance forward, as the page does. Rate limits use a token bucket with up to a two-second burst. Signalling, transport overhead, commitment fetches and shadow downloads are additional traffic; an upload media cap is not a wire-traffic limit.
 
@@ -4437,7 +4526,33 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
-## Current deployed checkpoint: 2dd
+## Current deployed checkpoint: df51
+
+The deployed application is `df51cbed1ebb3bd09ef1b521c451d6b47989a664`. All nine
+required jobs passed on attempt 1 of
+[CI run 38554223220](https://github.com/forgesworn/relayswarm/actions/runs/38554223220);
+the optional soak was skipped. Fresh production-only package/standalone checks
+and guarded pilot deployment passed. Both shared account methods are implemented;
+the pilot offers Nostr sign-in, while integrating websites supply their own
+authenticated account resolver. Private state and the independent EE H1 proxy
+were preserved. Exact assets and evidence are in [status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#current-deployed-checkpoint-df51-on-14-october-2026)
+and the [df51 summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/df51cbe-current-checkpoint-20261014.json).
+
+The ordinary 60.110 s check passed playback but failed contribution and
+both-quality peer payload: no channel opened and verified peer bytes were zero.
+A separate 60.027 s heap/native-stats diagnostic observed positive ICE check
+request counters and zero replies in retained snapshots. It narrows the failure
+stage, without proving its cause or ordinary qualification. Original M4 cleanup
+failure/unknown, later exact absence/removal and successful source cleanup are
+kept separate. No production connectivity fix is established.
+
+The full P01–P12 checklist remains open. No current same-topology 300 s qualifier,
+two-hour/churn, complete physical/Safari, hard-NAT, matched wire/cost or release
+pass exists. Earlier references to 37 review items have no separately located
+row-by-row ledger; no 37-item completion is asserted. PR 8 remains open and
+v0.1.0 remains the published RelaySwarm release.
+
+## Previous deployed checkpoint: 2dd
 
 The deployed application checkpoint is `2dd156e64f86e6f18b616e7d87159aee1c43eac2`. All nine required
 jobs passed on attempt 1 of [CI run 38525990386](https://github.com/forgesworn/relayswarm/actions/runs/38525990386).
@@ -4712,18 +4827,18 @@ records the later short/partial-long, TCP relay and Android checks separately.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Current 2dd ordinary 60.049 s playback passed but sharing/both-quality payload failed (15 low loads/3,169,304 bytes; zero high); fourteen-role R7/R9/R10/R11 remain RED. Earlier f393 forward/reverse and 0e renewal passes retain their own source/scope; same-topology 300 s, two-hour/churn stability and matched benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Current df51 ordinary 60.110 s playback passed but sharing/both-quality payload failed with zero peer bytes/channels. Separate native ICE diagnostics narrow the unanswered-check boundary without proving cause or a repair. Earlier fourteen-role R7/R9/R10/R11 remain RED; same-topology 300 s, two-hour/churn stability and matched benefit remain open |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Integrated adversarial/exact-source CI and 0e in-place own-ticket renewal pass with unchanged expiry, authority, admission and quota limits; all three peer actors retained sampled session/link/consent state across renewal; prior fourteen-viewer address-limit 429/authority-expiry reds remain unresolved operational capacity evidence under P12 |
 | P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Deployed 768 ordinary-Chrome trusted opt-in, real process restart, duplicate handling and natural five-minute expiry pass; reporting-off/policy/lease preservation and source cleanup pass; first deployed 219 timeout remains separately retained; backend component evidence does not replace new-client opt-in/reporting validation |
-| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Browser-profile Chrome/Firefox evidence retained. Current source implements a private durable account ledger with both optional Nostr and host website authentication. The controlled 55.780 s Chrome journey passes real uploads, renewal, conservative linking, server restart and fresh consent; 177 publisher and 92 swarm tests pass locally. It is reserved media payload, not an OS-wide meter. Deployed `2dd156e` predates accounts; real owner authentication, deployed account and complete physical upload journeys remain open |
+| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Private durable ledger supports both Nostr and host website authentication. Controlled 55.780 s Chrome acceptance, 177 local publisher cases, 92 swarm cases, exact-source CI and df51 pilot deployment pass. Pilot Nostr is offered; website resolver is unconfigured. Real owner authentication and complete physical upload journeys remain open. Charges are reserved media payload, not an OS-wide meter |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-2dd offline production-only package, ten documented imports, rebuilt standalone ESM, installed CLI and separate-process verified native transfer/HTTP fallback pass; unpublished local assets do not close downloaded immutable-release acceptance |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact-df51 offline production-only package, eleven documented imports, durable account-ledger replay, rebuilt standalone ESM, installed CLI and separate-process verified native transfer/HTTP fallback pass; unpublished local assets do not close downloaded immutable-release acceptance |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Actual 2dd passed all nine required CI jobs attempt 1 (38525990386), fresh local consumer/ESM, guarded deployment and normal-TLS exact client/media attestation; independent EE permanent H1 retained. Current ordinary sharing and fourteen-role qualification remain RED; local assets unpublished and final release/production acceptance open |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Earlier dated Kit/OBS/private YouTube/Firefox evidence retained. Current 2dd ordinary sharing and fourteen-role R7/R9/R10/R11 remain RED; latest R11 had zero peer links/payload despite setup decode and resource pass. Safari 17 R2/R4/R5 bootstrap-only; iPhone USB R2 no evaluation/unknown lockdown close. Historical Safari/Pixel peer, background, two-hour contribution and cleanup unknowns remain; full physical/native input, hard NAT, 7200 s/22 churn, matched total-wire/billed cost and release gates remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Actual df51 passed all nine required CI jobs attempt 1 (38554223220), fresh local consumer/ESM, guarded deployment and normal-TLS exact client/media attestation; independent EE permanent H1 retained. Ordinary sharing and earlier fourteen-role qualification remain RED; local assets unpublished and final release/production acceptance open |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Earlier dated Kit/OBS/private YouTube/Firefox evidence retained. Current df51 ordinary sharing remains RED; native diagnostic is not ordinary qualification. Earlier fourteen-role R7/R9/R10/R11 remain RED. Safari 17 R2/R4/R5 bootstrap-only; iPhone USB R2 no evaluation/unknown lockdown close. Original cleanup unknowns and later absence are separate. Complete physical/native input, hard NAT, 7200 s/22 churn, matched wire/billed cost and release gates remain open |
 
 ## Evidence rules
 
