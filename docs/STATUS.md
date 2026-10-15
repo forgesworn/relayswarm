@@ -11,6 +11,27 @@ on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current correction checkpoint
 
+The broadcaster guardian now keeps a live wrapper as each worker's process-group
+leader. It commands that wrapper through its original IPC channel, avoiding
+TERM/KILL against a numeric group after the leader has been reaped. Unknown IPC
+or cleanup evidence retains the dirty fence. The four worker slots, 1,500 ms
+force timer and 5,000 ms drain deadline are unchanged; each occupied slot adds
+one Node wrapper.
+
+The reviewed source passed syntax for 142 modules and a combined publisher and
+broadcast-guard run: 305 passes, two platform skips and no failures or
+cancellations. Real-process cases cover parent termination, redirected
+descendants, exact 128 KiB output and inner exit code 19, followed by lease
+handoff. The 28.521 s run retained 27 resource samples, peaking at 1,293,959,168
+bytes/22 processes with at least 40% free memory. Worker/group/birth and probe
+reaping passed; detached test-group and scratch absence are outside that outer
+guard's proof. Full ingest/forward recovery and exact-head hosted checks remain
+pending. The [worker correction checkpoint](../spikes/results/worker-live-group-checks-20261015.json)
+records the exact source and retained evidence. Internet renewal, Safari,
+sustained operation, publication and deployment remain open.
+
+## Earlier watcher correction checkpoint
+
 The follow-up watcher correction filters named temporary/media-file events,
 covers all authorised playlist names and case aliases, and revalidates changed
 filename coverage within the unchanged three-pass bound. The native-client test
@@ -27,7 +48,11 @@ suite failures or cancellations. The outer run took 27.375 s within the original
 at least 47% free memory. Worker/group/birth and probe reaping passed. This does
 not establish detached-group/scratch absence, native Windows qualification or
 any remaining field gate. The [local correction checkpoint](../spikes/results/playlist-filter-and-native-fixture-checks-20261015.json)
-records the exact source and retained manifest; hosted qualification is pending.
+records the exact source and retained manifest. Exact
+`274cd4dd193047ddd606fa22cdfee2fe1b22e309` subsequently passed all nine required
+jobs in [CI 38659745211](https://github.com/forgesworn/relayswarm/actions/runs/38659745211)
+and fresh offline consumption of all 256 committed package members. That result
+predates the worker-wrapper correction above and does not qualify it.
 
 Exact `1b096a060abf5bc9bdadb320fa32243048522985` remains unreleased.
 [CI 38657013063](https://github.com/forgesworn/relayswarm/actions/runs/38657013063)

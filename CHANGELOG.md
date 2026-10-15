@@ -4,6 +4,9 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Keep a live process-group wrapper for broadcaster worker shutdown, using its
+  original private IPC channel instead of signalling a reaped leader's numeric
+  PID. Preserve output, inner exit status and the existing dirty recovery fence.
 - Added complete live-playlist blocking reload across compatible renditions,
   with bounded waits, disconnect/shutdown cleanup, directory replacement
   revalidation and snapshot-consistent HEAD/range responses.

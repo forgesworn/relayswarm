@@ -1,7 +1,8 @@
 import { constants } from "node:fs";
 import { open, lstat, rm } from "node:fs/promises";
 import { dirname } from "node:path";
-import { spawn } from "node:child_process";
+import { fork } from "node:child_process";
+import { controlWorkerGroup, stopWorkerGroups } from "./broadcast-worker-group.mjs";
 import { acquireExclusiveStateLease } from "./exclusive-state-lease.mjs";
 import { safeWorkerFailure, workerFailureReason } from "./broadcast-worker-diagnostics.mjs";
 
@@ -18,42 +19,16 @@ function reportFailure(stage = "stop-unknown", error) {
 const dirtyMarker = `${process.argv[2]}.dirty`;
 let preparedResolve; const prepared = new Promise((done) => { preparedResolve = done; });
 const send = (message, callback = () => {}) => { if (process.connected) process.send(message, callback); else callback(); };
-function kill(child, signal) {
-  if (!child.pid) return;
-  try { process.kill(-child.pid, signal); } catch (error) { if (error.code !== "ESRCH") throw error; }
-}
-async function reapGroup(child) {
-  if (!child.pid) return;
-  let phase = "worker-group-kill";
-  try {
-    kill(child, "SIGKILL");
-    const deadline = Date.now() + 5000;
-    while (true) {
-      phase = "worker-group-probe";
-      try { process.kill(-child.pid, 0); }
-      catch (error) { if (error.code === "ESRCH") return; throw error; }
-      if (Date.now() >= deadline) { phase = "worker-group-timeout"; throw new Error("Worker process group could not be proved stopped."); }
-      await new Promise((done) => setTimeout(done, 20));
-    }
-  } catch (error) { noteFailure(phase, error); throw error; }
-}
 function stop() {
   if (stopPromise) return stopPromise;
   stopping = true;
   stopPromise = (async () => {
     await prepared;
     const live = [...workers.values()];
-    try { for (const worker of live) kill(worker.child, "SIGTERM"); }
-    catch (error) { noteFailure("stop-worker-term", error); throw error; }
-    const force = setTimeout(() => {
-      try { for (const worker of live) kill(worker.child, "SIGKILL"); }
-      catch (error) { reportFailure("stop-worker-kill", error); throw error; }
-    }, 1500);
     let clean = false;
-    try { await Promise.all(live.map((worker) => worker.closed)); clean = true; }
+    try { await stopWorkerGroups(live); clean = true; }
     catch (error) { noteFailure("stop-await-workers", error); throw error; }
     finally {
-      clearTimeout(force);
       try {
         if (marked && clean) {
           try { await rm(dirtyMarker); }
@@ -88,32 +63,33 @@ process.on("SIGINT", () => { stop().catch(stopFailed); });
 process.on("message", (message) => {
   if (message?.type === "stop") { stop().catch(stopFailed); return; }
   if (stopping || !lease || !process.connected) return;
-  if (message?.type === "kill") { const worker = workers.get(message.id); if (worker && ["SIGTERM", "SIGKILL"].includes(message.signal)) kill(worker.child, message.signal); return; }
+  if (message?.type === "kill") { const worker = workers.get(message.id); if (worker && ["SIGTERM", "SIGKILL"].includes(message.signal)) worker.group.signal(message.signal); return; }
   if (message?.type !== "start" || typeof message.id !== "string" || workers.has(message.id) || workers.size >= 4 || typeof message.executable !== "string" || !Array.isArray(message.args) || message.args.some((arg) => typeof arg !== "string")) return;
-  const child = spawn(message.executable, message.args, { stdio: ["ignore", message.captureStdout ? "pipe" : "ignore", "pipe"], detached: true, windowsHide: true });
+  const child = fork(new URL("./broadcast-worker-group.mjs", import.meta.url), [], {
+    stdio: ["ignore", message.captureStdout ? "pipe" : "ignore", "pipe", "ipc"],
+    detached: true, windowsHide: true, execArgv: [],
+  });
+  const group = controlWorkerGroup(child, {
+    configure: { executable: message.executable, args: message.args },
+    onSpawn: () => send({ type: "spawn", id: message.id }),
+    onError: (code) => send({ type: "error", id: message.id, code }),
+  });
   let finish, refuse; const closed = new Promise((done, reject) => { finish = done; refuse = reject; });
   closed.catch(() => {});
-  workers.set(message.id, { child, closed });
+  workers.set(message.id, { child, group, closed });
   child.stdout?.on("data", (buffer) => {
     child.stdout.pause(); let pending = Math.ceil(buffer.length / 8192);
     for (let offset = 0; offset < buffer.length; offset += 8192) send({ type: "stdout", id: message.id, data: buffer.subarray(offset, offset + 8192).toString("base64") }, () => { if (--pending === 0) child.stdout.resume(); });
   });
   child.stderr.on("data", () => {}); // Credential-bearing errors stay private.
-  child.once("spawn", () => send({ type: "spawn", id: message.id }));
-  child.once("error", (error) => send({ type: "error", id: message.id, code: ["ENOENT", "EACCES"].includes(error.code) ? error.code : "EWORKER" }));
-  child.once("close", async (code) => {
-    let phase = "worker-group-kill";
+  group.closed.then(({ code }) => {
     try {
-      // A leader may exit while a redirected descendant remains. Its process
-      // group remains ours until every member has been killed and reaped.
-      await reapGroup(child);
-      phase = "worker-close-notify";
       workers.delete(message.id); send({ type: "close", id: message.id, code }); finish();
-    } catch (error) {
-      noteFailure(phase, error);
-      refuse(error); reportFailure();
-      await stop().catch((error) => { reportFailure("stop-unknown", error); process.exitCode = 1; if (process.connected) process.disconnect(); });
-    }
+    } catch (error) { refuse(error); reportFailure("worker-close-notify", error); }
+  }, async (error) => {
+    noteFailure("worker-group-probe", error);
+    refuse(error); reportFailure();
+    await stop().catch((error) => { reportFailure("stop-unknown", error); process.exitCode = 1; if (process.connected) process.disconnect(); });
   });
 });
 let startupPhase = "lease-acquire";

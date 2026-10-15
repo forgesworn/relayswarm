@@ -1,0 +1,50 @@
+{
+  "v": 1,
+  "verdict": "PASS_LOCAL_WORKER_GROUP_CORRECTION_ONLY",
+  "sourceBase": "274cd4dd193047ddd606fa22cdfee2fe1b22e309",
+  "uncommittedDuringExecution": true,
+  "syntaxModules": 142,
+  "combinedPublisherAndBroadcastGuards": {
+    "tests": 307,
+    "pass": 305,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 2
+  },
+  "outerElapsedMs": 28521,
+  "resourceSampleCount": 27,
+  "sampledRSSMaximum": 1293959168,
+  "sampledProcessMaximum": 22,
+  "minimumFreePercent": 40,
+  "cleanup": {
+    "workerReaped": true,
+    "groupAbsent": true,
+    "leaderBirthAbsent": true,
+    "allAttemptedResourceProbeChildrenReaped": true,
+    "allAcceptedResourceProbeChildrenReaped": true
+  },
+  "guardWorkSeconds": 40,
+  "guardWholeSeconds": 60,
+  "sourcePinsSHA256": "e0e282bf28491882143ca6d23ec46e83e56430d131e68cdf27b9e4aa3870cae8",
+  "sourcePinsRecords": 357,
+  "evidenceManifestSHA256": "f97f8d72213c5e80270b3ba477fd468d134807858a989bad8b9b31bb2c2a1e00",
+  "evidencePath": "artifacts/worker-live-group-validation-20261015",
+  "source": [
+    {
+      "path": "src/broadcast-worker-guardian.mjs",
+      "sha256": "442754ee3c13ca008302f704e6f8ca8803485cdcbbd9af091cc713e67473f9e9"
+    },
+    {
+      "path": "src/broadcast-worker-group.mjs",
+      "sha256": "28a59200c644acb5b30a4e7f75c722bd36699ac7c10ef3236564c97aa30e21f7"
+    },
+    {
+      "path": "test/exclusive-state-lease.test.mjs",
+      "sha256": "93324162662fc0d68d1b2d2fb7aadd7e6297d7a2e542eb16e2348e800360fe6c"
+    }
+  ],
+  "scope": "Actual parent-crash and descendant tests plus deterministic IPC/group lifecycle cases. Outer sampled descendant-tree resource and group/birth proof excludes escaped or reparented test processes and complete scratch absence. Full ingest/forward integration pending hosted CI. Internet renewal, real-device Safari, sustained acceptance, publication and deployment remain open.",
+  "hostedQualification": "pending",
+  "published": false,
+  "deployed": false
+}

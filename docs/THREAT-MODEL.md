@@ -50,6 +50,16 @@ unrelated siblings and named metadata events; missing filenames or unknown
 event types fail closed. These limits do not
 establish Internet capacity or hard cancellation of kernel I/O.
 
+Broadcaster workers use a detached wrapper that remains their process-group
+leader until draining finishes. Only that executing wrapper signals its own
+group; the guardian sends commands over the original private IPC channel and
+uses numeric group IDs only for absence probes. Clean shutdown requires a drain
+witness, closed output pipes, settled IPC sends and observed group absence within
+the existing deadline. Missing evidence retains the dirty recovery fence.
+Guardian death and whole-host loss still require operator recovery. There are
+four logical worker slots and one additional Node wrapper per occupied slot;
+local sampled resource checks do not establish production capacity.
+
 The optional [account allowance](ACCOUNT-UPLOAD-BUDGET.md) introduces a separate
 private trust boundary: its service learns a stable Nostr identity or the host's
 authenticated website subject and can correlate participating devices. Explicit
