@@ -1458,10 +1458,13 @@ class HlsSwarm {
       } catch (error) { this.#noteError("admit", error); }
       if (this.stopped || this.admissionChecks.get(pubkey) !== check) return false;
       if (ok) {
-        this.admitted.set(pubkey, { ticket });
+        const candidateTicket = this.admitted.get(pubkey)?.candidateTicket;
+        this.admitted.set(pubkey, { ticket, ...(validTicket(candidateTicket) && candidateTicket !== ticket ? { candidateTicket } : {}) });
         if (this.admitted.size > 256) this.admitted.delete(this.admitted.keys().next().value);
       } else {
-        this.admitted.delete(pubkey);
+        const remembered = this.admitted.get(pubkey);
+        if (remembered?.ticket === ticket) this.admitted.delete(pubkey);
+        else if (remembered?.candidateTicket === ticket) delete remembered.candidateTicket;
         this.counters.admitRefused += 1;
       }
       return ok;
@@ -1488,6 +1491,9 @@ class HlsSwarm {
     if (!payload.transports.some((transport) => transport.type === TRANSPORT)) return;
     const active = this.links.has(from) || this.dials.has(from);
     const admitted = this.admitted.get(from);
+    // Keep one unvalidated replacement on an existing entry. Recording the
+    // latest presence before eligibility checks also supersedes older candidates.
+    if (admitted && validTicket(payload.ticket) && payload.ticket !== admitted.ticket) admitted.candidateTicket = payload.ticket;
     const knownCredential = !this.#gated() || admitted && admitted.ticket === payload.ticket;
     if (active && knownCredential) {
       if (payload.open !== null) this.#rememberOpen(from, payload.open);
@@ -1629,7 +1635,7 @@ class HlsSwarm {
     if (this.stopped || this.links.has(pubkey) || this.dials.has(pubkey) || this.dialChecks.has(pubkey) || this.#coolingDown(pubkey) || !this.#hasCapacity() || !this.#hasOutgoingSlot()) return;
     this.dialChecks.add(pubkey);
     try {
-      if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.ticket))) return;
+      if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket))) return;
     } finally { this.dialChecks.delete(pubkey); }
     if (this.stopped || this.links.has(pubkey) || this.dials.has(pubkey) || !this.#hasCapacity()
       || [...this.dials.values()].filter((dial) => dial.outgoing).length >= this.options.maxDialsInFlight) return;
@@ -1649,7 +1655,7 @@ class HlsSwarm {
         if (!this.#currentNegotiation(dial, negotiation)) return;
         await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "offer", outcome); });
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.ticket))) {
+        if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket))) {
           if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
           return;
         }

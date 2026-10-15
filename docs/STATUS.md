@@ -12,6 +12,74 @@ on `main` do not change that tag or its immutable downloaded assets.
 ## Current delivery checkpoint
 
 The experimental pilot runs exact
+`a416f7e1ee2d73acc6535b313baac018f2baab8a`. All nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38775128822)
+and fresh offline consumption of 269 exact-source package members passed.
+The installed CLI, eleven imports, durable ledger and native/HTTP fallback pass.
+The consumer resolves the declared production dependency ranges; the separate
+standalone ESM is bound to the root lock. Normal HTTPS attestation matched the
+761,854-byte client, SHA-256
+`570f12f862e9d8609c8d8f207abbc5a22346f4ed7fde0d099fc256244507d671`,
+from image
+`sha256:cf44c19870338976f0a0bfd6e1bc22ca177f54ca6b6d4418bbafc5755349bcda`.
+Relay-only ICE, TLS/TCP TURN selection, admission 32 and Nostr account budgets
+are configured; reporting and forwarding are off. Private state, permanent
+leases and the independent EE proxy survived deployment. Verification-source
+cleanup passed all five guards, retaining actual exit **255**.
+
+The selected account scope is **Nostr plus an authenticated host-supplied
+resolver API**. No named external website or human-wallet integration is a
+required feature; the Nostr-only pilot is valid. The public cross-Mac account
+API trial passed the shared cap, overlapping client reservations, replay,
+conflict, reopen and grant fencing with a disposable owner. Client overlap
+does not prove simultaneous server arrival. Its final limit was zero/spent 100;
+the disposable ledger row is intentionally retained.
+
+The focused LOW browser lifecycle passed all seven component gates in
+**74.412 s**: one verified low fragment/213,756 bytes and a real M1 production
+reservation; actual reload with a new page key, retained local/shared spend and
+upload still off after reconnect; fresh trusted Apply followed by a new
+206,424-byte reservation; M4 active serving-state Disconnect; and LAST UI
+10 MB/reset:false Settings with no subsequent fixture resume. All four contexts,
+exchanges, CDP, endpoint profiles and source cleanup passed. The final real
+zero-cap/logout retained spent 1,901,244 and cleared owned key buffers.
+This is not high-quality delivery, identified in-flight cancellation or the
+original both-quality/exhaustion acceptance. That original 3 MB trial remains
+RED: both donors accepted serving, but no high fragment completed verification
+before natural shared-cap refusal. Its later lifecycle gates were unmeasured.
+
+Native iOS 26.5 Simulator Safari passed trusted Start, Home/return and Resume,
+with advancing video clock/pixels and frame deltas 59/61, zero fatal/native/page
+errors and upload/report consents off. Cleanup and all 38 pre-existing Simulator
+states passed independent review. Return was still playing (`paused: false`),
+so the physical stopped-video fault was **not reproduced**. Physical-device,
+audible-audio, public-peer and enabled-upload-withdrawal acceptance remain separate.
+
+The original 4+10 R10 capacity attempt remains RED at 33 observed processes
+against M1's unchanged cap of 32, before measurement; its original M4 receipt-read
+failure and later fenced recovery remain separate. The new 3+11 R12 attempt
+started all fourteen roles but measured only **97.691 s** before an observed
+runtime admission refusal. Resource/shared-reader gates and all owned cleanup
+passed; the underlying cause is unproved. The source now retains a bounded
+replacement admission ticket and validates it before a new dial, preserving
+later candidates across earlier validation. The original source failed the
+maintained cooldown-renewal regression; the corrected source passed all 12 focused
+regressions and all 137 swarm tests. This local correction has no new CI or
+deployment proof and has not been established as the R12 cause. No matching
+300 s or 7,200 s/22-churn acceptance exists. Historical 533 short public/Internet passes below retain
+their exact revision and do not become new a416 cohorts.
+
+See the [current checkpoint record](../spikes/results/a416f7e-current-delivery-checkpoint-20261015.json)
+for exact evidence hashes. The full [P01–P12 requirements](PRODUCTION-READINESS.md#delivery-checklist)
+and 37-review-item scope remain open: complete both-quality/shared-budget and
+physical/browser coverage, difficult networks, natural expiry, matching capacity
+and sustained/churn operation, matched wire/cost benefit and immutable release
+acceptance. PR 8 remains open; v0.1.0 is the published prerelease and 0.2.0 the
+source candidate. No completed separate 37-row ledger is claimed.
+
+## Historical 5334091 delivery checkpoint
+
+The experimental pilot runs exact
 `53340911d3bb973fb392c1bad1f8f72aec2aa8bd`. All nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38741613596)
 and fresh offline consumption of 267 exact-source package members passed.

@@ -7,6 +7,37 @@ An entry remains open until the evidence described below exists.
 
 ## Current deployed pilot: 15 October 2026
 
+Exact `a416f7e` is deployed: nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38775128822),
+fresh 269-member consumption and normal HTTPS attestation pass. Private state,
+permanent leases and the EE proxy were preserved; owned verification-source
+cleanup passed all five guards with actual exit 255. Deployment is separate
+from field, capacity and release acceptance.
+
+Nostr plus an authenticated host-supplied resolver API is the selected account
+scope; no named website or human wallet is required. The public cross-Mac API
+trial passed its shared-cap/fencing checks. The focused LOW browser component
+passed seven gates in 74.412 s, including verified low media, real reservations,
+reload/new-key/spend retention, reconnect with upload off, fresh consent,
+serving-state Disconnect and LAST 10 MB Settings without fixture resume.
+The original both-quality/exhaustion trial remains RED with no high verified
+completion; the component does not replace it.
+
+Native iOS 26.5 Simulator Start/Home/return/Resume passed clock/pixels/frame59/61,
+zero media/page errors, consents off and cleanup. Return was still playing, so
+the physical stopped-video fault remains unreproduced. Original 4+10 R10 cap33
+RED remains; new 3+11 R12 measured 97.691 s before runtime admission refusal,
+with healthy resource/reader gates and all cleanup. Cause remains unknown;
+the remembered-admission source correction passed 12 focused regressions and
+137 swarm tests after the original-source regression RED. New CI/deployment and
+field repair remain unproved.
+No matching 300 s/7,200 s/22-churn, natural expiry, physical or matched-cost acceptance
+exists. See [current status](STATUS.md#current-delivery-checkpoint) and the
+[checkpoint record](../spikes/results/a416f7e-current-delivery-checkpoint-20261015.json).
+The full P01–P12/37-review scope and final release remain open.
+
+## Historical 5334091 checkpoint
+
 The current pilot is exact `5334091`, with all nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38741613596),
 267-member fresh consumption and guarded deployment passing. The ordinary
@@ -64,9 +95,9 @@ field evidence, fourteen-role capacity, 7,200 s/22 churn, matched wire/cost and
 immutable release/download acceptance. A separate completed 37-row ledger is
 not claimed. v0.1.0 remains the published release; 0.2.0 is a source candidate.
 
-All checkpoint sections before the delivery checklist below are historical.
+The remaining checkpoint sections before the delivery checklist are historical.
 Their deployment and pending-work statements belong to their named source/date;
-they do not override this current summary or reclassify retained REDs.
+they do not override the current a416 summary or reclassify retained REDs.
 
 ## Historical complete-playlist blocking reload candidate
 
@@ -576,18 +607,18 @@ retains its narrower scope. Every requirement remains open for full acceptance.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Exact 533 CI and the 60.034 s ordinary public check pass playback, contribution and low/high peer delivery: two fragments/868,936 bytes. Sustained benefit is unproved; the latest fourteen-role attempt stopped at 33 against the 32-process cap before measurement. The 300 s qualifier, two-hour/churn and matched benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Exact a416 CI and the focused LOW account component prove scoped low peer payload; historical 533 ordinary 60.034 s low/high PASS remains separate. New 3+11 R12 started all 14 roles but measured only 97.691 s before runtime admission refusal; cause unknown, resources/cleanup healthy. Original 4+10 R10 cap-33 RED retained. Matching 300 s, two-hour/churn and matched benefit remain open |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
-| P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Adversarial and exact 3e CI evidence retained. Existing per-address quota CLI (1–120/default 12) is deployed at 32 with relay/TLS-TCP selection; proxy viewers can share that address. This configuration does not prove fourteen-role capacity. Other quotas/expiry retain defaults |
+| P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Exact a416 adversarial/CI evidence retained; per-address CLI 1–120/default 12 is deployed at 32 with relay/TLS-TCP. R12 observed runtime admission refusal, cause unproved. The remembered-admission source correction passed 12 focused regressions and 137 swarm tests after an original-source regression RED; new CI/deployment, field repair and fourteen-role qualification remain unproved. Other quotas/expiry unchanged |
 | P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Deployed 768 ordinary-Chrome trusted opt-in, real process restart, duplicate handling and natural five-minute expiry pass; reporting-off/policy/lease preservation and source cleanup pass; first deployed 219 timeout remains separately retained; backend component evidence does not replace new-client opt-in/reporting validation |
-| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Nostr/website private ledger and controlled Chrome evidence retained. Deployed 533 preserves account state and offers Nostr. The cross-Mac diagnostic refused a valid 30 s challenge at 30.016 s local remaining; its issuer-clock correction has 42 focused passes/one platform skip, field acceptance pending. Website resolver, real owner and physical upload enforcement remain open |
+| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Nostr and authenticated host-supplied account API supported; Nostr-only pilot valid, no named website/human wallet required. Public cross-Mac shared-cap API PASS and focused LOW lifecycle PASS (74.412 s/seven gates) cover low verified media/reservations, reload/new key/spend, reconnect OFF/fresh consent and state withdrawal. Original 3 MB both-quality/exhaustion trial remains RED with high delivery unverified. Complete shared-media/physical acceptance remains open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact 533 fresh 267-member package, eleven imports, durable ledger replay, installed CLI, independent-process native/fallback and rebuilt ESM pass. Immutable assets remain unpublished; downloaded-release acceptance stays open |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact a416 fresh 269-member package, eleven imports, ledger replay, installed CLI and independent native/HTTP fallback pass. Consumer production semver lock differs from the root lock; separate standalone ESM is root-lock-bound. Immutable assets remain unpublished and downloaded-release acceptance stays open |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact 533 nine-job CI, 267-member consumption, guarded deployment/HTTPS attestation and source cleanup pass. New account-clock/playback-recovery corrections need final CI and deployment. PR 8, immutable release/download and final production gates remain open |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Exact 533 forced-early genuine Internet TURN (90.043 s) and ordinary public (60.034 s) short checks pass with separate scope. Latest capacity refusal and cross-Mac clock failure retained. Physical Safari, hard NAT, natural expiry, shared upload enforcement, 300 s/7,200 s/22-churn, server quotas, wire/cost and immutable release gates remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact a416 nine-job CI, 269-member consumption, guarded deployment/normal HTTPS and five-guard source cleanup (actual 255) pass; private publisher/account state, permanent leases and independent EE proxy preserved. The locally tested admission correction has no new CI/deployment proof. PR 8/0.2.0 publication, immutable release/download and final production gates remain open |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Actual a416 native iOS 26.5 Simulator Home/return/Resume passes clock/pixels/frame 59/61, zero errors, consents OFF and cleanup; returned paused:false leaves physical stopped fault unreproduced. API and focused LOW browser component PASS have separate scope; full R3/high/exhaustion and R12 capacity remain RED. Physical/browser breadth, hard NAT, natural expiry, 300 s/two-hour/churn, quotas/wire cost and release remain open |
 
 ## Evidence rules
 

@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 import { PeerLink } from "../src/browser/peer-link.mjs";
 import { startLocalRelay } from "./support/local-relay.mjs";
+import { RelayPool, RelaySwarmSession } from "../src/relay-session.mjs";
 import { PeerSelection } from "../src/browser/peer-selection.mjs";
 
 class FakePeerConnection {
@@ -346,4 +347,193 @@ test("ABR-sized objects avoid measured peers that cannot meet the playback deadl
   assert.equal(policy.select([smallFast, largeFast], KEY, new Set(), 100_000, 100), largeFast);
   assert.equal(policy.select([smallFast], KEY, new Set(), 100_000, 100), null);
   assert.equal(policy.select([cold, largeFast], KEY, new Set(), 100_000, 90), largeFast, "short playback budgets prefer observed delivery over exploration");
+});
+
+// These regressions exercise the real swarm, signed presence and encrypted
+// signalling over the existing local relay. Only native WebRTC is replaced.
+async function admissionEventually(predicate, message, timeoutMs = 5_000) {
+  const end = Date.now() + timeoutMs;
+  while (!predicate()) {
+    assert.ok(Date.now() < end, message);
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+}
+function admissionDeferred() {
+  const state = { settled: false };
+  state.promise = new Promise(done => { state.resolve = value => { state.settled = true; done(value); }; });
+  return state;
+}
+async function rememberedAdmissionFixture(t, { phase = null, admit, ...options } = {}) {
+  const relay = await startLocalRelay(), connections = [], offers = [], trace = [];
+  const entered = admissionDeferred(), release = admissionDeferred();
+  class AdmissionChannel extends EventTarget {
+    readyState = "connecting";
+    close() { this.readyState = "closed"; }
+  }
+  class AdmissionConnection extends EventTarget {
+    iceGatheringState = phase === "gather" ? "gathering" : "complete";
+    iceConnectionState = "new";
+    connectionState = "new";
+    signalingState = "stable";
+    localDescription = null;
+    closes = 0;
+    constructor() { super(); connections.push(this); trace.push("allocate"); }
+    addEventListener(name, listener, options) {
+      super.addEventListener(name, listener, options);
+      // This is the actual gathered() listener, installed after local SDP.
+      if (phase === "gather" && name === "icegatheringstatechange" && this.localDescription) entered.resolve();
+    }
+    createDataChannel() { this.channel = new AdmissionChannel(); return this.channel; }
+    async createOffer() {
+      if (phase === "createOffer") { entered.resolve(); await release.promise; }
+      return { type: "offer", sdp: "v=0\r\na=fixture-offer\r\n" };
+    }
+    async setLocalDescription(description) {
+      if (phase === "setLocalDescription") { entered.resolve(); await release.promise; }
+      this.localDescription = description; this.signalingState = "have-local-offer";
+    }
+    close() { this.closes++; this.connectionState = "closed"; }
+  }
+  const swarmId = "remembered-admission-fixture";
+  const swarm = createHlsSwarm({ swarmId, relays: [relay.url], ticket: "own-ticket", shadowSampleRate: 0,
+    RTCPeerConnectionImpl: AdmissionConnection, ...options,
+    admit: async (_pubkey, ticket, context) => {
+      trace.push(`check:${ticket}:start`);
+      const allowed = await admit(ticket, context, connections.length);
+      trace.push(`check:${ticket}:${allowed ? "accepted" : "refused"}`);
+      return allowed;
+    } });
+  const pool = new RelayPool([relay.url]);
+  const peer = new RelaySwarmSession({ pool, swarmId });
+  const witness = new RelaySwarmSession({ pool, swarmId });
+  const seen = new Set(); let announcement = 0;
+  t.after(async () => {
+    swarm.stop(); release.resolve(); peer.close(); witness.close(); pool.close(); await relay.close();
+  });
+  swarm.attach({ config: { loader: FakeLoader } });
+  await pool.connect(); peer.start(); witness.start();
+  await admissionEventually(() => swarm.metrics().pubkey, "swarm did not start");
+  peer.onSignal(({ payload }) => {
+    if (payload.type === "offer") { offers.push(payload); trace.push("offer"); }
+  });
+  witness.onPresence(({ from, payload }) => { if (from === peer.pubkey) seen.add(payload.ticket); });
+  const announce = ticket => peer.announcePresence({ role: "viewer", ticket, open: true,
+    transports: [{ type: "webrtc", publicKey: peer.pubkey }],
+    have: [(++announcement).toString(16).padStart(64, "0")] });
+  return { swarm, peer, trace, offers, connections, seen, announce, entered,
+    release() {
+      release.resolve();
+      if (phase === "gather") {
+        const pc = connections[0]; pc.iceGatheringState = "complete";
+        pc.dispatchEvent(new Event("icegatheringstatechange"));
+      }
+    } };
+}
+
+test("remembered admission checks a blocked renewal before allocating the retry PC", async t => {
+  for (const accepted of [true, false]) await t.test(accepted ? "renewal accepted" : "renewal refused", async t => {
+    let currentAllowed = true;
+    const checks = [];
+    const f = await rememberedAdmissionFixture(t, { retryFloorMs: 1_000, retryCeilingMs: 1_000, maxRetriesPerPeer: 1,
+      admit(ticket, _context, allocated) {
+        checks.push({ ticket, allocated });
+        return ticket === "B" ? accepted : ticket === "A" && currentAllowed;
+      } });
+    f.announce("A");
+    await admissionEventually(() => f.offers.length === 1, "initial A offer was not sent");
+    f.peer.sendSignal(f.swarm.metrics().pubkey, { type: "reject", transport: "webrtc",
+      requestId: f.offers[0].requestId, payload: { retryAfterMs: 1_000 } });
+    await admissionEventually(() => f.swarm.metrics().peers.dialsRejected === 1, "initial dial was not rejected");
+    currentAllowed = false;
+    const before = checks.length;
+    f.announce("B");
+    await admissionEventually(() => f.seen.has("B"), "signed renewed presence did not reach the local relay witness");
+    assert.equal(checks.length, before, "an inactive cooling peer must not trigger a presence admission request");
+    assert.equal(f.connections.length, 1);
+    await admissionEventually(() => checks.some(row => row.ticket === "B"), "scheduled retry did not check the remembered renewal");
+    assert.deepEqual(checks[before], { ticket: "B", allocated: 1 }, "renewal must be checked before a replacement PC exists");
+    if (accepted) {
+      await admissionEventually(() => f.offers.length === 2, "authorised renewal did not reach an outgoing offer");
+      assert.equal(f.connections.length, 2);
+      assert.ok(f.trace.lastIndexOf("check:B:accepted") < f.trace.lastIndexOf("offer"));
+    } else {
+      await admissionEventually(() => f.swarm.metrics().peers.admitRefused === 1, "renewal refusal was not recorded");
+      assert.equal(f.connections.length, 1, "a refused candidate cannot allocate a retry PC");
+      assert.equal(f.offers.length, 1, "a refused candidate cannot disclose another SDP");
+    }
+    assert.equal(f.connections[0].closes, 1);
+  });
+});
+
+test("remembered admission lets a later eligible presence supersede a blocked renewal", async t => {
+  const checks = [];
+  const f = await rememberedAdmissionFixture(t, { retryFloorMs: 1_000, retryCeilingMs: 1_000, maxRetriesPerPeer: 0,
+    admit(ticket) { checks.push(ticket); return ticket === "A" || ticket === "C"; } });
+  f.announce("A");
+  await admissionEventually(() => f.offers.length === 1, "initial A offer was not sent");
+  f.peer.sendSignal(f.swarm.metrics().pubkey, { type: "reject", transport: "webrtc",
+    requestId: f.offers[0].requestId, payload: { retryAfterMs: 1_000 } });
+  await admissionEventually(() => f.swarm.metrics().peers.dialsRejected === 1, "initial dial was not rejected");
+  const before = checks.length;
+  f.announce("B");
+  await admissionEventually(() => f.seen.has("B"), "blocked renewal did not reach the relay witness");
+  assert.equal(checks.length, before, "cooldown must not trigger an eager admission check");
+  await new Promise(resolve => setTimeout(resolve, 1_050));
+  f.announce("C");
+  await admissionEventually(() => f.offers.length === 2, "the later authorised presence did not permit another offer");
+  assert.ok(checks.slice(before).length >= 3, "C is checked on presence, before allocation and before SDP");
+  assert.ok(checks.slice(before).every(ticket => ticket === "C"), "a superseded candidate must not replace the latest verified ticket");
+  assert.equal(f.connections.length, 2);
+  assert.equal(f.swarm.metrics().peers.admitRefused, 0);
+});
+
+test("remembered admission verifies a renewal arriving during each native offer phase before SDP", async t => {
+  for (const phase of ["createOffer", "setLocalDescription", "gather"]) await t.test(phase, async t => {
+    const renewed = admissionDeferred(); let enteredRenewal = false;
+    const f = await rememberedAdmissionFixture(t, { phase,
+      admit(ticket) { if (ticket === "B") { enteredRenewal = true; return renewed.promise; } return ticket === "A"; } });
+    t.after(() => renewed.resolve(false));
+    f.announce("A");
+    await admissionEventually(() => f.connections.length === 1, "initial PC was not allocated");
+    await admissionEventually(() => f.entered.settled, "native offer phase was not reached");
+    f.announce("B");
+    await admissionEventually(() => enteredRenewal, "changed presence was not checked during the native operation");
+    f.release();
+    // Drain the released native continuation while its actual host check is
+    // still pending. No fake time, private swarm state or native PC is used.
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.offers.length, 0);
+    assert.equal(f.swarm.metrics().relays.signalsSent, 0);
+    renewed.resolve(true);
+    await admissionEventually(() => f.offers.length === 1, "verified renewal did not permit the offer");
+    assert.equal(f.connections.length, 1, "renewal must not replace the pending native connection");
+    assert.ok(f.trace.lastIndexOf("check:B:accepted") < f.trace.indexOf("offer"));
+    assert.equal(f.swarm.metrics().peers.admitRefused, 0);
+  });
+});
+
+test("remembered admission refuses both a rejected renewal and revoked current ticket before SDP", async t => {
+  for (const phase of ["createOffer", "setLocalDescription", "gather"]) await t.test(phase, async t => {
+    let currentAllowed = true;
+    const f = await rememberedAdmissionFixture(t, { phase,
+      admit(ticket) { return ticket === "A" && currentAllowed; } });
+    f.announce("A");
+    await admissionEventually(() => f.connections.length === 1, "initial PC was not allocated");
+    await admissionEventually(() => f.entered.settled, "native offer phase was not reached");
+    currentAllowed = false;
+    f.announce("B");
+    await admissionEventually(() => f.swarm.metrics().peers.admitRefused === 1, "invalid renewal was not refused");
+    assert.equal(f.connections.length, 1);
+    assert.equal(f.offers.length, 0);
+    f.release();
+    await admissionEventually(() => f.swarm.metrics().peers.dialsFailed === 1, "revoked current authority did not fail the pending dial");
+    assert.ok(f.trace.includes("check:B:refused"));
+    assert.ok(f.trace.includes("check:A:refused"), "rejecting an untrusted renewal cannot turn stale A into approval");
+    assert.equal(f.swarm.metrics().peers.admitRefused, 2);
+    assert.equal(f.swarm.metrics().relays.signalsSent, 0);
+    assert.equal(f.offers.length, 0);
+    assert.equal(f.connections.length, 1);
+    assert.equal(f.connections[0].closes, 1);
+    assert.equal(f.swarm.metrics().peers.connected, 0);
+  });
 });
