@@ -184,9 +184,13 @@ presentation-wide: unsupported parts, delta, ended or mixed presentations do
 not receive a partial blocking-reload promise. Raw pipeline files and media
 bytes are unchanged.
 
-On Windows, shallow watches of immediate parents also observe playlist-directory
-moves and ignore unrelated siblings and named metadata events. Missing filenames
-or unknown event types fail closed. If a presentation requires more than
+Direct directory watches cover every currently authorised playlist basename,
+including the master and other renditions, and the directory's own rename.
+Named temporary files and media segments do not invalidate playlist snapshots.
+Changes to filename coverage require a fresh read within the existing three
+revalidation limit. On Windows, shallow watches of immediate parents also observe
+playlist-directory moves and ignore unrelated siblings and named metadata events.
+Missing filenames or unknown event types fail closed. If a presentation requires more than
 41 watched directories, it retains its original bytes without added blocking
 capability. Arbitrary ancestor-tree moves are outside this coverage.
 

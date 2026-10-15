@@ -43,8 +43,11 @@ request limit. Disconnect/shutdown releases waiters and shared directory
 watchers; media bytes, signing scope and peer deadlines are unchanged. Required
 coverage is limited to 41 directories per request, including shallow Windows
 parent watches; excess coverage retains ordinary HTTP without added capability.
-Parent-only watches ignore unrelated siblings and named metadata events;
-missing filenames or unknown event types fail closed. These limits do not
+Direct watches cover all authorised playlist basenames and directory renames;
+unrelated named media/temporary-file events are ignored. Filename coverage changes
+consume the existing bounded revalidation budget. Parent-only watches ignore
+unrelated siblings and named metadata events; missing filenames or unknown
+event types fail closed. These limits do not
 establish Internet capacity or hard cancellation of kernel I/O.
 
 The optional [account allowance](ACCOUNT-UPLOAD-BUDGET.md) introduces a separate

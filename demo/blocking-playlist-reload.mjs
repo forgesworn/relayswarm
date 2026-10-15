@@ -94,30 +94,41 @@ export function createBlockingPlaylistReload({ publisher, enabled = true, platfo
   }
   function coverage(files) {
     const result = new Map();
-    const entry = directory => { if (!result.has(directory)) result.set(directory, { direct: false, children: new Set() }); return result.get(directory); };
-    for (const file of files) entry(dirname(file)).direct = true;
+    const entry = directory => { if (!result.has(directory)) result.set(directory, { direct: false, files: new Set(), children: new Set() }); return result.get(directory); };
+    for (const file of files) {
+      const subscription = entry(dirname(file)); subscription.direct = true;
+      subscription.files.add(eventName(basename(file)));
+    }
     if (platform === "win32") for (const [directory] of [...result]) {
       const parent = dirname(directory);
-      if (parent !== directory) entry(parent).children.add(basename(directory).toLowerCase());
+      if (parent !== directory) entry(parent).children.add(eventName(basename(directory)));
     }
     return result;
   }
+  // Notification matching only: case-insensitive filesystems also exist on
+  // macOS. Extra invalidation on a case-sensitive filesystem is conservative.
+  function eventName(value) { return value.toLowerCase(); }
+  function sameSubscription(left, right) {
+    return left?.direct === right.direct && ["files", "children"].every(key => left[key].size === right[key].size
+      && [...right[key]].every(value => left[key].has(value)));
+  }
   function notify(entry, event, filename) {
     const subscriptions = [...entry.subscriptions.values()];
-    if (subscriptions.some(value => value.direct)) { wake(); return; }
-    // A Windows shallow ancestor sees child-directory moves even when the
-    // directory's own watcher does not. Ignore unrelated sibling activity.
-    if (typeof filename !== "string" || !filename.length || filename.length > 4096) { entry.failed = true; counts.watchErrors++; wake(); return; }
-    // This shallow ancestor covers directory identity, not file contents.
-    // Windows modification/access events are redundant with the direct watch.
-    if (event === "change") return;
-    if (event !== "rename") { entry.failed = true; counts.watchErrors++; wake(); return; }
-    if (subscriptions.some(value => value.children.has(filename.toLowerCase()))) wake();
+    if (typeof filename !== "string" || !filename.length || filename.length > 4096 || !["change", "rename"].includes(event)) {
+      entry.failed = true; counts.watchErrors++; wake(); return;
+    }
+    const name = eventName(filename);
+    // Temporary files and segments are not playlist-authority changes. Every
+    // current master/rendition filename is covered, including shared roles.
+    const file = subscriptions.some(value => value.files.has(name));
+    const ownRename = event === "rename" && (name === eventName(basename(entry.directory)) || name === eventName(entry.directory));
+    const directory = event === "rename" && subscriptions.some(value => value.children.has(name) || value.direct && ownRename);
+    if (file || directory) wake();
   }
   function acquire(directory, token, subscription) {
     let entry = directories.get(directory);
     if (!entry) {
-      entry = { users: 0, failed: false, watcher: null, identity: null, rearming: null, subscriptions: new Map() };
+      entry = { directory, users: 0, failed: false, watcher: null, identity: null, rearming: null, subscriptions: new Map() };
       directories.set(directory, entry);
     }
     entry.users++; entry.subscriptions.set(token, subscription); return entry;
@@ -190,15 +201,19 @@ export function createBlockingPlaylistReload({ publisher, enabled = true, platfo
         // Unsupported Windows coverage keeps valid HTTP bytes, without a claim.
         if (wanted.size > 41) return snapshot.bytes;
         const pathsChanged = [...wanted].some(directory => !held.has(directory)) || [...held.keys()].some(directory => !wanted.has(directory));
+        let subscriptionsChanged = false;
         for (const directory of wanted) {
           if (!held.has(directory)) held.set(directory, acquire(directory, token, scopes.get(directory)));
-          else held.get(directory).subscriptions.set(token, scopes.get(directory));
+          else {
+            if (!sameSubscription(held.get(directory).subscriptions.get(token), scopes.get(directory))) subscriptionsChanged = true;
+            held.get(directory).subscriptions.set(token, scopes.get(directory));
+          }
         }
         for (const directory of held.keys()) if (!wanted.has(directory)) { release(directory, token); held.delete(directory); }
         let rearmed = false;
         for (const [directory, entry] of held) if (await ensureWatch(directory, entry)) rearmed = true;
         check(signal);
-        if (pathsChanged || rearmed || revision !== readRevision) {
+        if (pathsChanged || subscriptionsChanged || rearmed || revision !== readRevision) {
           if (++changes > 3) throw unavailable();
           // Recheck both directory identity and catalogue generation before any
           // return, including an already-ready response after a watch event.

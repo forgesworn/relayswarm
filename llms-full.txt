@@ -647,6 +647,8 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 - Added complete live-playlist blocking reload across compatible renditions,
   with bounded waits, disconnect/shutdown cleanup, directory replacement
   revalidation and snapshot-consistent HEAD/range responses.
+- Filter unrelated named file events from playlist reload watches while retaining
+  authorisation coverage, directory replacement checks and bounded revalidation.
 - Reuse the pending browser connection when simultaneous offers require it to
   yield, with fresh admission checks, fenced callbacks and its original dial
   deadline. Native browser and Internet qualification remain separate gates.
@@ -1114,9 +1116,13 @@ presentation-wide: unsupported parts, delta, ended or mixed presentations do
 not receive a partial blocking-reload promise. Raw pipeline files and media
 bytes are unchanged.
 
-On Windows, shallow watches of immediate parents also observe playlist-directory
-moves and ignore unrelated siblings and named metadata events. Missing filenames
-or unknown event types fail closed. If a presentation requires more than
+Direct directory watches cover every currently authorised playlist basename,
+including the master and other renditions, and the directory's own rename.
+Named temporary files and media segments do not invalidate playlist snapshots.
+Changes to filename coverage require a fresh read within the existing three
+revalidation limit. On Windows, shallow watches of immediate parents also observe
+playlist-directory moves and ignore unrelated siblings and named metadata events.
+Missing filenames or unknown event types fail closed. If a presentation requires more than
 41 watched directories, it retains its original bytes without added blocking
 capability. Arbitrary ancestor-tree moves are outside this coverage.
 
@@ -1357,6 +1363,71 @@ on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current correction checkpoint
 
+The follow-up watcher correction filters named temporary/media-file events,
+covers all authorised playlist names and case aliases, and revalidates changed
+filename coverage within the unchanged three-pass bound. The native-client test
+fixture also closes acquired resources on partial setup failure. Native tests now
+emit TAP failure details; the real directory-replacement test retains a bounded
+categorical trace if it fails. Neither instrumentation identifies the earlier
+hosted failures' causes.
+
+One serial local qualification first reproduced the new noise regression's 503
+against exact-1b watcher code, then passed syntax for 141 modules, all 29 native
+tests and 269 publisher tests with two platform skips. There were no corrected
+suite failures or cancellations. The outer run took 27.375 s within the original
+40/60 s guard; 26 resource samples peaked at 1,368,113,152 bytes/20 processes with
+at least 47% free memory. Worker/group/birth and probe reaping passed. This does
+not establish detached-group/scratch absence, native Windows qualification or
+any remaining field gate. The [local correction checkpoint](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/playlist-filter-and-native-fixture-checks-20261015.json)
+records the exact source and retained manifest; hosted qualification is pending.
+
+Exact `1b096a060abf5bc9bdadb320fa32243048522985` remains unreleased.
+[CI 38657013063](https://github.com/forgesworn/relayswarm/actions/runs/38657013063)
+finished with six required jobs passing, Windows failing the directory-replacement
+publisher test, macOS cancelled during native tests, and dependent live-relay
+checks skipped. Windows passed all 121 swarm tests; its publisher result was
+222 passes, one failure and 43 platform skips. The macOS log records a failed
+HTTP-fallback test before cancellation, without a retained assertion or final
+test totals. Neither failure's native event chronology is established.
+
+Fresh offline consumption of exact 1b passes all 254 committed package members,
+the eleven imports, installed CLI/demo, durable ledger replay, separate-process
+native transfer/HTTP fallback and standalone browser ESM. The unpublished
+1,150,413-byte tarball has SHA-256
+`870580a268b7a32143341146f079a1bff550274a5edd0dccbbc5ae91c712f99d`;
+the 124,612-byte standalone ESM has SHA-256
+`13291cbb1727d85144ddce6a4a2c49c0c2f0bc27e25bb54c2a7cf06fb22fb043`.
+The independent audit is retained in
+`artifacts/clean-consumer-1b096a0-diagnostics-preparation-20261014/analysis`.
+
+The instrumented real Chrome collision test on exact 1b remains RED. Both
+connections completed their offer/answer operations, including the yielding
+connection's rollback, but stayed in ICE checking until their original dial
+deadlines. Neither channel opened. The retained post-failure snapshot identifies
+these states without establishing the cause or its exact instant. No settings
+were changed. All worker/supervisor cleanup flags passed; audit:
+`artifacts/native-chrome-glare-1b096a0-run-20261015/analysis`.
+
+The subsequent R5 check used the existing Internet TURN service and the exact
+1b standalone bundle. It remains RED at the initial transport prerequisite:
+each endpoint retained 36 selected relay/TLS candidate-pair rows with known
+zero received bytes. Missing selected-pair references remain unknown. Seventeen
+complete peer fragments/1,981,896 bytes were verified before credential rotation;
+that media does not establish the required positive counters on the selected
+pair. Three real credential issuances succeeded and the donor accepted its new
+lease, with two lifetime connections per page and no constructor refusal.
+The test stopped at the missing prerequisite, so post-renewal media was not
+assessed. Consent and nondecreasing spend were retained. All seven worker and
+six supervisor cleanup flags passed within the unchanged time/resource bounds.
+The independent audit is retained in
+`artifacts/existing-turn-renewal-1b096a0-r5-run-20261015/analysis`.
+No browser defect, server quota or product renewal cause is established.
+The [public checkpoint](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/internet-renewal-and-ci-checkpoint-20261015.json)
+records these exact-source outcomes and retained audit hashes.
+
+The following earlier checkpoints retain their original scope; they do not
+qualify the later source or reclassify these failures.
+
 Exact `cf479ebd7bd42df3a08a0fba6bc2ed0fb6f42b44` completed all nine required
 jobs in [CI 38651823241](https://github.com/forgesworn/relayswarm/actions/runs/38651823241),
 including Windows, both HLS modes and the media/broadcast journey. The optional
@@ -1424,8 +1495,9 @@ The actual Windows response order and failure cause were not retained. Product
 admission/presence code is unchanged from exact CF. The corrected full local
 swarm suite passes 121 tests with no failures, cancellations or skips; syntax
 passes for 141 modules. The combined outer run completed in 20.962 s within the
-original guard, with recorded worker/group/birth and probe reaping. Windows CI
-qualification remains pending. These follow-up results are recorded in the
+original guard, with recorded worker/group/birth and probe reaping. Windows
+subsequently passed this suite on exact 1b, before its separate publisher failure
+above. These follow-up results are recorded in the
 [browser and admission checkpoint](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/glare-browser-and-admission-checkpoint-20261015.json).
 
 Separately, 30 pure observer/model tests passed in 355 ms, preserving unknown
@@ -4109,8 +4181,11 @@ request limit. Disconnect/shutdown releases waiters and shared directory
 watchers; media bytes, signing scope and peer deadlines are unchanged. Required
 coverage is limited to 41 directories per request, including shallow Windows
 parent watches; excess coverage retains ordinary HTTP without added capability.
-Parent-only watches ignore unrelated siblings and named metadata events;
-missing filenames or unknown event types fail closed. These limits do not
+Direct watches cover all authorised playlist basenames and directory renames;
+unrelated named media/temporary-file events are ignored. Filename coverage changes
+consume the existing bounded revalidation budget. Parent-only watches ignore
+unrelated siblings and named metadata events; missing filenames or unknown
+event types fail closed. These limits do not
 establish Internet capacity or hard cancellation of kernel I/O.
 
 The optional [account allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md) introduces a separate

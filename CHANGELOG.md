@@ -7,6 +7,8 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 - Added complete live-playlist blocking reload across compatible renditions,
   with bounded waits, disconnect/shutdown cleanup, directory replacement
   revalidation and snapshot-consistent HEAD/range responses.
+- Filter unrelated named file events from playlist reload watches while retaining
+  authorisation coverage, directory replacement checks and bounded revalidation.
 - Reuse the pending browser connection when simultaneous offers require it to
   yield, with fresh admission checks, fenced callbacks and its original dial
   deadline. Native browser and Internet qualification remain separate gates.

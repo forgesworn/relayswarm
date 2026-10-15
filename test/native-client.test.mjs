@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { once } from "node:events";
+import { once, EventEmitter } from "node:events";
 import { mkdtemp, readFile, writeFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -12,22 +12,59 @@ import { WebSocket } from "ws";
 import { generateSecretKey, finalizeEvent } from "nostr-tools/pure";
 import { createNativeObjectSeeder, fetchNativeObject, validateNativeDescriptor } from "../src/native-client.mjs";
 import { sha256Hex } from "../src/object-transfer.mjs";
-import { startLocalDht } from "./support/local-dht.mjs";
 import { startLocalRelay } from "./support/local-relay.mjs";
+import { startNativeTestInfrastructure } from "./support/native-fixture.mjs";
 import { NativeDhtTransport } from "../src/native-dht-transport.mjs";
 import { RelaySwarmSession } from "../src/relay-session.mjs";
 
-async function fixture(handler, { relayOptions, bytes = Buffer.from("independently trusted native object") } = {}) {
-  const relay = await startLocalRelay(relayOptions), dht = await startLocalDht();
+async function fixture(handler, { relayOptions, bytes = Buffer.from("independently trusted native object"),
+  acquireInfrastructure = startNativeTestInfrastructure, createHttpServer = createServer } = {}) {
+  const { relay, dht } = await acquireInfrastructure({ startRelay: () => startLocalRelay(relayOptions) });
   let requests = 0;
-  const server = createServer((request, response) => { requests++; handler(request, response); });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const descriptor = { v: 1, swarmId: "native-client-test-swarm", sha256: sha256Hex(bytes), size: bytes.length,
-    trustedSeeders: ["a".repeat(64)], relayUrls: [relay.url], originUrl: `http://127.0.0.1:${server.address().port}/object` };
-  return { bytes, descriptor, relay, dht, requests: () => requests,
-    options: { bootstrap: dht.bootstrap, allowLoopback: true, peerTimeoutMs: 200, timeoutMs: 3000 },
-    async close() { server.closeAllConnections(); await Promise.all([relay.close(), dht.close(), new Promise((resolve) => server.close(resolve))]); } };
+  let server;
+  try {
+    server = createHttpServer((request, response) => { requests++; handler(request, response); });
+    await new Promise((resolve, reject) => {
+      const onError = (error) => reject(error);
+      server.once("error", onError);
+      server.listen(0, "127.0.0.1", () => { server.removeListener("error", onError); resolve(); });
+    });
+    const descriptor = { v: 1, swarmId: "native-client-test-swarm", sha256: sha256Hex(bytes), size: bytes.length,
+      trustedSeeders: ["a".repeat(64)], relayUrls: [relay.url], originUrl: `http://127.0.0.1:${server.address().port}/object` };
+    return { bytes, descriptor, relay, dht, requests: () => requests,
+      options: { bootstrap: dht.bootstrap, allowLoopback: true, peerTimeoutMs: 200, timeoutMs: 3000 },
+      async close() { server.closeAllConnections(); await Promise.all([relay.close(), dht.close(), new Promise((resolve) => server.close(resolve))]); } };
+  } catch (error) {
+    // Setup owns every acquired resource until the complete fixture is returned.
+    const cleanup = [() => relay.close(), () => dht.close()];
+    if (server) cleanup.push(() => server.closeAllConnections(), () => new Promise((resolve) => server.close(resolve)));
+    await Promise.allSettled(cleanup.map((close) => Promise.resolve().then(close)));
+    throw error;
+  }
 }
+
+test("native client fixture closes acquired infrastructure and HTTP resources on setup failure", { timeout: 5000 }, async () => {
+  for (const phase of ["create", "listen", "descriptor"]) {
+    const failure = new Error("deliberate HTTP setup failure"), closed = [];
+    class Server extends EventEmitter {
+      listen(_port, _host, callback) {
+        queueMicrotask(() => phase === "listen" ? this.emit("error", failure) : callback());
+      }
+      address() { throw failure; }
+      closeAllConnections() { closed.push("connections"); throw new Error("deliberate cleanup failure"); }
+      close(callback) { closed.push("http"); queueMicrotask(callback); }
+    }
+    await assert.rejects(fixture(() => {}, {
+      acquireInfrastructure: async ({ startRelay }) => {
+        assert.equal(typeof startRelay, "function");
+        return { relay: { close() { closed.push("relay"); throw new Error("deliberate relay cleanup failure"); } },
+          dht: { close() { closed.push("dht"); } } };
+      },
+      createHttpServer: () => { if (phase === "create") throw failure; return new Server(); },
+    }), (error) => error === failure);
+    assert.deepEqual(closed.sort(), phase === "create" ? ["dht", "relay"] : ["connections", "dht", "http", "relay"]);
+  }
+});
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(predicate, timeoutMs = 3000) {

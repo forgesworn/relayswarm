@@ -4,7 +4,7 @@ import { renameSync, watch } from "node:fs";
 import { EventEmitter } from "node:events";
 import { mkdtemp, realpath, writeFile, rename, rm, readFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
 import { createHlsPublisher } from "../src/hls-publisher.mjs";
 import { completePlaylist, createBlockingPlaylistReload, sendPlaylistResponse } from "../demo/blocking-playlist-reload.mjs";
@@ -246,14 +246,36 @@ test("HEAD and HTTP ranges describe the same transformed bytes, including bare p
 
 test("same-path directory inode replacement rearms a shared watcher before later atomic publication", { timeout: 5000 }, async t => {
   const { directory, createReload, blocked, publish } = await fixture(t);
+  const trace = [], traceStarted = performance.now(); let traceDropped = 0;
+  const notification = (phase, role, event = "unknown", filename) => {
+    try {
+      if (trace.length >= 64) { traceDropped++; return; }
+      const name = typeof filename === "string" && filename.length > 0 && filename.length <= 4096 ? filename.toLowerCase() : null;
+      const ownNames = [directory, `${directory}-replacement`, `${directory}-previous`].flatMap(path => [path.toLowerCase(), basename(path).toLowerCase()]);
+      const category = name === null ? "unknown" : ownNames.includes(name) ? "own-directory"
+        : role === "direct" && name === "index.m3u8" ? "authorised-playlist"
+          : role === "direct" && name === "next.m3u8" ? "temp" : "unrelated";
+      trace.push({ atMs: Math.round(performance.now() - traceStarted), phase, role,
+        event: ["change", "rename"].includes(event) ? event : "unknown", filename: category });
+    } catch { traceDropped++; }
+  };
   let watches = 0, secondWatchCreated;
   const rearmed = new Promise(resolve => { secondWatchCreated = resolve; });
-  const reload = createReload({ watchDirectory(...args) { const watcher = watch(...args); if (args[0] === directory && ++watches === 2) secondWatchCreated(); return watcher; } });
+  const reload = createReload({ watchDirectory(...args) {
+    const role = args[0] === directory ? "direct" : "parent", changed = args[2];
+    args[2] = (event, filename) => { notification("notification", role, event, filename); changed(event, filename); };
+    const watcher = watch(...args); notification("install", role);
+    if (args[0] === directory && ++watches === 2) { notification("rearm", role); secondWatchCreated(); }
+    return watcher;
+  } });
   const replacement = `${directory}-replacement`, previous = `${directory}-previous`;
   t.after(async () => { await rm(replacement, { recursive: true, force: true }); await rm(previous, { recursive: true, force: true }); });
   await mkdir(replacement); await writeFile(join(replacement, "index.m3u8"), playlist());
   const pending = [reload.read("/media/index.m3u8", params(5)), reload.read("/media/index.m3u8", params(5))];
-  const results = Promise.all(pending); results.catch(() => {});
+  const results = Promise.all(pending); results.catch(() => {
+    try { t.diagnostic(JSON.stringify({ kind: "replacement-watch-trace", capacity: 64, dropped: traceDropped,
+      markerScope: "watch-created-before-helper-identity-confirmation", records: trace })); } catch {}
+  });
   await blocked(2, reload);
   // Consecutive synchronous renames prevent a test-only absent-path gap.
   renameSync(directory, previous); renameSync(replacement, directory);
@@ -397,5 +419,106 @@ test("Windows parent-only unknown filename or event remains fail-closed, includi
     assert.equal(state.reload.snapshot().watchErrors, 1);
     assert.equal(state.reload.snapshot().activeBlocked, 0); assert.equal(state.reload.snapshot().watchers, 0);
     assert.equal(state.timers.size, 0);
+  }
+});
+
+test("interleaved temporary-file and segment events do not exhaust playlist revalidation", { timeout: 5000 }, async t => {
+  const noise = [["rename", "next.m3u8"], ["change", "next.m3u8"], ["rename", "seg5.ts"]];
+  let state;
+  state = fake(t, { platform: "win32", beforeRead(reads) {
+    if (reads > 1) {
+      // Each callback runs DURING a fresh catalogue read, not just before a
+      // waiter wakes. The old unfiltered path exhausts its three passes here.
+      const [event, name] = noise[(reads - 2) % noise.length];
+      state.events.find(value => value.directory === "/fixture" && !value.closed).emitChange(event, name);
+    }
+  } });
+  let published = false;
+  const pending = state.reload.read("/media/index.m3u8", params(5));
+  const observed = pending.then(bytes => { assert.ok(published, "No complete segment was published yet."); return bytes; });
+  observed.catch(() => {});
+  await Promise.race([until(() => state.reload.snapshot().activeBlocked === 1), observed]);
+  assert.equal(state.reads, 2);
+  const direct = state.events.find(value => value.directory === "/fixture" && !value.closed);
+  for (const [event, name] of noise) direct.emitChange(event, name);
+  await flush(); assert.equal(state.reads, 2);
+  published = true; state.set(playlist(5));
+  assert.match((await observed).toString(), /MEDIA-SEQUENCE:5/u);
+  assert.equal(state.reads, 3); assert.equal(state.reload.snapshot().released, 1);
+  assert.equal(state.reload.snapshot().watchers, 0); assert.equal(state.timers.size, 0);
+});
+
+test("direct playlist names and shallow child-directory roles are unioned for the whole presentation", { timeout: 5000 }, async t => {
+  const state = fake(t, { platform: "win32" });
+  let text = playlist(), reads = 0;
+  const files = ["/fixture/master.m3u8", "/fixture/low/index.m3u8", "/fixture/high.m3u8"];
+  state.publisher.playlistSnapshot = async () => {
+    reads++; return { file: files[1], bytes: Buffer.from(text), isMedia: true, playlistFiles: files,
+      mediaPlaylists: files.slice(1).map(file => ({ file, text })) };
+  };
+  const pending = state.reload.read("/media/low/index.m3u8", params(5));
+  pending.catch(() => {});
+  await until(() => state.timers.size === 1);
+  const direct = state.events.find(value => value.directory === "/fixture");
+  const low = state.events.find(value => value.directory === "/fixture/low");
+  const before = reads;
+  direct.emitChange("change", "low"); direct.emitChange("rename", "unrelated");
+  await flush(); assert.equal(reads, before);
+  for (const [watcher, event, name] of [[direct, "change", "MASTER.M3U8"], [direct, "change", "HIGH.M3U8"],
+    [low, "change", "INDEX.M3U8"], [direct, "rename", "low"], [direct, "rename", "fixture"]]) {
+    const previous = reads; watcher.emitChange(event, name);
+    await until(() => reads > previous && state.timers.size === 1);
+  }
+  text = playlist(5); direct.emitChange("rename", "high.m3u8");
+  assert.match((await pending).toString(), /MEDIA-SEQUENCE:5/u);
+  assert.equal(state.reload.snapshot().watchers, 0); assert.equal(state.timers.size, 0);
+});
+
+test("case-alias notifications invalidate conservatively and own directory rename still wakes", { timeout: 5000 }, async t => {
+  const state = fake(t);
+  const pending = state.reload.read("/media/index.m3u8", params(5)); pending.catch(() => {});
+  await until(() => state.timers.size === 1);
+  const watcher = state.events.find(value => value.directory === "/fixture");
+  const before = state.reads;
+  // Model a case-only rename with just its new spelling, not an old-name event.
+  watcher.emitChange("rename", "INDEX.M3U8"); await until(() => state.reads > before && state.timers.size === 1);
+  const afterAlias = state.reads;
+  watcher.emitChange("rename", "fixture"); await until(() => state.reads > afterAlias && state.timers.size === 1);
+  state.set(playlist(5)); assert.match((await pending).toString(), /MEDIA-SEQUENCE:5/u);
+  assert.equal(state.reload.snapshot().watchers, 0);
+});
+
+test("new playlist names in an existing watched directory are covered before a fresh revalidation", { timeout: 5000 }, async t => {
+  const state = fake(t); let calls = 0;
+  state.publisher.playlistSnapshot = async () => {
+    calls++;
+    const expanded = calls > 1;
+    const snapshot = { file: "/fixture/low.m3u8", bytes: Buffer.from(playlist()), isMedia: true,
+      playlistFiles: ["/fixture/master.m3u8", "/fixture/low.m3u8", ...(expanded ? ["/fixture/high.m3u8"] : [])],
+      mediaPlaylists: [{ file: "/fixture/low.m3u8", text: playlist() },
+        ...(expanded ? [{ file: "/fixture/high.m3u8", text: playlist(4, calls > 2 ? "#EXT-X-ENDLIST\n" : "") }] : [])] };
+    if (calls === 2) {
+      // This new rendition changes after its captured read but before its
+      // filename was subscribed. Re-read under the expanded coverage.
+      state.events.find(value => value.directory === "/fixture").emitChange("change", "high.m3u8");
+    }
+    return snapshot;
+  };
+  const body = await state.reload.read("/media/low.m3u8", params(4));
+  assert.equal(body.toString(), playlist()); assert.equal(calls, 3);
+  assert.equal(state.reload.snapshot().watchers, 0); assert.equal(state.timers.size, 0);
+});
+
+test("direct-directory unknown filenames and event types fail closed and drain every waiter", { timeout: 5000 }, async t => {
+  for (const [event, filename] of [["change", undefined], ["rename", null], ["change", ""],
+    ["change", "x".repeat(4097)], ["unknown", "index.m3u8"], ["change", Buffer.from("index.m3u8")]]) {
+    const state = fake(t);
+    const pending = state.reload.read("/media/index.m3u8", params(5));
+    const refused = assert.rejects(pending, { status: 503 });
+    await until(() => state.reload.snapshot().activeBlocked === 1);
+    state.events.find(value => value.directory === "/fixture").emitChange(event, filename);
+    await refused;
+    assert.equal(state.reload.snapshot().watchErrors, 1); assert.equal(state.reload.snapshot().activeBlocked, 0);
+    assert.equal(state.reload.snapshot().watchers, 0); assert.equal(state.timers.size, 0);
   }
 });
