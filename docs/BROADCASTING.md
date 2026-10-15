@@ -50,6 +50,19 @@ before creating state or starting services. This changes no global issuance,
 request, expiry or consent limit, and does not trust forwarded-address headers.
 Choosing a limit does not establish a passing multi-viewer qualification.
 
+Admission also defaults to 600 requests per minute for each socket address,
+shared by challenge, ticket and verification requests. Configure
+`--admission-per-address-requests 900` only when the operator intends that
+allowance; accepted values are integers 1–10,000, default 600. Validation runs
+before state creation or service startup. Behind Caddy or another reverse proxy,
+viewers can share one backend socket address; forwarded-address headers remain
+untrusted. The global request limit remains 2,048 per minute, global ticket
+issuance remains 120 per minute, and all other admission limits remain unchanged.
+The pilot plans an explicit 900 after observing 637 startup admission requests
+within a minute, allowing headroom over that observation. This setting has not
+yet been deployed or qualified; configuring it does not prove field capacity or
+resolve the separate delayed-response observations.
+
 The broadcaster and demo accept `--ice-transport-policy all|relay`, default
 `all`. Choose `relay` explicitly to restrict peer ICE to relayed candidates;
 provide usable TURN configuration or the existing credential adapter. The

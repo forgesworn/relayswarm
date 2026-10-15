@@ -41,10 +41,11 @@ async function main() {
     mediamtx: { type: "string" }, "router-config": { type: "string", default: fileURLToPath(new URL("../broadcast/mediamtx.yml", import.meta.url)) },
     "youtube-url-file": { type: "string" }, "public-url": { type: "string" }, host: { type: "string", default: "127.0.0.1" }, port: { type: "string", default: "8787" },
     "admission-per-address-tickets": { type: "string", default: "12" },
+    "admission-per-address-requests": { type: "string", default: "600" },
     "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, "ice-transport-policy": { type: "string", default: "all" }, "turn-credentials-url": { type: "string" }, "turn-url-projection": { type: "string", default: "issued" }, "account-budget": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" },
   } });
   if (values.help) {
-    console.log("npm run broadcast -- [--mediamtx PATH] [--input rtsp://127.0.0.1:8554/live] [--state-dir DIR] [--youtube-url-file FILE] [--public-url https://trial.example] [--host 127.0.0.1] [--port 8787] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE | --turn-credentials-url https://issuer.example/turn] [--ice-transport-policy all|relay] [--turn-url-projection issued|tls-tcp] [--account-budget] [--admission-per-address-tickets 12] [--telemetry]\nSource must supply video and audio. Publisher identity and operator credentials remain in the private state directory. --account-budget enables an optional Nostr-linked allowance in the private account-budget.json ledger; connecting it never enables uploading. Website account authentication is supplied through startDemoServer's host callback. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/BROADCASTING.md.");
+    console.log("npm run broadcast -- [--mediamtx PATH] [--input rtsp://127.0.0.1:8554/live] [--state-dir DIR] [--youtube-url-file FILE] [--public-url https://trial.example] [--host 127.0.0.1] [--port 8787] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE | --turn-credentials-url https://issuer.example/turn] [--ice-transport-policy all|relay] [--turn-url-projection issued|tls-tcp] [--account-budget] [--admission-per-address-tickets 12] [--admission-per-address-requests 600] [--telemetry]\nSource must supply video and audio. Publisher identity and operator credentials remain in the private state directory. --account-budget enables an optional Nostr-linked allowance in the private account-budget.json ledger; connecting it never enables uploading. Website account authentication is supplied through startDemoServer's host callback. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/BROADCASTING.md.");
     return;
   }
   if (!["all", "relay"].includes(values["ice-transport-policy"])) throw new Error("Invalid ICE transport policy; use all or relay.");
@@ -52,6 +53,8 @@ async function main() {
   if (values["turn-url-projection"] !== "issued" && values["turn-credentials-url"] === undefined) throw new Error("TURN URL projection requires --turn-credentials-url.");
   const admissionPerAddressTickets = Number(values["admission-per-address-tickets"]);
   if (!Number.isSafeInteger(admissionPerAddressTickets) || admissionPerAddressTickets < 1 || admissionPerAddressTickets > 120) throw new Error("Admission tickets per address must be an integer from 1 to 120.");
+  const admissionPerAddressRequests = Number(values["admission-per-address-requests"]);
+  if (!Number.isSafeInteger(admissionPerAddressRequests) || admissionPerAddressRequests < 1 || admissionPerAddressRequests > 10000) throw new Error("Admission requests per address must be an integer from 1 to 10000.");
   const port = Number(values.port);
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535 || values.stun?.some((url) => !/^stuns?:[^\s]+$/u.test(url))) throw new Error("Invalid broadcaster port or STUN configuration.");
   if ([values.stun, values["ice-config"], values["turn-credentials-url"]].filter(value => value !== undefined).length > 1) throw new Error("Supply only one of --stun, --ice-config or --turn-credentials-url.");
@@ -101,7 +104,7 @@ async function main() {
     if (stopping) return;
     const playerPort = waiting.port;
     server = await startDemoServer({ mediaDir: pipeline.mediaDir, manifest: pipeline.manifest, publisherState: join(state, "publisher.json"), operatorTokenFile: tokenFile, operatorState: join(state, "operator.json"),
-      admissionOptions: { perAddressTickets: admissionPerAddressTickets }, iceTransportPolicy: values["ice-transport-policy"],
+      admissionOptions: { perAddressTickets: admissionPerAddressTickets, perAddressRequests: admissionPerAddressRequests }, iceTransportPolicy: values["ice-transport-policy"],
       host: values.host, port: playerPort, publicUrl: values["public-url"], tlsKey: values["tls-key"], tlsCert: values["tls-cert"], relays: values.relay, telemetry: values.telemetry,
       ...(values["account-budget"] ? { accountBudget: { statePath: join(state, "account-budget.json") } } : {}),
       beforeListen: async () => {

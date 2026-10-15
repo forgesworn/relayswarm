@@ -4,6 +4,9 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Expose the broadcaster's existing per-socket-address request allowance through
+  `--admission-per-address-requests` (1–10,000, default 600). Other admission
+  limits remain unchanged; field acceptance is separate.
 - Reclaim settled TURN viewer entries after their credential cache expires or
   initial issuance fails. Fresh credentials and unresolved issuance keep their
   slots; the viewer, request, issuer and rate limits remain unchanged.

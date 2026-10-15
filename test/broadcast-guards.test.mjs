@@ -429,6 +429,67 @@ test("CLI help advertises the admission option without creating state", { timeou
   assert.equal(await exists(state), false);
 });
 
+for (const value of ["0", "10001", "-1", "1.5", "NaN", "Infinity"]) {
+  test(`CLI rejects admission requests per address ${value} before creating state`, { timeout: 5000 }, async (t) => {
+    const directory = await fixture(t), state = join(directory, "uncreated-state");
+    const outcome = await boundedResult(cli(t, ["--state-dir", state, `--admission-per-address-requests=${value}`]).result);
+    assert.equal(outcome.code, 1);
+    assert.ok(outcome.stderr.includes("Broadcaster could not start."));
+    assert.equal(await exists(state), false);
+  });
+}
+
+test("CLI help advertises the admission request default without creating state", { timeout: 5000 }, async (t) => {
+  const directory = await fixture(t), state = join(directory, "uncreated-state");
+  const outcome = await boundedResult(cli(t, ["--state-dir", state, "--admission-per-address-requests=900", "--help"]).result);
+  assert.equal(outcome.code, 0);
+  assert.ok(outcome.stdout.includes("--admission-per-address-requests 600"));
+  assert.equal(await exists(state), false);
+});
+
+for (const configured of [undefined, 900]) {
+  test(`CLI admission requests per address ${configured ?? "default"} reach the player with other limits unchanged`, { timeout: 10000, skip: process.platform === "win32" }, async (t) => {
+    const directory = await fixture(t), state = join(directory, "state"), encoder = join(directory, "stub-encoder"), pidFile = join(directory, "encoder-pid");
+    await writeFile(encoder, `#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+for (const output of process.argv.slice(2).filter(value => value.endsWith('/index.m3u8'))) {
+  fs.writeFileSync(path.join(path.dirname(output), 'segment-0000000000000000020.ts'), 'bounded fixture segment');
+  fs.writeFileSync(output, ${JSON.stringify(raw)});
+}
+setInterval(() => {}, 1000);
+process.on('SIGTERM', () => process.exit(0));
+`, { mode: 0o700 });
+    cleanups.get(t).push(async () => {
+      if (await exists(pidFile)) { const pid = Number(await readFile(pidFile, "utf8")); try { process.kill(pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } }
+    });
+    const running = cli(t, ["--state-dir", state, "--ffmpeg", encoder, "--port=0", ...(configured === undefined ? [] : [`--admission-per-address-requests=${configured}`])]);
+    await until(() => {
+      assert.equal(running.child.exitCode, null, "CLI must accept the configured request limit");
+      return running.stdout().includes("RelaySwarm broadcaster player:");
+    }, 5000);
+    const base = running.stdout().match(/RelaySwarm broadcaster player: (http:\/\/[^\s]+)/u)[1];
+    const token = (await readFile(join(state, "operator-token"), "utf8")).trim();
+    const response = await fetch(`${base}/operator/status`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(2000) });
+    assert.equal(response.status, 200);
+    const { admission } = await response.json();
+    assert.equal(admission.perAddressRequests, configured ?? 600);
+    assert.equal(admission.requestCapacity, 2048);
+    assert.equal(admission.globalTickets, 120);
+    assert.equal(admission.perAddressTickets, 12);
+    assert.equal(admission.capacity, 512);
+    assert.equal(admission.ticketTtlSeconds, 120);
+    running.child.kill("SIGTERM");
+    const outcome = await boundedResult(running.result, 4000);
+    assert.equal(outcome.code, 0);
+    assert.equal(outcome.signal, null);
+    const pid = Number(await readFile(pidFile, "utf8"));
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    assert.equal(await exists(join(state, "media", ".broadcast-lock")), false);
+  });
+}
+
 for (const [name, entry] of [["broadcaster", script], ["demo", fileURLToPath(new URL("../demo/server.mjs", import.meta.url))]]) {
   test(`${name} CLI rejects invalid ICE policy before startup state`, { timeout: 5000 }, async (t) => {
     const directory = await fixture(t), state = join(directory, "uncreated-state");
