@@ -16,7 +16,8 @@ input, select, button { font: inherit; }
 input:not([type=checkbox]), select { color: #edf3ef; background: #10171a; border: 1px solid #6b7f75; border-radius: 6px; padding: 9px 10px; width: 100%; }
 input[type=checkbox] { width: 19px; height: 19px; flex-shrink: 0; accent-color: #b5e9bd; }
 input::placeholder { color: #9cada3; opacity: 1; }
-.check { display: flex; gap: 8px; align-items: flex-start; margin-top: 18px; }
+.check { display: flex; gap: 8px; align-items: center; min-height: 44px; margin-top: 18px; }
+.check input:disabled + span { color: #9cada3; }
 .hint, .muted, footer { color: #bdc9c3; font-size: .875rem; }
 .notice { padding: 12px; margin: 20px 0; border-left: 3px solid #b5e9bd; background: #23312b; font-size: .875rem; }
 button { border: 1px solid #91a59a; background: #192326; color: #edf3ef; border-radius: 6px; min-height: 44px; padding: 9px 15px; cursor: pointer; }

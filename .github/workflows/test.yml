@@ -45,6 +45,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npx playwright-core install --with-deps chrome
       - run: npm run test:playback -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
+      - run: npm run test:playback:resume -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
       - run: npm run test:operator -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
       - run: CHROME_PATH=/opt/google/chrome/chrome npm run test:media-browser
       - run: CHROME_PATH=/opt/google/chrome/chrome npm run test:media-recovery

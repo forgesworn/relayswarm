@@ -23,12 +23,12 @@ const startedAt = new Date().toISOString(), clockStart = performance.now();
 const elapsed = () => Math.round(performance.now() - clockStart);
 const push = (list, value, cap = 256) => { list.push(value); if (list.length > cap) list.shift(); };
 const bytes = (amount) => amount < 1000 ? `${amount} B` : amount < 1e6 ? `${(amount / 1000).toFixed(1)} kB` : `${(amount / 1e6).toFixed(1)} MB`;
-const player = { engine: "pending", firstPlayingAtMs: null, startupMs: null, stalls: 0, stallMs: 0, seeks: 0, seekRecoveryMs: [], fatalErrors: 0, errors: {}, fragmentsLoaded: 0, fragments: [], levelChanges: [], errorRecords: [], nativeErrors: [] };
+const player = { engine: "pending", firstPlayingAtMs: null, startupMs: null, stalls: 0, stallMs: 0, seeks: 0, seekRecoveryMs: [], fatalErrors: 0, errors: {}, fragmentsLoaded: 0, fragments: [], levelChanges: [], errorRecords: [], nativeErrors: [], resumeAttempts: 0, resumeRecords: [] };
 const network = { originMediaRequests: 0, encodedOriginMediaBytes: 0, transferOriginMediaBytes: 0 };
 const sessions = [], snapshots = [];
 let deliveryPolicy = { mode: null, revision: 0, telemetry: false }, policyUnavailable = true;
 const archivedTotals = { peerFirstBytes: 0, uploaded: 0, peerFirstLoads: 0, sessions: 0 };
-let session, hls, swarm, initialLoader, startRequestedAt = null, stallAt = null, seekAt = null, native = false, activeConfig, needsViewerApply = false, suspensionGeneration = 0;
+let session, hls, swarm, initialLoader, startRequestedAt = null, stallAt = null, seekAt = null, native = false, playerHasPlayed = false, activeConfig, needsViewerApply = false, suspensionGeneration = 0;
 let accountActionPending = false;
 const status = (message) => { byId("status").textContent = message; };
 const accountBudget = createAccountBudgetClient({ secretKey: admissionKey, origin: location.origin,
@@ -55,6 +55,7 @@ const mediaRecovery = createMediaRecovery({ media: video, getHls: () => hls, get
 });
 
 video.addEventListener("playing", () => {
+  playerHasPlayed = true;
   if (player.firstPlayingAtMs === null) { player.firstPlayingAtMs = elapsed(); player.startupMs = startRequestedAt === null ? null : player.firstPlayingAtMs - startRequestedAt; }
   if (seekAt !== null) { push(player.seekRecoveryMs, elapsed() - seekAt); seekAt = null; }
   if (stallAt !== null) { player.stallMs += elapsed() - stallAt; stallAt = null; }
@@ -208,6 +209,53 @@ async function obtainAdmission(candidateSession, existing, signal) {
   if (credential.issuer !== admission.issuer || credential.epoch !== admission.epoch || credential.swarmId !== candidateSession.swarmId || typeof credential.ticket !== "string" || credential.ticket.length > 2048 || !Number.isSafeInteger(credential.expiresAt) || credential.expiresAt * 1000 <= Date.now()) throw new Error("Invalid peer admission.");
   return credential;
 }
+function mountPlayer({ reloadNative = false } = {}) {
+  const selectedQuality = byId("quality").value;
+  byId("quality").length = 1; byId("quality").disabled = true;
+  playerHasPlayed = false;
+    if (Hls.isSupported()) {
+      byId("mode").disabled = false; byId("upload").disabled = false;
+      player.engine = `hls.js ${Hls.version}`;
+      hls = new Hls({ ...(session.mediaCapabilities?.parts === true ? {} : { liveSyncDurationCount: 4 }), maxBufferLength: 20, maxMaxBufferLength: 30 });
+      const mountedHls = hls;
+      initialLoader = hls.config.fLoader;
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (hls !== mountedHls) return;
+        hls.levels.forEach((level, index) => { const option = document.createElement("option"); option.value = String(index); option.textContent = `${level.height}p · ${Math.round(level.bitrate / 1000)} kbps`; byId("quality").append(option); });
+        if (/^\d+$/u.test(selectedQuality) && Number(selectedQuality) < hls.levels.length) {
+          hls.loadLevel = Number(selectedQuality); byId("quality").value = selectedQuality;
+        } else byId("quality").value = "-1";
+        byId("quality").disabled = false;
+      });
+      hls.on(Hls.Events.FRAG_LOADED, (_event, { frag, part, payload, networkDetails }) => {
+        if (hls !== mountedHls) return;
+        if (frag.sn === "initSegment") return;
+        player.fragmentsLoaded++;
+        push(player.fragments, { atMs: elapsed(), level: frag.level, sequence: frag.sn, part: part?.index ?? null, mediaType: frag.type ?? "video", playlist: segmentMediaContext({ frag, url: frag.url })?.playlist ?? null, discontinuity: frag.cc, rangeStart: frag.byteRangeStartOffset ?? null, rangeEnd: frag.byteRangeEndOffset ?? null, size: payload.byteLength,
+          source: networkDetails ? "origin" : activeConfig.mode === "peer-first" ? "peer" : "unknown", statsLoaded: frag.stats.loaded,
+          loadingMs: frag.stats.loading.end - frag.stats.loading.start });
+        render();
+      });
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => { if (hls === mountedHls) push(player.levelChanges, { atMs: elapsed(), level: data.level }); });
+      hls.on(Hls.Events.LEVEL_UPDATED, (_event, { details }) => {
+        if (hls !== mountedHls || document.visibilityState !== "visible") return;
+        mediaRecovery.observeLive(details, { lastFragmentCC: player.fragments.at(-1)?.discontinuity, fatalErrors: player.fatalErrors });
+      });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (hls !== mountedHls) return;
+        push(player.errorRecords, { atMs: elapsed(), details: data.details, fatal: Boolean(data.fatal), type: data.type, reason: String(data.reason ?? "").slice(0, 512), message: String(data.error?.message ?? "").slice(0, 512), nativeError: video.error && { code: video.error.code, message: video.error.message.slice(0, 512) }, mediaType: data.frag?.type ?? null, playlist: data.frag ? segmentMediaContext({ frag: data.frag, url: data.frag.url })?.playlist ?? null : null }, 64);
+        player.errors[data.details] = (player.errors[data.details] || 0) + 1;
+        if (data.fatal) { player.fatalErrors++; if (document.visibilityState !== "visible" || !mediaRecovery.handle(data)) status("Playback stopped after a fatal error. Download a receipt to retain the measurements."); }
+      });
+      configure();
+      hls.loadSource(session.manifest); hls.attachMedia(video);
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      native = true; player.engine = "native HLS"; byId("mode").value = "off"; byId("mode").disabled = true; byId("upload").disabled = true; configure(); video.src = session.manifest;
+      if (reloadNative) video.load();
+    } else { player.engine = "unsupported"; status("This browser cannot play the test stream."); return false; }
+  return true;
+}
+
 byId("settings").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!session || mediaRecovery.active() || accountActionPending || document.visibilityState !== "visible") return;
@@ -233,40 +281,46 @@ byId("settings").addEventListener("submit", async (event) => {
   needsViewerApply = !turnReady;
   if (startRequestedAt === null) {
     startRequestedAt = elapsed();
-    if (Hls.isSupported()) {
-      player.engine = `hls.js ${Hls.version}`;
-      hls = new Hls({ ...(session.mediaCapabilities?.parts === true ? {} : { liveSyncDurationCount: 4 }), maxBufferLength: 20, maxMaxBufferLength: 30 });
-      initialLoader = hls.config.fLoader;
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        hls.levels.forEach((level, index) => { const option = document.createElement("option"); option.value = String(index); option.textContent = `${level.height}p · ${Math.round(level.bitrate / 1000)} kbps`; byId("quality").append(option); });
-        byId("quality").disabled = false;
-      });
-      hls.on(Hls.Events.FRAG_LOADED, (_event, { frag, part, payload, networkDetails }) => {
-        if (frag.sn === "initSegment") return;
-        player.fragmentsLoaded++;
-        push(player.fragments, { atMs: elapsed(), level: frag.level, sequence: frag.sn, part: part?.index ?? null, mediaType: frag.type ?? "video", playlist: segmentMediaContext({ frag, url: frag.url })?.playlist ?? null, discontinuity: frag.cc, rangeStart: frag.byteRangeStartOffset ?? null, rangeEnd: frag.byteRangeEndOffset ?? null, size: payload.byteLength,
-          source: networkDetails ? "origin" : activeConfig.mode === "peer-first" ? "peer" : "unknown", statsLoaded: frag.stats.loaded,
-          loadingMs: frag.stats.loading.end - frag.stats.loading.start });
-        render();
-      });
-      hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => push(player.levelChanges, { atMs: elapsed(), level: data.level }));
-      hls.on(Hls.Events.LEVEL_UPDATED, (_event, { details }) => mediaRecovery.observeLive(details, {
-        lastFragmentCC: player.fragments.at(-1)?.discontinuity, fatalErrors: player.fatalErrors,
-      }));
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        push(player.errorRecords, { atMs: elapsed(), details: data.details, fatal: Boolean(data.fatal), type: data.type, reason: String(data.reason ?? "").slice(0, 512), message: String(data.error?.message ?? "").slice(0, 512), nativeError: video.error && { code: video.error.code, message: video.error.message.slice(0, 512) }, mediaType: data.frag?.type ?? null, playlist: data.frag ? segmentMediaContext({ frag: data.frag, url: data.frag.url })?.playlist ?? null : null }, 64);
-        player.errors[data.details] = (player.errors[data.details] || 0) + 1;
-        if (data.fatal) { player.fatalErrors++; if (!mediaRecovery.handle(data)) status("Playback stopped after a fatal error. Download a receipt to retain the measurements."); }
-      });
-      configure();
-      hls.loadSource(session.manifest); hls.attachMedia(video);
-    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      native = true; player.engine = "native HLS"; byId("mode").value = "off"; byId("mode").disabled = true; byId("upload").disabled = true; configure(); video.src = session.manifest;
-    } else { player.engine = "unsupported"; status("This browser cannot play the test stream."); startRequestedAt = null; return; }
-    byId("start").textContent = "Apply settings"; byId("download").disabled = false;
-    video.play().catch(() => { if (!mediaRecovery.snapshot().attempted) status("Press play on the video to begin."); });
+    if (!mountPlayer()) { startRequestedAt = null; return; }
+    byId("start").textContent = "Apply settings"; byId("download").disabled = false; byId("resume").disabled = false;
+    video.play().catch(() => { if (applyIsCurrent() && session === submittedSession && !playerHasPlayed && !mediaRecovery.snapshot().attempted) status("Press play on the video to begin."); });
   } else configure();
 });
+// Rebuild only after an explicit gesture. Safari's native Play can otherwise
+// keep retrying the resource that failed or was suspended in the background.
+byId("resume").addEventListener("click", () => {
+  if (!session || startRequestedAt === null || accountActionPending || document.visibilityState !== "visible") return;
+  suspensionGeneration++; needsViewerApply = true; stopSwarm();
+  policyRenewal.resume(); mediaRecovery.cancel("viewer-resume");
+  byId("upload").checked = false; byId("telemetry").checked = false;
+  const generation = suspensionGeneration, resumedSession = session;
+  const record = { attempt: player.resumeAttempts + 1, atMs: elapsed(), outcome: "requested" };
+  player.resumeAttempts++; push(player.resumeRecords, record, 8);
+  const current = () => generation === suspensionGeneration && session === resumedSession && document.visibilityState === "visible";
+  byId("resume-status").textContent = "Reloading playback from origin. Apply settings to rejoin peers; uploading is off.";
+  try {
+    video.pause();
+    const previousHls = hls; hls = undefined;
+    previousHls?.destroy();
+    native = false;
+    if (!mountPlayer({ reloadNative: true })) throw new Error("Playback unsupported.");
+    // Keep play() in this gesture's synchronous call stack; never auto-play on return.
+    Promise.resolve(video.play()).then(() => {
+      record.outcome = "play-request-resolved";
+      record.superseded = !current();
+      if (current()) byId("resume-status").textContent = "Origin playback requested. Apply settings to rejoin peers; uploading is off.";
+    }, () => {
+      record.outcome = "play-rejected";
+      record.superseded = !current();
+      if (current()) byId("resume-status").textContent = "The browser did not resume playback. Press Play, or use Resume playback to reload the stream again.";
+    });
+  } catch {
+    record.outcome = "restart-failed";
+    if (current()) byId("resume-status").textContent = "Playback could not be restarted. Use Resume playback to try again; download a receipt to retain the errors.";
+  }
+  render();
+});
+
 byId("reset-allowance")?.addEventListener("click", async () => {
   stopSwarm(); byId("upload").checked = false;
   await uploadBudget.reset(Number(byId("allowance").value));
@@ -306,7 +360,7 @@ byId("account-disconnect").addEventListener("click", async () => {
 byId("account-link").addEventListener("click", () => accountAction("link"));
 byId("account-settings").addEventListener("click", () => accountAction("settings"));
 byId("account-reset").addEventListener("click", () => accountAction("settings", true));
-byId("quality").addEventListener("change", () => { if (hls) { const level = Number(byId("quality").value); if (player.firstPlayingAtMs === null) hls.loadLevel = level; else hls.nextLevel = level; } });
+byId("quality").addEventListener("change", () => { if (hls) { const level = Number(byId("quality").value); if (!playerHasPlayed) hls.loadLevel = level; else hls.nextLevel = level; } });
 byId("kill").addEventListener("click", () => { if (mediaRecovery.active()) { mediaRecovery.cancel(); return; } byId("mode").value = "off"; configure(); });
 byId("download").addEventListener("click", () => {
   const url = URL.createObjectURL(new Blob([`${JSON.stringify(report(), null, 2)}\n`], { type: "application/json" }));
@@ -315,23 +369,27 @@ byId("download").addEventListener("click", () => {
 });
 function suspendPeerAuthority() { suspensionGeneration++; needsViewerApply = true; accountBudget.suspend(); policyRenewal.suspend(); turnCredentials.suspend(); stopSwarm(); }
 window.addEventListener("pagehide", () => { suspendPeerAuthority(); mediaRecovery.cancel("page-hidden"); });
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") suspendPeerAuthority(); else policyRenewal.resume(); });
-window.addEventListener("pageshow", () => { policyRenewal.resume(); if (startRequestedAt !== null && !swarm) { byId("kill").disabled = true; status("Peer delivery stopped while this page was inactive. Playback uses origin; apply settings to rejoin."); } });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") { suspendPeerAuthority(); mediaRecovery.cancel("page-hidden"); } else policyRenewal.resume(); });
+window.addEventListener("pageshow", () => { policyRenewal.resume(); if (startRequestedAt !== null && !swarm) { byId("kill").disabled = true; status("Peer delivery stopped while this page was inactive. Apply settings to rejoin."); byId("resume-status").textContent = "If playback stopped, use Resume playback to reload the stream from origin. Uploading remains off."; } });
 window.relaySwarmDemo = { report, stop: () => { mediaRecovery.cancel(); stopSwarm(); render(); }, ready: () => Boolean(session), turnLeaseObservation: () => turnCredentials.leaseObservation(), media: video };
+function reportingAvailability(available, message, switchedOff = false) {
+  byId("telemetry").disabled = !available;
+  if (!available) byId("telemetry").checked = false;
+  byId("telemetry-label").textContent = available ? "Share numeric measurements with this server" : switchedOff ? "Reporting is switched off by this service" : "Numeric reporting is unavailable";
+  byId("telemetry-status").textContent = message;
+}
 function policyUnavailableNow(reason, policy) {
   if (reason === "operator-off") {
     deliveryPolicy = { ...deliveryPolicy, ...policy }; policyUnavailable = false;
     byId("upload").checked = false;
-    if (!policy.telemetry) { byId("telemetry").checked = false; byId("telemetry").disabled = true; }
+    if (!policy.telemetry) reportingAvailability(false, "This service has reporting switched off. No numeric measurements will be sent.", true);
     if (swarm && activeConfig.mode !== "off") configure();
     byId("policy-status").textContent = "Operator delivery policy: origin only.";
     return;
   }
   policyUnavailable = true;
   byId("upload").checked = false;
-  byId("telemetry").disabled = true;
-  byId("telemetry-status").textContent = "Reporting is unavailable because the server policy could not be checked.";
-  byId("telemetry").checked = false;
+  reportingAvailability(false, "Reporting is unavailable because the server policy could not be checked. No numeric measurements will be sent.");
   if (reason === "publisher-session-changed") { mediaRecovery.cancel(reason); admissionCredential = null; }
   if (swarm && activeConfig.mode !== "off") configure();
   byId("policy-status").textContent = "Delivery policy unavailable · using origin until it returns.";
@@ -349,6 +407,7 @@ const policyRenewal = createPolicyRenewal({
     try {
       const next = await nextPolicy;
       if (!policy(next)) return null;
+      if (!next.telemetry) reportingAvailability(false, "This service has reporting switched off. No numeric measurements will be sent.", true);
       const result = await sessionResult;
       if (!result.ok) throw result.error;
       const current = result.current;
@@ -383,9 +442,7 @@ const policyRenewal = createPolicyRenewal({
     if (credentialInstalled) admissionCredential = candidateCredential;
     deliveryPolicy = next; policyUnavailable = false;
     if (next.mode === "off") byId("upload").checked = false;
-    byId("telemetry").disabled = !next.telemetry;
-    byId("telemetry-status").textContent = next.telemetry ? "Reporting is available. Tick the checkbox to share measurements." : "Reporting is switched off on this server. The checkbox is unavailable.";
-    if (!next.telemetry) byId("telemetry").checked = false;
+    reportingAvailability(next.telemetry, next.telemetry ? "Reporting is available. Tick the checkbox to share measurements." : "This service has reporting switched off. No numeric measurements will be sent.", !next.telemetry);
     if (changed && (swarm || startRequestedAt !== null && !needsViewerApply)) configure();
     else if (renewAdmission && credentialInstalled && swarm && !needsViewerApply) {
       if (!peerAuthorityFresh(session)) throw new Error("Peer admission renewal unavailable.");

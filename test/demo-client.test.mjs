@@ -15,7 +15,7 @@ import { generateSecretKey, getPublicKey, finalizeEvent } from "nostr-tools/pure
 
 const bundle = await build({ entryPoints: ["demo/client.mjs"], bundle: true, write: false, format: "esm", plugins: [{ name: "fixture", setup(builder) {
   builder.onResolve({ filter: /^(hls\.js|\.\.\/src\/browser\/hls-swarm\.mjs)$/ }, (args) => ({ path: args.path, namespace: "fixture" }));
-  builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={}; static isSupported(){return !globalThis.fixture.nativeHls;} constructor(){this.config={};} on(){} loadSource(){globalThis.fixture.sourceLoads++;} attachMedia(){} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0, tickets:[]}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;}, updateTicket(ticket){if(record.stopped||globalThis.fixture.rejectTicketUpdates||globalThis.fixture.disabledSwarm)return false; options.ticket=ticket; record.tickets.push(ticket); return true;}, attach(hls){if(globalThis.fixture.disabledSwarm)return;hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, metrics(){return {mode:globalThis.fixture.disabledSwarm?'off':options.mode, disabledReason:globalThis.fixture.disabledSwarm?'no-webrtc':null, serving:!globalThis.fixture.disabledSwarm&&options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
+  builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={MANIFEST_PARSED:'manifest',FRAG_LOADED:'fragment',LEVEL_SWITCHED:'level',LEVEL_UPDATED:'update',ERROR:'error'}; static isSupported(){return !globalThis.fixture.nativeHls;} constructor(){this.config={};this.callbacks=new Map();this.levels=[];this.id=globalThis.fixture.players.length;globalThis.fixture.players.push(this);} on(name,callback){this.callbacks.set(name,callback);} emit(name,data){this.callbacks.get(name)?.('',data);} loadSource(){globalThis.fixture.sourceLoads++;globalThis.fixture.playerOperations.push(['load-source',this.id]);} attachMedia(){} destroy(){this.destroyImpl?.();this.destroyed=true;globalThis.fixture.playerOperations.push(['destroy',this.id]);} stopLoad(){globalThis.fixture.playerOperations.push(['stop',this.id]);} startLoad(){globalThis.fixture.playerOperations.push(['start',this.id]);} recoverMediaError(){globalThis.fixture.playerOperations.push(['recover',this.id]);} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0, tickets:[]}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;}, updateTicket(ticket){if(record.stopped||globalThis.fixture.rejectTicketUpdates||globalThis.fixture.disabledSwarm)return false; options.ticket=ticket; record.tickets.push(ticket); return true;}, attach(hls){if(globalThis.fixture.disabledSwarm)return;hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, metrics(){return {mode:globalThis.fixture.disabledSwarm?'off':options.mode, disabledReason:globalThis.fixture.disabledSwarm?'no-webrtc':null, serving:!globalThis.fixture.disabledSwarm&&options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
 } }] });
 async function page(storage = new Map(), { realClock = false, fetchImpl, nativeHls = false, initialTurnCredentials } = {}) {
   const elements = new Map(), intervals = [], timers = new Map(), windowEvents = new Map(), documentEvents = new Map();
@@ -26,15 +26,208 @@ async function page(storage = new Map(), { realClock = false, fetchImpl, nativeH
   element("start").disabled = true;
   element("mode").value = "off"; element("limit").value = "512000"; element("allowance").value = "100000000";
   element("account-method").value = "nostr"; element("account-allowance").value = "100000000";
-  const video = { addEventListener() {}, play: async () => {}, canPlayType: () => nativeHls };
-  const fixture = { nativeHls, swarms: [], sourceLoads: 0, policy: { mode: null, revision: 0, telemetry: false }, session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment", ...(initialTurnCredentials === undefined ? {} : { turnCredentials: initialTurnCredentials }) } };
-  const context = { Date: ClockDate, fixture, location: { origin: "https://viewer.example" }, document: { visibilityState: "visible", addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, structuredClone, TextDecoder, TextEncoder, console,
+  const videoEvents = new Map();
+  const video = { paused: true, currentTime: 0, readyState: 0, error: null,
+    addEventListener(name, callback) { videoEvents.set(name, callback); },
+    play() { fixture.playCalls++; video.paused = false; return fixture.playImpl ? fixture.playImpl() : Promise.resolve(); },
+    pause() { fixture.pauseCalls++; video.paused = true; }, load() { fixture.nativeLoads++; video.error = null; video.readyState = 0; },
+    canPlayType: () => nativeHls };
+  const fixture = { nativeHls, swarms: [], players: [], playerOperations: [], playCalls: 0, pauseCalls: 0, nativeLoads: 0, sourceLoads: 0, policy: { mode: null, revision: 0, telemetry: false }, session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment", ...(initialTurnCredentials === undefined ? {} : { turnCredentials: initialTurnCredentials }) } };
+  const context = { Date: ClockDate, fixture, location: { origin: "https://viewer.example" }, document: { visibilityState: "visible", createElement: () => ({}), addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, structuredClone, TextDecoder, TextEncoder, queueMicrotask, console,
     fetch: async (url, init) => { if (fetchImpl) return fetchImpl(url, init); if (fixture.response) { const response = await fixture.response(url, init); if (response) return response; } const value = fixture.fetch ? await fixture.fetch(url, init) : url === "/session.json" ? fixture.session : fixture.policy; return { ok: true, json: async () => structuredClone(value) }; },
     setTimeout(callback, ms) { const id = realClock ? setTimeout(() => { timers.delete(id); callback(); }, ms) : Symbol(); timers.set(id, { callback, ms }); return id; }, clearTimeout(id) { if (realClock) clearTimeout(id); timers.delete(id); },
-    setInterval(callback, ms) { intervals.push({ callback, ms }); }, window: { addEventListener(name, callback) { windowEvents.set(name, callback); } } };
+    setInterval(callback, ms) { intervals.push({ callback, ms }); }, clearInterval() {}, window: { addEventListener(name, callback) { windowEvents.set(name, callback); } } };
   await vm.runInNewContext(`(async()=>{${bundle.outputFiles[0].text}})()`, context);
-  return { fixture, element, context, fireTimer(matches) { const entries = [...timers].filter(([, row]) => matches(row.ms)); assert.equal(entries.length, 1); const [id, row] = entries[0]; timers.delete(id); row.callback(); }, close() { windowEvents.get("pagehide")?.(); if (realClock) for (const id of timers.keys()) clearTimeout(id); timers.clear(); }, jumpWithoutTimers(ms) { clock += ms; }, windowEvent: (name) => windowEvents.get(name)?.(), visibility(state) { context.document.visibilityState = state; documentEvents.get("visibilitychange")?.(); }, submit: () => element("settings").submit({ preventDefault() {} }), poll: () => intervals.find((entry) => entry.ms === 2000).callback() };
+  return { fixture, element, context, video, videoEvent: name => videoEvents.get(name)?.(), sendReport: () => intervals.find(entry => entry.ms === 15000).callback(), fireTimer(matches) { const entries = [...timers].filter(([, row]) => matches(row.ms)); assert.equal(entries.length, 1); const [id, row] = entries[0]; timers.delete(id); row.callback(); }, close() { windowEvents.get("pagehide")?.(); if (realClock) for (const id of timers.keys()) clearTimeout(id); timers.clear(); }, jumpWithoutTimers(ms) { clock += ms; }, windowEvent: (name) => windowEvents.get(name)?.(), visibility(state) { context.document.visibilityState = state; documentEvents.get("visibilitychange")?.(); }, submit: () => element("settings").submit({ preventDefault() {} }), poll: () => intervals.find((entry) => entry.ms === 2000).callback() };
 }
+
+test("Resume playback reloads native origin only on a gesture and retains earlier errors", async () => {
+  const p = await page(new Map(), { nativeHls: true });
+  try {
+    await p.submit(); assert.equal(p.fixture.playCalls, 1);
+    p.video.error = { code: 2, message: "earlier media failure" }; p.videoEvent("error");
+    p.visibility("hidden"); p.windowEvent("pagehide"); p.visibility("visible"); p.windowEvent("pageshow");
+    assert.equal(p.fixture.playCalls, 1, "returning to the page must not auto-play");
+    assert.equal(p.fixture.nativeLoads, 0, "returning must not reload the media resource");
+    p.element("upload").checked = true; p.element("telemetry").checked = true;
+    p.fixture.playImpl = () => {
+      assert.equal(p.fixture.nativeLoads, 1, "load precedes play in the click handler");
+      assert.equal(p.video.src, p.fixture.session.manifest);
+      return Promise.resolve();
+    };
+    p.element("resume").click(); await delay(0);
+    const r = p.context.window.relaySwarmDemo.report();
+    assert.equal(p.fixture.playCalls, 2); assert.equal(r.player.nativeErrors.length, 1); assert.equal(r.player.fatalErrors, 1);
+    assert.equal(r.player.resumeAttempts, 1); assert.equal(r.player.resumeRecords[0].outcome, "play-request-resolved");
+    assert.equal(r.current.mode, "off"); assert.equal(r.current.upload, false);
+    assert.equal(p.element("upload").checked, false); assert.equal(p.element("telemetry").checked, false);
+    assert.equal(p.fixture.players.length, 0);
+  } finally { p.close(); }
+});
+
+test("Resume playback replaces the stopped HLS instance and requires a fresh peer Apply", async () => {
+  const p = await page();
+  try {
+    p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+    const oldPlayer = p.fixture.players[0]; await p.fixture.swarms.at(-1).options.reserveUploadBytes(77);
+    p.videoEvent("playing"); p.element("quality").value = "1"; p.element("quality").change(); assert.equal(oldPlayer.nextLevel, 1);
+    oldPlayer.emit("error", { fatal: true, type: "networkError", details: "manifestLoadError" });
+    p.visibility("hidden"); p.visibility("visible"); p.windowEvent("pageshow");
+    assert.equal(p.fixture.players.length, 1); assert.equal(p.fixture.sourceLoads, 1); assert.equal(p.fixture.playCalls, 1);
+    p.element("resume").click(); await Promise.resolve();
+    const r = p.context.window.relaySwarmDemo.report();
+    assert.equal(oldPlayer.destroyed, true); assert.equal(p.fixture.players.length, 2); assert.equal(p.fixture.sourceLoads, 2);
+    const destroy = p.fixture.playerOperations.findIndex(row => row[0] === "destroy");
+    const reload = p.fixture.playerOperations.findIndex(row => row[0] === "load-source" && row[1] === 1);
+    assert(destroy >= 0 && reload > destroy, "old MSE ownership ends before loading the replacement");
+    assert.equal(p.element("mode").value, "peer-first", "the viewer's choice remains available for Apply");
+    assert.equal(r.current.mode, "off"); assert.equal(r.current.upload, false); assert.equal(r.uploadBudget.spent, 77);
+    assert.equal(r.player.fatalErrors, 1); assert.equal(r.player.errorRecords.length, 1);
+    p.element("quality").value = "1"; p.element("quality").change();
+    assert.equal(p.fixture.players[1].loadLevel, 1); assert.equal(p.fixture.players[1].nextLevel, undefined, "the new player uses the startup quality setter before its first playing event");
+    p.videoEvent("playing"); p.element("quality").value = "0"; p.element("quality").change(); assert.equal(p.fixture.players[1].nextLevel, 0);
+    await p.poll(); assert.equal(p.fixture.swarms.at(-1).options.mode, "off");
+    await p.submit(); assert.equal(p.fixture.swarms.at(-1).options.mode, "peer-first"); assert.equal(p.fixture.swarms.at(-1).options.serve, false);
+    assert.equal(p.fixture.sourceLoads, 2, "Apply reuses the new player rather than reloading again");
+  } finally { p.close(); }
+});
+
+test("Resume playback cancels hidden queued repair without resetting its automatic budget", async () => {
+  const p = await page();
+  try {
+    await p.submit(); const first = p.fixture.players[0];
+    first.emit("error", { fatal: true, type: "mediaError", details: "bufferAppendError" });
+    p.visibility("hidden"); await Promise.resolve();
+    assert.equal(p.fixture.playerOperations.some(row => row[0] === "recover"), false);
+    assert.equal(p.context.window.relaySwarmDemo.report().player.mediaRecovery.outcome, "cancelled");
+    p.element("resume").click(); assert.equal(p.fixture.players.length, 1, "hidden clicks cannot reload or play");
+    p.visibility("visible"); p.element("resume").click(); await Promise.resolve();
+    const r = p.context.window.relaySwarmDemo.report();
+    assert.equal(r.player.mediaRecovery.attempted, 1); assert.equal(r.player.mediaRecovery.records[0].reason, "page-hidden");
+    assert.equal(p.fixture.players.length, 2); assert.equal(p.fixture.playCalls, 2);
+    assert.equal(p.fixture.playerOperations.some(row => row[0] === "recover"), false);
+  } finally { p.close(); }
+});
+
+test("Resume playback fences late play rejection and keeps a fresh account balance", async () => {
+  const p = await accountPage(); let reject, rejectInitial;
+  try {
+    await p.element("account-connect").click();
+    p.fixture.playImpl = () => new Promise((_resolve, no) => { rejectInitial = no; }); await p.submit();
+    const before = p.context.window.relaySwarmDemo.report().accountBudget;
+    p.fixture.playImpl = () => new Promise((_resolve, no) => { reject = no; });
+    p.element("resume").click();
+    const after = p.context.window.relaySwarmDemo.report().accountBudget;
+    assert.equal(after.connected, true); assert.equal(after.spent, before.spent); assert.equal(after.revision, before.revision);
+    p.fixture.playImpl = undefined; p.element("resume").click(); await delay(0);
+    const message = p.element("resume-status").textContent;
+    const playerStatus = p.element("status").textContent;
+    reject(new Error("late rejection from replaced resource")); await delay(0);
+    rejectInitial(new Error("late rejection from original Start")); await delay(0);
+    assert.equal(p.element("resume-status").textContent, message);
+    assert.equal(p.element("status").textContent, playerStatus);
+    const r = p.context.window.relaySwarmDemo.report(); assert.equal(r.player.resumeRecords[0].superseded, true);
+    assert.equal(r.player.resumeRecords[1].outcome, "play-request-resolved"); assert.equal(r.current.upload, false);
+  } finally { p.close(); }
+});
+
+test("Resume playback fences every retired player callback, including synchronous destroy events", async () => {
+  const p = await page();
+  try {
+    await p.submit(); const old = p.fixture.players[0];
+    const fatal = { fatal: true, type: "mediaError", details: "bufferAppendError" };
+    old.destroyImpl = () => old.emit("error", fatal);
+    p.element("resume").click(); await delay(0);
+    const current = p.fixture.players[1];
+    current.levels = [{ height: 360, bitrate: 100000 }]; current.emit("manifest");
+    const before = JSON.stringify(p.context.window.relaySwarmDemo.report().player);
+    const operations = JSON.stringify(p.fixture.playerOperations), status = p.element("status").textContent;
+    const quality = { value: p.element("quality").value, disabled: p.element("quality").disabled };
+    old.emit("manifest"); old.emit("error", fatal);
+    old.emit("update", { details: { get live() { throw new Error("Retired details must not reach recovery"); } } });
+    old.emit("level", { level: 7 });
+    old.emit("fragment", { frag: { sn: 1, level: 7, type: "main", cc: 1, url: "https://viewer.example/media/a.ts", stats: { loaded: 1, loading: { start: 1, end: 2 } } }, payload: new Uint8Array(1), networkDetails: {} });
+    await delay(0);
+    assert.equal(JSON.stringify(p.context.window.relaySwarmDemo.report().player), before);
+    assert.equal(JSON.stringify(p.fixture.playerOperations), operations); assert.equal(p.fixture.playCalls, 2);
+    assert.equal(p.element("status").textContent, status);
+    assert.deepEqual({ value: p.element("quality").value, disabled: p.element("quality").disabled }, quality);
+    assert.equal(p.context.window.relaySwarmDemo.report().player.fatalErrors, 0, "destroy-time stale errors cannot affect the replacement");
+    current.emit("error", { fatal: false, type: "networkError", details: "levelLoadError" });
+    assert.equal(p.context.window.relaySwarmDemo.report().player.errors.levelLoadError, 1, "current callbacks still record real errors");
+  } finally { p.close(); }
+});
+
+test("hidden current-player callbacks retain errors without starting recovery or autoplay", async () => {
+  const p = await page();
+  try {
+    await p.submit(); const current = p.fixture.players[0];
+    p.visibility("hidden");
+    current.emit("error", { fatal: true, type: "mediaError", details: "bufferAppendError" });
+    current.emit("update", { details: { get live() { throw new Error("Hidden updates must not reach recovery"); } } });
+    await delay(0);
+    const hidden = p.context.window.relaySwarmDemo.report();
+    assert.equal(hidden.player.fatalErrors, 1); assert.equal(hidden.player.errorRecords.length, 1);
+    assert.equal(hidden.player.mediaRecovery.attempted, 0); assert.equal(p.fixture.playCalls, 1);
+    assert.equal(p.fixture.playerOperations.some(row => row[0] === "recover"), false);
+    p.visibility("visible"); p.windowEvent("pageshow"); await delay(0);
+    assert.equal(p.fixture.playCalls, 1); assert.equal(p.context.window.relaySwarmDemo.report().player.mediaRecovery.attempted, 0);
+    current.emit("error", { fatal: true, type: "mediaError", details: "bufferAppendError" }); await delay(0);
+    assert.equal(p.context.window.relaySwarmDemo.report().player.mediaRecovery.attempted, 1, "a later visible error keeps the original recovery allowance");
+    assert.equal(p.fixture.playerOperations.some(row => row[0] === "recover"), true);
+  } finally { p.close(); }
+});
+
+test("reporting availability explains operator OFF immediately and never restores opt-in", async () => {
+  const p = await page(); let release;
+  try {
+    await p.submit(); const reports = [];
+    p.fixture.fetch = async (url, init) => {
+      if (url === "/reports") { reports.push(JSON.parse(init.body)); return {}; }
+      return url === "/session.json" ? p.fixture.session : p.fixture.policy;
+    };
+    assert.equal(p.element("telemetry").disabled, true); assert.match(p.element("telemetry-label").textContent, /switched off by this service/u);
+    p.fixture.policy = { mode: null, revision: 1, telemetry: true }; await p.poll();
+    assert.equal(p.element("telemetry").disabled, false); assert.equal(p.element("telemetry").checked, false);
+    p.element("telemetry").checked = true; await p.sendReport(); assert.equal(reports.length, 1);
+    p.fixture.policy = { mode: "off", revision: 2, telemetry: false };
+    const original = p.fixture.fetch;
+    p.fixture.fetch = (url, init) => url === "/session.json" ? new Promise(resolve => { release = () => resolve(p.fixture.session); }) : original(url, init);
+    const pending = p.poll();
+    for (let i = 0; i < 50 && !p.element("telemetry").disabled; i++) await Promise.resolve();
+    assert.equal(p.element("telemetry").disabled, true); assert.equal(p.element("telemetry").checked, false);
+    assert.match(p.element("telemetry-status").textContent, /No numeric measurements will be sent/u);
+    await p.sendReport(); assert.equal(reports.length, 1);
+    release(); await pending; p.fixture.fetch = original;
+    p.fixture.policy = { mode: null, revision: 3, telemetry: true }; await p.poll(); await p.sendReport();
+    assert.equal(p.element("telemetry").disabled, false); assert.equal(p.element("telemetry").checked, false); assert.equal(reports.length, 1);
+  } finally { release?.(); p.close(); }
+});
+
+test("reporting-only OFF clears consent before a held session response without revoking peers", async () => {
+  const p = await page(); let release;
+  try {
+    p.fixture.policy = { mode: null, revision: 1, telemetry: true }; await p.poll();
+    p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+    p.element("telemetry").checked = true;
+    const active = p.fixture.swarms.at(-1), reports = [];
+    p.fixture.fetch = async (url, init) => {
+      if (url === "/reports") { reports.push(init.body); return {}; }
+      if (url === "/session.json") return new Promise(resolve => { release = () => resolve(p.fixture.session); });
+      return p.fixture.policy;
+    };
+    p.fixture.policy = { mode: null, revision: 2, telemetry: false };
+    const pending = p.poll();
+    for (let i = 0; i < 50 && !p.element("telemetry").disabled; i++) await Promise.resolve();
+    assert.equal(p.element("telemetry").disabled, true); assert.equal(p.element("telemetry").checked, false);
+    assert.match(p.element("telemetry-label").textContent, /switched off by this service/u);
+    assert.match(p.element("telemetry-status").textContent, /No numeric measurements will be sent/u);
+    assert.notEqual(active.stopped, true); assert.equal(p.element("upload").checked, true);
+    await p.sendReport(); assert.equal(reports.length, 0);
+    release(); await pending;
+    assert.equal(p.fixture.swarms.at(-1), active); assert.notEqual(active.stopped, true);
+  } finally { release?.(); p.close(); }
+});
 
 test("operator mode cannot defeat viewer origin kill or grant upload consent", async () => {
   const p = await page(); p.fixture.policy.mode = "peer-first"; p.fixture.policy.revision++; await p.poll(); await p.submit();

@@ -14,7 +14,8 @@
       <section aria-label="Player">
         <video controls playsinline muted preload="none" aria-label="Test stream"></video>
         <p id="status" role="status">Loading the publisher…</p>
-        <div class="player-controls"><label for="quality">Quality</label><select id="quality" disabled><option value="-1">Automatic</option></select><button id="kill" type="button" disabled>Use origin only</button></div>
+        <div class="player-controls"><label for="quality">Quality</label><select id="quality" disabled><option value="-1">Automatic</option></select><button id="kill" type="button" disabled>Use origin only</button><button id="resume" type="button" disabled aria-describedby="resume-status">Resume playback</button></div>
+        <p id="resume-status" class="hint" role="status">Resume reloads the stream from origin if playback stops. Peer delivery then needs Apply settings again.</p>
         <div class="metrics" aria-label="Session measurements">
           <div><span id="saved">0 B</span><small>Verified peer media payload</small></div>
           <div><span id="origin">0</span><small>Origin media requests observed</small></div>
@@ -56,7 +57,7 @@
             <p class="hint">Both buttons apply the selected limit. Reset also clears recorded shared usage. Each action requires fresh account approval and stops uploading. Linking revokes existing grants; other pages must reconnect.</p>
           </fieldset>
           <p id="policy-status" class="hint">Checking operator delivery policy…</p>
-          <label class="check"><input id="telemetry" type="checkbox" disabled aria-describedby="telemetry-status">Share numeric measurements with this server</label>
+          <label class="check"><input id="telemetry" type="checkbox" disabled aria-describedby="telemetry-status"><span id="telemetry-label">Numeric reporting is unavailable</span></label>
           <p id="telemetry-status" class="hint" role="status">Reporting is unavailable until the server policy is checked.</p>
           <p class="hint">Optional reports every 15 seconds contain playback counts, media totals and a temporary page report ID. No account, browser version, labels or peer address is included. Reporting starts only after you opt in.</p>
           <label class="check"><input id="cellular" type="checkbox">Allow peer media on cellular or data-saving connections</label>

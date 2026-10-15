@@ -12,6 +12,57 @@ on `main` do not change that tag or its immutable downloaded assets.
 ## Current delivery checkpoint
 
 The experimental pilot runs exact
+`53340911d3bb973fb392c1bad1f8f72aec2aa8bd`. All nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38741613596)
+and fresh offline consumption of 267 exact-source package members passed.
+Guarded deployment served the 759,084-byte client, SHA-256
+`ca2d08ad1c4c2459658d5a2d0a6e045bf5ff7b464491b0bd49180ca1cacdd6f0`,
+from image
+`sha256:9d911f23d618cc5f78f79b5817a119f6b38439938a356f60a717763258d787a4`.
+Relay-only ICE, TLS/TCP selection, admission 32 and Nostr account allowances
+remain configured; website authentication, reporting and forwarding are off.
+
+The ordinary public check passed all three original application gates over
+60.034 s, independently replayed from retained samples. The receiver verified
+one low and one high fragment, 868,936 bytes total, or 5.8896% of its measured
+encoded media payload. All four players had zero observed fatal/native media
+errors or stalls. Twelve requests were accepted for serving; only two verified
+completions were proved. The other ten causes remain unknown. This is neither
+sustained reliability, a matched baseline benefit nor wire/cost savings.
+All owned cleanup passed. The separate genuine Internet TURN diagnostic passed
+90.043 s/40 verified fragments; its first local lease was shortened to 60 s
+against real 3,600 s credentials, so natural expiry remains unproved.
+
+The latest fourteen-role attempt stopped after 24.522 s at the unchanged M1
+32-process limit, with three players started and no measurement window. Its
+original M4 cleanup-receipt read failed; subsequent fenced recovery proved
+endpoint/profile cleanup, archived the owned stage and removed it after fresh
+absence checks. Original browser-context closure remains unknown. No matching
+300 s capacity qualifier or two-hour/22-churn result exists.
+
+The cross-Mac account API diagnostic failed before reservations: M4 received
+a valid challenge but measured 30.016 s against the client's strict 30 s upper
+bound. A final zero-cap/spent-zero policy was observed; missing-token revocation
+remains unknown, while both actors exited and cleared their owned key buffers.
+The unreleased source corrects issuer-relative lifetime measurement without
+extending grant/delegation limits, and provides explicit media recovery after
+background suspension. Local regressions and a trusted-click Chrome check pass.
+The latter reloads media, proves decoded video/audio progress, retains errors
+and spend, and leaves both consents off; explicit Apply rejoins receive-only.
+This synthetic pause/reload check does not reproduce the physical Safari
+failure. These checks remain separate from deployment,
+real owner/website authentication, upload enforcement and iPhone acceptance.
+See the [checkpoint record](../spikes/results/5334091-public-and-account-checkpoint-20261015.json).
+
+The complete [P01–P12 requirements](PRODUCTION-READINESS.md#delivery-checklist)
+remain open, including sustained sharing, physical/Safari and hard-NAT checks,
+natural expiry, shared-account field acceptance, matched wire/cost evidence and
+immutable release/download checks. PR 8 remains open; v0.1.0 is still the only
+published prerelease. Historical failures below retain their original scope.
+
+## Historical 3e52294 delivery checkpoint
+
+The experimental pilot runs exact
 `3e52294c2e1f44ab9cbed13adf43e94e995f1e2d`. All nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38701249959)
 and fresh offline consumption of 262 exact-source package members passed.
@@ -83,7 +134,7 @@ v0.1.0 remains the published release; 0.2.0 is the source candidate. Package
 The original CLI signs plaintext SDP; the browser loader uses pairwise NIP-44
 signalling. Deployment does not close final production or release acceptance.
 
-## Unreleased connection reuse and lease observations
+## Connection reuse and lease observations included in 5334091
 
 The branch adds bounded draining of an abandoned response on known ordered,
 fully reliable peer channels. The request still resolves promptly; the link
@@ -95,9 +146,9 @@ natural-renewal observation without fetching credentials or granting freshness.
 All 170 focused maintained-source checks pass, including 12 new framing/drain
 cases and 33 lease-observation cases, with guarded cleanup and fresh worker-group
 absence. The [source-check summary](../spikes/results/peer-link-response-drain-source-checks-20261015.json)
-retains exact file hashes. Hosted CI, deployment and ordinary public benefit of
-these changes remain separate gates. The measured 3e delivery failure above
-is unchanged; pure long-renewal witnesses do not establish natural expiry.
+retains exact file hashes. The later 5334091 CI, deployment and short ordinary
+public pass are recorded above. They do not establish causal improvement over
+the unchanged historical 3e failure or natural expiry from pure witnesses.
 
 ## Historical implementation and delivery checkpoints
 

@@ -56,10 +56,10 @@ export function createAccountBudgetControls({ resolveWebsiteAccount, now = Date.
         || (input.action === "settings" && (!exact(input.settings, ["limit", "reset"]) || !Number.isSafeInteger(input.settings.limit) || input.settings.limit < 0 || input.settings.limit > 1e12 || typeof input.settings.reset !== "boolean"))) fail("account-challenge-invalid", 400);
       if (challenges.size >= challengeCapacity) fail("account-challenge-capacity", 429);
       const websiteIdentity = input.methods.includes("website") ? await ledger.identity(await website(request, signal)) : null;
-      const challenge = randomBytes(24).toString("hex"), expiresAt = now() + 30000, delegationExpiresAt = now() + ledger.parameters.delegationTtlSeconds * 1000;
+      const challenge = randomBytes(24).toString("hex"), issuedAt = now(), expiresAt = issuedAt + 30000, delegationExpiresAt = issuedAt + ledger.parameters.delegationTtlSeconds * 1000;
       const content = JSON.stringify({ v: 1, purpose: "relayswarm-account-budget-authorize", origin, challenge, action: input.action, pagePubkey: input.pagePubkey,
         methods: input.methods, settings: input.action === "settings" ? { limit: input.settings.limit, reset: input.settings.reset } : null, expiresAt, delegationExpiresAt });
-      const event = { kind: 27237, created_at: Math.floor(now() / 1000), tags: [], content };
+      const event = { kind: 27237, created_at: Math.floor(issuedAt / 1000), tags: [], content };
       if (signal.aborted || stopping) fail("account-operation-cancelled", 503);
       if (challenges.size >= challengeCapacity) fail("account-challenge-capacity", 429);
       challenges.set(challenge, { ...input, origin, expiresAt, delegationExpiresAt, content, websiteIdentity });

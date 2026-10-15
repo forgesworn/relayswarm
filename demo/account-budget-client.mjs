@@ -16,11 +16,29 @@ export function createAccountBudgetClient({ secretKey, origin, fetchImpl = globa
   const pagePubkey = getPublicKey(secretKey);
   if (new URL(origin).origin !== origin || !["http:", "https:"].includes(new URL(origin).protocol)) throw unavailable();
   let descriptor = null, required = false, credential = null, state = null, failed = false, busy = false;
-  let generation = 0, life = new AbortController(), pending = 0, maintenance = false, lastStatus = 0, lastWall = now();
+  let generation = 0, life = new AbortController(), pending = 0, maintenance = false, lastStatus = 0, lastWall = now(), lastMono = mono();
   function revoke() { failed = true; credential = null; generation++; life.abort(); life = new AbortController(); onRevoke(); }
+  function clockPoint() {
+    const wall = now(), monotonic = mono(), rollback = wall < lastWall || monotonic < lastMono;
+    lastWall = wall; lastMono = monotonic;
+    if (!integer(wall) || !Number.isFinite(monotonic) || monotonic < 0 || rollback) throw unavailable();
+    return { wall, monotonic };
+  }
+  function elapsed(start, end) {
+    const duration = Math.max(end.wall - start.wall, end.monotonic - start.monotonic);
+    if (!Number.isFinite(duration) || end.wall < start.wall || end.monotonic < start.monotonic) throw unavailable();
+    return duration;
+  }
+  // The signed challenge identifies the issuer's clock. Count the whole request
+  // round trip as elapsed: this expires authority early rather than extending it
+  // when the page and server clocks differ. Renewal retains this original anchor.
+  const issuerTime = (clock, at) => clock.issuedAt + elapsed(clock.started, at);
   function fresh() {
-    const wall = now(), rollback = wall < lastWall; lastWall = wall;
-    if (credential && (rollback || wall >= credential.expiresAt || wall >= credential.delegationExpiresAt || mono() - credential.receivedMono >= credential.remainingMs || mono() < credential.receivedMono)) revoke();
+    try {
+      const at = clockPoint();
+      if (credential && (issuerTime(credential.clock, at) >= Math.min(credential.expiresAt, credential.delegationExpiresAt)
+        || elapsed(credential.received, at) >= credential.remainingMs)) revoke();
+    } catch { if (credential) revoke(); }
     return !required || Boolean(credential && !failed);
   }
   function snapshot() {
@@ -62,32 +80,36 @@ export function createAccountBudgetClient({ secretKey, origin, fetchImpl = globa
       }, signal, 5000);
     } finally { pending--; }
   }
-  function install(value, renewal, old) {
-    const wall = now();
-    if (value?.v !== 1 || !hex(value.grant, 64) || !integer(value.expiresAt) || value.expiresAt <= wall || value.expiresAt > wall + descriptor.grantTtlSeconds * 1000 || !integer(value.delegationExpiresAt) || value.delegationExpiresAt < value.expiresAt || !integer(value.epoch) || value.epoch < 1 || value.requiresFreshUploadConsent !== !renewal) throw unavailable();
+  function install(value, renewal, old, clock, requested) {
+    const at = clockPoint(), issuerNow = issuerTime(clock, at), ttl = descriptor.grantTtlSeconds * 1000;
+    if (value?.v !== 1 || !hex(value.grant, 64) || !integer(value.expiresAt) || value.expiresAt <= issuerNow || value.expiresAt > issuerNow + ttl || !integer(value.delegationExpiresAt) || value.delegationExpiresAt < value.expiresAt || !integer(value.epoch) || value.epoch < 1 || value.requiresFreshUploadConsent !== !renewal) throw unavailable();
     if (value.snapshot?.revision !== value.epoch || renewal && (value.delegationExpiresAt !== old.delegationExpiresAt || value.epoch !== old.epoch || value.snapshot?.generation !== state?.generation)) throw unavailable();
+    const remainingMs = Math.min(ttl - elapsed(requested, at), value.expiresAt - issuerNow, value.delegationExpiresAt - issuerNow);
+    if (!(remainingMs > 0)) throw unavailable();
     acceptState(value.snapshot);
     credential = { grant: value.grant, epoch: value.epoch, expiresAt: value.expiresAt, delegationExpiresAt: value.delegationExpiresAt,
-      receivedMono: mono(), remainingMs: Math.min(value.expiresAt, value.delegationExpiresAt) - wall };
-    failed = false; lastStatus = wall;
+      clock, received: at, remainingMs };
+    failed = false; lastStatus = at.wall;
   }
   function requestBody(action, current, amount) {
     const operationId = Array.from(random(), b => b.toString(16).padStart(2, "0")).join("");
     if (!hex(operationId, 32)) throw unavailable();
     const content = JSON.stringify({ v: 1, purpose: "relayswarm-account-budget-request", origin, action, grant: current.grant, operationId, bytes: action === "reserve" ? amount : null });
     return { v: 1, grant: current.grant, operationId, ...(action === "reserve" ? { bytes: amount } : {}),
-      proof: finalizeEvent({ kind: 27238, created_at: Math.floor(now() / 1000), tags: [], content }, secretKey) };
+      proof: finalizeEvent({ kind: 27238, created_at: Math.floor(issuerTime(current.clock, clockPoint()) / 1000), tags: [], content }, secretKey) };
   }
   async function ownerAction(action, methods, settings) {
     if (busy || !descriptor || !methodsValid(methods) || methods.some(v => !descriptor.methods.includes(v)) || (action === "link") !== (methods.length === 2) || !["grant", "settings", "link"].includes(action) || action === "settings" && (!exact(settings, ["limit", "reset"]) || !limit(settings.limit) || typeof settings.reset !== "boolean")) throw unavailable();
     busy = true; required = true; revoke(); const attempt = generation, configured = descriptor;
     try {
       return await boundedOperation(async signal => {
+        const started = clockPoint();
         const challenge = await post(paths.challengeEndpoint, { v: 1, action, methods, pagePubkey, ...(action === "settings" ? { settings } : {}) }, signal);
-        const template = challenge?.event, wall = now(); let content;
+        const template = challenge?.event, at = clockPoint(); let content;
         try { content = JSON.parse(template.content); } catch { throw unavailable(); }
         const expected = { v: 1, purpose: "relayswarm-account-budget-authorize", origin, challenge: challenge.challenge, action, pagePubkey, methods, settings: action === "settings" ? settings : null, expiresAt: challenge.expiresAt, delegationExpiresAt: content.delegationExpiresAt };
-        if (challenge.v !== 1 || !hex(challenge.challenge, 48) || !integer(challenge.expiresAt) || challenge.expiresAt <= wall || challenge.expiresAt > wall + 30000 || !integer(content.delegationExpiresAt) || content.delegationExpiresAt <= wall || content.delegationExpiresAt > wall + configured.delegationTtlSeconds * 1000 || !exact(template, ["kind", "created_at", "tags", "content"]) || template.kind !== 27237 || !integer(template.created_at) || Math.abs(template.created_at * 1000 - wall) > 30000 || !same(template.tags, []) || template.content !== JSON.stringify(expected)) throw unavailable();
+        const issuedAt = challenge.expiresAt - 30000, clock = { issuedAt, started }, issuerNow = issuerTime(clock, at);
+        if (challenge.v !== 1 || !hex(challenge.challenge, 48) || !integer(challenge.expiresAt) || !integer(issuedAt) || challenge.expiresAt <= issuerNow || !integer(content.delegationExpiresAt) || content.delegationExpiresAt <= issuerNow || content.delegationExpiresAt > issuedAt + configured.delegationTtlSeconds * 1000 || !exact(template, ["kind", "created_at", "tags", "content"]) || template.kind !== 27237 || !integer(template.created_at) || Math.abs(template.created_at * 1000 - at.wall) > 30000 || Math.floor(issuedAt / 1000) !== template.created_at || !same(template.tags, []) || template.content !== JSON.stringify(expected)) throw unavailable();
         let nostrProof;
         if (methods.includes("nostr")) {
           const provider = signer(); if (typeof provider?.signEvent !== "function" || typeof provider?.getPublicKey !== "function") throw unavailable();
@@ -100,12 +122,13 @@ export function createAccountBudgetClient({ secretKey, origin, fetchImpl = globa
             created_at: signed?.created_at, tags: signed?.tags, content: signed?.content };
           if (!nostrProof || nostrProof.content !== template.content || nostrProof.kind !== template.kind || nostrProof.created_at !== template.created_at || !same(nostrProof.tags, []) || nostrProof.pubkey !== expectedPubkey || !verifyEvent(nostrProof)) throw unavailable();
         }
-        if (signal.aborted || attempt !== generation || descriptor !== configured || now() >= challenge.expiresAt) throw unavailable();
+        if (signal.aborted || attempt !== generation || descriptor !== configured || issuerTime(clock, clockPoint()) >= challenge.expiresAt) throw unavailable();
         const pageProof = finalizeEvent({ kind: template.kind, created_at: template.created_at, tags: [], content: template.content }, secretKey);
+        const requested = clockPoint();
         const value = await post(paths.authorizeEndpoint, { v: 1, challenge: challenge.challenge, pageProof, ...(nostrProof ? { nostrProof } : {}) }, signal);
         if (signal.aborted || attempt !== generation || descriptor !== configured || value.delegationExpiresAt !== content.delegationExpiresAt) throw unavailable();
         // A deliberate new account action may select a different ledger.
-        state = null; install(value, false); return snapshot();
+        state = null; install(value, false, null, clock, requested); return snapshot();
       }, life.signal, 30000);
     } catch { if (attempt === generation) revoke(); throw unavailable(); }
     finally { busy = false; }
@@ -127,16 +150,18 @@ export function createAccountBudgetClient({ secretKey, origin, fetchImpl = globa
   }
   async function maintain() {
     if (!required || busy || maintenance || !fresh()) return false;
-    const current = credential, attempt = generation, renewal = current.expiresAt - now() <= 20000;
-    if (!renewal && now() - lastStatus < 15000) return true;
+    const current = credential, attempt = generation;
     maintenance = true;
     try {
+      const requested = clockPoint();
+      const renewal = current.remainingMs - elapsed(current.received, requested) <= 20000;
+      if (!renewal && requested.wall - lastStatus < 15000) return true;
       const value = await post(renewal ? paths.renewEndpoint : paths.statusEndpoint, requestBody(renewal ? "renew" : "status", current), life.signal);
       if (attempt !== generation || credential !== current || !fresh()) return false;
-      if (renewal) install(value, true, current);
+      if (renewal) install(value, true, current, current.clock, requested);
       else {
         if (value?.v !== 1 || value.epoch !== current.epoch || value.snapshot?.revision !== current.epoch || value.expiresAt !== current.expiresAt || value.delegationExpiresAt !== current.delegationExpiresAt || value.snapshot?.generation !== state?.generation) throw unavailable();
-        acceptState(value.snapshot); lastStatus = now();
+        acceptState(value.snapshot); lastStatus = clockPoint().wall;
       }
       if (state.remaining === 0) revoke();
       return fresh();

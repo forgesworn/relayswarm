@@ -10,13 +10,18 @@ The 0.2.0 source candidate includes further production feature work; its
 Node 22.13+; CI uses Node 24. The npm registry is unpublished.
 
 The [current experimental pilot](docs/STATUS.md#current-delivery-checkpoint)
-runs `3e52294`: all nine required CI jobs, fresh 262-member package checks and
+runs `5334091`: all nine required CI jobs, fresh 267-member package checks and
 guarded deployment with normal HTTPS attestation passed. The pilot uses
 relay-only ICE and TLS/TCP TURN selection, admission limit 32 and Nostr account
 allowances; the host website account resolver is unconfigured. A separate local
-two-browser Internet TURN renewal check passed 90.031 s with verified media.
-The latest 60.038 s ordinary public check passed playback and contribution,
-but verified peer delivery failed at both qualities; all owned cleanup passed.
+two-browser Internet TURN renewal check passed 90.043 s with verified media.
+The latest 60.034 s ordinary public check passed playback, contribution and
+verified peer delivery at both qualities: two fragments/868,936 bytes. This is
+short-run evidence; sustained benefit and capacity remain unproved. The latest
+fourteen-role attempt stopped at the local test's 32-process limit. A separate
+cross-Mac account check exposed a clock-difference refusal; the source now
+corrects issuer lifetime handling and adds explicit playback recovery, pending
+deployment and field acceptance.
 Physical, broader network, sustained and release acceptance and the full
 [P01–P12 delivery checklist](docs/PRODUCTION-READINESS.md#delivery-checklist)
 remain open; earlier RED results remain historical REDs.
@@ -182,6 +187,7 @@ on physical phones or a broad range of internet networks.
 | `npm run native:fetch -- --help` | Installed native client with verified HTTP fallback |
 | `npm run test:native` | Local relay and local HyperDHT bootstrap; no external network |
 | `npm run test:playback` | Two-rendition real Chrome regression; Chrome and ffmpeg |
+| `npm run test:playback:resume` | Trusted Resume click, decoded media and fresh consent; Chrome and ffmpeg |
 | `npm run test:browser -- --mode shadow` | Live HLS Chrome harness; Chrome and ffmpeg |
 | `npm run test:browser -- --mode peer-first` | Authenticated peer-first harness; Chrome and ffmpeg |
 | `npm test` / `npm run poc` | Original WebRTC PoC/fan-out against public Nostr relays |

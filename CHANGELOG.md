@@ -4,6 +4,13 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Measure account authority against the signed issuer lifetime and conservative
+  elapsed time, so small device/server clock differences do not reject a valid
+  challenge. Keep the original grant/delegation limits, rollback revocation and
+  server proof checks; issue all challenge timestamps from one clock sample.
+- Add an explicit Resume playback action to rebuild suspended media from the
+  origin, preserve errors/spend and require fresh Apply/upload consent before
+  peer contribution. Explain disabled reporting when the server has it off.
 - Retain an abandoned response on known ordered, reliable peer channels only
   until its validated response boundary or the existing drain timeout. Origin
   fallback stays prompt; late payload is discarded before connection reuse.

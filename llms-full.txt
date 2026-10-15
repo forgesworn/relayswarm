@@ -22,13 +22,18 @@ The 0.2.0 source candidate includes further production feature work; its
 Node 22.13+; CI uses Node 24. The npm registry is unpublished.
 
 The [current experimental pilot](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#current-delivery-checkpoint)
-runs `3e52294`: all nine required CI jobs, fresh 262-member package checks and
+runs `5334091`: all nine required CI jobs, fresh 267-member package checks and
 guarded deployment with normal HTTPS attestation passed. The pilot uses
 relay-only ICE and TLS/TCP TURN selection, admission limit 32 and Nostr account
 allowances; the host website account resolver is unconfigured. A separate local
-two-browser Internet TURN renewal check passed 90.031 s with verified media.
-The latest 60.038 s ordinary public check passed playback and contribution,
-but verified peer delivery failed at both qualities; all owned cleanup passed.
+two-browser Internet TURN renewal check passed 90.043 s with verified media.
+The latest 60.034 s ordinary public check passed playback, contribution and
+verified peer delivery at both qualities: two fragments/868,936 bytes. This is
+short-run evidence; sustained benefit and capacity remain unproved. The latest
+fourteen-role attempt stopped at the local test's 32-process limit. A separate
+cross-Mac account check exposed a clock-difference refusal; the source now
+corrects issuer lifetime handling and adds explicit playback recovery, pending
+deployment and field acceptance.
 Physical, broader network, sustained and release acceptance and the full
 [P01–P12 delivery checklist](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md#delivery-checklist)
 remain open; earlier RED results remain historical REDs.
@@ -194,6 +199,7 @@ on physical phones or a broad range of internet networks.
 | `npm run native:fetch -- --help` | Installed native client with verified HTTP fallback |
 | `npm run test:native` | Local relay and local HyperDHT bootstrap; no external network |
 | `npm run test:playback` | Two-rendition real Chrome regression; Chrome and ffmpeg |
+| `npm run test:playback:resume` | Trusted Resume click, decoded media and fresh consent; Chrome and ffmpeg |
 | `npm run test:browser -- --mode shadow` | Live HLS Chrome harness; Chrome and ffmpeg |
 | `npm run test:browser -- --mode peer-first` | Authenticated peer-first harness; Chrome and ffmpeg |
 | `npm test` / `npm run poc` | Original WebRTC PoC/fan-out against public Nostr relays |
@@ -656,6 +662,13 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Measure account authority against the signed issuer lifetime and conservative
+  elapsed time, so small device/server clock differences do not reject a valid
+  challenge. Keep the original grant/delegation limits, rollback revocation and
+  server proof checks; issue all challenge timestamps from one clock sample.
+- Add an explicit Resume playback action to rebuild suspended media from the
+  origin, preserve errors/spend and require fresh Apply/upload consent before
+  peer contribution. Explain disabled reporting when the server has it off.
 - Retain an abandoned response on known ordered, reliable peer channels only
   until its validated response boundary or the existing drain timeout. Origin
   fallback stays prompt; late payload is discarded before connection reuse.
@@ -1441,6 +1454,57 @@ on `main` do not change that tag or its immutable downloaded assets.
 ## Current delivery checkpoint
 
 The experimental pilot runs exact
+`53340911d3bb973fb392c1bad1f8f72aec2aa8bd`. All nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38741613596)
+and fresh offline consumption of 267 exact-source package members passed.
+Guarded deployment served the 759,084-byte client, SHA-256
+`ca2d08ad1c4c2459658d5a2d0a6e045bf5ff7b464491b0bd49180ca1cacdd6f0`,
+from image
+`sha256:9d911f23d618cc5f78f79b5817a119f6b38439938a356f60a717763258d787a4`.
+Relay-only ICE, TLS/TCP selection, admission 32 and Nostr account allowances
+remain configured; website authentication, reporting and forwarding are off.
+
+The ordinary public check passed all three original application gates over
+60.034 s, independently replayed from retained samples. The receiver verified
+one low and one high fragment, 868,936 bytes total, or 5.8896% of its measured
+encoded media payload. All four players had zero observed fatal/native media
+errors or stalls. Twelve requests were accepted for serving; only two verified
+completions were proved. The other ten causes remain unknown. This is neither
+sustained reliability, a matched baseline benefit nor wire/cost savings.
+All owned cleanup passed. The separate genuine Internet TURN diagnostic passed
+90.043 s/40 verified fragments; its first local lease was shortened to 60 s
+against real 3,600 s credentials, so natural expiry remains unproved.
+
+The latest fourteen-role attempt stopped after 24.522 s at the unchanged M1
+32-process limit, with three players started and no measurement window. Its
+original M4 cleanup-receipt read failed; subsequent fenced recovery proved
+endpoint/profile cleanup, archived the owned stage and removed it after fresh
+absence checks. Original browser-context closure remains unknown. No matching
+300 s capacity qualifier or two-hour/22-churn result exists.
+
+The cross-Mac account API diagnostic failed before reservations: M4 received
+a valid challenge but measured 30.016 s against the client's strict 30 s upper
+bound. A final zero-cap/spent-zero policy was observed; missing-token revocation
+remains unknown, while both actors exited and cleared their owned key buffers.
+The unreleased source corrects issuer-relative lifetime measurement without
+extending grant/delegation limits, and provides explicit media recovery after
+background suspension. Local regressions and a trusted-click Chrome check pass.
+The latter reloads media, proves decoded video/audio progress, retains errors
+and spend, and leaves both consents off; explicit Apply rejoins receive-only.
+This synthetic pause/reload check does not reproduce the physical Safari
+failure. These checks remain separate from deployment,
+real owner/website authentication, upload enforcement and iPhone acceptance.
+See the [checkpoint record](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/5334091-public-and-account-checkpoint-20261015.json).
+
+The complete [P01–P12 requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md#delivery-checklist)
+remain open, including sustained sharing, physical/Safari and hard-NAT checks,
+natural expiry, shared-account field acceptance, matched wire/cost evidence and
+immutable release/download checks. PR 8 remains open; v0.1.0 is still the only
+published prerelease. Historical failures below retain their original scope.
+
+## Historical 3e52294 delivery checkpoint
+
+The experimental pilot runs exact
 `3e52294c2e1f44ab9cbed13adf43e94e995f1e2d`. All nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38701249959)
 and fresh offline consumption of 262 exact-source package members passed.
@@ -1512,7 +1576,7 @@ v0.1.0 remains the published release; 0.2.0 is the source candidate. Package
 The original CLI signs plaintext SDP; the browser loader uses pairwise NIP-44
 signalling. Deployment does not close final production or release acceptance.
 
-## Unreleased connection reuse and lease observations
+## Connection reuse and lease observations included in 5334091
 
 The branch adds bounded draining of an abandoned response on known ordered,
 fully reliable peer channels. The request still resolves promptly; the link
@@ -1524,9 +1588,9 @@ natural-renewal observation without fetching credentials or granting freshness.
 All 170 focused maintained-source checks pass, including 12 new framing/drain
 cases and 33 lease-observation cases, with guarded cleanup and fresh worker-group
 absence. The [source-check summary](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/peer-link-response-drain-source-checks-20261015.json)
-retains exact file hashes. Hosted CI, deployment and ordinary public benefit of
-these changes remain separate gates. The measured 3e delivery failure above
-is unchanged; pure long-renewal witnesses do not establish natural expiry.
+retains exact file hashes. The later 5334091 CI, deployment and short ordinary
+public pass are recorded above. They do not establish causal improvement over
+the unchanged historical 3e failure or natural expiry from pure witnesses.
 
 ## Historical implementation and delivery checkpoints
 
@@ -3507,8 +3571,8 @@ key stays on the server. v0.1.0 release assets retain their original behaviour.
 
 ## Current pilot and evidence scope
 
-The experimental pilot now runs exact `3e52294`, with all nine required CI
-jobs and fresh 262-member package checks. Guarded deployment and normal HTTPS
+The experimental pilot now runs exact `5334091`, with all nine required CI
+jobs and fresh 267-member package checks. Guarded deployment and normal HTTPS
 client/two-playlist attestation passed. Relay-only ICE, TLS/TCP TURN projection
 and admission limit 32 are deployed; Nostr account allowances are enabled and
 the website resolver remains unconfigured. Reporting/forwarding remain off.
@@ -3516,16 +3580,18 @@ Private state/permanent leases were preserved and the owned finite source was
 removed under all five cleanup guards, retaining actual exit 255.
 
 A separate local two-Chrome/synthetic-HLS cohort used genuine Internet TURN
-and passed 90.031 s with 40 verified fragments/4,631,756 bytes, including 23 fragments/
-2,656,252 bytes after the renewed transport boundary. Independent unchanged strict replay passes the
+and passed 90.043 s with 40 verified fragments/4,631,756 bytes. Independent unchanged strict replay passes the
 same rebuilt-diagnostic cohort. First local lease 60 s/real issued lease 3,600 s:
 this does not prove natural expiry, exact standalone Internet playback or an
 ordinary journey against the deployed pilot. Earlier REDs stay historical REDs.
 
-Latest ordinary public acceptance remains RED: measured 60.038 s playback and
-contribution passed, but the receiver verified zero peer fragments/bytes at
-both qualities. Seven requests received partial payload without EOF before
-closure. All owned cleanup passed; the delivery cause remains unproved.
+The latest ordinary public check passed playback, contribution and verified
+peer delivery over 60.034 s: one low and one high fragment, 868,936 bytes total.
+All owned cleanup passed. Sustained benefit remains unproved; only two of twelve
+accepted peer requests had verified completions. The fourteen-role test stopped
+at its local process limit before measurement. A cross-Mac account diagnostic
+exposed a device-clock rejection; its source correction and explicit Resume
+playback action still require deployed/physical acceptance.
 See [current status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#current-delivery-checkpoint)
 and the full [P01–P12 checklist](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md#delivery-checklist).
 Historical field sections retain their own dates/topologies; current public,
@@ -3559,12 +3625,21 @@ Hiding or leaving the page stops its swarm and clears upload and reporting
 consent. Returning uses origin until settings are applied again; physical
 background/resume playback remains a field gate.
 
+The unreleased source adds **Resume playback** beside Quality. If returning to
+the page leaves the video stopped, tap it to reload playback from the origin.
+It clears uploading/reporting consent and retains errors and spent allowance.
+The selected peer mode stays selected; press **Apply settings** to rejoin peers
+and explicitly opt in again before contributing. Returning to the page alone
+does not request playback. Native iPhone acceptance remains outstanding.
+When reporting is disabled by the operator, its label says it is switched off
+and the checkbox remains unavailable.
+
 If the host offers a shared account allowance, connecting it is a separate,
 explicit action using a Nostr signer or the host's signed-in website account.
 It adds the service's cumulative cap to this browser's allowance and leaves
 uploading off until a fresh Apply. See [shared upload allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md)
 for linking, resetting, reconnecting after reload and the service's privacy
-boundary. The deployed `3e52294` pilot offers Nostr sign-in; its host website
+boundary. The deployed `5334091` pilot offers Nostr sign-in; its host website
 account resolver is unconfigured.
 
 The player checks operator policy and publisher identity every two seconds,
@@ -4964,7 +5039,7 @@ devices, supporting Nostr sign-in and host website accounts. The
 passes both methods, real peer uploads, renewal, linking, restart persistence
 and fresh consent. It uses disposable signatures and an owned website session
 on loopback; physical devices and actual owner authentication remain separate
-acceptance gates under P06/P12. The deployed `8f482b4` pilot offers Nostr sign-in
+acceptance gates under P06/P12. The deployed `5334091` pilot offers Nostr sign-in
 and preserves the private durable ledger. Integrating websites supply their own
 authenticated account resolver; none is configured on this pilot.
 
@@ -5069,6 +5144,18 @@ observed time. After restart the service trusts the host's UTC clock and that
 durable high-water mark. It cannot establish physical elapsed time during an
 unobserved crash or clock change. Recorded spend persists independently of
 grant expiry. Use a reliable host clock and preserve the private state.
+
+The browser measures the issuer's lifetimes from the signed challenge rather
+than assuming its device clock exactly matches the server. The challenge uses
+one server timestamp for its event and both deadlines. The client counts the
+whole request round trip and subsequent signing time against those deadlines,
+using the greater of wall and monotonic elapsed time. Each grant also retains
+its original request-start lifetime cap; renewal keeps the first delegation
+anchor. Observed rollback of either browser clock revokes authority. The
+existing 30-second proof freshness bound and server-side expiry checks remain.
+Deploy this browser client with the matching server: older challenge handlers
+with separately sampled timestamps can fail the client's coherence check at
+a second boundary.
 
 ## Privacy and scope
 
@@ -5742,6 +5829,28 @@ An entry remains open until the evidence described below exists.
 
 ## Current deployed pilot: 15 October 2026
 
+The current pilot is exact `5334091`, with all nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38741613596),
+267-member fresh consumption and guarded deployment passing. The ordinary
+public check passed playback, contribution and low/high verified peer delivery
+over 60.034 s: two fragments/868,936 bytes, 5.8896% of receiver media payload.
+This does not establish sustained reliability, matched wire savings or cost.
+The separate forced-early Internet TURN check passed 90.043 s; natural expiry
+remains unproved. Reporting/forwarding and website authentication remain off.
+
+The latest fourteen-role attempt stopped at 33 observed processes against the
+unchanged 32-process M1 cap, before any measurement window. Endpoint/profile
+cleanup was recovered separately after the original M4 receipt-read failure;
+browser-context closure remains unknown. No 300 s qualifier or two-hour/churn
+acceptance exists. The cross-Mac account test identified a valid challenge
+rejected over a 16 ms clock difference; issuer-lifetime and explicit playback
+recovery corrections are in the unreleased source, pending field acceptance.
+See the [checkpoint record](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/5334091-public-and-account-checkpoint-20261015.json)
+and [current status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#current-delivery-checkpoint). The full P01–P12
+scope remains open; v0.1.0 is the published prerelease.
+
+## Historical 3e52294 checkpoint
+
 Exact `3e52294` passed all nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38701249959),
 fresh 262-member package/standalone consumption and guarded pilot deployment.
@@ -6289,18 +6398,18 @@ retains its narrower scope. Every requirement remains open for full acceptance.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Exact 3e hosted loopback quality/restart gates pass. Measured ordinary public 60.038 s passes playback/contribution but verifies zero peer fragments/bytes at both qualities; seven matching-metadata responses remain incomplete before closure. All owned cleanup passes; delivery cause is unresolved. Fourteen-role, matching 32-process-cap 300 s qualification, two-hour/churn and matched benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Exact 533 CI and the 60.034 s ordinary public check pass playback, contribution and low/high peer delivery: two fragments/868,936 bytes. Sustained benefit is unproved; the latest fourteen-role attempt stopped at 33 against the 32-process cap before measurement. The 300 s qualifier, two-hour/churn and matched benefit remain open |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Adversarial and exact 3e CI evidence retained. Existing per-address quota CLI (1–120/default 12) is deployed at 32 with relay/TLS-TCP selection; proxy viewers can share that address. This configuration does not prove fourteen-role capacity. Other quotas/expiry retain defaults |
 | P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Deployed 768 ordinary-Chrome trusted opt-in, real process restart, duplicate handling and natural five-minute expiry pass; reporting-off/policy/lease preservation and source cleanup pass; first deployed 219 timeout remains separately retained; backend component evidence does not replace new-client opt-in/reporting validation |
-| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Private durable ledger implements Nostr and host website authentication with atomic reservations and consent/grant fencing. Earlier controlled 55.780 s Chrome/shared-ledger evidence and exact 3e CI retained; deployed 3e preserves permanent account lease/state and offers Nostr. Website resolver, real owner/physical journeys and concurrent cross-device field evidence remain open. Reserved payload charges are not an OS-wide meter |
+| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Nostr/website private ledger and controlled Chrome evidence retained. Deployed 533 preserves account state and offers Nostr. The cross-Mac diagnostic refused a valid 30 s challenge at 30.016 s local remaining; its issuer-clock correction has 42 focused passes/one platform skip, field acceptance pending. Website resolver, real owner and physical upload enforcement remain open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Same-head guarded parent crash, complete scoped writer audit, preserved lease inodes and explicit dirty-marker operator recovery pass; same page decoded both qualities at continuity 17 and cleanup passed; this is not automatic guardian clean-drain |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact 3e fresh offline production-only package (262 exact-source members), eleven imports, durable ledger replay, installed CLI, independent-process verified native/fallback and rebuilt ESM pass. Earlier smoke REDs retained. Assets remain unpublished; immutable downloaded-release acceptance stays open |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact 533 fresh 267-member package, eleven imports, durable ledger replay, installed CLI, independent-process native/fallback and rebuilt ESM pass. Immutable assets remain unpublished; downloaded-release acceptance stays open |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact 3e nine-job CI, fresh 262-member consumer/ESM and guarded pilot deployment pass. Normal HTTPS client/two-playlist attestation, preserved identity/private state/permanent leases/EE proxy and owned-source cleanup exit 255 pass. Relay/TLS-TCP/admission 32 deployed; rollback guards retained, not newly exercised. Immutable release/download and final production gates remain open |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Exact 3e rebuilt diagnostic cohort passes 90.031 s/40 fragments with genuine Internet TURN and independent unchanged strict replay; two local Chrome pages/synthetic HLS scope, not natural 3,600 s expiry or deployed public acceptance. Current ordinary public 60.038 s passes playback/contribution but verifies zero peer fragments/bytes at either quality; all owned cleanup passes. Historical failures remain separate. Safari/physical, hard NAT, natural expiry/reconnection, cross-device budget field evidence, fourteen-role, 7,200 s/22-churn, server quotas/cost and immutable release gates remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact 533 nine-job CI, 267-member consumption, guarded deployment/HTTPS attestation and source cleanup pass. New account-clock/playback-recovery corrections need final CI and deployment. PR 8, immutable release/download and final production gates remain open |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Exact 533 forced-early genuine Internet TURN (90.043 s) and ordinary public (60.034 s) short checks pass with separate scope. Latest capacity refusal and cross-Mac clock failure retained. Physical Safari, hard NAT, natural expiry, shared upload enforcement, 300 s/7,200 s/22-churn, server quotas, wire/cost and immutable release gates remain open |
 
 ## Evidence rules
 

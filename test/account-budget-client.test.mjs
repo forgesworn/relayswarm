@@ -7,7 +7,7 @@ const origin = "https://viewer.example";
 const accountDescriptor = { v: 1, methods: ["nostr", "website"], defaultLimit: 100000000, grantTtlSeconds: 120, delegationTtlSeconds: 10800,
   ...Object.fromEntries(["challenge", "authorize", "reserve", "status", "renew", "logout"].map(v => [`${v}Endpoint`, `/account-budget/${v}`])) };
 
-function fixture(descriptor = accountDescriptor) {
+function fixture(descriptor = accountDescriptor, { clientOffset = 0 } = {}) {
   const secretKey = generateSecretKey(), stable = generateSecretKey(), requests = [], templates = new Map();
   let wall = Date.now(), monotonic = 0, signatures = 0, pubkeyReads = 0, revocations = 0, sequence = 0;
   let grant, delegation, expires, spent = 0, cap = descriptor.defaultLimit, revision = 1, generation = 1, linkedMethods = ["nostr"];
@@ -44,13 +44,74 @@ function fixture(descriptor = accountDescriptor) {
     if (api.held) await api.held(url, init, value);
     return { ok: true, json: async () => api.transform ? api.transform(url, value) : value };
   };
-  api.client = createAccountBudgetClient({ secretKey, origin, fetchImpl, now: () => wall, mono: () => monotonic,
+  api.client = createAccountBudgetClient({ secretKey, origin, fetchImpl, now: () => wall + clientOffset, mono: () => monotonic,
     signer: () => ({ getPublicKey: async () => { pubkeyReads++; return getPublicKey(stable); }, signEvent: async event => { signatures++; return api.signer ? api.signer(event) : finalizeEvent(event, stable); } }), onRevoke: () => revocations++ });
   api.client.configure(descriptor);
   Object.assign(api, { advance(ms, frozenMono = false) { wall += ms; if (!frozenMono) monotonic += ms; },
+    shiftMonotonic(ms) { monotonic += ms; },
     signatures: () => signatures, pubkeyReads: () => pubkeyReads, revocations: () => revocations, spent: () => spent, stable, secretKey });
   return api;
 }
+
+test("server-issued account lifetimes tolerate different device clocks without extending expiry", async () => {
+  for (const clientOffset of [-15000, -16, 16, 15000]) {
+    const f = fixture(accountDescriptor, { clientOffset });
+    await f.client.ownerAction("grant", ["nostr"]);
+    assert.equal(await f.client.reserve(19), true);
+    f.advance(100001); assert.equal(await f.client.maintain(), true);
+    assert.equal(f.signatures(), 1); assert.equal(f.client.snapshot().spent, 19);
+    f.advance(120001); const before = f.requests.length;
+    assert.equal(await f.client.reserve(1), false); assert.equal(f.requests.length, before);
+    assert.equal(f.client.snapshot().available, false);
+  }
+});
+
+test("challenge round trip and signing time count against the original issuer lifetime", async () => {
+  for (const stage of ["challenge", "signer"]) {
+    const f = fixture(accountDescriptor, { clientOffset: -16 });
+    if (stage === "challenge") f.held = async url => { if (url.endsWith("/challenge")) f.advance(30001); };
+    else f.signer = event => { f.advance(30001); return finalizeEvent(event, f.stable); };
+    await assert.rejects(f.client.ownerAction("grant", ["nostr"]));
+    assert.equal(f.requests.filter(v => v.url.endsWith("/authorize")).length, 0);
+    assert.equal(f.client.snapshot().available, false);
+  }
+});
+
+test("device-clock tolerance does not accept incoherent or longer signed challenge authority", async () => {
+  for (const field of ["issuedAt", "delegationExpiresAt"]) {
+    const f = fixture(accountDescriptor, { clientOffset: -16 });
+    f.transform = (url, value) => {
+      if (!url.endsWith("/challenge")) return value;
+      const content = JSON.parse(value.event.content);
+      if (field === "issuedAt") { value.expiresAt += 1000; content.expiresAt += 1000; }
+      else content.delegationExpiresAt += 1;
+      value.event.content = JSON.stringify(content); return value;
+    };
+    await assert.rejects(f.client.ownerAction("grant", ["nostr"]));
+    assert.equal(f.signatures(), 0); assert.equal(f.requests.length, 1);
+  }
+});
+
+test("grant renewal retains the original delegation deadline across device-clock differences", async () => {
+  const f = fixture({ ...accountDescriptor, delegationTtlSeconds: 600 }, { clientOffset: -15000 });
+  await f.client.ownerAction("grant", ["nostr"]);
+  for (let i = 0; i < 5; i++) { f.advance(100001); assert.equal(await f.client.maintain(), true); }
+  f.advance(100001); const before = f.requests.length;
+  assert.equal(await f.client.reserve(1), false); assert.equal(f.requests.length, before);
+  assert.equal(f.client.snapshot().available, false); assert.equal(f.signatures(), 1);
+});
+
+test("authority rejects clock rollback after a later observation and counts delayed grant responses", async () => {
+  const f = fixture(); await f.client.ownerAction("grant", ["nostr"]);
+  f.advance(10000); f.client.snapshot(); f.shiftMonotonic(-1);
+  const before = f.requests.length;
+  assert.equal(await f.client.reserve(1), false); assert.equal(f.requests.length, before);
+  const g = fixture(accountDescriptor, { clientOffset: -15000 });
+  g.held = async url => { if (url.endsWith("/authorize")) g.advance(5000); };
+  await g.client.ownerAction("grant", ["nostr"]);
+  g.advance(115001); assert.equal(await g.client.reserve(1), false);
+  assert.equal(g.client.snapshot().available, false);
+});
 
 test("account client requires explicit owner action, signs exact intent and exposes only budget fields", async () => {
   const f = fixture(); assert.equal(await f.client.reserve(10), true); assert.equal(f.requests.length, 0); assert.equal(f.signatures(), 0);

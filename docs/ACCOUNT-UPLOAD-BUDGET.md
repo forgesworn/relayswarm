@@ -9,7 +9,7 @@ devices, supporting Nostr sign-in and host website accounts. The
 passes both methods, real peer uploads, renewal, linking, restart persistence
 and fresh consent. It uses disposable signatures and an owned website session
 on loopback; physical devices and actual owner authentication remain separate
-acceptance gates under P06/P12. The deployed `8f482b4` pilot offers Nostr sign-in
+acceptance gates under P06/P12. The deployed `5334091` pilot offers Nostr sign-in
 and preserves the private durable ledger. Integrating websites supply their own
 authenticated account resolver; none is configured on this pilot.
 
@@ -114,6 +114,18 @@ observed time. After restart the service trusts the host's UTC clock and that
 durable high-water mark. It cannot establish physical elapsed time during an
 unobserved crash or clock change. Recorded spend persists independently of
 grant expiry. Use a reliable host clock and preserve the private state.
+
+The browser measures the issuer's lifetimes from the signed challenge rather
+than assuming its device clock exactly matches the server. The challenge uses
+one server timestamp for its event and both deadlines. The client counts the
+whole request round trip and subsequent signing time against those deadlines,
+using the greater of wall and monotonic elapsed time. Each grant also retains
+its original request-start lifetime cap; renewal keeps the first delegation
+anchor. Observed rollback of either browser clock revokes authority. The
+existing 30-second proof freshness bound and server-side expiry checks remain.
+Deploy this browser client with the matching server: older challenge handlers
+with separately sampled timestamps can fail the client's coherence check at
+a second boundary.
 
 ## Privacy and scope
 

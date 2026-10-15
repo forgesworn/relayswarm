@@ -12,8 +12,8 @@ key stays on the server. v0.1.0 release assets retain their original behaviour.
 
 ## Current pilot and evidence scope
 
-The experimental pilot now runs exact `3e52294`, with all nine required CI
-jobs and fresh 262-member package checks. Guarded deployment and normal HTTPS
+The experimental pilot now runs exact `5334091`, with all nine required CI
+jobs and fresh 267-member package checks. Guarded deployment and normal HTTPS
 client/two-playlist attestation passed. Relay-only ICE, TLS/TCP TURN projection
 and admission limit 32 are deployed; Nostr account allowances are enabled and
 the website resolver remains unconfigured. Reporting/forwarding remain off.
@@ -21,16 +21,18 @@ Private state/permanent leases were preserved and the owned finite source was
 removed under all five cleanup guards, retaining actual exit 255.
 
 A separate local two-Chrome/synthetic-HLS cohort used genuine Internet TURN
-and passed 90.031 s with 40 verified fragments/4,631,756 bytes, including 23 fragments/
-2,656,252 bytes after the renewed transport boundary. Independent unchanged strict replay passes the
+and passed 90.043 s with 40 verified fragments/4,631,756 bytes. Independent unchanged strict replay passes the
 same rebuilt-diagnostic cohort. First local lease 60 s/real issued lease 3,600 s:
 this does not prove natural expiry, exact standalone Internet playback or an
 ordinary journey against the deployed pilot. Earlier REDs stay historical REDs.
 
-Latest ordinary public acceptance remains RED: measured 60.038 s playback and
-contribution passed, but the receiver verified zero peer fragments/bytes at
-both qualities. Seven requests received partial payload without EOF before
-closure. All owned cleanup passed; the delivery cause remains unproved.
+The latest ordinary public check passed playback, contribution and verified
+peer delivery over 60.034 s: one low and one high fragment, 868,936 bytes total.
+All owned cleanup passed. Sustained benefit remains unproved; only two of twelve
+accepted peer requests had verified completions. The fourteen-role test stopped
+at its local process limit before measurement. A cross-Mac account diagnostic
+exposed a device-clock rejection; its source correction and explicit Resume
+playback action still require deployed/physical acceptance.
 See [current status](STATUS.md#current-delivery-checkpoint)
 and the full [P01–P12 checklist](PRODUCTION-READINESS.md#delivery-checklist).
 Historical field sections retain their own dates/topologies; current public,
@@ -64,12 +66,21 @@ Hiding or leaving the page stops its swarm and clears upload and reporting
 consent. Returning uses origin until settings are applied again; physical
 background/resume playback remains a field gate.
 
+The unreleased source adds **Resume playback** beside Quality. If returning to
+the page leaves the video stopped, tap it to reload playback from the origin.
+It clears uploading/reporting consent and retains errors and spent allowance.
+The selected peer mode stays selected; press **Apply settings** to rejoin peers
+and explicitly opt in again before contributing. Returning to the page alone
+does not request playback. Native iPhone acceptance remains outstanding.
+When reporting is disabled by the operator, its label says it is switched off
+and the checkbox remains unavailable.
+
 If the host offers a shared account allowance, connecting it is a separate,
 explicit action using a Nostr signer or the host's signed-in website account.
 It adds the service's cumulative cap to this browser's allowance and leaves
 uploading off until a fresh Apply. See [shared upload allowance](ACCOUNT-UPLOAD-BUDGET.md)
 for linking, resetting, reconnecting after reload and the service's privacy
-boundary. The deployed `3e52294` pilot offers Nostr sign-in; its host website
+boundary. The deployed `5334091` pilot offers Nostr sign-in; its host website
 account resolver is unconfigured.
 
 The player checks operator policy and publisher identity every two seconds,

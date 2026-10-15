@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { createAccountBudgetControls, accountBudgetRequestContent } from "../demo/account-budget.mjs";
+import { createAccountBudgetClient } from "../demo/account-budget-client.mjs";
 import { startDemoServer } from "../demo/server.mjs";
 
 const op = (n) => n.toString(16).padStart(32, "0");
@@ -39,6 +40,22 @@ async function fixture(t, options = {}) {
   }
   return { controls, post, authorize, request, statePath, get base() { return base; } };
 }
+
+test("real account client accepts server lifetimes across device clock differences and second boundaries", posixState, async t => {
+  let serverNow = Math.floor(Date.now() / 1000) * 1000 + 995;
+  const f = await fixture(t, { now: () => serverNow++, defaultLimit: 100 });
+  const descriptor = f.controls.descriptor(), owner = generateSecretKey();
+  for (const offset of [-15000, 15000]) {
+    const client = createAccountBudgetClient({ secretKey: generateSecretKey(), origin: f.base, now: () => serverNow + offset,
+      fetchImpl: (path, init) => fetch(f.base + path, { ...init, headers: { ...init.headers, origin: f.base } }),
+      signer: () => ({ getPublicKey: async () => getPublicKey(owner), signEvent: async event => finalizeEvent(event, owner) }) });
+    client.configure(descriptor);
+    await client.ownerAction("grant", ["nostr"]);
+    assert.equal(await client.reserve(25), true);
+    assert.equal(client.snapshot().spent, offset < 0 ? 25 : 50);
+    assert.equal(await client.disconnect(), true);
+  }
+});
 
 test("real HTTP Nostr authorisation requires both exact proofs; independent pages share spending", posixState, async (t) => {
   const f = await fixture(t, { defaultLimit: 100 }); const stable = generateSecretKey();

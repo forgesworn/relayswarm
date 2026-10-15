@@ -61,21 +61,23 @@ Peer-first media loads/bytes avoided are not net connection-data savings, and
 upload counters measure committed media payload rather than acknowledged delivery.
 Pending durable reservations can consume quota without entering those counters.
 Documentation on main can include corrections after the immutable releases.
-Current deployed source `3e52294` passed all nine required CI jobs, fresh
-262-member package/native/fallback/ESM checks and guarded deployment with normal
+Current deployed source `5334091` passed all nine required CI jobs, fresh
+267-member package/native/fallback/ESM checks and guarded deployment with normal
 HTTPS client/two-playlist attestation. The pilot uses relay-only ICE, TLS/TCP
 TURN selection and admission limit 32; this does not prove fourteen-role capacity.
 A separate local two-browser/synthetic-HLS cohort using genuine Internet TURN
-passed 90.031 s with 40 verified fragments, including 23 after an early local
-60 s renewal.
+passed 90.043 s with 40 verified fragments after an early local 60 s renewal.
 Its genuine issued TTL was 3,600 s; natural expiry remains unproved.
-The latest ordinary deployed public check measured 60.038 s: playback and explicit
-contribution passed, but the receiver verified zero peer fragments/bytes at
-both qualities. Seven responses had valid metadata and partial payload without
-EOF before closure. All owned cleanup passed. Donor accepted-serve counters
-are not completed delivery; the underlying network/send-queue cause remains
-unproved. Earlier pre-browser, public delivery and cleanup failures retain
-separate verdicts. See STATUS for current evidence and unresolved gates.
+The latest ordinary deployed public check passed playback, contribution and
+low/high verified delivery over 60.034 s: two fragments/868,936 bytes, 5.8896%
+of measured receiver media payload. All owned cleanup passed. Only two of twelve
+accepted requests had verified completions; the other causes remain unknown.
+This does not establish sustained reliability, wire or cost savings. The latest
+fourteen-role attempt stopped at the unchanged 32-process M1 cap before measurement.
+A cross-Mac account check exposed a 30.016-second challenge refused by the strict
+30-second local-clock bound. Unreleased issuer-relative lifetime and explicit
+Resume playback corrections require new deployment and field acceptance.
+Earlier failures retain separate verdicts. See STATUS for exact scope.
 Latest Safari 26 tooling returned driver ready but session creation timed out
 before a page/application test. Owned process/scratch cleanup passed; exact
 session destruction remains unknown.
