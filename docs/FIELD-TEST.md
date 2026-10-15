@@ -217,7 +217,10 @@ isolates each viewer's bounded cache; it is Secure on HTTPS and is not account
 authentication. Bounds are 64 viewer caches, 64 active endpoint requests,
 10 upstream tasks, a burst of 10 with one token restored per three seconds,
 four seconds for upstream headers/body and 16 KiB per response. Excess work
-is refused without evicting active viewer state.
+is refused without evicting active viewer state. Settled entries without a live
+credential cache are reclaimed after expiry or a failed initial issuance;
+fresh caches and unresolved issuance retain their slots. A reclaimed cookie
+requires new issuance through the same limits and grants no cached authority.
 
 The client refreshes at two thirds of the conservative credential lifetime,
 with one request at a time and a five-second whole-request limit. New credential

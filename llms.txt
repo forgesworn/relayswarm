@@ -61,30 +61,21 @@ Peer-first media loads/bytes avoided are not net connection-data savings, and
 upload counters measure committed media payload rather than acknowledged delivery.
 Pending durable reservations can consume quota without entering those counters.
 Documentation on main can include corrections after the immutable releases.
-Current deployed source `5334091` passed all nine required CI jobs, fresh
-267-member package/native/fallback/ESM checks and guarded deployment with normal
-HTTPS client/two-playlist attestation. The pilot uses relay-only ICE, TLS/TCP
-TURN selection and admission limit 32; this does not prove fourteen-role capacity.
-A separate local two-browser/synthetic-HLS cohort using genuine Internet TURN
-passed 90.043 s with 40 verified fragments after an early local 60 s renewal.
-Its genuine issued TTL was 3,600 s; natural expiry remains unproved.
-The latest ordinary deployed public check passed playback, contribution and
-low/high verified delivery over 60.034 s: two fragments/868,936 bytes, 5.8896%
-of measured receiver media payload. All owned cleanup passed. Only two of twelve
-accepted requests had verified completions; the other causes remain unknown.
-This does not establish sustained reliability, wire or cost savings. The latest
-fourteen-role attempt stopped at the unchanged 32-process M1 cap before measurement.
-A cross-Mac account check exposed a 30.016-second challenge refused by the strict
-30-second local-clock bound. Unreleased issuer-relative lifetime and explicit
-Resume playback corrections require new deployment and field acceptance.
-Earlier failures retain separate verdicts. See STATUS for exact scope.
-Latest Safari 26 tooling returned driver ready but session creation timed out
-before a page/application test. Owned process/scratch cleanup passed; exact
-session destruction remains unknown.
-Earlier fourteen-role REDs, Safari bootstrap and
-no-evaluation iPhone USB checks do not close acceptance. Full P01–P12, long/churn,
-physical/NAT, cost and release gates remain open. No separate 37-row ledger was
-located; no 37-item completion is asserted. Consult dated STATUS evidence.
+Current deployed source `18bbfd7`. Nine required CI jobs, fresh package consumption and
+guarded HTTPS deployment passed. Nostr and an authenticated host-supplied
+account API are implemented; integrating websites supply their authentication.
+
+The agreed feature surfaces are implemented, but acceptance is incomplete.
+The latest fourteen-player run completed five minutes with video/audio
+progress, but three receivers stayed on origin after TURN credential failure.
+A subsequent request confirmed the credential cache was full; a regression-tested source correction reclaims expired and
+failed entries without raising its bounds, pending CI and deployment. Earlier REDs
+retain their original verdicts. Matching capacity, two-hour/churn operation,
+natural expiry, physical/browser breadth, difficult networks, measured wire/cost
+benefit and immutable release/download acceptance remain open. v0.1.0 is the
+published prerelease; 0.2.0 remains the source candidate. See the
+[P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
+
 
 ## Documentation
 

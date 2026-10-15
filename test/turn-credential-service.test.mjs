@@ -153,6 +153,49 @@ test("global burst/refill, viewer capacity and strict origins cannot be bypassed
   assert.equal((await capped.post()).status, 429); assert.equal((await capped.post(first.cookie)).status, 200);
 });
 
+test("settled expired viewer caches release capacity and old cookies require new issuance", { timeout: 5000 }, async t => {
+  let wall = 1000000, mono = 1000, calls = 0;
+  const f = await fixture(t, { capacity: 1, now: () => wall, monotonicNow: () => mono,
+    fetchImpl: async () => response(payload(++calls, 5)) });
+  const first = await f.post(); assert.equal(first.status, 200);
+  const full = await f.post(); assert.equal(full.status, 429); assert.equal(full.body.error, "turn-viewer-capacity");
+  assert.equal(calls, 1, "a live cache cannot be evicted for a new viewer");
+  wall += 6000; mono += 6000;
+  const next = await f.post(); assert.equal(next.status, 200, "an expired settled cache must not reserve its slot for three hours");
+  assert.notEqual(next.cookie, first.cookie); assert.equal(calls, 2);
+  assert.equal((await f.post(first.cookie)).status, 429, "an old cookie cannot use another viewer's fresh cache");
+  assert.equal(calls, 2);
+  wall += 6000; mono += 6000;
+  const reissued = await f.post(first.cookie); assert.equal(reissued.status, 200);
+  assert.notEqual(reissued.cookie, first.cookie); assert.notEqual(reissued.cookie, next.cookie);
+  assert.equal(calls, 3); assert.notDeepEqual(reissued.body.iceServers, first.body.iceServers);
+});
+
+test("failed initial issuance releases only settled viewer slots", { timeout: 5000 }, async t => {
+  let calls = 0;
+  const f = await fixture(t, { capacity: 1, fetchImpl: async () => {
+    if (++calls === 1) throw new Error("private issuer failure");
+    return response(payload(calls));
+  } });
+  const failed = await f.post(); assert.equal(failed.status, 503); assert.equal(failed.body.error, "turn-unavailable");
+  const next = await f.post(); assert.equal(next.status, 200, "a settled initial failure must not consume a viewer slot");
+  assert.notEqual(next.cookie, failed.cookie); assert.equal(calls, 2);
+  assert.equal((await f.post(failed.cookie)).status, 429, "the failed cookie does not inherit a later viewer's lease");
+
+  let pendingCalls = 0; const release = deferred();
+  const held = await fixture(t, { capacity: 1, timeoutMs: 30, fetchImpl: async () => {
+    if (++pendingCalls === 1) { await release.promise; return response(payload(1)); }
+    return response(payload(pendingCalls));
+  } });
+  const timedOut = await held.post(); assert.equal(timedOut.status, 503);
+  const stillOwned = await held.post(); assert.equal(stillOwned.status, 429); assert.equal(stillOwned.body.error, "turn-viewer-capacity");
+  assert.equal(pendingCalls, 1, "logical timeout cannot evict unresolved raw issuance");
+  release.resolve(); await new Promise(setImmediate);
+  const afterSettlement = await held.post(); assert.equal(afterSettlement.status, 200);
+  assert.notEqual(afterSettlement.cookie, timedOut.cookie); assert.equal(pendingCalls, 2);
+  assert.equal(afterSettlement.body.iceServers[0].username, "test-2", "late timed-out success cannot restore its discarded cache");
+});
+
 test("wall rollback and monotonic expiry refuse cached credentials", { timeout: 5000 }, async t => {
   let wall = 1000000, mono = 1000, calls = 0;
   const f = await fixture(t, { now: () => wall, monotonicNow: () => mono, fetchImpl: async () => {

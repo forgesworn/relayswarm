@@ -3,13 +3,110 @@
 [Documentation](README.md) · [Field-test guide](FIELD-TEST.md) ·
 [Changelog](../CHANGELOG.md)
 
-Checkpoint: 15 October 2026. The published experimental release is
+Checkpoint: 16 October 2026. The published experimental release is
 [v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0), which points to
 `3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. The 0.2.0 production feature
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
+
+Checkpoint: 16 October 2026. The experimental pilot runs exact
+`18bbfd71e459c2a4bfa0c0ed0b43bb43525be310`. All nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38804221165)
+and fresh consumption of 270 exact-source package members passed. The installed
+CLI, eleven imports, durable ledger and native/HTTP fallback passed. Consumer
+dependencies resolve the declared semver ranges; the separate standalone ESM
+and demo build inputs match root-lock versions.
+
+Normal HTTPS attestation matched the 762,188-byte client, SHA-256
+`1831fd319442467a1ad16de1a9b6cf0f9f11a38d27952c7f3c7c5fdb9b53ac29`,
+from image
+`sha256:3696dfd42ce4e318594283c986846ab404c399551844028d612a7d8632921657`.
+The app ID is
+`2563375a9d03c047f353aaf5f28b3aeaf1bdca03e2fdaf285afe7f7f14d4e6a7`.
+Relay-only ICE, TLS/TCP TURN selection, admission 32 and Nostr account budgets
+are configured; reporting and forwarding are off. Private state, permanent
+leases and the independent EE proxy were preserved. Verification-source cleanup
+passed all five guards, retaining actual exit 255.
+
+The admission correction retains a changed ticket for a later dial and preserves
+a newer candidate while an earlier validation settles. Its original-source
+regression remains RED; the correction passed 12 focused regressions, all
+137 swarm tests and the exact-source CI above, and is deployed. It has not been
+established as the cause or repair of the earlier field failures.
+
+The separate Internet TURN R4 diagnostic passed **90.045 s/88 samples** with
+40 verified fragments/4,631,756 bytes, including 23 fragments after renewed
+transport. Its declared `selected-send-and-resolved-transport-v1` checkpoints
+are 7/42/87. Supplemental strict numeric analysis passes at 23/42/87; the
+legacy strict check at the stored directional checkpoints remains RED because
+initial selected-pair receive counters are zero. These are distinct results.
+Three genuine issuances had 3,600 s leases, with the first local lease shortened
+to 60 s. All owned cleanup passed. This rebuilt diagnostic is separate from
+the exact standalone ESM and deployed playback; natural expiry is unproved.
+
+Nostr plus an authenticated host-supplied account API is the selected account
+scope. The Nostr-only pilot is valid; no named website or human wallet is a
+required feature. Prior cross-Mac API shared-cap/fencing and focused LOW browser
+lifecycle passes retain their original a416 scope. The latter passed seven
+gates in 74.412 s; it does not replace the original both-quality/exhaustion
+trial, whose high-quality verification remained RED. Native iOS 26.5 Simulator
+Start/Home/return/Resume passed advancing clock/pixels and frame deltas 59/61,
+with zero media/page errors, consents off and cleanup. Return was still playing,
+so the physical stopped-video fault was not reproduced. Physical, audible-audio
+and enabled-upload-withdrawal acceptance remain separate.
+
+Completed fourteen-role attempts remain separate: R13 measured **257.301 s**
+before an admission observation stopped qualification; no field cause is proved.
+R14 stopped during setup when M4 Chrome no longer matched its pinned version.
+R15 stopped during setup with **0 ms measurement**: two verify requests aborted
+after 3,002/3,005 ms, without an observed HTTP refusal. Final CDP shows both
+emitted requestExtra before cancellation while other requests completed;
+server receipt and the cause of the missing headers remain unproved. R15 cleanup
+independently passed for all eight acquired contexts and owned processes,
+profiles, stages and source. Its full fourteen-context/acceptance flags remain
+false.
+
+R16 measured **302.582 s** and retains its original RED renewal verdict.
+The conservative `surviving-link-renewal-v1` witness was adopted prospectively
+before R17; it proves a positive counter-derived lower bound on surviving
+tracked links, with identity/pubkey/session retained. It does not prove direct
+peer-connection identity or continuous delivery. R17 measured **303.597 s**
+and passed that witness, but failed its both-quality gate: receiver 1 verified
+LOW only during setup, outside the measurement window.
+
+R18 stopped during setup. Its native observer incorrectly included HTTP header
+waiting in the one-second response-body deadline. The corrected v2 observer
+was applied prospectively before R19; R18 remains RED. R19 measured
+**304.134 s**: all fourteen players showed frame/audio progress and all eight
+contributors uploaded, but receivers 2–4 had no TURN lease and remained in
+origin-only mode. Both-quality, renewal and semantic-coverage gates failed.
+All owned cleanup passed independent review for R16–R19.
+
+A separate post-run HTTPS request returned **429 `turn-viewer-capacity`**.
+Source inspection found that expired leases and failed initial issuance can
+retain settled viewer-cache slots for three hours. The original browser
+responses were not captured, so this later probe does not establish each
+receiver's historical rejection code. A source correction reclaims settled entries without a live cache and passes
+16 focused service tests after two original-source failures. Fresh leases and
+unresolved work retain their slots, and the 64-viewer bound remains. New-source CI, deployment and field
+acceptance are still required.
+
+The defined P01-P12 source feature surfaces are implemented. Matching 300 s
+capacity, 7,200 s/22-churn operation, natural expiry, physical/browser breadth,
+difficult-network acceptance, matched wire/cost benefit and final immutable
+release/download acceptance remain open. Automatic cleanup by a surviving
+broadcast guardian is implemented; the older operator-recovery experiment has
+narrower proof scope. Guardian or host catastrophe still requires operator
+inspection. PR 8 remains open; v0.1.0 is the published prerelease and 0.2.0 the
+source candidate. Historical passes and REDs retain their original revision.
+
+See the [checkpoint record](../spikes/results/18bbfd7-current-delivery-checkpoint-20261016.json)
+for exact retained evidence hashes and the
+[P01-P12 checklist](PRODUCTION-READINESS.md#delivery-checklist) for acceptance.
+
+## Historical a416f7e delivery checkpoint
 
 The experimental pilot runs exact
 `a416f7e1ee2d73acc6535b313baac018f2baab8a`. All nine required

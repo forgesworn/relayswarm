@@ -10,21 +10,20 @@ The 0.2.0 source candidate includes further production feature work; its
 Node 22.13+; CI uses Node 24. The npm registry is unpublished.
 
 The [current experimental pilot](docs/STATUS.md#current-delivery-checkpoint)
-runs `5334091`: all nine required CI jobs, fresh 267-member package checks and
-guarded deployment with normal HTTPS attestation passed. The pilot uses
-relay-only ICE and TLS/TCP TURN selection, admission limit 32 and Nostr account
-allowances; the host website account resolver is unconfigured. A separate local
-two-browser Internet TURN renewal check passed 90.043 s with verified media.
-The latest 60.034 s ordinary public check passed playback, contribution and
-verified peer delivery at both qualities: two fragments/868,936 bytes. This is
-short-run evidence; sustained benefit and capacity remain unproved. The latest
-fourteen-role attempt stopped at the local test's 32-process limit. A separate
-cross-Mac account check exposed a clock-difference refusal; the source now
-corrects issuer lifetime handling and adds explicit playback recovery, pending
-deployment and field acceptance.
-Physical, broader network, sustained and release acceptance and the full
-[P01–P12 delivery checklist](docs/PRODUCTION-READINESS.md#delivery-checklist)
-remain open; earlier RED results remain historical REDs.
+runs exact `18bbfd7`. Nine required CI jobs, fresh package consumption and
+guarded HTTPS deployment passed. Nostr and an authenticated host-supplied
+account API are implemented; integrating websites supply their authentication.
+
+The agreed feature surfaces are implemented, but acceptance is incomplete.
+The latest fourteen-player run completed five minutes with video/audio
+progress, but three receivers stayed on origin after TURN credential failure.
+A subsequent request confirmed the credential cache was full; a regression-tested source correction reclaims expired and
+failed entries without raising its bounds, pending CI and deployment. Earlier REDs
+retain their original verdicts. Matching capacity, two-hour/churn operation,
+natural expiry, physical/browser breadth, difficult networks, measured wire/cost
+benefit and immutable release/download acceptance remain open. v0.1.0 is the
+published prerelease; 0.2.0 remains the source candidate. See the
+[P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
 
 [Documentation](docs/README.md) · [Installation](docs/GETTING-STARTED.md) ·
 [hls.js integration](INTEGRATION.md) · [API reference](docs/API.md) ·

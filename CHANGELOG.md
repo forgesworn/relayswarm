@@ -4,6 +4,12 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Reclaim settled TURN viewer entries after their credential cache expires or
+  initial issuance fails. Fresh credentials and unresolved issuance keep their
+  slots; the viewer, request, issuer and rate limits remain unchanged.
+- Retain renewed admission tickets while peer retry or connection limits delay
+  their next validation, without replacing a newer pending ticket when older
+  work settles.
 - Measure account authority against the signed issuer lifetime and conservative
   elapsed time, so small device/server clock differences do not reject a valid
   challenge. Keep the original grant/delegation limits, rollback revocation and

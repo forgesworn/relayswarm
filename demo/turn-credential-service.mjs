@@ -47,7 +47,12 @@ export function createTurnCredentialService({ url, urlProjection = "issued", fet
     for (const [token, entry] of viewers) {
       if (entry.untilWall <= time.wall || entry.untilMono <= time.mono) {
         entry.pending?.controller.abort(); viewers.delete(token);
-      } else if (entry.cache && (entry.cache.expiresAt <= time.wall || entry.cache.expiresMono <= time.mono)) entry.cache = null;
+      } else {
+        if (entry.cache && (entry.cache.expiresAt <= time.wall || entry.cache.expiresMono <= time.mono)) entry.cache = null;
+        // An expired lease or settled initial failure has no cache to isolate.
+        // Raw issuance keeps its slot until actual settlement, even after timeout.
+        if (!entry.cache && !entry.pending) viewers.delete(token);
+      }
     }
   }
   function viewer(request, response, origin, time) {
