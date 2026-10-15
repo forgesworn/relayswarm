@@ -4,6 +4,8 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Refuse redundant stop IPC after a broadcaster worker's first force request
+  or drain witness, preserving its original cleanup proof and deadlines.
 - Expose the broadcaster's per-socket-address admission ticket limit through
   `--admission-per-address-tickets` (1–120, default 12), without changing other
   admission limits or establishing multi-viewer acceptance.

@@ -644,6 +644,8 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Refuse redundant stop IPC after a broadcaster worker's first force request
+  or drain witness, preserving its original cleanup proof and deadlines.
 - Expose the broadcaster's per-socket-address admission ticket limit through
   `--admission-per-address-tickets` (1–120, default 12), without changing other
   admission limits or establishing multi-viewer acceptance.
@@ -1369,6 +1371,28 @@ on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
 
+The latest worker shutdown correction refuses further TERM/KILL IPC after its
+first force request or an accepted drain witness. Two regressions reproduce
+EPIPE with the preceding source; all 21 focused lease/controller tests pass
+with the correction. The 6.645 s guarded run retained the original time and
+resource bounds, with all five recorded outer cleanup checks passing. Syntax
+for 142 modules passed separately.
+
+The earlier combined local suite remains RED: a 6 s playlist fixture timeout
+preceded the original 40 s work cutoff, and initial group absence failed. The
+confirmed remaining task TLS probe was subsequently stopped after fresh exact
+identity and fixture checks; its absence and group absence were then proved.
+This later recovery does not change the original result. The
+[stop-message correction checkpoint](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/worker-stop-send-fence-checks-20261015.json)
+records the separate scopes; the focused pass is not a full-suite pass.
+
+Exact `f3eeef340213a009f7986f1d8d69073e7e0edda1` passed fresh 259-member
+package consumption. Its [CI run](https://github.com/forgesworn/relayswarm/actions/runs/38691157253)
+passed eight required jobs and failed the RTMPS capability guard's orderly
+close with `worker-group-probe` / `unknown`; the later broadcast browser step
+did not run. That hosted failure's cause remains unproved. Corrected-source
+CI, fresh package consumption and final production acceptance remain pending.
+
 The broadcaster exposes `--admission-per-address-tickets` (1–120, default 12)
 for the existing per-socket-address quota. Viewers behind a proxy can share
 that address. The focused admission and broadcaster checks passed all 33 tests,
@@ -1400,6 +1424,12 @@ full-command comparison. Its same-read witness retained the Python launcher to
 runtime command-name change; later original-birth/group absence and owned-stage
 removal passed without signals. All task-owned actors and the finite source
 were then absent. No request-timeout cause or cleanup repair is claimed.
+
+A later response-phase diagnostic stopped before measurement when the unchanged
+0.5 s ownership process probe timed out. It provides no new peer result. The
+M4 endpoint's ten cleanup flags passed with the direct kernel runtime; its
+original controller assertion remains separate from later actor/stage absence
+and source removal proof.
 
 The [pilot and acceptance checkpoint](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/pilot-turn-acceptance-20261015.json)
 records these separate scopes. Ordinary sharing, Safari/physical devices,

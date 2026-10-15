@@ -164,6 +164,26 @@ test("closed wrapper and delayed stop never signal a recycled PID or group", asy
   assert.ok(h.probes.every((pid) => pid === 4123));
 });
 
+for (const afterDrain of [false, true]) {
+  test(`force request fences redundant IPC ${afterDrain ? "after" : "before"} the drain witness while wrapper is still live`, async () => {
+    const h = groupHarness({ holdSends: true }); h.callbacks[0]();
+    h.child.emit("message", { type: "result", code: 19, signal: null });
+    h.callbacks.at(-1)(); // The original force request was written successfully.
+    if (afterDrain) h.child.emit("message", { type: "draining" });
+    const before = h.sent.length, originalSend = h.child.send;
+    const error = Object.assign(new Error("Redundant send raced wrapper self-kill."), { code: "EPIPE" });
+    h.child.send = (message, callback) => { originalSend(message, callback); callback(error); };
+    const term = h.group.signal("SIGTERM"), kill = h.group.signal("SIGKILL");
+    if (!afterDrain) h.child.emit("message", { type: "draining" });
+    h.end(); await h.tick();
+    // Without the fence the redundant send gets EPIPE and rejects this proof.
+    assert.deepEqual(await h.group.closed, { code: 19, signal: null, statusKnown: true });
+    assert.equal(term, false); assert.equal(kill, false);
+    assert.equal(h.sent.length, before);
+    assert.deepEqual(h.sent.filter((row) => row.type === "signal"), [{ type: "signal", signal: "SIGKILL" }]);
+  });
+}
+
 test("stop before wrapper readiness never launches a late encoder", async () => {
   const h = groupHarness({ ready: false }); h.group.signal("SIGTERM");
   h.child.emit("message", { type: "ready" });

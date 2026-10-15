@@ -24,7 +24,7 @@ export function controlWorkerGroup(child, { configure, onSpawn = () => {}, onErr
   probe = (pid) => process.kill(-pid, 0), now = () => performance.now(),
   pause = () => new Promise((done) => setTimeout(done, 20)) } = {}) {
   let live = true, pipeClosed = false, channelClosed = false, configured = false, draining = false, stopping = false;
-  let status, uncertain, observing, deadline, settled = false, pendingSends = 0;
+  let status, uncertain, observing, deadline, settled = false, pendingSends = 0, killRequested = false;
   let resolve, reject;
   const closed = new Promise((done, refuse) => { resolve = done; reject = refuse; });
   closed.catch(() => {});
@@ -77,9 +77,11 @@ export function controlWorkerGroup(child, { configure, onSpawn = () => {}, onErr
     })();
   }
   function signal(signal) {
-    if (!["SIGTERM", "SIGKILL"].includes(signal) || !live || !child.connected) return false;
+    if (!["SIGTERM", "SIGKILL"].includes(signal) || !live || !child.connected || killRequested || draining) return false;
     stopping = true;
-    if (signal === "SIGKILL") observe(); // Same original five-second drain budget.
+    // The first force request owns the remaining drain. Redundant IPC can race
+    // the wrapper's self-kill and fail after its legitimate drain witness.
+    if (signal === "SIGKILL") { killRequested = true; observe(); } // Same original five-second drain budget.
     return send({ type: "signal", signal });
   }
   child.on("message", (message) => {
