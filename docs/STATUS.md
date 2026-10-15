@@ -9,6 +9,45 @@ Checkpoint: 15 October 2026. The published experimental release is
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
 
+## Current delivery checkpoint
+
+The broadcaster exposes `--admission-per-address-tickets` (1–120, default 12)
+for the existing per-socket-address quota. Viewers behind a proxy can share
+that address. The focused admission and broadcaster checks passed all 33 tests,
+with syntax for 142 modules, in a 28.445 s guarded run. Other quotas and ticket
+expiry retain their defaults. This option has not been deployed or qualified
+with fourteen viewers.
+
+Exact `54da3840a6a057d2112945b3b465704a030aac32` passed all nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38663487490), fresh
+258-member package consumption and the complete 90.006 s forced-early Internet
+TURN renewal check. The receiver verified 40 fragments/4,632,696 bytes, including
+23 fragments/2,654,936 bytes after the renewed transport boundary. Real
+credentials lasted 3,600 seconds; the first local lease was conservatively
+shortened to 60 seconds. This does not prove natural expiry or prolonged load.
+
+The experimental pilot now runs exact 54 with server-owned credentials from the
+existing TURN service. Normal HTTPS attestation matched the live client to the
+image and read both fresh HLS playlists. Identity and permanent leases matched;
+private budget files were retained across the orderly drain. The account JSON
+inode changed during an atomic write. The temporary source was stopped and
+removed with its actual exit code 255 retained.
+
+The subsequent ordinary four-role public check remains RED after 60.072 s.
+Playback and accepted contribution passed; the receiver verified zero peer
+loads/bytes at both qualities. Five matching-have opportunities reached five
+commitment requests and five request timeouts. Donor counters record accepted
+serves, not completed wire delivery. The original M4 cleanup failed its strict
+full-command comparison. Its same-read witness retained the Python launcher to
+runtime command-name change; later original-birth/group absence and owned-stage
+removal passed without signals. All task-owned actors and the finite source
+were then absent. No request-timeout cause or cleanup repair is claimed.
+
+The [pilot and acceptance checkpoint](../spikes/results/pilot-turn-acceptance-20261015.json)
+records these separate scopes. Ordinary sharing, Safari/physical devices,
+natural expiry, sustained/churn, matched wire/cost and immutable release gates
+remain open. Earlier RED results remain unchanged.
+
 ## Current correction checkpoint
 
 The broadcaster guardian now keeps a live wrapper as each worker's process-group
@@ -25,10 +64,9 @@ descendants, exact 128 KiB output and inner exit code 19, followed by lease
 handoff. The 28.521 s run retained 27 resource samples, peaking at 1,293,959,168
 bytes/22 processes with at least 40% free memory. Worker/group/birth and probe
 reaping passed; detached test-group and scratch absence are outside that outer
-guard's proof. Full ingest/forward recovery and exact-head hosted checks remain
-pending. The [worker correction checkpoint](../spikes/results/worker-live-group-checks-20261015.json)
-records the exact source and retained evidence. Internet renewal, Safari,
-sustained operation, publication and deployment remain open.
+guard's proof. The later exact-54 CI, package and pilot results are recorded above. The [worker correction checkpoint](../spikes/results/worker-live-group-checks-20261015.json)
+records the exact source and retained evidence. Natural TURN expiry, ordinary public peer delivery, Safari/physical journeys,
+sustained operation, immutable publication and final production acceptance remain open.
 
 ## Earlier watcher correction checkpoint
 

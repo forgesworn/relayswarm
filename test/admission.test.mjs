@@ -37,6 +37,21 @@ test("ticket lifetime expires and issuance quota ignores untrusted forwarded add
   assert.equal((await post(controls, "/admission/challenge", { pubkey: getPublicKey(generateSecretKey()) }, { origin: "https://other.example" })).status, 403);
   time += 121000; assert.equal(controls.verify(JSON.parse(first.response.result.ticket).tags[0][1], first.response.result.ticket), false);
 });
+test("explicit 32-ticket proxy allowance retains all other admission defaults", { timeout: 5000 }, async () => {
+  const time = 100000, controls = createAdmissionControls({ swarmId: "stream", now: () => time, perAddressTickets: 32 });
+  const defaults = createAdmissionControls({ swarmId: "stream" }).metrics();
+  assert.equal(defaults.perAddressTickets, 12);
+  for (const name of ["capacity", "ticketTtlSeconds", "globalTickets", "perAddressRequests", "requestCapacity"]) {
+    assert.equal(controls.metrics()[name], defaults[name]);
+  }
+  for (let index = 0; index < 32; index++) {
+    const { response } = await issue(controls, generateSecretKey(), time, { address: "127.0.0.1", forwarded: `untrusted-${index}` });
+    assert.equal(response.status, 200);
+  }
+  const denied = await issue(controls, generateSecretKey(), time, { address: "127.0.0.1", forwarded: "another-untrusted-address" });
+  assert.equal(denied.response.status, 429);
+  assert.equal(controls.metrics().tickets, 32);
+});
 test("invalid signatures, mismatched challenge keys and challenge overload are refused before minting", async () => {
   const controls = createAdmissionControls({ swarmId: "stream", capacity: 1, now: () => 100000 });
   const viewer = generateSecretKey(), challenge = await post(controls, "/admission/challenge", { pubkey: getPublicKey(viewer) });

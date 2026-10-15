@@ -4,6 +4,9 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Expose the broadcaster's per-socket-address admission ticket limit through
+  `--admission-per-address-tickets` (1–120, default 12), without changing other
+  admission limits or establishing multi-viewer acceptance.
 - Keep a live process-group wrapper for broadcaster worker shutdown, using its
   original private IPC channel instead of signalling a reaped leader's numeric
   PID. Preserve output, inner exit status and the existing dirty recovery fence.

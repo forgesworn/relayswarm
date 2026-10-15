@@ -42,6 +42,14 @@ is off by default. It obtains separate viewer credentials, refreshes active
 peer sessions and retains consent and spent allowances. It supplies no TURN
 deployment; expired credentials leave playback on origin until fresh Apply.
 
+Admission defaults to 12 tickets per minute for each socket address. Viewers
+behind a reverse proxy can share that address. Set
+`--admission-per-address-tickets 32` when the operator intends that capacity;
+accepted values are integers 1–120, default 12. The launcher validates the value
+before creating state or starting services. This changes no global issuance,
+request, expiry or consent limit, and does not trust forwarded-address headers.
+Choosing a limit does not establish a passing multi-viewer qualification.
+
 ## Output and recovery
 
 Add `--account-budget` to offer the optional shared upload allowance. It keeps

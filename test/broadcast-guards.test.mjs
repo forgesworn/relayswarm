@@ -411,6 +411,24 @@ async function boundedResult(value, timeoutMs = 3000) {
   finally { clearTimeout(timer); }
 }
 
+for (const value of ["0", "121", "-1", "1.5", "NaN", "Infinity"]) {
+  test(`CLI rejects admission tickets per address ${value} before creating state`, { timeout: 5000 }, async (t) => {
+    const directory = await fixture(t), state = join(directory, "uncreated-state");
+    const outcome = await boundedResult(cli(t, ["--state-dir", state, `--admission-per-address-tickets=${value}`]).result);
+    assert.equal(outcome.code, 1);
+    assert.ok(outcome.stderr.includes("Broadcaster could not start."));
+    assert.equal(await exists(state), false);
+  });
+}
+
+test("CLI help advertises the admission option without creating state", { timeout: 5000 }, async (t) => {
+  const directory = await fixture(t), state = join(directory, "uncreated-state");
+  const outcome = await boundedResult(cli(t, ["--state-dir", state, "--admission-per-address-tickets=32", "--help"]).result);
+  assert.equal(outcome.code, 0);
+  assert.ok(outcome.stdout.includes("--admission-per-address-tickets 12"));
+  assert.equal(await exists(state), false);
+});
+
 test("CLI rejects a FIFO secret promptly instead of blocking on open", { timeout: 5000, skip: process.platform === "win32" }, async (t) => {
   const directory = await fixture(t), path = join(directory, "fifo-fixture");
   const made = spawnSync("mkfifo", ["-m", "600", path], { encoding: "utf8", timeout: 1000 });
