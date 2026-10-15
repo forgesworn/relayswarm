@@ -7,7 +7,7 @@ import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 import { createFetchDiagnostics } from "./fetch-diagnostics.mjs";
 import { createPolicyRenewal } from "./policy-renewal.mjs";
 import { createAccountBudgetClient } from "./account-budget-client.mjs";
-import { createTurnCredentials } from "./turn-credentials.mjs";
+import { createTurnCredentials, normalizeTurnCredentialDescriptor } from "./turn-credentials.mjs";
 
 const fetchDiagnostics = createFetchDiagnostics();
 
@@ -42,7 +42,8 @@ const turnCredentials = createTurnCredentials({ origin: location.origin,
   },
 });
 const iceTransportPolicy = value => value?.iceTransportPolicy === undefined ? "all" : value.iceTransportPolicy;
-const turnIdentity = value => JSON.stringify([value?.swarmId, value?.streamEvent?.id, value?.admission?.issuer, value?.admission?.epoch]);
+const turnDescriptor = value => normalizeTurnCredentialDescriptor(value?.turnCredentials);
+const turnIdentity = value => JSON.stringify([value?.swarmId, value?.streamEvent?.id, value?.admission?.issuer, value?.admission?.epoch, turnDescriptor(value)?.urlProjection ?? "issued"]);
 const mediaRecovery = createMediaRecovery({ media: video, getHls: () => hls, getSession: () => session, now: elapsed,
   revokeContribution() { stopSwarm(); byId("mode").value = "off"; byId("upload").checked = false; },
   status(message) {
@@ -181,7 +182,7 @@ function sameIdentity(a, b) {
   return a?.swarmId === b?.swarmId && a?.streamEvent?.id === b?.streamEvent?.id && a?.admission?.epoch === b?.admission?.epoch && a?.admission?.issuer === b?.admission?.issuer;
 }
 function samePeerConfiguration(a, b) {
-  const fields = (value) => [value?.swarmId, value?.streamEvent, value?.relays, value?.admission, value?.manifest, value?.deliveryPolicyEndpoint, value?.commitmentEndpoint, value?.iceServers, iceTransportPolicy(value), value?.turnCredentials, value?.mediaCapabilities, value?.delegation, value?.revokedDelegationIds, value?.delegationRevocations];
+  const fields = (value) => [value?.swarmId, value?.streamEvent, value?.relays, value?.admission, value?.manifest, value?.deliveryPolicyEndpoint, value?.commitmentEndpoint, value?.iceServers, iceTransportPolicy(value), turnDescriptor(value), value?.mediaCapabilities, value?.delegation, value?.revokedDelegationIds, value?.delegationRevocations];
   return JSON.stringify(fields(a)) === JSON.stringify(fields(b));
 }
 function ownCredentialFresh(configuredSession) {
@@ -354,6 +355,8 @@ const policyRenewal = createPolicyRenewal({
       if (current?.v !== 1 || typeof current.swarmId !== "string" || !current.streamEvent || typeof current.streamEvent.id !== "string" || !Array.isArray(current.relays) || !["all", "relay"].includes(iceTransportPolicy(current)) || current.manifest !== base.manifest) {
         invalidate("invalid-session"); throw new Error("Publisher session changed incompatibly.");
       }
+      try { turnDescriptor(current); }
+      catch { invalidate("invalid-session"); throw new Error("Publisher session changed incompatibly."); }
       const identityChanged = !sameIdentity(current, base);
       if (identityChanged) invalidate("publisher-session-changed");
       const renewAdmission = Boolean(current.admission && startRequestedAt !== null && byId("mode").value !== "off" && next.mode !== "off" && (identityChanged || !credential || credential.expiresAt * 1000 - Date.now() <= 20000));
@@ -369,9 +372,10 @@ const policyRenewal = createPolicyRenewal({
     const identityChanged = !sameIdentity(current, session);
     const configurationChanged = !samePeerConfiguration(current, session);
     const transportPolicyChanged = iceTransportPolicy(current) !== iceTransportPolicy(session);
+    const projectionChanged = turnDescriptor(current)?.urlProjection !== turnDescriptor(session)?.urlProjection;
     const changed = policyUnavailable || next.mode !== deliveryPolicy.mode || identityChanged || configurationChanged;
     accountBudget.configure(current.accountBudget);
-    if (transportPolicyChanged) { suspensionGeneration++; needsViewerApply = true; stopSwarm(); byId("upload").checked = false; }
+    if (transportPolicyChanged || projectionChanged) { suspensionGeneration++; needsViewerApply = true; stopSwarm(); byId("upload").checked = false; }
     if (identityChanged) { mediaRecovery.cancel("publisher-session-changed"); stopSwarm(); }
     if (identityChanged || configurationChanged) session = current;
     turnCredentials.configure(current.turnCredentials, turnIdentity(current));
@@ -413,6 +417,7 @@ setInterval(() => { if (swarm) push(snapshots, { atMs: elapsed(), metrics: swarm
 try {
   session = await fetchDiagnostics.json("session", "/session.json", { cache: "no-store" });
   if (!["all", "relay"].includes(iceTransportPolicy(session))) throw new Error("Invalid ICE transport policy.");
+  turnDescriptor(session);
   accountBudget.configure(session.accountBudget); turnCredentials.configure(session.turnCredentials, turnIdentity(session)); byId("allowance").value = String(uploadBudget.snapshot().limit); await refreshPolicy(); byId("start").disabled = false;
   status(isSecureContext ? "Ready · choose a delivery mode and start playback." : "This address needs HTTPS for peer delivery. Origin playback is available.");
 } catch { status("The publisher is unavailable. Reload after it has started."); }

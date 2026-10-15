@@ -19,9 +19,15 @@ export function validateTurnCredentialsUrl(value) {
   return url.href;
 }
 
+export function validateTurnUrlProjection(value = "issued") {
+  if (!["issued", "tls-tcp"].includes(value)) throw new Error("Invalid TURN URL projection; use issued or tls-tcp.");
+  return value;
+}
+
 /** Optional issuer proxy. Cookies isolate bounded viewer caches; they are not account authentication. */
-export function createTurnCredentialService({ url, fetchImpl = globalThis.fetch, now = Date.now, monotonicNow = () => performance.now(),
+export function createTurnCredentialService({ url, urlProjection = "issued", fetchImpl = globalThis.fetch, now = Date.now, monotonicNow = () => performance.now(),
   capacity = 64, activeCapacity = 64, timeoutMs = 4000 } = {}) {
+  validateTurnUrlProjection(urlProjection);
   const issuer = validateTurnCredentialsUrl(url);
   if (typeof fetchImpl !== "function" || typeof now !== "function" || typeof monotonicNow !== "function"
     || !Number.isInteger(capacity) || capacity < 1 || capacity > 64 || !Number.isInteger(activeCapacity) || activeCapacity < 1 || activeCapacity > 64
@@ -152,6 +158,18 @@ export function createTurnCredentialService({ url, fetchImpl = globalThis.fetch,
       if (pending.waiters === 0) pending.controller.abort();
     }
   }
+  function responseServers(result) {
+    if (urlProjection === "issued") return result.iceServers;
+    // Select TCP only where the issuer left a secure URI's transport unspecified.
+    // The issued/cache entry and its original lease are never modified.
+    const servers = result.iceServers.map(server => ({ ...server, urls: server.urls.flatMap(value => {
+      if (!value.startsWith("turns:")) return [];
+      if (!value.includes("?")) return [`${value}?transport=tcp`];
+      return value.endsWith("?transport=tcp") ? [value] : [];
+    }) })).filter(server => server.urls.length > 0);
+    if (servers.length === 0) fail("turn-tls-tcp-unavailable");
+    try { return validateIceConfig({ v: 1, iceServers: servers }); } catch { fail("turn-tls-tcp-unavailable"); }
+  }
   async function serve(request, response, path, base) {
     if (path !== ENDPOINT) return false;
     let controller;
@@ -169,8 +187,9 @@ export function createTurnCredentialService({ url, fetchImpl = globalThis.fetch,
       if (closing || controller.signal.aborted) fail();
       const entry = viewer(request, response, origin, time), result = await credential(entry, controller.signal), current = clock();
       if (closing || controller.signal.aborted || response.destroyed || current.wall >= result.expiresAt || current.mono >= result.expiresMono) fail();
+      const iceServers = responseServers(result);
       response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify({ v: 1,
-        iceServers: result.iceServers, ttlSeconds: result.ttlSeconds, issuedAt: result.issuedAt, expiresAt: result.expiresAt, refreshAt: result.refreshAt, serverTime: current.wall }));
+        iceServers, ttlSeconds: result.ttlSeconds, issuedAt: result.issuedAt, expiresAt: result.expiresAt, refreshAt: result.refreshAt, serverTime: current.wall }));
     } catch (error) {
       if (!response.destroyed && !response.headersSent) {
         const known = error instanceof TurnError, status = known ? error.status : 503;
@@ -180,7 +199,7 @@ export function createTurnCredentialService({ url, fetchImpl = globalThis.fetch,
     } finally { connections.delete(controller); request.off("aborted", disconnect); response.off("close", disconnect); }
     return true;
   }
-  return { descriptor: () => ({ v: 1, endpoint: ENDPOINT, method: "POST" }),
+  return { descriptor: () => ({ v: 1, endpoint: ENDPOINT, method: "POST", ...(urlProjection === "tls-tcp" ? { urlProjection } : {}) }),
     handle(...args) {
       const task = serve(...args); handles.add(task); task.finally(() => handles.delete(task)).catch(() => {}); return task;
     },

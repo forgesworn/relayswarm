@@ -118,6 +118,36 @@ a bounded retry; it does not extend expiry or increment the refresh counter. The
 `createHlsSwarm({iceServers})` option remains a configuration captured when the
 swarm is created; no seamless ICE-restart API is added.
 
+### Optional TLS-over-TCP URL projection
+
+Set `turnCredentials.urlProjection: "tls-tcp"` (default `"issued"`) or use
+`--turn-url-projection tls-tcp` together with `--turn-credentials-url`. This
+operator selection is independent of `iceTransportPolicy`. Invalid choices or
+CLI TLS projection without an issuer are rejected before private reads/state.
+The default session descriptor stays unchanged; explicit selection adds only
+`urlProjection: "tls-tcp"` to its TURN descriptor.
+
+The adapter retains the raw issued URLs and lease in its private cache. In its
+response it preserves explicit `turns:host[:port]?transport=tcp`, appends
+`?transport=tcp` only to a valid transport-unspecified `turns:host[:port]`, and
+excludes plain `turn:` and explicit UDP. Hostname, port, credentials and original
+expiry/refresh boundaries are preserved. Empty/invalid projections refuse peer
+configuration without unrestricted retry; origin fallback remains. The client
+independently requires explicit secure TCP URLs. A selection change fences old
+pending work, stops peers and withdraws upload until fresh Apply.
+
+This is application-selected configuration, distinguishable from the original
+issuer response. [RFC5928 section3](https://www.rfc-editor.org/rfc/rfc5928.html#section-3)
+defines user/application transport preferences;
+[RFC7350 section4.6](https://www.rfc-editor.org/rfc/rfc7350.html#section-4.6)
+allows TLS or DTLS for unspecified `turns:`. Explicit TCP narrows that selection;
+it does not prove issuer/server compatibility. The selected URI is then resolved
+unchanged under [RFC7065](https://www.rfc-editor.org/rfc/rfc7065.html#section-3.1)
+and supplied as [WebRTC ICE configuration](https://www.w3.org/TR/webrtc/#dom-rtciceserver).
+TLS describes the client-to-TURN hop, not every relay-to-peer hop. Actual selected
+transport and verified payload still require measurement; no delivery repair,
+cost or field qualification follows from this option.
+
 ## Node HLS publisher
 
 ```js

@@ -17,16 +17,17 @@ const bundle = await build({ entryPoints: ["demo/client.mjs"], bundle: true, wri
   builder.onResolve({ filter: /^(hls\.js|\.\.\/src\/browser\/hls-swarm\.mjs)$/ }, (args) => ({ path: args.path, namespace: "fixture" }));
   builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={}; static isSupported(){return !globalThis.fixture.nativeHls;} constructor(){this.config={};} on(){} loadSource(){globalThis.fixture.sourceLoads++;} attachMedia(){} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0, tickets:[]}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;}, updateTicket(ticket){if(record.stopped||globalThis.fixture.rejectTicketUpdates||globalThis.fixture.disabledSwarm)return false; options.ticket=ticket; record.tickets.push(ticket); return true;}, attach(hls){if(globalThis.fixture.disabledSwarm)return;hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, metrics(){return {mode:globalThis.fixture.disabledSwarm?'off':options.mode, disabledReason:globalThis.fixture.disabledSwarm?'no-webrtc':null, serving:!globalThis.fixture.disabledSwarm&&options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
 } }] });
-async function page(storage = new Map(), { realClock = false, fetchImpl, nativeHls = false } = {}) {
+async function page(storage = new Map(), { realClock = false, fetchImpl, nativeHls = false, initialTurnCredentials } = {}) {
   const elements = new Map(), intervals = [], timers = new Map(), windowEvents = new Map(), documentEvents = new Map();
   let clock = 0; const wallStart = Date.now(), performanceStart = performance.now();
   const now = () => realClock ? performance.now() - performanceStart : clock;
   class ClockDate extends Date { constructor(...args) { super(...(args.length ? args : [ClockDate.now()])); } static now() { return wallStart + now(); } }
   const element = (id) => { if (!elements.has(id)) elements.set(id, { value: "", checked: false, disabled: false, addEventListener(name, callback) { this[name] = callback; }, append() {} }); return elements.get(id); };
+  element("start").disabled = true;
   element("mode").value = "off"; element("limit").value = "512000"; element("allowance").value = "100000000";
   element("account-method").value = "nostr"; element("account-allowance").value = "100000000";
   const video = { addEventListener() {}, play: async () => {}, canPlayType: () => nativeHls };
-  const fixture = { nativeHls, swarms: [], sourceLoads: 0, policy: { mode: null, revision: 0, telemetry: false }, session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment" } };
+  const fixture = { nativeHls, swarms: [], sourceLoads: 0, policy: { mode: null, revision: 0, telemetry: false }, session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment", ...(initialTurnCredentials === undefined ? {} : { turnCredentials: initialTurnCredentials }) } };
   const context = { Date: ClockDate, fixture, location: { origin: "https://viewer.example" }, document: { visibilityState: "visible", addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, structuredClone, TextDecoder, TextEncoder, console,
     fetch: async (url, init) => { if (fetchImpl) return fetchImpl(url, init); if (fixture.response) { const response = await fixture.response(url, init); if (response) return response; } const value = fixture.fetch ? await fixture.fetch(url, init) : url === "/session.json" ? fixture.session : fixture.policy; return { ok: true, json: async () => structuredClone(value) }; },
     setTimeout(callback, ms) { const id = realClock ? setTimeout(() => { timers.delete(id); callback(); }, ms) : Symbol(); timers.set(id, { callback, ms }); return id; }, clearTimeout(id) { if (realClock) clearTimeout(id); timers.delete(id); },
@@ -718,6 +719,7 @@ test("TURN demo refresh recycles active peers while preserving consent, admissio
   try {
     await p.element("account-connect").click();
     p.fixture.session.iceTransportPolicy = "relay";
+    p.fixture.session.turnCredentials = { ...turnDescriptor, urlProjection: "tls-tcp" };
     p.fixture.session.admission = { issuer: "issuer", epoch: "epoch", challengeEndpoint: "/admission-challenge", ticketEndpoint: "/admission-ticket", verifyEndpoint: "/admission-verify" };
     const fetchAccount = p.fixture.fetch;
     p.fixture.fetch = (url, init) => url.startsWith("/admission-") ? { ...p.fixture.session.admission, swarmId: p.fixture.session.swarmId, challenge: "challenge", ticket: "private-admission-ticket", expiresAt: Math.floor(p.context.Date.now() / 1000) + 300 } : fetchAccount(url, init);
@@ -764,3 +766,72 @@ test("TURN demo descriptor removal stops active peers; unchanged static ICE neve
     assert.equal(p.fixture.swarms.at(-1).options.serve, false);
   } finally { p.close(); }
 });
+
+
+test("TURN projection defaults are equivalent but a selection change stops peers and preserves both spent ledgers until fresh Apply", async () => {
+  const p = await turnPage(await accountPage());
+  try {
+    await p.element("account-connect").click(); p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+    const first = p.fixture.swarms.at(-1), count = p.fixture.swarms.length;
+    assert.equal(await first.options.reserveUploadBytes(77), true);
+    p.fixture.session.turnCredentials = { ...turnDescriptor, urlProjection: "issued" }; await p.poll();
+    assert.equal(p.fixture.swarms.length, count); assert.notEqual(first.stopped, true); assert.equal(p.turnCalls.length, 1);
+    p.fixture.session.turnCredentials = { ...turnDescriptor, urlProjection: "tls-tcp" }; await p.poll();
+    assert.equal(first.stopped, true); assert.equal(p.element("upload").checked, false); assert.equal(p.turnCalls.length, 1);
+    assert.equal(p.context.window.relaySwarmDemo.report().current, null);
+    assert.equal(await first.options.reserveUploadBytes(1), false);
+    await p.poll(); assert.equal(p.fixture.swarms.length, count);
+    await p.submit(); const next = p.fixture.swarms.at(-1), report = p.context.window.relaySwarmDemo.report();
+    assert.notEqual(next, first); assert.equal(next.options.serve, false); assert.equal(p.turnCalls.length, 2);
+    assert.deepEqual(Array.from(next.options.iceServers[0].urls), ["turns:private-relay.test:5349?transport=tcp"]);
+    assert.equal(report.uploadBudget.spent, 77); assert.equal(report.accountBudget.spent, 277); assert.equal(p.fixture.accountSignatures, 1);
+    for (const value of ["private-turn", "private-relay", "tls-tcp"]) assert.equal(JSON.stringify(report).includes(value), false);
+  } finally { p.close(); }
+});
+
+test("TURN projection change during initial acquisition fences late completion and never restores old upload consent", async () => {
+  const p = await turnPage(); let release;
+  try {
+    p.element("mode").value = "peer-first"; p.element("upload").checked = true;
+    p.fixture.turnResponse = () => new Promise(resolve => { release = resolve; });
+    const applying = p.submit(); await settleTurn(); assert.equal(typeof release, "function");
+    p.fixture.session.turnCredentials = { ...turnDescriptor, urlProjection: "tls-tcp" }; await p.poll(); await applying;
+    assert.equal(p.element("upload").checked, false); assert.equal(p.fixture.sourceLoads, 0);
+    release(new Response("{}", { headers: { "content-type": "application/json" } })); await settleTurn();
+    assert.equal(p.context.window.relaySwarmDemo.report().current, null); assert.equal(p.turnCalls.length, 1);
+    p.fixture.turnResponse = null; await p.submit(); assert.equal(p.turnCalls.length, 2);
+    assert.equal(p.fixture.swarms.at(-1).options.serve, false);
+  } finally { p.close(); }
+});
+
+for (const [kind, invalidDescriptor] of [["unknown enum", { ...turnDescriptor, urlProjection: "invalid" }], ["extra field", { ...turnDescriptor, urlProjection: "tls-tcp", extra: true }]]) {
+  test(`invalid initial TURN projection ${kind} cannot establish peer authority`, async () => {
+    const p = await page(new Map(), { initialTurnCredentials: invalidDescriptor });
+    try {
+      const report = p.context.window.relaySwarmDemo.report();
+      assert.equal(report.policyRenewal.fresh, false); assert.equal(report.current, null);
+      assert.equal(report.turnCredentials.enabled, false); assert.equal(report.turnCredentials.active, false);
+      assert.equal(report.turnCredentials.pending, false); assert.equal(report.turnCredentials.refreshes, 0);
+      assert.equal(p.element("start").disabled, true);
+      assert.equal(p.fixture.swarms.length, 0); assert.equal(p.fixture.sourceLoads, 0); assert.equal(p.element("upload").checked, false);
+      assert.match(p.element("status").textContent, /publisher is unavailable/u);
+    } finally { p.close(); }
+  });
+  test(`invalid refreshed TURN projection ${kind} revokes immediately at the same fresh clock`, async () => {
+    const p = await turnPage();
+    try {
+      p.fixture.session.turnCredentials = { ...turnDescriptor, urlProjection: "tls-tcp" }; await p.poll();
+      p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+      const first = p.fixture.swarms.at(-1), calls = p.turnCalls.length, clock = p.context.performance.now();
+      assert.equal(p.context.window.relaySwarmDemo.report().policyRenewal.fresh, true);
+      assert.equal(await first.options.reserveUploadBytes(77), true);
+      p.fixture.session.turnCredentials = invalidDescriptor; await p.poll();
+      assert.equal(p.context.performance.now(), clock, "No expiry/timer advance may explain the revocation");
+      assert.equal(first.stopped, true); assert.equal(p.element("upload").checked, false); assert.equal(p.turnCalls.length, calls);
+      assert.equal(await first.options.reserveUploadBytes(1), false);
+      const report = p.context.window.relaySwarmDemo.report();
+      assert.equal(report.policyRenewal.fresh, false); assert.equal(report.uploadBudget.spent, 77);
+      assert.equal(p.fixture.swarms.at(-1).options.mode, "off"); assert.equal(p.fixture.swarms.at(-1).options.serve, false);
+    } finally { p.close(); }
+  });
+}

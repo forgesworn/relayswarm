@@ -19,7 +19,7 @@ import { readIceConfigFile } from "../src/ice-config.mjs";
 import { createAccountBudgetControls } from "./account-budget.mjs";
 import { createRequestDiagnostics } from "./request-diagnostics.mjs";
 import { isCliEntry } from "../src/cli-entry.mjs";
-import { createTurnCredentialService, validateTurnCredentialsUrl } from "./turn-credential-service.mjs";
+import { createTurnCredentialService, validateTurnCredentialsUrl, validateTurnUrlProjection } from "./turn-credential-service.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +39,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
   if (typeof blockingPlaylistReload !== "boolean") throw new Error("Invalid blocking playlist policy.");
   if (turnCredentials !== undefined) {
     if (!turnCredentials || typeof turnCredentials !== "object" || Array.isArray(turnCredentials) || iceServers !== undefined) throw new Error("Supply either static ICE servers or a TURN credential issuer.");
+    validateTurnUrlProjection(turnCredentials.urlProjection);
     validateTurnCredentialsUrl(turnCredentials.url);
   }
   if (beforeListen !== undefined && typeof beforeListen !== "function") throw new Error("beforeListen must be a function.");
@@ -206,9 +207,11 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
 
 async function main() {
   const { values } = parseArgs({ options: { "media-dir": { type: "string" }, manifest: { type: "string", default: "master.m3u8" }, host: { type: "string", default: "127.0.0.1" }, port: { type: "string", default: "8787" },
-    "public-url": { type: "string" }, "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, "ice-transport-policy": { type: "string", default: "all" }, "turn-credentials-url": { type: "string" }, "publisher-state": { type: "string" }, "operator-token-file": { type: "string" }, "operator-state": { type: "string" }, "account-budget-state": { type: "string" }, "allow-encrypted-media": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" } } });
-  if (values.help) { console.log("npm run demo -- [--media-dir DIR --manifest master.m3u8] [--host 127.0.0.1 --port 8787] [--public-url https://demo.example] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE | --turn-credentials-url https://issuer.example/turn] [--ice-transport-policy all|relay] [--publisher-state FILE] [--operator-token-file FILE] [--account-budget-state FILE] [--telemetry]\nWithout --media-dir, ffmpeg generates a two-rendition live test stream. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/FIELD-TEST.md."); return; }
+    "public-url": { type: "string" }, "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, "ice-transport-policy": { type: "string", default: "all" }, "turn-credentials-url": { type: "string" }, "turn-url-projection": { type: "string", default: "issued" }, "publisher-state": { type: "string" }, "operator-token-file": { type: "string" }, "operator-state": { type: "string" }, "account-budget-state": { type: "string" }, "allow-encrypted-media": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" } } });
+  if (values.help) { console.log("npm run demo -- [--media-dir DIR --manifest master.m3u8] [--host 127.0.0.1 --port 8787] [--public-url https://demo.example] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE | --turn-credentials-url https://issuer.example/turn] [--ice-transport-policy all|relay] [--turn-url-projection issued|tls-tcp] [--publisher-state FILE] [--operator-token-file FILE] [--account-budget-state FILE] [--telemetry]\nWithout --media-dir, ffmpeg generates a two-rendition live test stream. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/FIELD-TEST.md."); return; }
   if (!["all", "relay"].includes(values["ice-transport-policy"])) throw new Error("Invalid ICE transport policy; use all or relay.");
+  validateTurnUrlProjection(values["turn-url-projection"]);
+  if (values["turn-url-projection"] !== "issued" && values["turn-credentials-url"] === undefined) throw new Error("TURN URL projection requires --turn-credentials-url.");
   const port = Number(values.port);
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new Error("Invalid port.");
   if (values.stun?.some((url) => !/^stuns?:[^\s]+$/u.test(url))) throw new Error("--stun requires a STUN URL.");
@@ -227,7 +230,7 @@ async function main() {
       publisherState: values["publisher-state"], operatorTokenFile: values["operator-token-file"], operatorToken: values["operator-token-file"] ? undefined : process.env.RELAYSWARM_OPERATOR_TOKEN, telemetry: values.telemetry,
       operatorState: values["operator-state"], ...(values["account-budget-state"] ? { accountBudget: { statePath: values["account-budget-state"] } } : {}), allowEncryptedMedia: values["allow-encrypted-media"],
       iceTransportPolicy: values["ice-transport-policy"], publicUrl: values["public-url"], tlsKey: values["tls-key"], tlsCert: values["tls-cert"], relays: values.relay,
-      ...(iceServers ? { iceServers } : {}), ...(values["turn-credentials-url"] !== undefined ? { turnCredentials: { url: values["turn-credentials-url"] } } : {}) });
+      ...(iceServers ? { iceServers } : {}), ...(values["turn-credentials-url"] !== undefined ? { turnCredentials: { url: values["turn-credentials-url"], urlProjection: values["turn-url-projection"] } } : {}) });
     console.log(`RelaySwarm field-test player: ${demo.base}\n${values["publisher-state"] ? "Publisher identity is restored from the private server state file." : "Publisher key is ephemeral and stays on this server."} Press Ctrl-C to stop.`);
     let stopping = false;
     const stop = async () => { if (stopping) return; stopping = true; await close(); };

@@ -53,11 +53,24 @@ Choosing a limit does not establish a passing multi-viewer qualification.
 The broadcaster and demo accept `--ice-transport-policy all|relay`, default
 `all`. Choose `relay` explicitly to restrict peer ICE to relayed candidates;
 provide usable TURN configuration or the existing credential adapter. The
-choice does not force TLS: the adapter currently preserves all validated issuer
+choice does not force TLS: by default the adapter preserves all validated issuer
 URLs. It never falls back to `all`, changes the peer deadline or grants upload
 consent. Playback keeps its existing origin fallback. A changed demo session
 policy stops peers and requires fresh Apply and upload consent. This option
 does not establish improved delivery, measured privacy or field acceptance.
+
+With the optional credential issuer, `--turn-url-projection tls-tcp` selects
+secure TCP configuration independently of the ICE candidate policy. Default
+`issued` preserves the existing descriptor and issued URLs. The adapter retains
+its original raw cache/lease, preserves explicit secure TCP URLs, and appends
+`?transport=tcp` only where a valid `turns:` URI left transport unspecified.
+It excludes plain TURN and explicit UDP; it changes no host, port, credentials,
+issuer TTL or refresh boundary. The client enforces the projected response too.
+No supported result means origin fallback, never unrestricted retry. Changing
+selection stops peers and requires fresh Apply/upload consent. This is an
+application-selected URI, not the unchanged issuer response or a capability
+proof; see the [API contract and primary standards](API.md#optional-tls-over-tcp-url-projection).
+No existing issuer/service configuration is changed by this option.
 
 ## Output and recovery
 

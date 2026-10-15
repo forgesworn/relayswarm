@@ -3,7 +3,14 @@ const invalid = () => new Error("TURN credentials unavailable.");
 const exact = (value, keys) => value && typeof value === "object" && !Array.isArray(value)
   && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const integer = value => Number.isSafeInteger(value) && value >= 0;
-function credentialResponse(value) {
+export function normalizeTurnCredentialDescriptor(value) {
+  if (value === undefined || value === null) return null;
+  if (!(exact(value, ["v", "endpoint", "method"]) || exact(value, ["v", "endpoint", "method", "urlProjection"]))
+    || value.v !== 1 || value.endpoint !== "/turn-credentials" || value.method !== "POST"
+    || Object.hasOwn(value, "urlProjection") && !["issued", "tls-tcp"].includes(value.urlProjection)) throw invalid();
+  return { v: 1, endpoint: value.endpoint, method: value.method, ...(value.urlProjection === "tls-tcp" ? { urlProjection: "tls-tcp" } : {}) };
+}
+function credentialResponse(value, projection) {
   if (!exact(value, ["v", "iceServers", "ttlSeconds", "issuedAt", "expiresAt", "refreshAt", "serverTime"]) || value.v !== 1
     || !Number.isInteger(value.ttlSeconds) || value.ttlSeconds < 5 || value.ttlSeconds > 3600
     || ![value.issuedAt, value.expiresAt, value.refreshAt, value.serverTime].every(integer)
@@ -23,6 +30,7 @@ function credentialResponse(value) {
     // URL parsing checks bracketed IPv6 and port bounds without DNS or I/O.
     const address = new URL(`http://${url.pathname}`);
     if (address.port === "0") throw invalid();
+    if (projection === "tls-tcp" && (url.protocol !== "turns:" || url.search !== "?transport=tcp")) throw invalid();
   }
   return { servers: [{ urls: [...server.urls], username: server.username, credential: server.credential }],
     lifetime: value.expiresAt - value.serverTime, refreshAfter: Math.max(0, value.refreshAt - value.serverTime) };
@@ -56,7 +64,7 @@ export function createTurnCredentials({ origin, fetchImpl = globalThis.fetch, no
       refreshTimer = setTimer(() => { void renew(false); }, delay);
     }
   }
-  async function readResponse(response, signal) {
+  async function readResponse(response, signal, projection) {
     const discard = async () => { try { await response.body?.cancel(); } catch { /* Already closed or locked. */ } };
     if (!response.ok || response.redirected || !response.body?.getReader
       || !/^application\/json(?:\s*;\s*charset=utf-8)?$/iu.test(response.headers?.get("content-type") ?? "")) { await discard(); throw invalid(); }
@@ -75,14 +83,14 @@ export function createTurnCredentials({ origin, fetchImpl = globalThis.fetch, no
       }
       const body = new Uint8Array(size); let offset = 0;
       for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
-      return credentialResponse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)));
+      return credentialResponse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)), projection);
     } finally { signal.removeEventListener("abort", cancel); reader.releaseLock(); }
   }
   function renew(explicit) {
     fresh();
     if (!descriptor || closed || !active) return Promise.resolve(!descriptor && !closed);
     if (pending) return pending.result;
-    const attempt = { generation, mono: now(), wall: wallNow(), controller: new AbortController(), hadCurrent: Boolean(current), explicit };
+    const attempt = { generation, projection: descriptor.urlProjection ?? "issued", mono: now(), wall: wallNow(), controller: new AbortController(), hadCurrent: Boolean(current), explicit };
     const { signal } = attempt.controller; pending = attempt; let timer, cancel;
     const deadline = new Promise((_, reject) => {
       cancel = () => reject(invalid()); signal.addEventListener("abort", cancel, { once: true });
@@ -91,7 +99,7 @@ export function createTurnCredentials({ origin, fetchImpl = globalThis.fetch, no
     const task = Promise.resolve().then(async () => {
       if (signal.aborted) throw invalid();
       const response = await fetchImpl(new URL(descriptor.endpoint, origin).href, { method: "POST", credentials: "same-origin", cache: "no-store", redirect: "error", headers: { "content-type": "application/json" }, body: '{"v":1}', signal });
-      return readResponse(response, signal);
+      return readResponse(response, signal, attempt.projection);
     });
     let settled = false, completed = false;
     const release = () => {
@@ -133,8 +141,8 @@ export function createTurnCredentials({ origin, fetchImpl = globalThis.fetch, no
   return {
     configure(value, nextIdentity) {
       if (closed) return;
-      const shape = value === undefined || value === null ? null : value;
-      const valid = shape === null || exact(shape, ["v", "endpoint", "method"]) && shape.v === 1 && shape.endpoint === "/turn-credentials" && shape.method === "POST";
+      let shape = null, valid = true;
+      try { shape = normalizeTurnCredentialDescriptor(value); } catch { valid = false; }
       const unchanged = valid && identity === nextIdentity && JSON.stringify(descriptor) === JSON.stringify(shape);
       if (unchanged) return;
       const had = Boolean(current) || Boolean(descriptor); clearTimers(); abort(); current = null; active = false; identity = nextIdentity;

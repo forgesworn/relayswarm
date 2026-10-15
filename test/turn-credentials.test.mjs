@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createTurnCredentials } from "../demo/turn-credentials.mjs";
+import { createTurnCredentials, normalizeTurnCredentialDescriptor } from "../demo/turn-credentials.mjs";
 const jsonResponse = body => new Response(typeof body === "string" ? body : JSON.stringify(body), { headers: { "content-type": "application/json" } });
 const descriptor = { v: 1, endpoint: "/turn-credentials", method: "POST" };
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
@@ -162,5 +162,73 @@ test("unchanged cached credentials preserve the original lease and retry without
     assert.equal(f.events.filter(event => event === "refresh").length, barrier ? 0 : 1);
     if (!barrier) assert.equal(f.client.servers()[0].credential, "new-private-credential");
     f.client.close(); assert.equal(f.timers.size, 0);
+  }
+});
+
+
+test("TURN projection descriptor is exact and issued is the same inert configuration as an absent default", async () => {
+  const f = fixture();
+  try {
+    assert.deepEqual(normalizeTurnCredentialDescriptor({ ...descriptor, urlProjection: "issued" }), descriptor);
+    f.client.configure(descriptor, "session"); assert.equal(await f.client.acquire(), true);
+    f.client.configure({ ...descriptor, urlProjection: "issued" }, "session");
+    assert.equal(f.client.fresh(), true); assert.equal(f.calls.length, 1); assert.equal(f.events.length, 1);
+    for (const bad of [null, "", "all", "TLS-TCP", true, {}]) {
+      f.client.configure({ ...descriptor, urlProjection: bad }, "session"); assert.equal(await f.client.acquire(), false);
+    }
+    f.client.configure({ ...descriptor, urlProjection: "tls-tcp", extra: true }, "session"); assert.equal(await f.client.acquire(), false);
+    assert.equal(f.calls.length, 1); assert.equal(f.client.fresh(), false);
+  } finally { f.client.close(); }
+});
+
+test("TLS TCP client independently rejects unprojected or mixed responses without widening the selected policy", async () => {
+  for (const urls of [["turns:relay.test:5349"], ["turn:relay.test:5349?transport=tcp"], ["turns:relay.test:5349?transport=udp"], ["turns:relay.test?transport=tcp", "turn:relay.test"], ["turns:relay.test?transport=tcp&transport=udp"]]) {
+    const f = fixture(); f.client.configure({ ...descriptor, urlProjection: "tls-tcp" }, "session");
+    try {
+      f.fetch(async () => { const value = f.payload(); value.iceServers[0].urls = urls; return jsonResponse(value); });
+      assert.equal(await f.client.acquire(), false); assert.equal(f.client.fresh(), false); assert.equal(f.client.servers(), undefined);
+      assert.equal(f.calls.length, 1); assert.equal(f.client.snapshot().refreshes, 0);
+    } finally { f.client.close(); }
+  }
+});
+
+test("TURN projection change aborts a held body, fences late completion and keeps its raw single-flight slot until settlement", async () => {
+  const f = fixture(); f.client.configure(descriptor, "session"); let release, signal;
+  try {
+    f.fetch(async (_url, options) => {
+      signal = options.signal; const body = JSON.stringify(f.payload());
+      return { ok: true, redirected: false, headers: new Headers({ "content-type": "application/json" }), body: {
+        getReader() { let count = 0; return { read() { if (count++) return Promise.resolve({ done: true }); return new Promise(resolve => { release = () => resolve({ done: false, value: new TextEncoder().encode(body) }); }); }, cancel: async () => {}, releaseLock() {} }; },
+      } };
+    });
+    const applying = f.client.acquire(); await flush(); assert.equal(typeof release, "function");
+    f.client.configure({ ...descriptor, urlProjection: "tls-tcp" }, "session");
+    assert.equal(signal.aborted, true); assert.equal(await applying, false); assert.equal(f.client.snapshot().pending, true);
+    assert.equal(await f.client.acquire(), false); assert.equal(f.calls.length, 1);
+    release(); await flush(); assert.equal(f.client.snapshot().pending, false); assert.equal(f.client.fresh(), false);
+    f.fetch(async () => jsonResponse(f.payload())); assert.equal(await f.client.acquire(), true);
+    assert.equal(f.calls.length, 2); assert.deepEqual(f.client.servers()[0].urls, ["turns:relay.test:5349?transport=tcp"]);
+    assert.equal(f.events.filter(value => value === "refresh").length, 0);
+  } finally { f.client.close(); }
+});
+
+test("TLS TCP cached material preserves expiry and refreshes only new compliant material before original expiry", async () => {
+  for (const barrier of [null, "expired", "inactive", "suspend", "identity", "close"]) {
+    const f = fixture(); f.client.configure({ ...descriptor, urlProjection: "tls-tcp" }, "session");
+    try {
+      const issued = f.payload(15); let reply;
+      f.fetch(() => new Promise(resolve => { reply = resolve; })); const applying = f.client.acquire(); await flush();
+      f.jump(250); reply(jsonResponse({ ...issued, serverTime: issued.issuedAt + 200 })); assert.equal(await applying, true);
+      f.fetch(async () => jsonResponse({ ...issued, serverTime: issued.issuedAt + 9800 })); await f.advance(9550);
+      assert.equal(f.client.snapshot().remainingMs, 5000); assert.equal(f.client.snapshot().refreshes, 1); assert.equal(f.events.includes("refresh"), false);
+      if (barrier === "expired") { f.jump(5000); assert.equal(f.client.fresh(), false); }
+      if (barrier === "inactive") f.client.setActive(false);
+      if (barrier === "suspend") f.client.suspend();
+      if (barrier === "identity") f.client.configure({ ...descriptor, urlProjection: "tls-tcp" }, "replacement");
+      if (barrier === "close") f.client.close();
+      f.fetch(async () => jsonResponse(f.payload(15, "new-private-material"))); await f.advance(2500);
+      assert.equal(f.calls.length, barrier ? 2 : 3); assert.equal(f.client.snapshot().refreshes, barrier ? 1 : 2);
+      assert.equal(f.events.filter(value => value === "refresh").length, barrier ? 0 : 1);
+    } finally { f.client.close(); }
   }
 });

@@ -11,6 +11,21 @@ on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
 
+The optional TURN adapter now supports explicit `issued`/`tls-tcp` URL selection.
+It keeps the raw issued lease and expiry, selects TCP only for secure URLs whose
+transport was unspecified, and independently checks the projected client response.
+Selection changes require fresh Apply/upload consent. Invalid refreshed descriptors
+revoke the prior policy immediately, including at the same unexpired clock.
+
+Twenty-nine credential/service tests passed. The first focused run remained RED
+at two new initial-state assertions that misread the disabled optional adapter's
+availability flag. A test-only correction checks actual peer authority and the
+initially disabled Start button; all 52 demo-client tests then passed in 7.942 s.
+Runtime bytes were unchanged between runs, and all recorded outer cleanup checks
+passed within the original bounds. The [TURN URL checkpoint](../spikes/results/turn-url-projection-checks-20261015.json)
+retains both scopes. This option has no Internet allocation, deployment or public
+delivery qualification yet.
+
 The swarm, demo and broadcaster now expose explicit `all`/`relay` ICE candidate
 policy, defaulting to `all`. A changed policy stops peers, clears upload consent
 and fences an Apply awaiting old admission. Fourteen focused tests, syntax for
@@ -19,6 +34,14 @@ and fences an Apply awaiting old admission. Fourteen focused tests, syntax for
 [ICE policy checkpoint](../spikes/results/ice-transport-policy-checks-20261015.json)
 records that local scope. Relay-only does not force TLS or prove a delivery repair;
 the option has not been deployed or publicly qualified.
+
+Exact `e7330694dbcd7a16d5ac305dbde74f95162fbdc7` subsequently passed all nine
+required [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38699590666)
+and fresh consumption of all 261 committed package members. Its hosted loopback
+broadcast receipt verified five peer loads/2,695,920 bytes across four checkpoints,
+including 842,804 bytes after restart. The two contributors each recorded one
+buffer stall and one console 404 was retained. These results predate the TURN URL
+selection above and do not establish ordinary public or physical acceptance.
 
 The latest worker shutdown correction refuses further TERM/KILL IPC after its
 first force request or an accepted drain witness. Two regressions reproduce

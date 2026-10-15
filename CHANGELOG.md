@@ -4,6 +4,10 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Add optional `issued`/`tls-tcp` TURN URL projection to the demo and broadcaster
+  credential adapter. Explicit secure TCP is retained; only transport-unspecified
+  secure URLs gain a TCP selection. Raw leases, expiry and upload consent remain
+  bounded. This is configuration support, not selected-path or field proof.
 - Add explicit `all`/`relay` ICE transport policy to the swarm, demo and
   broadcaster, defaulting to `all`. Relay-only does not force TLS or establish
   a delivery repair; changed demo policy requires fresh viewer Apply and consent.

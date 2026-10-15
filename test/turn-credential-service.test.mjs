@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { PassThrough } from "node:stream";
+import { EventEmitter } from "node:events";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -179,4 +181,72 @@ test("demo exposes descriptor only, never mints on session polls, and defaults o
   assert.equal(calls, 0);
   assert.equal((await fetch(`${demo.base}/turn-credentials`, { method: "POST", headers: { origin: demo.base, "content-type": "application/json" }, body: '{"v":1}' })).status, 200);
   assert.equal(calls, 1);
+});
+
+// Exercise the real request handler without opening an HTTP listener or issuer.
+async function memoryPost(controls, cookie) {
+  const request = new PassThrough(); request.method = "POST"; request.complete = true;
+  request.headers = { origin: "https://viewer.invalid", "content-type": "application/json", ...(cookie ? { cookie } : {}) };
+  const response = new EventEmitter();
+  Object.assign(response, { destroyed: false, writableEnded: false, headersSent: false, headers: {},
+    setHeader(name, value) { this.headers[name] = value; },
+    writeHead(status, headers) { this.status = status; this.headersSent = true; Object.assign(this.headers, headers); return this; },
+    end(body) { this.writableEnded = true; this.body = JSON.parse(body); return this; },
+  });
+  const pending = controls.handle(request, response, "/turn-credentials", "https://viewer.invalid");
+  request.end('{"v":1}'); await pending;
+  return { ...response, cookie: response.headers["set-cookie"]?.split(";")[0] };
+}
+
+test("TURN projection validates before issuer or private server inputs and keeps default descriptor exact", async () => {
+  for (const urlProjection of [null, "", "all", "TLS-TCP", true, {}]) {
+    assert.throws(() => createTurnCredentialService({ url: "invalid", urlProjection }), /Invalid TURN URL projection/u);
+    await assert.rejects(startDemoServer({ turnCredentials: { url: "invalid", urlProjection }, operatorTokenFile: "/must-not-read" }), /Invalid TURN URL projection/u);
+  }
+  for (const urlProjection of [undefined, "issued", "tls-tcp"]) {
+    const controls = createTurnCredentialService({ url: "https://issuer.invalid/turn", urlProjection, fetchImpl: () => { throw Error("Must remain inert"); } });
+    try { assert.deepEqual(controls.descriptor(), { v: 1, endpoint: "/turn-credentials", method: "POST", ...(urlProjection === "tls-tcp" ? { urlProjection } : {}) }); }
+    finally { await controls.close(); }
+  }
+});
+
+test("TLS TCP response projection narrows issued forms without changing cache, lease, credentials or authority", async () => {
+  let wall = 1000000, mono = 0;
+  const original = { ...payload(1, 15), urls: ["turn:relay.invalid:3478?transport=tcp", "turns:Relay.invalid:443", "turns:[::1]:5349?transport=tcp", "turns:relay.invalid:5349?transport=udp"] };
+  const before = JSON.stringify(original), states = [];
+  try {
+    for (const urlProjection of ["issued", "tls-tcp"]) {
+      let calls = 0;
+      const controls = createTurnCredentialService({ url: "https://issuer.invalid/turn", urlProjection, now: () => wall, monotonicNow: () => mono,
+        fetchImpl: async () => { calls++; return response(original); } }); states.push(controls);
+      const first = await memoryPost(controls); assert.equal(first.status, 200);
+      assert.deepEqual(first.body.iceServers[0], { username: original.username, credential: original.credential,
+        urls: urlProjection === "issued" ? original.urls : ["turns:Relay.invalid:443?transport=tcp", "turns:[::1]:5349?transport=tcp"] });
+      assert.deepEqual([first.body.issuedAt, first.body.refreshAt, first.body.expiresAt, first.body.ttlSeconds], [1000000, 1010000, 1015000, 15]);
+      first.body.iceServers[0].urls.length = 0;
+      wall += 100; mono += 100;
+      const cached = await memoryPost(controls, first.cookie); assert.equal(cached.status, 200); assert.equal(calls, 1);
+      assert.equal(cached.body.iceServers[0].urls.length, urlProjection === "issued" ? 4 : 2);
+      assert.equal(cached.body.issuedAt, 1000000); assert.equal(cached.body.expiresAt, 1015000); assert.equal(cached.body.refreshAt, 1010000);
+      assert.equal(JSON.stringify(original), before);
+    }
+  } finally { await Promise.all(states.map(value => value.close())); }
+});
+
+test("TLS TCP projection accepts implicit ports only by appending TCP and refuses empty, malformed or overbound results", async () => {
+  const rows = [
+    [["turns:relay.invalid"], ["turns:relay.invalid?transport=tcp"]],
+    [["turns:relay.invalid:5349?transport=tcp"], ["turns:relay.invalid:5349?transport=tcp"]],
+    [["turn:relay.invalid", "turn:relay.invalid?transport=tcp", "turns:relay.invalid?transport=udp"], null],
+    ...["turns:relay.invalid?", "turns:relay.invalid?transport=tcp&transport=udp", "turns:relay.invalid?transport=%74cp", "turns:relay.invalid#x", "turns://relay.invalid", "turns:user@relay.invalid", "turns:relay.invalid:0", "turns:relay.invalid:65536", "turns:[invalid]", `turns:${"a".repeat(499)}`].map(url => [[url], null]),
+  ];
+  for (const [urls, expected] of rows) {
+    let calls = 0; const controls = createTurnCredentialService({ url: "https://issuer.invalid/turn", urlProjection: "tls-tcp", fetchImpl: async () => { calls++; return response({ ...payload(), urls }); } });
+    try {
+      const result = await memoryPost(controls); assert.equal(result.status, expected ? 200 : 503);
+      if (expected) assert.deepEqual(result.body.iceServers[0].urls, expected);
+      else { assert.deepEqual(Object.keys(result.body), ["error"]); assert.equal(JSON.stringify(result.body).includes("relay.invalid"), false); }
+      assert.equal(calls, 1);
+    } finally { await controls.close(); }
+  }
 });

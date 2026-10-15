@@ -536,3 +536,32 @@ test("parent SIGKILL stops encoder and forwarder before automatic ownership hand
   await recovered.close();
   assert.equal(await exists(join(mediaDir, ".broadcast-workers.sqlite.dirty")), false);
 });
+
+
+for (const [name, entry] of [["broadcaster", script], ["demo", fileURLToPath(new URL("../demo/server.mjs", import.meta.url))]]) {
+  test(`${name} CLI rejects an unknown TURN projection before startup state`, { timeout: 5000 }, async t => {
+    const directory = await fixture(t), state = join(directory, "uncreated-projection-state");
+    const args = name === "broadcaster" ? ["--state-dir", state] : ["--publisher-state", join(state, "publisher.json")];
+    const outcome = await boundedResult(cli(t, [...args, "--turn-url-projection=invalid"], entry).result);
+    assert.equal(outcome.code, 1); assert.equal(await exists(state), false);
+    if (name === "demo") assert.match(outcome.stderr, /Invalid TURN URL projection/u);
+  });
+  test(`${name} CLI requires an issuer for TLS projection before private ICE reads or state`, { timeout: 5000 }, async t => {
+    const directory = await fixture(t), state = join(directory, "uncreated-projection-state");
+    // This valid static file would permit startup if the issuer requirement were
+    // removed; only the real parser/early configuration path is exercised.
+    const ice = join(directory, "static-ice.json");
+    await writeFile(ice, '{"v":1,"iceServers":[{"urls":"stun:relay.invalid"}]}', { mode: 0o600 });
+    const args = name === "broadcaster" ? ["--state-dir", state] : ["--publisher-state", join(state, "publisher.json")];
+    const outcome = await boundedResult(cli(t, [...args, "--ice-config", ice, "--turn-url-projection=tls-tcp"], entry).result);
+    assert.equal(outcome.code, 1); assert.equal(await exists(state), false);
+    if (name === "demo") assert.match(outcome.stderr, /requires --turn-credentials-url/u);
+  });
+  test(`${name} CLI help advertises inert TURN projection`, { timeout: 5000 }, async t => {
+    const directory = await fixture(t), state = join(directory, "uncreated-projection-state");
+    const args = name === "broadcaster" ? ["--state-dir", state] : ["--publisher-state", join(state, "publisher.json")];
+    const outcome = await boundedResult(cli(t, [...args, "--turn-url-projection=tls-tcp", "--help"], entry).result);
+    assert.equal(outcome.code, 0); assert.ok(outcome.stdout.includes("--turn-url-projection issued|tls-tcp"));
+    assert.equal(await exists(state), false);
+  });
+}

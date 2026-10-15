@@ -11,7 +11,7 @@ import { startDemoServer } from "../demo/server.mjs";
 import { startBroadcastWaitingServer } from "../demo/broadcast-waiting.mjs";
 import { readIceConfigFile } from "../src/ice-config.mjs";
 import { isCliEntry } from "../src/cli-entry.mjs";
-import { validateTurnCredentialsUrl } from "../demo/turn-credential-service.mjs";
+import { validateTurnCredentialsUrl, validateTurnUrlProjection } from "../demo/turn-credential-service.mjs";
 
 async function privateFile(path, create) {
   const parent = dirname(resolve(path));
@@ -41,13 +41,15 @@ async function main() {
     mediamtx: { type: "string" }, "router-config": { type: "string", default: fileURLToPath(new URL("../broadcast/mediamtx.yml", import.meta.url)) },
     "youtube-url-file": { type: "string" }, "public-url": { type: "string" }, host: { type: "string", default: "127.0.0.1" }, port: { type: "string", default: "8787" },
     "admission-per-address-tickets": { type: "string", default: "12" },
-    "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, "ice-transport-policy": { type: "string", default: "all" }, "turn-credentials-url": { type: "string" }, "account-budget": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" },
+    "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, "ice-transport-policy": { type: "string", default: "all" }, "turn-credentials-url": { type: "string" }, "turn-url-projection": { type: "string", default: "issued" }, "account-budget": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" },
   } });
   if (values.help) {
-    console.log("npm run broadcast -- [--mediamtx PATH] [--input rtsp://127.0.0.1:8554/live] [--state-dir DIR] [--youtube-url-file FILE] [--public-url https://trial.example] [--host 127.0.0.1] [--port 8787] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE | --turn-credentials-url https://issuer.example/turn] [--ice-transport-policy all|relay] [--account-budget] [--admission-per-address-tickets 12] [--telemetry]\nSource must supply video and audio. Publisher identity and operator credentials remain in the private state directory. --account-budget enables an optional Nostr-linked allowance in the private account-budget.json ledger; connecting it never enables uploading. Website account authentication is supplied through startDemoServer's host callback. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/BROADCASTING.md.");
+    console.log("npm run broadcast -- [--mediamtx PATH] [--input rtsp://127.0.0.1:8554/live] [--state-dir DIR] [--youtube-url-file FILE] [--public-url https://trial.example] [--host 127.0.0.1] [--port 8787] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE | --turn-credentials-url https://issuer.example/turn] [--ice-transport-policy all|relay] [--turn-url-projection issued|tls-tcp] [--account-budget] [--admission-per-address-tickets 12] [--telemetry]\nSource must supply video and audio. Publisher identity and operator credentials remain in the private state directory. --account-budget enables an optional Nostr-linked allowance in the private account-budget.json ledger; connecting it never enables uploading. Website account authentication is supplied through startDemoServer's host callback. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/BROADCASTING.md.");
     return;
   }
   if (!["all", "relay"].includes(values["ice-transport-policy"])) throw new Error("Invalid ICE transport policy; use all or relay.");
+  validateTurnUrlProjection(values["turn-url-projection"]);
+  if (values["turn-url-projection"] !== "issued" && values["turn-credentials-url"] === undefined) throw new Error("TURN URL projection requires --turn-credentials-url.");
   const admissionPerAddressTickets = Number(values["admission-per-address-tickets"]);
   if (!Number.isSafeInteger(admissionPerAddressTickets) || admissionPerAddressTickets < 1 || admissionPerAddressTickets > 120) throw new Error("Admission tickets per address must be an integer from 1 to 120.");
   const port = Number(values.port);
@@ -108,7 +110,7 @@ async function main() {
         if (stopping) throw new Error("Broadcaster stopped during listener handoff.");
       },
       operatorExtraStatus: () => pipeline.metrics(), ...(iceServers ? { iceServers } : {}),
-      ...(values["turn-credentials-url"] !== undefined ? { turnCredentials: { url: values["turn-credentials-url"] } } : {}) });
+      ...(values["turn-credentials-url"] !== undefined ? { turnCredentials: { url: values["turn-credentials-url"], urlProjection: values["turn-url-projection"] } } : {}) });
     if (stopping) { await server.close(); return; }
     console.log(`RelaySwarm broadcaster player: ${server.base}\nOperator token file: ${tokenFile}\nPublisher identity persists across restarts. Press Ctrl-C to stop.`);
     await Promise.race([stopped, pipeline.failure.then((error) => { throw error; })]);
