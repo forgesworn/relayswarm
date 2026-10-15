@@ -11,6 +11,100 @@ on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
 
+The experimental pilot runs exact
+`3e52294c2e1f44ab9cbed13adf43e94e995f1e2d`. All nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38701249959)
+and fresh offline consumption of 262 exact-source package members passed.
+The installed CLI/native HTTP fallback, durable ledger and rebuilt standalone
+ESM checks retain their own scope; hosted browser checks are injected headless
+loopback evidence, not ordinary public or physical acceptance.
+
+Guarded deployment and normal HTTPS attestation passed. The image is
+`sha256:2e20d5dd2eb96f7505d03c3b018565e5756d27941b1ea5c5396d1206c95751ea`;
+the served client is 757,269 bytes, SHA-256
+`b561859c7b1b5167a5843d41569d0309915773a1c8dc91f7b1732cf138c35882`.
+The attestation matched image/client/identity and read two fresh HLS playlists.
+Exact deployed options are `--ice-transport-policy relay`,
+`--turn-url-projection tls-tcp` and `--admission-per-address-tickets 32`, alongside
+the existing server-owned issuer. Nostr account allowances are enabled; the
+website account resolver remains unconfigured. Reporting and forwarding stay
+off. Private state and permanent lease/token identities survived the orderly
+drain; account JSON atomic replacement is allowed. The temporary source was
+removed under all five cleanup-v2 guards, retaining its actual exit code **255**.
+Admission 32 is configuration evidence, not fourteen-role capacity acceptance.
+
+The separate `selected-send-and-resolved-transport-v1` Internet renewal cohort
+passed 90.031 s/88 samples: 40 verified fragments/4,631,756 bytes, including
+23 fragments/2,656,252 bytes after the renewed transport boundary. Independent
+replay also passes the unchanged original strict state machine on this same
+cohort (initial 7.298 s, boundary 40.059 s, final 90.031 s). Two local isolated
+headless Chrome pages used prepared synthetic HLS/local rendezvous and genuine
+Internet TURN. Three genuine issuances had 3,600 s leases; the first local lease
+was shortened to 60 s. The rebuilt 127,516-byte diagnostic candidate is distinct
+from the exact standalone ESM. All seven worker/six supervisor cleanup flags
+and fresh three-group/scratch absence checks passed. This is not a journey
+against the deployed pilot, natural expiry or exact ingress attribution.
+Earlier intermittent timeouts remain unexplained; no product repair or browser
+bug is inferred, and previous RED cohorts remain RED.
+
+**Ordinary public peer delivery remains RED.** The latest 60.038 s measured
+four-role journey passed frame/audio decoding at both requested qualities and
+contribution, with no fatal/native media errors or stalls. The receiver verified
+zero peer fragments/bytes. Seven matching-HAVE requests reached valid metadata
+and partial payload, but no EOF was observed before channel closure; six product
+timeout closures and one abort were recorded separately. Their exact native-to-
+product reason correlation and underlying send-queue/network cause remain
+unproved. Donors accepted 633,184 low and 2,685,768 high bytes for serving; these
+are not completed network delivery.
+
+All four contexts, both CDP connections, owned worker/group/helper, endpoint
+resources/stages and source cleanup passed. The actual source exit was 255.
+M1 peaked at 39 processes under this check's 64-process cap; this does not
+qualify the long scenario's 32-process cap. The [public result summary](../spikes/results/3e52294-ordinary-public-20261015.json)
+retains exact evidence hashes and limits. Earlier preparation refusals, native
+monitor failures and historical exact-54 delivery/cleanup failures remain
+separate retained results.
+
+Exact retained provenance is in
+`deployment-3e52294-directional-proof-bound-20261015/ROOT-DEPLOYMENT-EVIDENCE-MANIFEST.json`,
+`existing-turn-renewal-3e52294-directional-r5-run-20261015` and
+`public-cross-hls-eligibility-3e52294-seventh-root-20261015` under
+`artifacts/`. Deployment, forced-renewal cohort and ordinary public delivery
+are separate proof classes.
+
+The full [P01–P12 checklist](PRODUCTION-READINESS.md#delivery-checklist) and
+37-review-item scope remain open; no separate completed 37-row ledger is claimed.
+Ordinary public peer delivery, complete physical/Safari journeys, hard NAT,
+website resolver integration, natural expiry/reconnection, cross-device budget
+field evidence, fourteen-role capacity, 7,200 s/22-churn operation, matched
+wire/cost benefit and immutable release/download acceptance remain outstanding.
+v0.1.0 remains the published release; 0.2.0 is the source candidate. Package
+0.2.0, session wire 3, commitment schemas 1/2 and metrics 2 are distinct.
+The original CLI signs plaintext SDP; the browser loader uses pairwise NIP-44
+signalling. Deployment does not close final production or release acceptance.
+
+## Unreleased connection reuse and lease observations
+
+The branch adds bounded draining of an abandoned response on known ordered,
+fully reliable peer channels. The request still resolves promptly; the link
+remains busy until a validated terminal response or the existing drain timeout.
+Signed verification, wire framing and playback/fallback deadlines are unchanged.
+Redacted TURN lease provenance and a passive three-scalar getter support later
+natural-renewal observation without fetching credentials or granting freshness.
+
+All 170 focused maintained-source checks pass, including 12 new framing/drain
+cases and 33 lease-observation cases, with guarded cleanup and fresh worker-group
+absence. The [source-check summary](../spikes/results/peer-link-response-drain-source-checks-20261015.json)
+retains exact file hashes. Hosted CI, deployment and ordinary public benefit of
+these changes remain separate gates. The measured 3e delivery failure above
+is unchanged; pure long-renewal witnesses do not establish natural expiry.
+
+## Historical implementation and delivery checkpoints
+
+The following dated results retain their original source, topology, failures
+and limits. Their statements about then-current deployment or pending options
+do not describe the current pilot above. Later passes do not rewrite a RED.
+
 The optional TURN adapter now supports explicit `issued`/`tls-tcp` URL selection.
 It keeps the raw issued lease and expiry, selects TCP only for secure URLs whose
 transport was unspecified, and independently checks the projected client response.
@@ -123,7 +217,9 @@ records these separate scopes. Ordinary sharing, Safari/physical devices,
 natural expiry, sustained/churn, matched wire/cost and immutable release gates
 remain open. Earlier RED results remain unchanged.
 
-## Current correction checkpoint
+<a id="current-correction-checkpoint"></a>
+
+## Historical correction checkpoint
 
 The broadcaster guardian now keeps a live wrapper as each worker's process-group
 leader. It commands that wrapper through its original IPC channel, avoiding
@@ -555,7 +651,7 @@ unchanged; no new infrastructure or Till/provider exposure was created. The
 retains the exact scopes. The deployed pilot remains 8f, with reporting and
 forwarding off; PR 8, P01–P12 and final release acceptance remain open.
 
-## Current source: shared account allowance
+## Shared account allowance implementation checkpoint
 
 The current branch adds both requested account methods: explicit Nostr sign-in
 and an integrating website's authenticated account. One private durable ledger
@@ -645,7 +741,9 @@ independent source review passes. The
 retains both original failures, exact inputs and limitations. Neither correction
 nor later CI removes the restart-sharing gate; these checks did not change the then-deployed pilot.
 
-## Current deployed checkpoint: 8f on 14 October 2026
+<a id="current-deployed-checkpoint-8f-on-14-october-2026"></a>
+
+## Historical deployed checkpoint: 8f on 14 October 2026
 
 The deployed application is `8f482b4528a671acfe9f1afc336cce5743aaaefd`.
 All nine required jobs passed on attempt 1 of

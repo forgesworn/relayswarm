@@ -9,11 +9,17 @@ The 0.2.0 source candidate includes further production feature work; its
 [delivery requirements](docs/PRODUCTION-READINESS.md) remain open. MIT licensed,
 Node 22.13+; CI uses Node 24. The npm registry is unpublished.
 
-The [current deployed checkpoint](docs/STATUS.md#current-deployed-checkpoint-8f-on-14-october-2026)
-is source `8f482b4`, including shared upload allowances through Nostr or a host
-website account. All nine required CI jobs and exact local package/deployment
-checks passed. Ordinary peer delivery remains red; physical, network and sustained
-acceptance and the full P01–P12 delivery checklist remain open.
+The [current experimental pilot](docs/STATUS.md#current-delivery-checkpoint)
+runs `3e52294`: all nine required CI jobs, fresh 262-member package checks and
+guarded deployment with normal HTTPS attestation passed. The pilot uses
+relay-only ICE and TLS/TCP TURN selection, admission limit 32 and Nostr account
+allowances; the host website account resolver is unconfigured. A separate local
+two-browser Internet TURN renewal check passed 90.031 s with verified media.
+The latest 60.038 s ordinary public check passed playback and contribution,
+but verified peer delivery failed at both qualities; all owned cleanup passed.
+Physical, broader network, sustained and release acceptance and the full
+[P01–P12 delivery checklist](docs/PRODUCTION-READINESS.md#delivery-checklist)
+remain open; earlier RED results remain historical REDs.
 
 [Documentation](docs/README.md) · [Installation](docs/GETTING-STARTED.md) ·
 [hls.js integration](INTEGRATION.md) · [API reference](docs/API.md) ·

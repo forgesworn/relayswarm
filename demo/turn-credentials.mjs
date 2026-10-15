@@ -33,6 +33,7 @@ function credentialResponse(value, projection) {
     if (projection === "tls-tcp" && (url.protocol !== "turns:" || url.search !== "?transport=tcp")) throw invalid();
   }
   return { servers: [{ urls: [...server.urls], username: server.username, credential: server.credential }],
+    ttlSeconds: value.ttlSeconds, issuedAt: value.issuedAt, expiresAt: value.expiresAt, refreshAt: value.refreshAt, serverTime: value.serverTime,
     lifetime: value.expiresAt - value.serverTime, refreshAfter: Math.max(0, value.refreshAt - value.serverTime) };
 }
 
@@ -42,11 +43,13 @@ export function createTurnCredentials({ origin, fetchImpl = globalThis.fetch, no
   if (![fetchImpl, now, wallNow, setTimer, clearTimer, onRefresh, onUnavailable].every(value => typeof value === "function")) throw invalid();
   let descriptor = null, identity, generation = 0, current = null, active = false, closed = false, pending = null, refreshTimer, expiryTimer;
   let lastWall = wallNow(), refreshes = 0, failures = 0, outcome = "disabled";
+  let authorityEpoch = 0, leaseOrdinal = 0;
   const count = value => Math.min(Number.MAX_SAFE_INTEGER, value + 1);
   const left = (record, duration = record.lifetime) => Math.min(duration - (now() - record.mono), duration - (wallNow() - record.wall));
   const clearTimers = () => { clearTimer(refreshTimer); clearTimer(expiryTimer); refreshTimer = expiryTimer = undefined; };
   function abort() { generation++; pending?.controller.abort(); }
   function unavailable(reason) {
+    authorityEpoch = count(authorityEpoch);
     const had = Boolean(current); current = null; active = false; clearTimers(); abort(); outcome = reason;
     if (had) onUnavailable(reason);
   }
@@ -114,15 +117,17 @@ export function createTurnCredentials({ origin, fetchImpl = globalThis.fetch, no
     // the underlying work settles; never overlap requests after a logical timeout.
     task.then(release, release);
     attempt.result = Promise.race([task, deadline]).then(value => {
+      let responseObservedMono;
       const wasFresh = fresh();
-      if (closed || !active || signal.aborted || generation !== attempt.generation || now() < attempt.mono || wallNow() < attempt.wall
+      if (closed || !active || signal.aborted || generation !== attempt.generation || (responseObservedMono = now()) < attempt.mono || wallNow() < attempt.wall
         || left(attempt, 5000) <= 0 || left(attempt, value.lifetime) <= 0) throw invalid();
       if (wasFresh && current && JSON.stringify(current.servers) === JSON.stringify(value.servers)) {
         // A conservatively early refresh can return the server's cached lease.
         // Keep its original expiry and peers; retry without an immediate loop.
         outcome = "accepted"; schedule(true); return true;
       }
-      current = { ...value, mono: attempt.mono, wall: attempt.wall }; outcome = "accepted"; refreshes = count(refreshes); schedule();
+      leaseOrdinal = count(leaseOrdinal);
+      current = { ...value, mono: attempt.mono, wall: attempt.wall, leaseOrdinal, authorityEpoch, acceptanceKind: explicit ? "explicit" : "automatic", responseObservedMonotonicMs: responseObservedMono, fullTtlAfterResponseMonotonicMs: responseObservedMono + value.ttlSeconds * 1000 }; outcome = "accepted"; refreshes = count(refreshes); schedule();
       if (!explicit && attempt.hadCurrent && wasFresh) onRefresh();
       return true;
     }).catch(() => {
@@ -145,6 +150,7 @@ export function createTurnCredentials({ origin, fetchImpl = globalThis.fetch, no
       try { shape = normalizeTurnCredentialDescriptor(value); } catch { valid = false; }
       const unchanged = valid && identity === nextIdentity && JSON.stringify(descriptor) === JSON.stringify(shape);
       if (unchanged) return;
+      authorityEpoch = count(authorityEpoch);
       const had = Boolean(current) || Boolean(descriptor); clearTimers(); abort(); current = null; active = false; identity = nextIdentity;
       descriptor = valid ? shape && { ...shape } : { v: 1, endpoint: null, method: "POST" }; outcome = !valid ? "invalid-descriptor" : descriptor ? "waiting" : "disabled";
       if (had || descriptor) onUnavailable("configuration-changed");
@@ -165,8 +171,17 @@ export function createTurnCredentials({ origin, fetchImpl = globalThis.fetch, no
     },
     fresh,
     servers() { return descriptor && fresh() ? structuredClone(current.servers) : undefined; },
-    suspend() { active = false; clearTimers(); abort(); current = null; if (descriptor) outcome = "suspended"; },
+    leaseObservation() { return current ? {
+      authorityEpoch: current.authorityEpoch, leaseOrdinal: current.leaseOrdinal,
+      responseObservedMonotonicMs: current.responseObservedMonotonicMs,
+    } : null; },
+    suspend() { if (descriptor && outcome !== "suspended" && outcome !== "closed") authorityEpoch = count(authorityEpoch); active = false; clearTimers(); abort(); current = null; if (descriptor) outcome = "suspended"; },
     close() { this.suspend(); closed = true; outcome = "closed"; },
-    snapshot() { const available = fresh(); return { v: 1, enabled: Boolean(descriptor), available, active, pending: Boolean(pending), remainingMs: current ? Math.max(0, Math.floor(left(current))) : 0, refreshes, failures, outcome, closed }; },
+    snapshot() { const available = fresh(); return { v: 1, enabled: Boolean(descriptor), available, active, pending: Boolean(pending), remainingMs: current ? Math.max(0, Math.floor(left(current))) : 0, refreshes, failures, outcome, closed, authorityEpoch, lease: current ? {
+      leaseOrdinal: current.leaseOrdinal, authorityEpoch: current.authorityEpoch, acceptanceKind: current.acceptanceKind,
+      ttlSeconds: current.ttlSeconds, issuedAt: current.issuedAt, expiresAt: current.expiresAt, refreshAt: current.refreshAt, serverTime: current.serverTime,
+      responseObservedMonotonicMs: current.responseObservedMonotonicMs, fullTtlAfterResponseMonotonicMs: current.fullTtlAfterResponseMonotonicMs,
+      requestStartedMonotonicMs: current.mono, expiresAtMonotonicMs: current.mono + current.lifetime, refreshAtMonotonicMs: current.mono + current.refreshAfter,
+    } : null }; },
   };
 }

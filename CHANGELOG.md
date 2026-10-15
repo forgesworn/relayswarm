@@ -4,6 +4,15 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Retain an abandoned response on known ordered, reliable peer channels only
+  until its validated response boundary or the existing drain timeout. Origin
+  fallback stays prompt; late payload is discarded before connection reuse.
+  Wire framing, playback deadlines and signed media verification are unchanged.
+- Add redacted TURN lease provenance and conservative monotonic response timing
+  for lifecycle measurement, retaining cached leases without moving their
+  anchors. A passive debug getter exposes only epoch, ordinal and timestamp;
+  it does not check or grant credential freshness.
+
 - Add optional `issued`/`tls-tcp` TURN URL projection to the demo and broadcaster
   credential adapter. Explicit secure TCP is retained; only transport-unspecified
   secure URLs gain a TCP selection. Raw leases, expiry and upload consent remain

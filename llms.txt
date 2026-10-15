@@ -43,7 +43,7 @@ provides authenticated operator policy, bounded admission and durable idempotent
 opt-in numeric reports. Upload budgets persist across reloads/tabs without consent.
 Optional Nostr or host website accounts share a private durable allowance across
 devices; account changes leave uploading off until fresh consent. The deployed
-8f pilot offers Nostr; integrating websites supply their own account resolver.
+3e pilot offers Nostr; integrating websites supply their own account resolver.
 Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The example origin adds bounded blocking reload for compatible complete live
 playlists across all renditions, with 24 waiters inside 32 media requests.
@@ -61,25 +61,21 @@ Peer-first media loads/bytes avoided are not net connection-data savings, and
 upload counters measure committed media payload rather than acknowledged delivery.
 Pending durable reservations can consume quota without entering those counters.
 Documentation on main can include corrections after the immutable releases.
-Current deployed source `8f482b4` passed all nine required CI jobs and fresh
-local package/deployment checks. Its ordinary 60.119 s check passed playback but
-failed sharing with zero peer channels or bytes. All 120 populated retained
-budget geometries matched the existing formula. Original cleanup failures and
-later absence/source removal remain separate. Another interpreter capture
-refused a remote timestamp 68 ms ahead before workload; no clock, deadline or
-freshness change is claimed. Earlier a2c99a9/d283071 restart-sharing failures
-remain separate from the 8f loopback fixture pass. The temporary SSH coturn
-fixture was removed. An existing shared service on Stall separately carried
-verified Internet TLS-relay media in a scoped short test; continuous TLS,
-natural expiry, physical devices and hard NAT remain unproved. Exact 7a CI
-passed all nine required jobs and fresh 239-member package/native/fallback/ESM
-checks. Its injected loopback broadcast passed both qualities and restart
-sharing; TURN renewal was off, so no cache-fix causal repair is claimed.
-Mock-issuer browser rollover passes separately. Actual existing-service forced
-renewal R3/R4 remain RED: R4 accepted a new lease but hit its original lifetime
-PC cap after glare; post-renewal TLS/media remains unproved. Da9's zero-budget
-restart RED and cache reproduction are retained. The last-attested pilot stays
-8f; no new deployment or release is implied. See STATUS for exact scope.
+Current deployed source `3e52294` passed all nine required CI jobs, fresh
+262-member package/native/fallback/ESM checks and guarded deployment with normal
+HTTPS client/two-playlist attestation. The pilot uses relay-only ICE, TLS/TCP
+TURN selection and admission limit 32; this does not prove fourteen-role capacity.
+A separate local two-browser/synthetic-HLS cohort using genuine Internet TURN
+passed 90.031 s with 40 verified fragments, including 23 after an early local
+60 s renewal.
+Its genuine issued TTL was 3,600 s; natural expiry remains unproved.
+The latest ordinary deployed public check measured 60.038 s: playback and explicit
+contribution passed, but the receiver verified zero peer fragments/bytes at
+both qualities. Seven responses had valid metadata and partial payload without
+EOF before closure. All owned cleanup passed. Donor accepted-serve counters
+are not completed delivery; the underlying network/send-queue cause remains
+unproved. Earlier pre-browser, public delivery and cleanup failures retain
+separate verdicts. See STATUS for current evidence and unresolved gates.
 Latest Safari 26 tooling returned driver ready but session creation timed out
 before a page/application test. Owned process/scratch cleanup passed; exact
 session destruction remains unknown.

@@ -1,0 +1,86 @@
+{
+  "v": 1,
+  "date": "2026-10-15",
+  "baseSourceSha": "3e52294c2e1f44ab9cbed13adf43e94e995f1e2d",
+  "kind": "maintained-bounded-peer-response-drain-and-redacted-turn-observation-source-checks",
+  "implemented": {
+    "boundedLateResponseDrain": true,
+    "knownOrderedAndReliableOnly": true,
+    "promptNullFallback": true,
+    "payloadReleasedWhileDraining": true,
+    "busyUntilValidatedResponseBoundary": true,
+    "drainUsesExistingTimeoutMs": 3000,
+    "hostStopAndAdmissionCloseImmediately": true,
+    "wireFramingUnchanged": true,
+    "hlsPlaybackAndPeerDeadlinePolicyUnchanged": true,
+    "signedCommitmentVerificationUnchanged": true,
+    "redactedLeaseProvenanceAndConservativeTiming": true,
+    "passiveThreeScalarGetter": true
+  },
+  "actualFocusedTests": {
+    "passed": 170,
+    "failed": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "testFiles": [
+      "test/hls-swarm.test.mjs",
+      "test/browser-hardening.test.mjs",
+      "test/stream-discovery.test.mjs",
+      "test/turn-credentials.test.mjs",
+      "test/turn-lease-observation.test.mjs",
+      "test/peer-link-drain.test.mjs"
+    ],
+    "newDrainCases": 12,
+    "leaseObservationCases": 33,
+    "guardElapsedMs": 19129,
+    "guardWorkSeconds": 40,
+    "guardWholeSeconds": 60,
+    "allFiveGuardCleanupFlags": true,
+    "freshWorkerGroupAbsent": true,
+    "resourceLimits": {
+      "rssBytes": 3221225472,
+      "processes": 64,
+      "minFreePercent": 25
+    }
+  },
+  "sourceFiles": [
+    {
+      "path": "src/browser/peer-link.mjs",
+      "bytes": 12892,
+      "sha256": "3a833977a99adcd78df8efd517ac42136d888248477544b672eec925dfce4da0"
+    },
+    {
+      "path": "demo/turn-credentials.mjs",
+      "bytes": 13077,
+      "sha256": "26783a95dc9a1470cf51bf11b99dc4d6a85db7be7210c96c0e87bd22d90b79d4"
+    },
+    {
+      "path": "demo/client.mjs",
+      "bytes": 35647,
+      "sha256": "857295fcaea7a35e63c3074f155235cdaebe5d0f10e551662ad6b66d9abeb253"
+    },
+    {
+      "path": "test/peer-link-drain.test.mjs",
+      "bytes": 11757,
+      "sha256": "cc5c1c29c84b2fdd67ba7d93325470e45f53b1b1c963b037f8d72852fc56262e"
+    },
+    {
+      "path": "test/turn-credentials.test.mjs",
+      "bytes": 33265,
+      "sha256": "386c2a14db3f940f0070bb88274eb5c5f2c175ecf06f8094ed54bb3cf7f1d411"
+    },
+    {
+      "path": "test/turn-lease-observation.test.mjs",
+      "bytes": 4817,
+      "sha256": "595b4632e0cf2efda0a2ad92df9c785bca4b1a261b295cfff9c39667be16a43c"
+    },
+    {
+      "path": "test/fixtures/turn-credentials-before-lease-observation.mjs",
+      "bytes": 11525,
+      "sha256": "225edceddce35a10ba0c5dd96c197c322c8ceb4fd72d83bc3edf072b5345bc93"
+    }
+  ],
+  "retainedEvidenceManifestSHA256": "2c4cbdef254f2402e1175f4e29397b9b835356d1df6ef9f4440a201ceda91d8b",
+  "independentDrainSourceReviewSHA256": "6dfdf05e276ad8b3329f9de5e2cd98e9cd61c724506db9d60463305e45b1e2d1",
+  "scope": "Fake-channel and local-relay source evidence. Public delivery improvement, natural TURN renewal, long/churn and final release remain unproved. The earlier measured public RED is retained."
+}

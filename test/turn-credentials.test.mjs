@@ -232,3 +232,171 @@ test("TLS TCP cached material preserves expiry and refreshes only new compliant 
     } finally { f.client.close(); }
   }
 });
+
+test("lease observation retains validated3600s metadata and the original conservative request anchors", async () => {
+  const f = fixture(); f.client.configure(descriptor, "session"); const issued = f.payload(3600); let reply;
+  f.fetch(() => new Promise(resolve => { reply = resolve; })); const acquiring = f.client.acquire(); await flush();
+  f.jump(250); reply(jsonResponse({ ...issued, serverTime: issued.issuedAt + 200 }));
+  assert.equal(await acquiring, true);
+  assert.deepEqual(f.client.snapshot().lease, { leaseOrdinal: 1, authorityEpoch: 1, acceptanceKind: "explicit",
+    ttlSeconds: 3600, issuedAt: 1000000, expiresAt: 4600000, refreshAt: 3400000, serverTime: 1000200,
+    requestStartedMonotonicMs: 0, expiresAtMonotonicMs: 3599800, refreshAtMonotonicMs: 2399800, responseObservedMonotonicMs: 250, fullTtlAfterResponseMonotonicMs: 3600250 });
+  assert.equal(f.client.snapshot().remainingMs, 3599550); f.client.close();
+});
+
+test("a distinct naturally scheduled3600s successor advances lease ordinal without changing authority epoch", async () => {
+  const f = fixture(); f.client.configure(descriptor, "session"); f.fetch(async () => jsonResponse(f.payload(3600)));
+  assert.equal(await f.client.acquire(), true); const first = f.client.snapshot();
+  f.fetch(async () => jsonResponse(f.payload(3600, "successor-private-credential")));
+  await f.advance(2400000); const next = f.client.snapshot();
+  assert.equal(f.calls.length, 2); assert.equal(next.lease.leaseOrdinal, 2); assert.equal(next.lease.acceptanceKind, "automatic");
+  assert.equal(next.authorityEpoch, first.authorityEpoch); assert.equal(next.lease.authorityEpoch, first.authorityEpoch);
+  assert.equal(next.lease.ttlSeconds, 3600); assert.equal(next.lease.requestStartedMonotonicMs, 2400000);
+  assert.equal(next.lease.expiresAtMonotonicMs, 6000000); assert.equal(next.lease.refreshAtMonotonicMs, 4800000);
+  assert.deepEqual(f.events, ["configuration-changed", "refresh"]);
+  // The demo refresh callback's stop/configure path changes cancellation generation.
+  // Those operations must not masquerade as a new TURN authority epoch.
+  f.client.setActive(false); f.client.configure({ ...descriptor }, "session"); f.client.setActive(true);
+  assert.equal(f.client.snapshot().authorityEpoch, first.authorityEpoch); assert.deepEqual(f.client.snapshot().lease, next.lease);
+  f.client.close();
+});
+
+test("an early cached response preserves every original observed lease field and deadline", async () => {
+  const f = fixture(); f.client.configure(descriptor, "session"); const issued = f.payload(15); let reply;
+  f.fetch(() => new Promise(resolve => { reply = resolve; })); const acquiring = f.client.acquire(); await flush();
+  f.jump(250); reply(jsonResponse({ ...issued, serverTime: issued.issuedAt + 200 })); assert.equal(await acquiring, true);
+  const before = f.client.snapshot().lease;
+  f.fetch(async () => jsonResponse({ ...issued, serverTime: issued.issuedAt + 9800 })); await f.advance(9550);
+  assert.deepEqual(f.client.snapshot().lease, before); assert.equal(f.client.snapshot().remainingMs, 5000);
+  assert.equal(f.client.snapshot().refreshes, 1); assert.equal(f.events.filter(x => x === "refresh").length, 0);
+  f.client.close();
+});
+
+test("only actual configuration, suspension and unavailability boundaries advance authority epoch", async () => {
+  const f = fixture(); assert.equal(f.client.snapshot().authorityEpoch, 0);
+  f.client.configure(descriptor, "session"); await f.client.acquire(); assert.equal(f.client.snapshot().authorityEpoch, 1);
+  f.client.setActive(false); f.client.setActive(true); f.client.configure({ ...descriptor }, "session");
+  assert.equal(f.client.snapshot().authorityEpoch, 1);
+  f.client.suspend(); assert.equal(f.client.snapshot().authorityEpoch, 2); assert.equal(f.client.snapshot().lease, null);
+  f.client.suspend(); assert.equal(f.client.snapshot().authorityEpoch, 2);
+  assert.equal(await f.client.acquire(), true); assert.equal(f.client.snapshot().lease.leaseOrdinal, 2);
+  assert.equal(f.client.snapshot().lease.acceptanceKind, "explicit"); assert.equal(f.client.snapshot().authorityEpoch, 2);
+  f.client.configure(descriptor, "replacement"); assert.equal(f.client.snapshot().authorityEpoch, 3);
+  assert.equal(f.client.snapshot().lease, null); assert.equal(await f.client.acquire(), true);
+  assert.equal(f.client.snapshot().lease.leaseOrdinal, 3); assert.equal(f.client.snapshot().lease.authorityEpoch, 3);
+  f.client.close(); assert.equal(f.client.snapshot().authorityEpoch, 4); f.client.close(); assert.equal(f.client.snapshot().authorityEpoch, 4);
+});
+
+test("expiry clears the lease and advances authority once while retaining explicit reacquisition semantics", async () => {
+  const f = fixture(); f.client.configure(descriptor, "session"); f.fetch(async () => jsonResponse(f.payload(3600)));
+  await f.client.acquire(); f.client.setActive(false); f.jump(3600001);
+  assert.equal(f.client.fresh(), false); assert.equal(f.client.snapshot().lease, null); assert.equal(f.client.snapshot().authorityEpoch, 2);
+  assert.equal(f.client.fresh(), false); assert.equal(f.client.snapshot().authorityEpoch, 2); assert.equal(f.calls.length, 1);
+  assert.equal(await f.client.acquire(), true); assert.equal(f.client.snapshot().lease.leaseOrdinal, 2);
+  assert.equal(f.client.snapshot().lease.authorityEpoch, 2); assert.equal(f.client.snapshot().lease.acceptanceKind, "explicit");
+  assert.equal(f.events.filter(x => x === "expired").length, 1); assert.equal(f.events.includes("refresh"), false); f.client.close();
+});
+
+test("late fenced responses never install an observed lease or advance its ordinal", async () => {
+  for (const barrier of ["suspend", "identity", "close"]) {
+    const f = fixture(); f.client.configure(descriptor, "session"); let reply;
+    f.fetch(() => new Promise(resolve => { reply = resolve; })); const acquiring = f.client.acquire(); await flush();
+    if (barrier === "suspend") f.client.suspend();
+    if (barrier === "identity") f.client.configure(descriptor, "replacement");
+    if (barrier === "close") f.client.close();
+    const epoch = f.client.snapshot().authorityEpoch; reply(jsonResponse(f.payload(3600))); assert.equal(await acquiring, false);
+    assert.equal(f.client.snapshot().lease, null); assert.equal(f.client.snapshot().refreshes, 0);
+    assert.equal(f.client.snapshot().authorityEpoch, epoch); f.client.close();
+  }
+});
+
+test("lease snapshot has exact redacted scalar keys and independent defensive copies", async () => {
+  const f = fixture(); f.client.configure(descriptor, "private-session"); await f.client.acquire();
+  const before = f.client.snapshot(), original = { ...before.lease };
+  assert.deepEqual(Object.keys(before.lease).sort(), ["leaseOrdinal", "authorityEpoch", "acceptanceKind", "ttlSeconds", "issuedAt", "expiresAt", "refreshAt", "serverTime", "requestStartedMonotonicMs", "expiresAtMonotonicMs", "refreshAtMonotonicMs", "responseObservedMonotonicMs", "fullTtlAfterResponseMonotonicMs"].sort());
+  assert.ok(Object.entries(before.lease).every(([key, value]) => key === "acceptanceKind" ? value === "explicit" : typeof value === "number" && Number.isFinite(value)));
+  before.lease.leaseOrdinal = 999; before.lease.expiresAtMonotonicMs = -1; before.authorityEpoch = 999; before.lease.responseObservedMonotonicMs = -1; before.lease.fullTtlAfterResponseMonotonicMs = -1;
+  assert.deepEqual(f.client.snapshot().lease, original); assert.equal(f.client.snapshot().authorityEpoch, 1);
+  const text = JSON.stringify(f.client.snapshot()); for (const forbidden of ["private-", "relay.test", "turns:", "username", "credential", "servers", "session"]) assert.equal(text.includes(forbidden), false);
+  f.client.close(); assert.equal(f.client.snapshot().lease, null);
+});
+
+test("observation does not confuse issuer wall time with the page monotonic domain", async () => {
+  const f = fixture(); f.jump(7000000, 1000); f.client.configure(descriptor, "session");
+  f.fetch(async () => jsonResponse(f.payload(3600))); assert.equal(await f.client.acquire(), true);
+  const lease = f.client.snapshot().lease; assert.equal(lease.issuedAt, 1001000); assert.equal(lease.serverTime, 1001000);
+  assert.equal(lease.requestStartedMonotonicMs, 7000000); assert.equal(lease.expiresAtMonotonicMs, 10600000);
+  assert.equal(lease.refreshAtMonotonicMs, 9400000); assert.equal(f.client.snapshot().remainingMs, 3600000); f.client.close();
+});
+
+test("a failed refresh retaining valid authority does not create a new lease or authority epoch", async () => {
+  const f = fixture(); f.client.configure(descriptor, "session"); await f.client.acquire(); const before = f.client.snapshot();
+  f.fetch(async () => { throw Error("private upstream detail"); }); await f.advance(40000);
+  assert.equal(f.client.snapshot().available, true); assert.deepEqual(f.client.snapshot().lease, before.lease);
+  assert.equal(f.client.snapshot().authorityEpoch, before.authorityEpoch); assert.equal(f.client.snapshot().failures, 1);
+  assert.equal(f.client.snapshot().refreshes, 1); assert.equal(f.events.includes("refresh"), false); f.client.close();
+});
+
+test("disabled suspension and close never manufacture authority epochs", () => {
+  for (const configured of [false, true]) {
+    const f = fixture();
+    if (configured) f.client.configure(null, "disabled-session");
+    const epoch = f.client.snapshot().authorityEpoch;
+    assert.equal(epoch, configured ? 1 : 0); assert.equal(f.client.snapshot().enabled, false);
+    for (let i = 0; i < 3; i++) {
+      f.client.suspend(); assert.equal(f.client.snapshot().authorityEpoch, epoch);
+      assert.equal(f.client.snapshot().lease, null); assert.equal(f.client.snapshot().enabled, false);
+    }
+    f.client.close(); f.client.close(); f.client.suspend();
+    assert.equal(f.client.snapshot().authorityEpoch, epoch); assert.equal(f.client.snapshot().closed, true);
+    assert.equal(f.calls.length, 0); assert.equal(f.timers.size, 0);
+  }
+});
+
+test("leaseObservation is a defensive three-scalar copy with zero operational reads or effects", async () => {
+  let mono = 100, wall = 1000000, deny = false; const operations = [];
+  const touch = name => { operations.push(name); if (deny) throw Error("Getter performed an operational action"); };
+  const client = createTurnCredentials({ origin: "https://viewer.test",
+    now() { touch("mono"); return mono; }, wallNow() { touch("wall"); return wall; },
+    setTimer() { touch("set"); return 1; }, clearTimer() { touch("clear"); },
+    fetchImpl() { touch("fetch"); return Promise.resolve(jsonResponse({ v: 1, iceServers: [{ urls: ["turns:relay.test:5349?transport=tcp"], username: "private-user", credential: "private-secret" }], ttlSeconds: 60, issuedAt: 1000000, expiresAt: 1060000, refreshAt: 1040000, serverTime: 1000000 })); },
+    onRefresh() { touch("refresh"); }, onUnavailable() { touch("unavailable"); },
+  });
+  const inert = [...operations]; deny = true; assert.equal(client.leaseObservation(), null); assert.deepEqual(operations, inert); deny = false;
+  client.configure(descriptor, "session"); assert.equal(await client.acquire(), true);
+  const expected = { authorityEpoch: 1, leaseOrdinal: 1, responseObservedMonotonicMs: 100 };
+  const before = client.snapshot(), trace = [...operations]; deny = true;
+  const first = client.leaseObservation(); assert.deepEqual(first, expected); assert.deepEqual(Object.keys(first).sort(), Object.keys(expected).sort());
+  first.authorityEpoch = 999; first.leaseOrdinal = 999; first.responseObservedMonotonicMs = -1;
+  const second = client.leaseObservation(); assert.deepEqual(second, expected); assert.notEqual(second, first); assert.deepEqual(operations, trace);
+  deny = false; assert.deepEqual(client.snapshot(), before);
+  // The passive stamp does not compute freshness or grant authority, even after time passes.
+  mono += 60001; wall += 60001; const expiredTrace = [...operations]; deny = true;
+  assert.deepEqual(client.leaseObservation(), expected); assert.deepEqual(operations, expiredTrace); deny = false;
+  assert.equal(client.fresh(), false); assert.equal(client.leaseObservation(), null); client.close();
+});
+
+test("leaseObservation follows a genuine automatic distinct successor without changing authority epoch", async () => {
+  const f = fixture(); f.client.configure(descriptor, "session"); await f.client.acquire();
+  const before = f.client.leaseObservation(); assert.deepEqual(before, { authorityEpoch: 1, leaseOrdinal: 1, responseObservedMonotonicMs: 0 });
+  f.fetch(async () => jsonResponse(f.payload(60, "successor-private-credential"))); await f.advance(40000);
+  assert.deepEqual(f.client.leaseObservation(), { authorityEpoch: 1, leaseOrdinal: 2, responseObservedMonotonicMs: 40000 });
+  assert.equal(f.client.snapshot().lease.acceptanceKind, "automatic"); assert.deepEqual(f.events, ["configuration-changed", "refresh"]); f.client.close();
+});
+
+test("leaseObservation preserves the original stamp for an unchanged cached response", async () => {
+  const f = fixture(); f.client.configure(descriptor, "session"); const issued = f.payload();
+  f.fetch(async () => jsonResponse(issued)); await f.client.acquire(); const before = f.client.leaseObservation();
+  f.fetch(async () => jsonResponse({ ...issued, serverTime: issued.issuedAt + 40000 })); await f.advance(40000);
+  assert.deepEqual(f.client.leaseObservation(), before); assert.equal(f.client.snapshot().refreshes, 1);
+  assert.equal(f.events.includes("refresh"), false); f.client.close();
+});
+
+test("leaseObservation clears on suspension, configuration change and close without reacquiring", async () => {
+  const f = fixture(); assert.equal(f.client.leaseObservation(), null); f.client.configure(descriptor, "session"); assert.equal(f.client.leaseObservation(), null);
+  await f.client.acquire(); const first = f.client.leaseObservation(); f.client.suspend(); assert.equal(f.client.leaseObservation(), null);
+  const calls = f.calls.length; assert.equal(f.client.leaseObservation(), null); assert.equal(f.calls.length, calls);
+  await f.client.acquire(); assert.deepEqual(f.client.leaseObservation(), { ...first, authorityEpoch: first.authorityEpoch + 1, leaseOrdinal: first.leaseOrdinal + 1 });
+  f.client.configure(descriptor, "replacement"); assert.equal(f.client.leaseObservation(), null); assert.equal(f.calls.length, calls + 1);
+  await f.client.acquire(); f.client.close(); assert.equal(f.client.leaseObservation(), null);
+});

@@ -317,7 +317,7 @@ function suspendPeerAuthority() { suspensionGeneration++; needsViewerApply = tru
 window.addEventListener("pagehide", () => { suspendPeerAuthority(); mediaRecovery.cancel("page-hidden"); });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") suspendPeerAuthority(); else policyRenewal.resume(); });
 window.addEventListener("pageshow", () => { policyRenewal.resume(); if (startRequestedAt !== null && !swarm) { byId("kill").disabled = true; status("Peer delivery stopped while this page was inactive. Playback uses origin; apply settings to rejoin."); } });
-window.relaySwarmDemo = { report, stop: () => { mediaRecovery.cancel(); stopSwarm(); render(); }, ready: () => Boolean(session), media: video };
+window.relaySwarmDemo = { report, stop: () => { mediaRecovery.cancel(); stopSwarm(); render(); }, ready: () => Boolean(session), turnLeaseObservation: () => turnCredentials.leaseObservation(), media: video };
 function policyUnavailableNow(reason, policy) {
   if (reason === "operator-off") {
     deliveryPolicy = { ...deliveryPolicy, ...policy }; policyUnavailable = false;

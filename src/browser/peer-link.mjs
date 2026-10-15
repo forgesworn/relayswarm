@@ -104,19 +104,40 @@ export class PeerLink {
     if (this.closed || this.pending || signal?.aborted) return Promise.resolve(null);
     return new Promise((resolve) => {
       const id = this.nextId++;
-      const finish = (bytes) => {
-        if (this.pending?.id !== id) return;
+      const settle = (bytes) => {
         clearTimeout(this.pending.timer);
         signal?.removeEventListener("abort", cancel);
-        this.pending = null;
-        if (bytes) this.lastDeliveredAt = Date.now();
         resolve(bytes);
       };
-      // Binary chunks carry no request id. Close on cancellation or timeout so
-      // late chunks cannot be mistaken for a subsequent response.
-      const cancel = () => { finish(null); this.close("request-abort"); };
-      const timeout = () => { finish(null); this.close("request-timeout"); };
-      this.pending = { id, key, expectedSize, size: -1, parts: [], received: 0, finish, timer: setTimeout(timeout, Math.max(1, timeoutMs)) };
+      const finish = (bytes) => {
+        if (this.pending?.id !== id) return;
+        const drained = this.pending.draining;
+        settle(bytes);
+        this.pending = null;
+        if (bytes) this.lastDeliveredAt = Date.now();
+        if (drained && !this.closed) this.onScheduleChange?.(this);
+      };
+      const abandon = (reason) => {
+        const pending = this.pending;
+        if (!pending || pending.id !== id || pending.draining) return;
+        // Untagged binary chunks may only be discarded up to a definitive
+        // response boundary on a known ordered, fully reliable channel.
+        let reliable = false;
+        try {
+          reliable = this.channel.ordered === true && this.channel.maxRetransmits === null &&
+            this.channel.maxPacketLifeTime === null && this.channel.readyState === "open";
+        } catch {}
+        if (!reliable) { finish(null); this.close(reason); return; }
+        pending.draining = true;
+        pending.parts.length = 0;
+        settle(null);
+        pending.timer = setTimeout(() => {
+          if (this.pending === pending && pending.draining) this.close(reason);
+        }, this.drainTimeoutMs);
+      };
+      const cancel = () => abandon("request-abort");
+      const timeout = () => abandon("request-timeout");
+      this.pending = { id, key, expectedSize, size: -1, parts: [], chunks: 0, received: 0, draining: false, finish, timer: setTimeout(timeout, Math.max(1, timeoutMs)) };
       signal?.addEventListener("abort", cancel, { once: true });
       if (!this.#sendText({ t: "want", id, k: key })) finish(null);
     });
@@ -149,13 +170,15 @@ export class PeerLink {
     if (this.closed) return;
     if (typeof data !== "string") {
       const pending = this.pending;
-      if (!pending || pending.size < 0) return;
+      if (!pending) return;
+      if (pending.size < 0) return this.close("protocol");
       const chunk = new Uint8Array(data);
-      if (!chunk.byteLength || chunk.byteLength > CHUNK_BYTES || pending.parts.length >= this.maxChunks) return this.close("protocol");
+      if (!chunk.byteLength || chunk.byteLength > CHUNK_BYTES || pending.chunks >= this.maxChunks) return this.close("protocol");
+      pending.chunks += 1;
       pending.received += chunk.byteLength;
       this.bytesIn += chunk.byteLength;
-      if (pending.received > pending.size) return pending.finish(null);
-      pending.parts.push(chunk);
+      if (pending.received > pending.size) return this.close("protocol");
+      if (!pending.draining) pending.parts.push(chunk);
       return;
     }
     if (data.length > 64 * 1024) return this.close("protocol");
@@ -185,17 +208,20 @@ export class PeerLink {
       case "want": return this.#onWant(message);
       case "meta": {
         const pending = this.pending;
-        if (!pending || message.id !== pending.id) return;
+        if (!pending) return;
+        if (message.id !== pending.id) return pending.draining ? this.close("protocol") : undefined;
         if (pending.size !== -1) return this.close("protocol");
         if (pending.expectedSize !== undefined && message.size !== pending.expectedSize) return this.close("protocol");
-        if (!Number.isSafeInteger(message.size) || message.size < 1 || message.size > this.maxSegmentBytes) return pending.finish(null);
+        if (!Number.isSafeInteger(message.size) || message.size < 1 || message.size > this.maxSegmentBytes) return this.close("protocol");
         pending.size = message.size;
         return;
       }
       case "eof": {
         const pending = this.pending;
-        if (!pending || message.id !== pending.id) return;
-        if (pending.received !== pending.size) return pending.finish(null);
+        if (!pending) return;
+        if (message.id !== pending.id) return pending.draining ? this.close("protocol") : undefined;
+        if (pending.received !== pending.size) return this.close("protocol");
+        if (pending.draining) return pending.finish(null);
         const bytes = new Uint8Array(pending.size);
         let offset = 0;
         for (const part of pending.parts) {
@@ -205,7 +231,11 @@ export class PeerLink {
         return pending.finish(bytes);
       }
       case "none":
-        if (this.pending && message.id === this.pending.id) this.pending.finish(null);
+        if (this.pending) {
+          if (message.id !== this.pending.id) return this.pending.draining ? this.close("protocol") : undefined;
+          if (this.pending.size !== -1) return this.close("protocol");
+          this.pending.finish(null);
+        }
         return;
       default:
         return;

@@ -75,9 +75,14 @@ response is in flight in each direction. A binary chunk is at most 16 KiB.
 Control text is capped at 64 KiB. Object size is limited by the host's configured
 segment cap, at most 16 MiB. `meta` cannot override the independently verified
 commitment size. Repeated headers, excessive chunks, empty chunks and response
-size overflow fail the transfer. Timeout or cancellation closes a receiving
-link, because untagged late binary chunks cannot safely be reused by another
-request. Upload queues and backpressure have bounded capacities and deadlines.
+size overflow close the link. Timeout or cancellation resolves the request
+without extending its deadline. On a known ordered, fully reliable channel,
+the receiver may discard the remaining response while keeping the link busy
+until a matching, size-validated `eof`, or `none` before any metadata. No new
+request can reuse untagged chunks during that interval. The existing bounded
+drain timeout closes an incomplete response; unknown or partially reliable
+channels close immediately. Host stop and admission withdrawal still close
+immediately. Upload queues and backpressure retain their original bounds.
 Optional `contribution` and `fetching` controls coordinate serving and short
 fetch leases; they are advisory and never authorise media or spend upload
 allowance.

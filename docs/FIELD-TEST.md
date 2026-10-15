@@ -10,6 +10,33 @@ can offer explicitly opted-in numeric reports and authenticated
 operator controls. See [operations](OPERATIONS.md). The publisher's signing
 key stays on the server. v0.1.0 release assets retain their original behaviour.
 
+## Current pilot and evidence scope
+
+The experimental pilot now runs exact `3e52294`, with all nine required CI
+jobs and fresh 262-member package checks. Guarded deployment and normal HTTPS
+client/two-playlist attestation passed. Relay-only ICE, TLS/TCP TURN projection
+and admission limit 32 are deployed; Nostr account allowances are enabled and
+the website resolver remains unconfigured. Reporting/forwarding remain off.
+Private state/permanent leases were preserved and the owned finite source was
+removed under all five cleanup guards, retaining actual exit 255.
+
+A separate local two-Chrome/synthetic-HLS cohort used genuine Internet TURN
+and passed 90.031 s with 40 verified fragments/4,631,756 bytes, including 23 fragments/
+2,656,252 bytes after the renewed transport boundary. Independent unchanged strict replay passes the
+same rebuilt-diagnostic cohort. First local lease 60 s/real issued lease 3,600 s:
+this does not prove natural expiry, exact standalone Internet playback or an
+ordinary journey against the deployed pilot. Earlier REDs stay historical REDs.
+
+Latest ordinary public acceptance remains RED: measured 60.038 s playback and
+contribution passed, but the receiver verified zero peer fragments/bytes at
+both qualities. Seven requests received partial payload without EOF before
+closure. All owned cleanup passed; the delivery cause remains unproved.
+See [current status](STATUS.md#current-delivery-checkpoint)
+and the full [P01–P12 checklist](PRODUCTION-READINESS.md#delivery-checklist).
+Historical field sections retain their own dates/topologies; current public,
+physical/Safari, hard-NAT, cross-device budget, natural-expiry, fourteen-role,
+7,200 s/22-churn, matched wire/cost and release acceptance remain open.
+
 ## Run locally
 
 From the [current source candidate](GETTING-STARTED.md#run-the-source-demo) or a
@@ -42,7 +69,7 @@ explicit action using a Nostr signer or the host's signed-in website account.
 It adds the service's cumulative cap to this browser's allowance and leaves
 uploading off until a fresh Apply. See [shared upload allowance](ACCOUNT-UPLOAD-BUDGET.md)
 for linking, resetting, reconnecting after reload and the service's privacy
-boundary. The deployed `8f482b4` pilot offers Nostr sign-in; its host website
+boundary. The deployed `3e52294` pilot offers Nostr sign-in; its host website
 account resolver is unconfigured.
 
 The player checks operator policy and publisher identity every two seconds,
@@ -190,8 +217,14 @@ retry without extending expiry. Unexpired credentials can survive a failed
 refresh; expiry, configuration changes or page suspension stop peer delivery.
 Expiry clears uploading and requires fresh Apply. Returning credentials or
 returning to the page cannot restore upload consent. Origin playback remains
-available during peer reconnection. Receipts contain fixed lifecycle counters,
-not credential values, cookies or issuer addresses.
+available during peer reconnection. Receipts contain fixed lifecycle counters
+and redacted lease timing/provenance, never credential values, cookies or issuer
+addresses. Distinct automatic leases have an ordinal and authority epoch; cached
+responses keep their original record and deadlines. The debug API
+`relaySwarmDemo.turnLeaseObservation()` returns only the last observed epoch,
+ordinal and response timestamp without checking or granting freshness. A full
+TTL after the observed response is a conservative timing boundary, not proof
+that the TURN server rejected old credentials or expired an allocation.
 
 Focused lifecycle, page-VM and owned HTTP tests pass. The preceding da9 source
 also passed mock-issuer Chrome rollover locally and in CI. Fresh browser/CI
@@ -352,7 +385,7 @@ Later exact-07 CI passed separately above; the full P01–P12/release gates rema
 
 The deployed source is `8f482b4528a671acfe9f1afc336cce5743aaaefd`; all nine required
 CI jobs, fresh local consumer/ESM checks and guarded deployment pass. See
-[status](STATUS.md#current-deployed-checkpoint-8f-on-14-october-2026) and the
+[status](STATUS.md#historical-deployed-checkpoint-8f-on-14-october-2026) and the
 [8f summary](../spikes/results/8f482b4-current-checkpoint-20261014.json).
 
 Ordinary cross-Mac playback passed over 60.119 s, but contribution and both-quality

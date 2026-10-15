@@ -126,7 +126,7 @@ active incoming duplicates do not allocate or restart a timer. Incoming distinct
 requests still supersede pending incoming connections. Wire version, public
 options and existing limits stay unchanged. The correction has passed 121 unit
 tests; native rollback/SCTP and Internet renewal remain unproved. See the
-[current checkpoint](docs/STATUS.md#current-correction-checkpoint).
+[current checkpoint](docs/STATUS.md#current-delivery-checkpoint).
 
 ## Cost, and what to tell viewers
 
@@ -268,6 +268,11 @@ payload rate and failure history. Healthy measured peers take priority over
 fast refusals; cold peers receive bounded exploration. A known delivery gets
 headroom within the original peer deadline, rather than an equal share of it.
 Attempts remain serial and capped by `maxPeers` and the original deadline.
+A timed-out or cancelled request resolves promptly for origin fallback. On a
+known ordered, fully reliable channel, the link stays busy while discarding
+that response up to a matching validated EOF, or a refusal before metadata.
+Only then can another request use the channel. The existing drain limit closes
+an incomplete response; host stop and admission withdrawal close immediately.
 Fresh-origin coordination is bounded by safe buffered playback and measured
 HTTP fallback time. hls.js owns quality selection. These mechanisms do not
 prove optimal internet scheduling or net savings.
