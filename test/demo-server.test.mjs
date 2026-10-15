@@ -27,6 +27,7 @@ test("demo serves exact HTTP ranges and matching signed commitments without expo
   const demo = await start(t);
   const session = await fetch(`${demo.base}/session.json`).then((response) => response.json());
   assert.equal(session.swarmId, demo.publisher.swarmId);
+  assert.equal(session.iceTransportPolicy, "all");
   assert.equal(session.secretKey, undefined);
   const response = await fetch(`${demo.base}/media/shared.ts`, { headers: { range: "bytes=4-7" } });
   assert.equal(response.status, 206);
@@ -52,6 +53,17 @@ test("demo refuses insecure remote bindings and invalid external configuration",
   await assert.rejects(startDemoServer({ host: "0.0.0.0" }), /require HTTPS/u);
   for (const publicUrl of ["http://example.test", "https://user:pass@example.test", "https://example.test/path"]) await assert.rejects(startDemoServer({ publicUrl }), /HTTPS origin/u);
   await assert.rejects(startDemoServer({ relays: ["ws://public.example"] }), /wss/u);
+});
+
+test("demo publishes an explicit relay policy and rejects invalid policies before private reads", async (t) => {
+  for (const iceTransportPolicy of [null, "", "Relay", "none", true]) {
+    await assert.rejects(startDemoServer({ iceTransportPolicy, operatorTokenFile: "/must-not-read-token" }), /Invalid ICE transport policy/u);
+  }
+  const demo = await start(t, { iceTransportPolicy: "relay" });
+  const session = await fetch(`${demo.base}/session.json`).then((response) => response.json());
+  assert.equal(session.iceTransportPolicy, "relay");
+  assert.deepEqual(session.iceServers, []); // Policy does not invent TURN service or downgrade to all.
+  assert.equal(await fetch(`${demo.base}/media/shared.ts`).then((response) => response.text()), "abcdefgh");
 });
 
 test("control timings expose numeric headers and authenticated bounded aggregates without request details", async (t) => {

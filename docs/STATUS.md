@@ -11,6 +11,15 @@ on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
 
+The swarm, demo and broadcaster now expose explicit `all`/`relay` ICE candidate
+policy, defaulting to `all`. A changed policy stops peers, clears upload consent
+and fences an Apply awaiting old admission. Fourteen focused tests, syntax for
+142 modules and documentation checks passed in 7.219 s within the unchanged
+40/60 s guard. All five recorded outer cleanup checks passed. The
+[ICE policy checkpoint](../spikes/results/ice-transport-policy-checks-20261015.json)
+records that local scope. Relay-only does not force TLS or prove a delivery repair;
+the option has not been deployed or publicly qualified.
+
 The latest worker shutdown correction refuses further TERM/KILL IPC after its
 first force request or an accepted drain witness. Two regressions reproduce
 EPIPE with the preceding source; all 21 focused lease/controller tests pass
@@ -31,7 +40,13 @@ package consumption. Its [CI run](https://github.com/forgesworn/relayswarm/actio
 passed eight required jobs and failed the RTMPS capability guard's orderly
 close with `worker-group-probe` / `unknown`; the later broadcast browser step
 did not run. That hosted failure's cause remains unproved. Corrected-source
-CI, fresh package consumption and final production acceptance remain pending.
+CI and fresh package consumption subsequently passed on exact
+`91423b2e7eb1576f67265b64208023d565f8c5f8`: all nine required
+[jobs](https://github.com/forgesworn/relayswarm/actions/runs/38694780028) passed,
+and the clean consumer verified 260 package members. Its hosted loopback
+broadcast check verified six peer loads/3,298,836 bytes across four checkpoints,
+including 756,888 bytes after restart. Those results predate the new ICE option;
+they do not establish ordinary public delivery or final production acceptance.
 
 The broadcaster exposes `--admission-per-address-tickets` (1–120, default 12)
 for the existing per-socket-address quota. Viewers behind a proxy can share
@@ -70,6 +85,15 @@ A later response-phase diagnostic stopped before measurement when the unchanged
 M4 endpoint's ten cleanup flags passed with the direct kernel runtime; its
 original controller assertion remains separate from later actor/stage absence
 and source removal proof.
+
+A further diagnostic reached 50.513 s of the required 60 s before the unchanged
+0.5 s group-membership probe timed out. Its application gates remain unmeasured;
+all original endpoint and outer cleanup checks passed. Three receiver responses
+had matching metadata but no matching EOF when JavaScript entered channel close:
+two had no chunks and one had 114,688 of 204,356 declared bytes. Product timeout,
+abort and channel-error counters are separate observations; native channel
+ordinals were not joined to product request reasons. This narrows the observed
+phase to incomplete responses without establishing a cause or a passing run.
 
 The [pilot and acceptance checkpoint](../spikes/results/pilot-turn-acceptance-20261015.json)
 records these separate scopes. Ordinary sharing, Safari/physical devices,

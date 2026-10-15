@@ -91,6 +91,17 @@ the configured origin; do not expose the trusted ledger methods directly or
 accept viewer-supplied account subjects as authentication. The session
 descriptor contains supported methods, bounds and fixed endpoint paths only.
 
+## ICE transport policy
+
+The core swarm and `startDemoServer` accept `iceTransportPolicy: "all" | "relay"`,
+default `"all"`. Both demo and broadcaster CLIs expose
+`--ice-transport-policy all|relay`. Invalid values are rejected before host
+state or services start. A demo policy change stops peers and requires fresh
+Apply and upload consent; an absent legacy descriptor means `"all"`.
+Relay-only is an explicit operator privacy/compatibility choice, not a TLS
+selection or a proved transfer repair. It never downgrades to `"all"`; if usable
+relay connectivity is unavailable, playback retains its existing origin fallback.
+
 ## Optional demo TURN renewal
 
 `startDemoServer({turnCredentials: {url: 'https://issuer.example/turn'}})` enables

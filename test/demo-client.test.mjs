@@ -45,6 +45,64 @@ test("operator mode cannot defeat viewer origin kill or grant upload consent", a
   assert.equal(p.fixture.swarms.at(-1).options.mode, "off");
 });
 
+test("ICE policy normalises absent to all and a change requires new Apply and upload consent", async () => {
+  const p = await page();
+  try {
+    p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+    const first = p.fixture.swarms.at(-1), count = p.fixture.swarms.length;
+    assert.equal(first.options.iceTransportPolicy, "all");
+    assert.equal(await first.options.reserveUploadBytes(77), true);
+    p.fixture.session.iceTransportPolicy = "all"; await p.poll();
+    assert.equal(p.fixture.swarms.length, count); assert.notEqual(first.stopped, true);
+    p.fixture.session.iceTransportPolicy = "relay"; await p.poll();
+    assert.equal(first.stopped, true); assert.equal(p.element("upload").checked, false);
+    assert.equal(p.context.window.relaySwarmDemo.report().current, null);
+    assert.equal(await first.options.reserveUploadBytes(1), false);
+    await p.poll(); assert.equal(p.fixture.swarms.length, count);
+    await p.submit();
+    const next = p.fixture.swarms.at(-1);
+    assert.equal(next.options.iceTransportPolicy, "relay"); assert.equal(next.options.serve, false);
+    assert.equal(p.context.window.relaySwarmDemo.report().uploadBudget.spent, 77);
+    assert.equal(p.element("telemetry").checked, false);
+  } finally { p.close(); }
+});
+
+test("invalid refreshed ICE policy revokes peers instead of falling back to all", async () => {
+  const p = await page();
+  try {
+    p.fixture.session.iceTransportPolicy = "relay"; await p.poll();
+    p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+    const first = p.fixture.swarms.at(-1);
+    p.fixture.session.iceTransportPolicy = "invalid"; await p.poll();
+    assert.equal(first.stopped, true); assert.equal(p.element("upload").checked, false);
+    assert.equal(p.fixture.swarms.at(-1).options.mode, "off");
+    assert.equal(p.fixture.swarms.at(-1).options.serve, false);
+    assert.ok(p.fixture.swarms.every(({ options }) => options.iceTransportPolicy === "relay"));
+  } finally { p.close(); }
+});
+
+test("ICE policy change fences an Apply awaiting its old admission ticket", async () => {
+  const p = await page(); let finishTicket, hold = true;
+  try {
+    p.fixture.session.admission = { issuer: "issuer", epoch: "epoch", challengeEndpoint: "/challenge", ticketEndpoint: "/ticket", verifyEndpoint: "/verify" };
+    p.fixture.fetch = async (url) => {
+      if (url === "/session.json") return p.fixture.session;
+      if (url === "/delivery-policy.json") return p.fixture.policy;
+      const result = { ...p.fixture.session.admission, swarmId: p.fixture.session.swarmId, challenge: "challenge", ticket: "ticket", expiresAt: Math.ceil(Date.now() / 1000) + 300 };
+      if (url === "/ticket" && hold) return new Promise(resolve => { finishTicket = () => resolve(result); });
+      return result;
+    };
+    await p.poll(); p.element("mode").value = "peer-first"; p.element("upload").checked = true;
+    const applying = p.submit(); for (let i = 0; i < 20 && !finishTicket; i++) await Promise.resolve(); assert.ok(finishTicket);
+    p.fixture.session.iceTransportPolicy = "relay"; await p.poll();
+    hold = false; finishTicket(); await applying;
+    assert.equal(p.fixture.sourceLoads, 0); assert.equal(p.element("upload").checked, false);
+    await p.submit();
+    assert.equal(p.fixture.swarms.at(-1).options.iceTransportPolicy, "relay");
+    assert.equal(p.fixture.swarms.at(-1).options.serve, false);
+  } finally { p.close(); }
+});
+
 async function accountPage(storage = new Map()) {
   const p = await page(storage), stable = generateSecretKey();
   let grant = "a".repeat(64), spent = 200, revision = 1, generation = 1, cap = 100000000, delegation, expires, intent;
@@ -659,16 +717,19 @@ test("TURN demo refresh recycles active peers while preserving consent, admissio
   const p = await turnPage(await accountPage());
   try {
     await p.element("account-connect").click();
+    p.fixture.session.iceTransportPolicy = "relay";
     p.fixture.session.admission = { issuer: "issuer", epoch: "epoch", challengeEndpoint: "/admission-challenge", ticketEndpoint: "/admission-ticket", verifyEndpoint: "/admission-verify" };
     const fetchAccount = p.fixture.fetch;
     p.fixture.fetch = (url, init) => url.startsWith("/admission-") ? { ...p.fixture.session.admission, swarmId: p.fixture.session.swarmId, challenge: "challenge", ticket: "private-admission-ticket", expiresAt: Math.floor(p.context.Date.now() / 1000) + 300 } : fetchAccount(url, init);
     await p.poll(); p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
     const first = p.fixture.swarms.at(-1); assert.equal(await first.options.reserveUploadBytes(77), true);
+    assert.equal(first.options.iceTransportPolicy, "relay");
     p.jumpWithoutTimers(4000); await p.poll(); p.fireTimer(ms => ms > 3000 && ms <= 4000); await settleTurn();
     const next = p.fixture.swarms.at(-1), report = p.context.window.relaySwarmDemo.report();
     assert.notEqual(next, first); assert.equal(first.stopped, true); assert.equal(next.options.serve, true); assert.equal(p.element("upload").checked, true);
     assert.equal(next.options.ticket, first.options.ticket); assert.equal(next.options.secretKey, first.options.secretKey);
     assert.equal(next.options.iceServers[0].credential, "private-turn-secret-2");
+    assert.equal(next.options.iceTransportPolicy, "relay");
     assert.equal(report.uploadBudget.spent, 77); assert.equal(report.accountBudget.spent, 277); assert.equal(p.fixture.accountSignatures, 1);
     assert.equal(p.fixture.sourceLoads, 1); assert.equal(p.turnCalls.length, 2);
   } finally { p.close(); }

@@ -391,8 +391,8 @@ test("non-network ingest, insecure forwarding and out-of-range limits are reject
   assert.equal(await exists(join(directory, ".broadcast-lock")), false);
 });
 
-function cli(t, args) {
-  const child = spawn(process.execPath, [script, ...args], { stdio: ["ignore", "pipe", "pipe"] });
+function cli(t, args, entry = script) {
+  const child = spawn(process.execPath, [entry, ...args], { stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
   child.stdout.on("data", (chunk) => { stdout = `${stdout}${chunk}`.slice(-16384); });
   child.stderr.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-16384); });
@@ -428,6 +428,23 @@ test("CLI help advertises the admission option without creating state", { timeou
   assert.ok(outcome.stdout.includes("--admission-per-address-tickets 12"));
   assert.equal(await exists(state), false);
 });
+
+for (const [name, entry] of [["broadcaster", script], ["demo", fileURLToPath(new URL("../demo/server.mjs", import.meta.url))]]) {
+  test(`${name} CLI rejects invalid ICE policy before startup state`, { timeout: 5000 }, async (t) => {
+    const directory = await fixture(t), state = join(directory, "uncreated-state");
+    const args = name === "broadcaster" ? ["--state-dir", state] : ["--publisher-state", join(state, "publisher.json"), "--ice-config", join(directory, "absent-private-ice")];
+    const outcome = await boundedResult(cli(t, [...args, "--ice-transport-policy=Relay"], entry).result);
+    assert.equal(outcome.code, 1); assert.equal(await exists(state), false);
+    if (name === "demo") assert.match(outcome.stderr, /Invalid ICE transport policy/u);
+  });
+  test(`${name} CLI help advertises inert ICE policy choice`, { timeout: 5000 }, async (t) => {
+    const directory = await fixture(t), state = join(directory, "uncreated-state");
+    const args = name === "broadcaster" ? ["--state-dir", state] : ["--publisher-state", join(state, "publisher.json")];
+    const outcome = await boundedResult(cli(t, [...args, "--help"], entry).result);
+    assert.equal(outcome.code, 0); assert.ok(outcome.stdout.includes("--ice-transport-policy all|relay"));
+    assert.equal(await exists(state), false);
+  });
+}
 
 test("CLI rejects a FIFO secret promptly instead of blocking on open", { timeout: 5000, skip: process.platform === "win32" }, async (t) => {
   const directory = await fixture(t), path = join(directory, "fifo-fixture");

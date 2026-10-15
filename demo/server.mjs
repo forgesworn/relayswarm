@@ -32,9 +32,10 @@ export function httpRange(header, size) {
   return { start, end: Math.min(end, size - 1) };
 }
 
-export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host = "127.0.0.1", port = 0, publicUrl, tlsKey, tlsCert, relays = [], iceServers,
+export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host = "127.0.0.1", port = 0, publicUrl, tlsKey, tlsCert, relays = [], iceServers, iceTransportPolicy = "all",
   publisherState, operatorToken, operatorTokenFile, operatorState, telemetry = false, reportCapacity, reportTtlMs, operatorExtraStatus, beforeListen,
   admissionOptions, accountBudget, turnCredentials, blockingPlaylistReload = true, mediaCapabilities = { parts: false }, allowEncryptedMedia = false, commitmentSecretKey, delegation, revokedDelegationIds = [], delegationRevocations = [] } = {}) {
+  if (!["all", "relay"].includes(iceTransportPolicy)) throw new Error("Invalid ICE transport policy; use all or relay.");
   if (typeof blockingPlaylistReload !== "boolean") throw new Error("Invalid blocking playlist policy.");
   if (turnCredentials !== undefined) {
     if (!turnCredentials || typeof turnCredentials !== "object" || Array.isArray(turnCredentials) || iceServers !== undefined) throw new Error("Supply either static ICE servers or a TURN credential issuer.");
@@ -92,7 +93,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
       if (url.pathname === "/stream.json") return send("application/json", JSON.stringify(advertisement));
       if (url.pathname === "/session.json") return send("application/json", JSON.stringify({ v: 1, swarmId: publisher.swarmId, streamEvent: publisher.streamEvent,
         manifest: publisher.manifestPath, relays: relays.length ? relays : [`${base.replace(/^http/u, "ws")}/relay`],
-        ...(iceServers ? { iceServers } : {}), ...(turnControls ? { turnCredentials: turnControls.descriptor() } : {}), ...(accountControls ? { accountBudget: accountControls.descriptor() } : {}), ...(publisher.delegation ? { delegation: publisher.delegation } : {}),
+        iceTransportPolicy, ...(iceServers ? { iceServers } : {}), ...(turnControls ? { turnCredentials: turnControls.descriptor() } : {}), ...(accountControls ? { accountBudget: accountControls.descriptor() } : {}), ...(publisher.delegation ? { delegation: publisher.delegation } : {}),
         ...(revokedDelegationIds.length ? { revokedDelegationIds } : {}), ...(delegationRevocations.length ? { delegationRevocations } : {}),
         admission: admission.descriptor(), mediaCapabilities: { ...mediaCapabilities }, streamAdvertisementEndpoint: "/stream.json", commitmentEndpoint: "/commitment", deliveryPolicyEndpoint: "/delivery-policy.json", experimental: true }));
       if (url.pathname === "/commitment") {
@@ -205,8 +206,9 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
 
 async function main() {
   const { values } = parseArgs({ options: { "media-dir": { type: "string" }, manifest: { type: "string", default: "master.m3u8" }, host: { type: "string", default: "127.0.0.1" }, port: { type: "string", default: "8787" },
-    "public-url": { type: "string" }, "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, "turn-credentials-url": { type: "string" }, "publisher-state": { type: "string" }, "operator-token-file": { type: "string" }, "operator-state": { type: "string" }, "account-budget-state": { type: "string" }, "allow-encrypted-media": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" } } });
-  if (values.help) { console.log("npm run demo -- [--media-dir DIR --manifest master.m3u8] [--host 127.0.0.1 --port 8787] [--public-url https://demo.example] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE | --turn-credentials-url https://issuer.example/turn] [--publisher-state FILE] [--operator-token-file FILE] [--account-budget-state FILE] [--telemetry]\nWithout --media-dir, ffmpeg generates a two-rendition live test stream. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/FIELD-TEST.md."); return; }
+    "public-url": { type: "string" }, "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, "ice-transport-policy": { type: "string", default: "all" }, "turn-credentials-url": { type: "string" }, "publisher-state": { type: "string" }, "operator-token-file": { type: "string" }, "operator-state": { type: "string" }, "account-budget-state": { type: "string" }, "allow-encrypted-media": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" } } });
+  if (values.help) { console.log("npm run demo -- [--media-dir DIR --manifest master.m3u8] [--host 127.0.0.1 --port 8787] [--public-url https://demo.example] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE | --turn-credentials-url https://issuer.example/turn] [--ice-transport-policy all|relay] [--publisher-state FILE] [--operator-token-file FILE] [--account-budget-state FILE] [--telemetry]\nWithout --media-dir, ffmpeg generates a two-rendition live test stream. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/FIELD-TEST.md."); return; }
+  if (!["all", "relay"].includes(values["ice-transport-policy"])) throw new Error("Invalid ICE transport policy; use all or relay.");
   const port = Number(values.port);
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new Error("Invalid port.");
   if (values.stun?.some((url) => !/^stuns?:[^\s]+$/u.test(url))) throw new Error("--stun requires a STUN URL.");
@@ -224,7 +226,7 @@ async function main() {
     demo = await startDemoServer({ mediaDir: values["media-dir"] || fixture.directory, manifest: values.manifest, host: values.host, port,
       publisherState: values["publisher-state"], operatorTokenFile: values["operator-token-file"], operatorToken: values["operator-token-file"] ? undefined : process.env.RELAYSWARM_OPERATOR_TOKEN, telemetry: values.telemetry,
       operatorState: values["operator-state"], ...(values["account-budget-state"] ? { accountBudget: { statePath: values["account-budget-state"] } } : {}), allowEncryptedMedia: values["allow-encrypted-media"],
-      publicUrl: values["public-url"], tlsKey: values["tls-key"], tlsCert: values["tls-cert"], relays: values.relay,
+      iceTransportPolicy: values["ice-transport-policy"], publicUrl: values["public-url"], tlsKey: values["tls-key"], tlsCert: values["tls-cert"], relays: values.relay,
       ...(iceServers ? { iceServers } : {}), ...(values["turn-credentials-url"] !== undefined ? { turnCredentials: { url: values["turn-credentials-url"] } } : {}) });
     console.log(`RelaySwarm field-test player: ${demo.base}\n${values["publisher-state"] ? "Publisher identity is restored from the private server state file." : "Publisher key is ephemeral and stays on this server."} Press Ctrl-C to stop.`);
     let stopping = false;

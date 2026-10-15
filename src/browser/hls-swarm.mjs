@@ -85,6 +85,7 @@ const DEFAULTS = Object.freeze({
   reannounceDebounceMs: 4_000,
   minReannounceGapMs: 12_000,
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  iceTransportPolicy: "all",
 });
 const SAMPLE_LIMIT = 500;
 
@@ -256,6 +257,7 @@ export function createHlsSwarm(options = {}) {
 class HlsSwarm {
   constructor(options) {
     this.options = { ...DEFAULTS, ...options };
+    if (this.options.iceTransportPolicy === undefined) this.options.iceTransportPolicy = DEFAULTS.iceTransportPolicy;
     this.startedAt = Date.now();
     this.transportStartedAt = now();
     this.transportSequence = 0;
@@ -367,6 +369,7 @@ class HlsSwarm {
         if (url.protocol !== "wss:" && !(url.protocol === "ws:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) return "invalid-relays";
       }
     } catch { return "invalid-relays"; }
+    if (!["all", "relay"].includes(this.options.iceTransportPolicy)) return "invalid-ice-transport-policy";
     if (mode === "off") return "mode-off";
     if (mode !== "shadow" && mode !== "peer-first") return "invalid-mode";
     if (mode === "peer-first" && !validStreamAuthorisation(this.options.streamEvent)) return "invalid-stream-authorisation";
@@ -1558,7 +1561,7 @@ class HlsSwarm {
 
   #newPeerConnection(outgoing) {
     const Impl = this.options.RTCPeerConnectionImpl || globalThis.RTCPeerConnection;
-    const pc = new Impl({ iceServers: this.options.iceServers });
+    const pc = new Impl({ iceServers: this.options.iceServers, iceTransportPolicy: this.options.iceTransportPolicy });
     const meta = { id: this.transportSequence < Number.MAX_SAFE_INTEGER ? ++this.transportSequence : 0, listeners: [], ended: false };
     this.transportConnections.set(pc, meta);
     this.#transport(pc, "created", outgoing ? "outgoing" : "incoming");

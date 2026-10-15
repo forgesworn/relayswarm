@@ -50,6 +50,15 @@ before creating state or starting services. This changes no global issuance,
 request, expiry or consent limit, and does not trust forwarded-address headers.
 Choosing a limit does not establish a passing multi-viewer qualification.
 
+The broadcaster and demo accept `--ice-transport-policy all|relay`, default
+`all`. Choose `relay` explicitly to restrict peer ICE to relayed candidates;
+provide usable TURN configuration or the existing credential adapter. The
+choice does not force TLS: the adapter currently preserves all validated issuer
+URLs. It never falls back to `all`, changes the peer deadline or grants upload
+consent. Playback keeps its existing origin fallback. A changed demo session
+policy stops peers and requires fresh Apply and upload consent. This option
+does not establish improved delivery, measured privacy or field acceptance.
+
 ## Output and recovery
 
 Add `--account-budget` to offer the optional shared upload allowance. It keeps

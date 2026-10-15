@@ -30,7 +30,7 @@ class PC extends EventTarget {
   static instances = [];
   iceGatheringState = "complete";
   localDescription = { sdp: "address-bearing-sdp" };
-  constructor() { super(); PC.instances.push(this); }
+  constructor(configuration) { super(); this.configuration = configuration; PC.instances.push(this); }
   close() { this.closed = true; }
   createDataChannel() { return new Channel(); }
   async createOffer() { return { type: "offer", sdp: "address-bearing-sdp" }; }
@@ -57,7 +57,7 @@ class RecordedChannel extends Channel {
 async function linkedFixture(options = {}, LoaderImpl = Loader) {
   const relay = options.WebSocketImpl ? { url: "wss://memory-relay.example", close: async () => {} } : await startLocalRelay();
   const connections = [], peers = [];
-  class Connection extends PC { constructor() { super(); connections.push(this); } }
+  class Connection extends PC { constructor(configuration) { super(configuration); connections.push(this); } }
   const swarm = createHlsSwarm({ ...base, relays: [relay.url], RTCPeerConnectionImpl: Connection, shadowSampleRate: 0, ...options });
   const hls = { config: { loader: LoaderImpl } };
   swarm.attach(hls);
@@ -101,6 +101,32 @@ function memoryRelaySocket() {
     close() { sockets.delete(this); this.dispatchEvent(new Event("close")); }
   };
 }
+
+for (const policy of [undefined, "all", "relay"]) {
+  test(`ICE transport policy ${policy ?? "default"} reaches incoming and outgoing native connections`, async () => {
+    const servers = [{ urls: "turns:relay.example:5349", username: "fixture", credential: "fixture" }];
+    const fixture = await linkedFixture({ WebSocketImpl: memoryRelaySocket(), iceServers: servers, iceTransportPolicy: policy });
+    try {
+      await fixture.addPeer();
+      const peer = new RelaySwarmSession({ pool: fixture.pool, swarmId: base.swarmId });
+      fixture.peers.push(peer); peer.start();
+      peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }] });
+      await until(() => fixture.connections.length >= 2);
+      assert.equal(fixture.swarm.metrics().transportDiagnostics.counters.created.incoming, 1);
+      assert.ok(fixture.swarm.metrics().transportDiagnostics.counters.created.outgoing >= 1);
+      for (const pc of fixture.connections) assert.deepEqual(pc.configuration, { iceServers: servers, iceTransportPolicy: policy ?? "all" });
+    } finally { await fixture.close(); }
+  });
+}
+
+test("invalid ICE transport policies disable peers and leave the origin loader intact", () => {
+  for (const iceTransportPolicy of [null, "", "Relay", "none", true, {}]) {
+    const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], iceTransportPolicy });
+    const hls = { config: { loader: Loader } };
+    assert.equal(swarm.metrics().disabledReason, "invalid-ice-transport-policy");
+    swarm.attach(hls); assert.equal(hls.config.fLoader, undefined); swarm.stop();
+  }
+});
 
 test("concurrent accepted uploads reserve the full session allowance and withdraw availability", async () => {
   const fixture = await linkedFixture({ serve: true, maxUploadBytesPerSession: 64 });

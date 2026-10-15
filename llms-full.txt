@@ -359,6 +359,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `presenceIntervalMs` | `20000` | Presence heartbeat, jittered 30%. |
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
+| `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 
@@ -644,6 +645,9 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Add explicit `all`/`relay` ICE transport policy to the swarm, demo and
+  broadcaster, defaulting to `all`. Relay-only does not force TLS or establish
+  a delivery repair; changed demo policy requires fresh viewer Apply and consent.
 - Refuse redundant stop IPC after a broadcaster worker's first force request
   or drain witness, preserving its original cleanup proof and deadlines.
 - Expose the broadcaster's per-socket-address admission ticket limit through
@@ -1031,6 +1035,17 @@ the configured origin; do not expose the trusted ledger methods directly or
 accept viewer-supplied account subjects as authentication. The session
 descriptor contains supported methods, bounds and fixed endpoint paths only.
 
+## ICE transport policy
+
+The core swarm and `startDemoServer` accept `iceTransportPolicy: "all" | "relay"`,
+default `"all"`. Both demo and broadcaster CLIs expose
+`--ice-transport-policy all|relay`. Invalid values are rejected before host
+state or services start. A demo policy change stops peers and requires fresh
+Apply and upload consent; an absent legacy descriptor means `"all"`.
+Relay-only is an explicit operator privacy/compatibility choice, not a TLS
+selection or a proved transfer repair. It never downgrades to `"all"`; if usable
+relay connectivity is unavailable, playback retains its existing origin fallback.
+
 ## Optional demo TURN renewal
 
 `startDemoServer({turnCredentials: {url: 'https://issuer.example/turn'}})` enables
@@ -1371,6 +1386,15 @@ on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
 
+The swarm, demo and broadcaster now expose explicit `all`/`relay` ICE candidate
+policy, defaulting to `all`. A changed policy stops peers, clears upload consent
+and fences an Apply awaiting old admission. Fourteen focused tests, syntax for
+142 modules and documentation checks passed in 7.219 s within the unchanged
+40/60 s guard. All five recorded outer cleanup checks passed. The
+[ICE policy checkpoint](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/ice-transport-policy-checks-20261015.json)
+records that local scope. Relay-only does not force TLS or prove a delivery repair;
+the option has not been deployed or publicly qualified.
+
 The latest worker shutdown correction refuses further TERM/KILL IPC after its
 first force request or an accepted drain witness. Two regressions reproduce
 EPIPE with the preceding source; all 21 focused lease/controller tests pass
@@ -1391,7 +1415,13 @@ package consumption. Its [CI run](https://github.com/forgesworn/relayswarm/actio
 passed eight required jobs and failed the RTMPS capability guard's orderly
 close with `worker-group-probe` / `unknown`; the later broadcast browser step
 did not run. That hosted failure's cause remains unproved. Corrected-source
-CI, fresh package consumption and final production acceptance remain pending.
+CI and fresh package consumption subsequently passed on exact
+`91423b2e7eb1576f67265b64208023d565f8c5f8`: all nine required
+[jobs](https://github.com/forgesworn/relayswarm/actions/runs/38694780028) passed,
+and the clean consumer verified 260 package members. Its hosted loopback
+broadcast check verified six peer loads/3,298,836 bytes across four checkpoints,
+including 756,888 bytes after restart. Those results predate the new ICE option;
+they do not establish ordinary public delivery or final production acceptance.
 
 The broadcaster exposes `--admission-per-address-tickets` (1–120, default 12)
 for the existing per-socket-address quota. Viewers behind a proxy can share
@@ -1430,6 +1460,15 @@ A later response-phase diagnostic stopped before measurement when the unchanged
 M4 endpoint's ten cleanup flags passed with the direct kernel runtime; its
 original controller assertion remains separate from later actor/stage absence
 and source removal proof.
+
+A further diagnostic reached 50.513 s of the required 60 s before the unchanged
+0.5 s group-membership probe timed out. Its application gates remain unmeasured;
+all original endpoint and outer cleanup checks passed. Three receiver responses
+had matching metadata but no matching EOF when JavaScript entered channel close:
+two had no chunks and one had 114,688 of 204,356 declared bytes. Product timeout,
+abort and channel-error counters are separate observations; native channel
+ordinals were not joined to product request reasons. This narrows the observed
+phase to incomplete responses without establishing a cause or a passing run.
 
 The [pilot and acceptance checkpoint](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/pilot-turn-acceptance-20261015.json)
 records these separate scopes. Ordinary sharing, Safari/physical devices,
@@ -4895,6 +4934,15 @@ accepted values are integers 1–120, default 12. The launcher validates the val
 before creating state or starting services. This changes no global issuance,
 request, expiry or consent limit, and does not trust forwarded-address headers.
 Choosing a limit does not establish a passing multi-viewer qualification.
+
+The broadcaster and demo accept `--ice-transport-policy all|relay`, default
+`all`. Choose `relay` explicitly to restrict peer ICE to relayed candidates;
+provide usable TURN configuration or the existing credential adapter. The
+choice does not force TLS: the adapter currently preserves all validated issuer
+URLs. It never falls back to `all`, changes the peer deadline or grants upload
+consent. Playback keeps its existing origin fallback. A changed demo session
+policy stops peers and requires fresh Apply and upload consent. This option
+does not establish improved delivery, measured privacy or field acceptance.
 
 ## Output and recovery
 

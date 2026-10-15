@@ -4,6 +4,9 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Add explicit `all`/`relay` ICE transport policy to the swarm, demo and
+  broadcaster, defaulting to `all`. Relay-only does not force TLS or establish
+  a delivery repair; changed demo policy requires fresh viewer Apply and consent.
 - Refuse redundant stop IPC after a broadcaster worker's first force request
   or drain witness, preserving its original cleanup proof and deadlines.
 - Expose the broadcaster's per-socket-address admission ticket limit through
