@@ -9,8 +9,9 @@ devices, supporting Nostr sign-in and host website accounts. The
 passes both methods, real peer uploads, renewal, linking, restart persistence
 and fresh consent. It uses disposable signatures and an owned website session
 on loopback; physical devices and actual owner authentication remain separate
-acceptance gates under P06/P12. The deployed `5334091` pilot offers Nostr sign-in
-and preserves the private durable ledger. Integrating websites supply their own
+acceptance gates under P06/P12. The
+[current pilot](STATUS.md#current-delivery-checkpoint) offers Nostr sign-in and
+preserves the private durable ledger. Integrating websites supply their own
 authenticated account resolver; none is configured on this pilot.
 
 The account service records cumulative media payload reservations. Every

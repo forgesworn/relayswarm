@@ -329,8 +329,9 @@ The default segment key is the URL pathname; a byte-range request adds
 `#start-end`, matching the loader context. Publisher and viewer must agree
 on this mapping. A commitment older than two minutes, a different stream,
 rendition, discontinuity, sequence or part, an expired commitment, or a
-signature from another key is rejected. Delegated commitment keys are not
-implemented.
+signature from an unauthorised key is rejected. Author-scoped delegation and
+the host's current revocation view are supported; see
+[delegated signing](docs/PRODUCTION-FEATURES.md#signing-and-discovery).
 
 Signature validation, peer discovery, transfer and SHA-256 verification must
 all finish within `originFallbackMs`. With a thin playback buffer the wait is

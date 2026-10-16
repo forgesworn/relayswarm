@@ -225,7 +225,8 @@ explicit Nostr sign-in or a host website account to coordinate media reservation
 across devices. Its private service can associate those devices; linking both
 identities also reveals their association to that service. Stable account
 identities and grants stay out of swarm traffic and receipts. Sign-in never
-enables uploading or reporting. The deployed `8f482b4` pilot offers Nostr sign-in;
+enables uploading or reporting. The
+[current pilot](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#current-delivery-checkpoint) offers Nostr sign-in;
 integrating websites supply their own authenticated account resolver.
 
 The browser defaults to Google's public STUN server unless the host supplies
@@ -238,7 +239,7 @@ storage nor availability after every source disappears.
 
 Still outstanding: physical-phone and varied-NAT trials, sustained operation,
 broad internet scheduling/cost evidence, a full Sybil suite, an accepted NIP
-and released independent-client interoperability. Actual fMP4/adaptive-quality
+and physical/public-NAT independent-client acceptance. Actual fMP4/adaptive-quality
 and wider-media fixtures are recorded separately from physical acceptance.
 See [Threat model](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/THREAT-MODEL.md) and [the field gates](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md).
 
@@ -592,8 +593,9 @@ The default segment key is the URL pathname; a byte-range request adds
 `#start-end`, matching the loader context. Publisher and viewer must agree
 on this mapping. A commitment older than two minutes, a different stream,
 rendition, discontinuity, sequence or part, an expired commitment, or a
-signature from another key is rejected. Delegated commitment keys are not
-implemented.
+signature from an unauthorised key is rejected. Author-scoped delegation and
+the host's current revocation view are supported; see
+[delegated signing](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md#signing-and-discovery).
 
 Signature validation, peer discovery, transfer and SHA-256 verification must
 all finish within `originFallbackMs`. With a thin playback buffer the wait is
@@ -5175,8 +5177,9 @@ devices, supporting Nostr sign-in and host website accounts. The
 passes both methods, real peer uploads, renewal, linking, restart persistence
 and fresh consent. It uses disposable signatures and an owned website session
 on loopback; physical devices and actual owner authentication remain separate
-acceptance gates under P06/P12. The deployed `5334091` pilot offers Nostr sign-in
-and preserves the private durable ledger. Integrating websites supply their own
+acceptance gates under P06/P12. The
+[current pilot](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#current-delivery-checkpoint) offers Nostr sign-in and
+preserves the private durable ledger. Integrating websites supply their own
 authenticated account resolver; none is configured on this pilot.
 
 The account service records cumulative media payload reservations. Every
@@ -5841,8 +5844,10 @@ Measured HTTP latency raises the origin reserve; peer transfer estimates
 cannot spend the time retained for fallback. hls.js retains bitrate selection.
 
 Commitment, admission and persistent-reservation host callbacks receive an
-operation-specific signal. A deadline aborts the callback's I/O as well as its
-caller; stopped or expired checks cannot accumulate outstanding HTTP requests.
+operation-specific signal. A deadline aborts that signal and stops waiting
+for the result. Host callbacks must honour the signal to cancel their I/O.
+The bundled demo passes it to its HTTP requests; stopped or expired operations
+fence late results.
 
 The demo retains fatal/native decoder records and allows one deferred attempt
 to recover a fatal append/MediaSource-reset error. It restores the HTTP loader,

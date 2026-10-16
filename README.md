@@ -213,7 +213,8 @@ explicit Nostr sign-in or a host website account to coordinate media reservation
 across devices. Its private service can associate those devices; linking both
 identities also reveals their association to that service. Stable account
 identities and grants stay out of swarm traffic and receipts. Sign-in never
-enables uploading or reporting. The deployed `8f482b4` pilot offers Nostr sign-in;
+enables uploading or reporting. The
+[current pilot](docs/STATUS.md#current-delivery-checkpoint) offers Nostr sign-in;
 integrating websites supply their own authenticated account resolver.
 
 The browser defaults to Google's public STUN server unless the host supplies
@@ -226,7 +227,7 @@ storage nor availability after every source disappears.
 
 Still outstanding: physical-phone and varied-NAT trials, sustained operation,
 broad internet scheduling/cost evidence, a full Sybil suite, an accepted NIP
-and released independent-client interoperability. Actual fMP4/adaptive-quality
+and physical/public-NAT independent-client acceptance. Actual fMP4/adaptive-quality
 and wider-media fixtures are recorded separately from physical acceptance.
 See [Threat model](docs/THREAT-MODEL.md) and [the field gates](docs/FIELD-TEST.md).
 
