@@ -30,6 +30,7 @@ import { generateSecretKey } from "nostr-tools/pure";
 import { RelayPool, RelaySwarmSession, validTicket } from "../relay-session.mjs";
 import { PeerLink } from "./peer-link.mjs";
 import { PeerSelection } from "./peer-selection.mjs";
+import { NeighbourDiscovery } from "./neighbour-discovery.mjs";
 import { boundedOperation } from "./bounded-operation.mjs";
 import { validStreamAuthorisation, verifySegmentCommitment, segmentMediaContext } from "./segment-commitment.mjs";
 
@@ -286,6 +287,7 @@ class HlsSwarm {
     this.cooldowns = new Map();
     this.retries = new Map();
     this.openPeers = new Map();
+    this.discovery = new NeighbourDiscovery();
     this.lastEvictionAt = 0;
     this.lastAnnouncedAt = 0;
     this.reannounceTimer = null;
@@ -418,6 +420,8 @@ class HlsSwarm {
   stop() {
     if (this.stopped) return;
     this.stopped = true;
+    this.#endDiscovery();
+    this.discovery.clear();
     this.lifecycle.abort();
     this.admissionChecks.clear();
     this.admitted.clear();
@@ -498,6 +502,7 @@ class HlsSwarm {
         counters: Object.fromEntries(Object.entries(this.transportCounters).map(([event, values]) => [event, { ...values }])),
         records: this.transportRecords.map((record) => ({ ...record })),
       },
+      neighbourDiscovery: this.discovery.snapshot(),
       peerEligibilityDiagnostics: {
         capacity: 64,
         dropped: this.peerEligibilityDropped,
@@ -727,6 +732,8 @@ class HlsSwarm {
           swarm.counters.peerFirstLoaded += 1;
           swarm.counters.peerFirstBytes += size;
           swarm.counters.bytesFromPeers += size;
+          if (swarm.discovery.verified(result.discoveryContext)
+            && swarm.discovery.window?.context === result.discoveryContext) swarm.#endDiscovery();
           if (swarm.firstPeerSegmentAtMs === null) swarm.firstPeerSegmentAtMs = Date.now() - swarm.startedAt;
           pushSample(swarm.peerLatencySamples, end - t0);
           swarm.#hold(result.key, result.bytes.slice());
@@ -763,6 +770,8 @@ class HlsSwarm {
   #contributionContext(context) {
     if (this.stopped || !context.frag || context.frag.sn === "initSegment") return;
     const rendition = this.#renditionContext(context);
+    this.discovery.context(context.frag.type || "main", rendition);
+    this.#expireDiscovery(false);
     const previous = this.renditions.get(rendition);
     for (const [identity, seen] of this.renditions) if (seen < Date.now() - 30_000) this.renditions.delete(identity);
     if (!this.renditions.has(rendition) && this.renditions.size >= 8) this.renditions.delete(this.renditions.keys().next().value);
@@ -864,12 +873,17 @@ class HlsSwarm {
   }
 
   async #peerFirst(context, signal, deadline, budgetMs, budgetGeometry) {
+    const discoveryContext = this.discovery.contexts.get(context.frag.type || "main");
     const key = await this.#segmentKey(context);
     if (signal.aborted || this.stopped) {
       this.#peerEligibility(context, budgetMs, "aborted-before-eligibility", null, budgetGeometry);
       return null;
     }
     const rendition = this.#renditionContext(context);
+    if (discoveryContext?.rendition === rendition && this.discovery.contexts.get(discoveryContext.mediaType) === discoveryContext) {
+      this.discovery.demand(discoveryContext.mediaType, rendition, key);
+      this.#seekNeighbours();
+    }
     const coordinated = ![...this.links.values()].some((peer) => peer.have.has(key));
     if (coordinated) {
       if (!this.#shouldWaitForOrigin(key, rendition)) {
@@ -940,7 +954,7 @@ class HlsSwarm {
       if (commitment.expiresAt <= Math.floor(Date.now() / 1000)) return null;
       this.peerSelection.record(link, now() - requestedAt, bytes.byteLength);
       if (coordinated) this.counters.coordinatedPeerLoads += 1;
-      return { key, bytes };
+      return { key, bytes, discoveryContext };
     }
     return null;
   }
@@ -1324,6 +1338,63 @@ class HlsSwarm {
 
   // --- rotation -------------------------------------------------------------
 
+  #servesRendition(link, rendition) {
+    return !link.closed && link.contribution?.serving && (link.renditions.get(rendition) || 0) > Date.now() - 30_000;
+  }
+
+  #unmetDiscovery(context) {
+    return ![...this.links.values()].some(link => this.#servesRendition(link, context.rendition)
+      || context.keys.some(key => link.have.has(key)));
+  }
+
+  #discoveryVictim(context) {
+    if (context.spent || this.links.size < 2 || Date.now() - this.lastEvictionAt < this.options.evictionCooldownMs) return null;
+    // Preserve a useful sibling audio/video neighbour as well as the target.
+    const contexts = [...this.discovery.contexts.values()].filter(value => Date.now() - value.activityAt < 30_000);
+    return rotationCandidate([...this.links.values()].filter(link => !contexts.some(value =>
+      this.#servesRendition(link, value.rendition) || value.keys.some(key => link.have.has(key)))), { ...this.options, banned: this.banned });
+  }
+
+  #endDiscovery(window = this.discovery.window, closePending = true) {
+    if (!window || !this.discovery.end(window)) return;
+    clearTimeout(window.timer); this.timers.delete(window.timer);
+    const attempt = window.attempt, dial = attempt?.dial;
+    // An incoming glare offer may adopt the same PC with a new negotiation.
+    // Only this exact still-owned outgoing generation may be retired here.
+    if (closePending && dial && dial.discovery === attempt && dial.negotiation === attempt.negotiation
+      && this.dials.get(dial.pubkey) === dial) {
+      dial.discovery = null;
+      this.#failDial(dial, "superseded");
+    }
+  }
+
+  #expireDiscovery(checkCandidate = true) {
+    const window = this.discovery.window;
+    if (window && (!this.discovery.live(window) || !this.discovery.current(window.context)
+      || checkCandidate && window.attempt && !this.discovery.valid(window.attempt))) {
+      this.discovery.counters.expired++;
+      this.#endDiscovery(window);
+    }
+  }
+
+  #seekNeighbours() {
+    if (this.stopped || this.options.mode !== "peer-first") return;
+    this.#expireDiscovery();
+    if (!this.#hasOutgoingSlot()) return;
+    const room = this.links.size + this.dials.size < this.options.maxPeers;
+    const choice = this.discovery.choose(candidate => !this.links.has(candidate.pubkey) && !this.dials.has(candidate.pubkey)
+      && !this.dialChecks.has(candidate.pubkey) && !this.#coolingDown(candidate.pubkey)
+      && (!this.#gated() || validTicket(candidate.ticket))
+      && (this.retries.get(candidate.pubkey) || 0) <= this.options.maxRetriesPerPeer,
+    context => this.#unmetDiscovery(context) && (room || this.discovery.reserved() || Boolean(this.#discoveryVictim(context))), room);
+    if (!choice) return;
+    const attempt = this.discovery.begin(choice);
+    if (!attempt) return;
+    const window = attempt.window;
+    if (!window.timer) window.timer = this.#after(Math.max(0, window.expiresAt - Date.now()), () => this.#endDiscovery(window));
+    this.#guard("discovery", () => this.#dial(attempt.pubkey, attempt));
+  }
+
   #rememberOpen(pubkey, open) {
     this.openPeers.set(pubkey, { open, at: Date.now() });
     if (this.openPeers.size > 64) this.openPeers.delete(this.openPeers.keys().next().value);
@@ -1344,6 +1415,8 @@ class HlsSwarm {
 
   /** Room now, or a rotation a caller with no peers at all could trigger. */
   #canTakeAnotherPeer() {
+    this.#expireDiscovery();
+    if (this.discovery.reserved()) return false;
     return this.#hasCapacity() || (this.links.size >= 2 && Boolean(this.#rotationCandidate()));
   }
 
@@ -1362,6 +1435,7 @@ class HlsSwarm {
    * same budget.
    */
   #evictForOffer(askerPeers) {
+    if (this.discovery.reserved()) return null;
     if (askerPeers !== 0) return null;
     if (this.links.size < 2) return null;
     if (Date.now() - this.lastEvictionAt < this.options.evictionCooldownMs) return null;
@@ -1405,6 +1479,11 @@ class HlsSwarm {
       this.retries.set(from, attempts);
       this.counters.retriesScheduled += 1;
       this.#after(retryAfterMs + Math.random() * 1_000, () => {
+        if (this.discovery.reserved()) {
+          this.cooldowns.delete(from);
+          this.#seekNeighbours();
+          return;
+        }
         if (this.links.has(from) || this.dials.has(from) || this.banned.has(from) || !this.#hasCapacity()) return;
         this.cooldowns.delete(from);
         return this.#dial(from);
@@ -1422,7 +1501,8 @@ class HlsSwarm {
   }
 
   #hasCapacity() {
-    return this.links.size + this.dials.size < this.options.maxPeers;
+    this.#expireDiscovery();
+    return this.links.size + this.dials.size + (this.discovery.reserved() ? 1 : 0) < this.options.maxPeers;
   }
 
   #hasOutgoingSlot() {
@@ -1430,7 +1510,7 @@ class HlsSwarm {
   }
 
   #coolingDown(pubkey) {
-    return this.banned.has(pubkey) || (this.cooldowns.get(pubkey) || 0) > Date.now();
+    return this.discovery.suppresses(pubkey) || this.banned.has(pubkey) || (this.cooldowns.get(pubkey) || 0) > Date.now();
   }
 
   #gated() {
@@ -1489,6 +1569,10 @@ class HlsSwarm {
   async #onPresence({ from, payload }) {
     if (this.stopped || payload.role !== "viewer") return;
     if (!payload.transports.some((transport) => transport.type === TRANSPORT)) return;
+    if (this.options.mode === "peer-first") {
+      this.discovery.hint(from, payload.have, payload.ticket);
+      this.#seekNeighbours();
+    }
     const active = this.links.has(from) || this.dials.has(from);
     const admitted = this.admitted.get(from);
     // Keep one unvalidated replacement on an existing entry. Recording the
@@ -1582,7 +1666,8 @@ class HlsSwarm {
   }
 
   #currentNegotiation(dial, negotiation) {
-    return !this.stopped && this.dials.get(dial.pubkey) === dial && dial.negotiation === negotiation && !negotiation.controller.signal.aborted;
+    return !this.stopped && this.dials.get(dial.pubkey) === dial && dial.negotiation === negotiation && !negotiation.controller.signal.aborted
+      && (!dial.discovery || this.discovery.valid(dial.discovery));
   }
 
   #retireNegotiation(dial, closeChannel = true) {
@@ -1595,6 +1680,10 @@ class HlsSwarm {
   }
 
   #beginNegotiation(dial, requestId, outgoing) {
+    if (!outgoing && dial.discovery) {
+      this.#endDiscovery(dial.discovery.window, false);
+      dial.discovery = null;
+    }
     if (dial.negotiation) dial.negotiation.superseded = true;
     this.#retireNegotiation(dial);
     dial.requestId = requestId; dial.outgoing = outgoing;
@@ -1631,21 +1720,41 @@ class HlsSwarm {
     if (negotiation.channel?.readyState === "open") negotiation.onOpen();
   }
 
-  async #dial(pubkey) {
-    if (this.stopped || this.links.has(pubkey) || this.dials.has(pubkey) || this.dialChecks.has(pubkey) || this.#coolingDown(pubkey) || !this.#hasCapacity() || !this.#hasOutgoingSlot()) return;
+  async #dial(pubkey, discovery = null) {
+    if (this.stopped || this.links.has(pubkey) || this.dials.has(pubkey) || this.dialChecks.has(pubkey) || this.#coolingDown(pubkey)
+      || !(discovery ? this.discovery.valid(discovery) : this.#hasCapacity()) || !this.#hasOutgoingSlot()) {
+      if (discovery) this.discovery.abandoned(discovery);
+      return;
+    }
     this.dialChecks.add(pubkey);
     try {
-      if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket))) return;
+      if (!(await this.#admits(pubkey, discovery ? discovery.ticket : this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket))) {
+        if (discovery) { this.discovery.abandoned(discovery); this.cooldowns.set(pubkey, Date.now() + 60_000); }
+        return;
+      }
     } finally { this.dialChecks.delete(pubkey); }
-    if (this.stopped || this.links.has(pubkey) || this.dials.has(pubkey) || !this.#hasCapacity()
-      || [...this.dials.values()].filter((dial) => dial.outgoing).length >= this.options.maxDialsInFlight) return;
+    if (this.stopped || this.links.has(pubkey) || this.dials.has(pubkey) || this.#coolingDown(pubkey)
+      || [...this.dials.values()].filter((dial) => dial.outgoing).length >= this.options.maxDialsInFlight
+      || (discovery ? !this.discovery.valid(discovery) || !this.#unmetDiscovery(discovery.window.context) : !this.#hasCapacity())) {
+      if (discovery) this.discovery.abandoned(discovery);
+      return;
+    }
+    if (discovery && this.links.size + this.dials.size >= this.options.maxPeers) {
+      const victim = this.#discoveryVictim(discovery.window.context);
+      if (!victim || !this.discovery.replaced(discovery, victim.pubkey)) { this.discovery.abandoned(discovery); return; }
+      this.lastEvictionAt = Date.now(); this.counters.evicted++;
+      this.cooldowns.set(victim.pubkey, discovery.window.expiresAt);
+      victim.close("rotation");
+    }
     const pc = this.#newPeerConnection(true);
     const requestId = randomRequestId();
     const dial = { pubkey, pc, startedAt: now(), offerSentAt: 0 };
+    if (discovery) { dial.discovery = discovery; this.discovery.allocated(discovery, dial); }
     this.dials.set(pubkey, dial);
     const negotiation = this.#beginNegotiation(dial, requestId, true);
+    if (discovery) discovery.negotiation = negotiation;
     this.counters.dialsStarted += 1;
-    dial.timer = this.#after(this.options.dialTimeoutMs, () => this.#failDial(dial, "timeout"));
+    dial.timer = this.#after(discovery ? Math.min(this.options.dialTimeoutMs, Math.max(0, discovery.window.expiresAt - Date.now())) : this.options.dialTimeoutMs, () => this.#failDial(dial, "timeout"));
     try {
       this.#dialChannel(dial, negotiation, pc.createDataChannel("relayswarm", { ordered: true }));
       await this.#serialNegotiation(dial, negotiation, async () => {
@@ -1678,6 +1787,7 @@ class HlsSwarm {
   #failDial(dial, reason, cooldownMs = 0, diagnosticReason = reason) {
     if (this.dials.get(dial.pubkey) !== dial) return;
     this.dials.delete(dial.pubkey);
+    this.discovery.failed(dial);
     this.#retireNegotiation(dial);
     clearTimeout(dial.timer);
     this.timers.delete(dial.timer);
@@ -1691,6 +1801,7 @@ class HlsSwarm {
     // peer knows when it could rotate somebody out.
     const fallback = reason === "rejected" ? 30_000 : 60_000;
     this.cooldowns.set(dial.pubkey, Date.now() + (cooldownMs > 0 ? cooldownMs : fallback));
+    this.#seekNeighbours();
   }
 
   async #onSignal({ from, payload }) {
@@ -1733,11 +1844,15 @@ class HlsSwarm {
       return;
     }
     if (payload.type !== "offer" || !sdp) return;
+    this.#expireDiscovery();
+    if (this.discovery.suppresses(from)) return;
     if (this.banned.has(from) || this.links.has(from)) return;
     this.#transport(this.dials.get(from)?.pc, "offer-received", "authenticated");
     // Checked before anything is answered: the answer's SDP carries this
     // viewer's address. An unadmitted offer is dropped without a reply.
     if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null)) || this.stopped || this.links.has(from)) return;
+    this.#expireDiscovery();
+    if (this.discovery.suppresses(from)) return;
     const existing = this.dials.get(from);
     const offerKey = `${from}:${payload.requestId}`;
     if ((existing && !existing.outgoing && existing.requestId === payload.requestId) || this.receivedOffers.has(offerKey)) return;
@@ -1840,6 +1955,11 @@ class HlsSwarm {
     const rejectExtraChannel = (event) => { if (event.channel !== channel) { try { event.channel.close(); } catch {} } };
     dial.pc.addEventListener("datachannel", rejectExtraChannel);
     this.dials.delete(dial.pubkey);
+    if (dial.discovery) {
+      this.discovery.counters.opened++;
+      this.#endDiscovery(dial.discovery.window, false);
+      dial.discovery = null;
+    }
     clearTimeout(dial.timer);
     this.timers.delete(dial.timer);
     if (dial.outgoing) this.counters.dialsAccepted += 1;

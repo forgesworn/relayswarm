@@ -10,6 +10,7 @@ import { RelayPool, RelaySwarmSession } from "../src/relay-session.mjs";
 import { commitmentContent, KIND_SEGMENT_COMMITMENT, verifySegmentCommitment } from "../src/browser/segment-commitment.mjs";
 import { startLocalRelay } from "./support/local-relay.mjs";
 import { boundedOperation } from "../src/browser/bounded-operation.mjs";
+import { NeighbourDiscovery } from "../src/browser/neighbour-discovery.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(predicate, timeoutMs = 5_000) {
@@ -57,7 +58,8 @@ class RecordedChannel extends Channel {
 async function linkedFixture(options = {}, LoaderImpl = Loader) {
   const relay = options.WebSocketImpl ? { url: "wss://memory-relay.example", close: async () => {} } : await startLocalRelay();
   const connections = [], peers = [];
-  class Connection extends PC { constructor(configuration) { super(configuration); connections.push(this); } }
+  let peakLiveConnections = 0;
+  class Connection extends PC { constructor(configuration) { super(configuration); connections.push(this); peakLiveConnections = Math.max(peakLiveConnections, connections.filter(pc => !pc.closed).length); } }
   const swarm = createHlsSwarm({ ...base, relays: [relay.url], RTCPeerConnectionImpl: Connection, shadowSampleRate: 0, ...options });
   const hls = { config: { loader: LoaderImpl } };
   swarm.attach(hls);
@@ -74,7 +76,7 @@ async function linkedFixture(options = {}, LoaderImpl = Loader) {
   };
   const load = () => new Promise((resolve) => new hls.config.fLoader({}).load(context, {}, { onSuccess: resolve }));
   const close = async () => { swarm.stop(); for (const peer of peers) peer.close(); pool.close(); await relay.close(); };
-  return { swarm, hls, addPeer, load, close, peers, pool, connections };
+  return { swarm, hls, addPeer, load, close, peers, pool, connections, get peakLiveConnections() { return peakLiveConnections; } };
 }
 
 // Real session/signature/encryption handling over an in-memory relay boundary.
@@ -1866,4 +1868,312 @@ test("glare rechecks revocation after a held rollback before installing remote S
   assert.equal(f.swarm.metrics().peers.connected, 0); assert.equal(f.swarm.metrics().peers.dialling, 0);
   assert.equal(f.connections.length, 1); assert.equal(pc.closes, 1);
   assert.equal(f.swarm.metrics().transportDiagnostics.counters["dial-end"].admission, 1);
+});
+
+
+test("full idle neighbourhood discovers an admitted requested-rendition seeder without a seventh live PC", async t => {
+  const playback = peerPlaybackOptions(300), outgoing = [], trace = [], admission = [];
+  t.mock.method(PC.prototype, 'createDataChannel', function () {
+    const channel = new ServingChannel(playback.bytes, 0, trace, 'discovered-seeder');
+    outgoing.push(channel); return channel;
+  });
+  const f = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(), ticket: 'own-ticket',
+    admit: async (_key, ticket) => { admission.push(ticket); return ticket === 'fixture-ticket'; },
+    minLinkLifeMs: 1, idleEvictMs: 1, evictionCooldownMs: 1,
+  });
+  try {
+    const idle = [];
+    for (let i = 0; i < 6; i++) idle.push(await f.addPeer());
+    await sleep(10);
+    assert.equal(f.swarm.metrics().peers.connected, 6);
+    // The existing loader computes this exact missing key at positive budget.
+    await f.load();
+    const candidate = new RelaySwarmSession({ pool: f.pool, swarmId: base.swarmId }); candidate.start(); f.peers.push(candidate);
+    const offers = [];
+    candidate.onSignal(({ payload }) => {
+      if (payload.type !== 'offer') return;
+      offers.push(payload);
+      candidate.sendSignal(f.swarm.metrics().pubkey, { type: 'answer', transport: 'webrtc', requestId: payload.requestId,
+        payload: { sdp: 'fixture-answer', ticket: 'fixture-ticket' } });
+    });
+    candidate.announcePresence({ role: 'viewer', transports: [{ type: 'webrtc', publicKey: candidate.pubkey }],
+      have: [playback.key], open: true, ticket: 'fixture-ticket' });
+    await until(() => offers.length === 1, 2500);
+    await until(() => f.swarm.metrics().peers.linksOpened === 7);
+    assert.equal(idle.filter(channel => channel.readyState === 'closed').length, 1, 'only one old idle victim is replaced');
+    assert.equal(f.connections.filter(pc => !pc.closed).length, 6, 'replacement never retains a seventh native connection');
+    assert.equal(f.peakLiveConnections, 6, 'the native allocation itself respects the cap');
+    assert.equal(offers[0].payload.peers, 5, 'actual remaining peer count is disclosed truthfully');
+    assert(admission.every(ticket => ticket === 'fixture-ticket'));
+    assert.equal(f.swarm.metrics().neighbourDiscovery.replacementSpent, 1, 'PC-open earns no replacement budget');
+    outgoing.at(-1).receive(JSON.stringify({ t: 'have', keys: [playback.key] }));
+    await sleep(10);
+    assert.equal(f.swarm.metrics().neighbourDiscovery.replacementSpent, 1, 'HAVE earns no replacement budget');
+    await f.load();
+    assert.equal(f.swarm.metrics().segments.peerFirstLoaded, 1, 'a later ordinary load verifies the advertised media under its original deadline');
+    assert.equal(f.swarm.metrics().neighbourDiscovery.replacementSpent, 0, 'accepted verified delivery ends this exact unmet episode');
+    assert.deepEqual(trace, ['discovered-seeder']);
+  } finally { await f.close(); }
+});
+
+function advisoryFixture() {
+  let at = 100_000;
+  const state = new NeighbourDiscovery(() => at), key = "a".repeat(64), pubkey = "b".repeat(64);
+  const context = state.demand("main", "main:0", key);
+  state.hint(pubkey, [key], "fixture-ticket");
+  const begin = () => state.begin(state.choose(() => true, () => true, false));
+  return { state, key, pubkey, context, begin, advance(ms) { at += ms; } };
+}
+
+test("neighbour discovery isolates main/audio generations and bounds untrusted hints and demanded keys", () => {
+  const f = advisoryFixture(), { state } = f;
+  const main = f.context, audio = state.demand("audio", "audio:0", "c".repeat(64)), attempt = f.begin();
+  for (let i = 1; i <= 6; i++) {
+    state.demand("main", "main:0", i.toString(16).repeat(64));
+    state.demand("audio", "audio:0", (i + 6).toString(16).repeat(64));
+  }
+  assert.equal(state.valid(attempt), true, "alternating audio requests do not invalidate the main intent");
+  assert.equal(state.contexts.get("main"), main); assert.equal(state.contexts.get("audio"), audio);
+  assert.equal(state.snapshot().requestedKeys, 4); assert(main.keys.includes(f.key), "a pending exact key stays pinned");
+  state.context("audio", "audio:1"); assert.equal(state.valid(attempt), true);
+  state.context("main", "main:1"); assert.equal(state.valid(attempt), false);
+  for (let i = 0; i < 80; i++) state.hint(i.toString(16).padStart(64, "0"), Array.from({ length: 20 }, (_, n) => n.toString(16).padStart(64, "0")), { large: "untrusted" });
+  assert.equal(state.candidates.size, 64);
+  assert([...state.candidates.values()].every(value => value.have.length === 8 && value.ticket === null));
+  assert.equal(state.snapshot().contexts, 2);
+});
+
+test("neighbour opportunity expiry is hard, nonrenewable and releases every reserved slot without clearing spent episodes", () => {
+  const peers = [advisoryFixture(), advisoryFixture()];
+  for (const f of peers) {
+    const attempt = f.begin(); assert(f.state.replaced(attempt, "c".repeat(64)));
+    f.state.allocated(attempt, {}); f.state.failed(attempt.dial);
+    assert.equal(f.state.reserved(), true);
+    for (let i = 0; i < 14; i++) { f.advance(1000); f.state.demand("main", "main:0", f.key); }
+    assert.equal(f.state.snapshot().remainingMs, 1000);
+    f.advance(1000); f.state.demand("main", "main:0", f.key);
+    assert.equal(f.state.reserved(), false); assert.equal(f.state.suppresses("c".repeat(64)), false);
+    assert.equal(f.state.valid(attempt), false); f.state.end();
+    assert.equal(f.state.choose(() => true, () => true, false), null, "a refilled full neighbourhood cannot force another replacement");
+    assert.equal(f.state.snapshot().replacementSpent, 1);
+    f.advance(30_001); f.state.demand("main", "main:0", "d".repeat(64));
+    assert.deepEqual(f.context.keys, ["d".repeat(64)], "inactivity clears stale keys before resuming");
+    assert.equal(f.context.spent, true, "inactivity does not renew the eviction budget");
+  }
+});
+
+test("neighbour success requires the exact selected generation and cannot credit a sibling or A-to-B-to-A result", () => {
+  const f = advisoryFixture(), attempt = f.begin(); f.state.replaced(attempt, "c".repeat(64));
+  const audio = f.state.demand("audio", "audio:0", "d".repeat(64));
+  assert.equal(f.state.verified(audio), true); assert.equal(f.context.spent, true);
+  f.state.context("main", "main:1"); const newMain = f.state.demand("main", "main:0", f.key); newMain.spent = true;
+  assert.equal(f.state.verified(f.context), false); assert.equal(newMain.spent, true);
+  assert.equal(f.state.verified(newMain), true); assert.equal(newMain.spent, false);
+});
+
+test("neighbour clock rollback invalidates intent and never reports more than its original fifteen seconds", () => {
+  const f = advisoryFixture(), attempt = f.begin(); f.state.replaced(attempt, "c".repeat(64));
+  f.advance(-1);
+  assert.equal(f.state.valid(attempt), false); assert.equal(f.state.reserved(), false);
+  assert.equal(f.state.suppresses("c".repeat(64)), false); assert.equal(f.state.snapshot().remainingMs, 0);
+});
+
+test("neighbour advancing clock cannot extend the opportunity past creation plus fifteen seconds", () => {
+  let at = 100_000; const state = new NeighbourDiscovery(() => at++), key = "a".repeat(64);
+  state.demand("main", "main:0", key); state.hint("b".repeat(64), [key], "fixture-ticket");
+  const attempt = state.begin(state.choose(() => true, () => true, false));
+  assert.equal(attempt.window.expiresAt - attempt.window.createdAt, 15_000);
+});
+
+test("neighbour zero-budget activity cannot revive a stale positive-budget key", () => {
+  const f = advisoryFixture(); f.context.spent = true;
+  for (let i = 0; i < 4; i++) { f.advance(10_000); f.state.context("main", "main:0"); }
+  f.state.demand("main", "main:0", "e".repeat(64));
+  assert.deepEqual(f.context.keys, ["e".repeat(64)]); assert.equal(f.context.spent, true);
+});
+
+async function discoveryFixture({ admit = async () => true, candidateSecretKey, ...options } = {}) {
+  const playback = peerPlaybackOptions(100), state = { candidate: null, checks: 0 };
+  const f = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(), ticket: "own-ticket",
+    admit: (pubkey, ticket, extra) => { if (pubkey === state.candidate) state.checks++; return admit(pubkey, ticket, extra); },
+    minLinkLifeMs: 1, idleEvictMs: 1, evictionCooldownMs: 1, ...options });
+  const channels = [];
+  for (let i = 0; i < 6; i++) channels.push(await f.addPeer());
+  await sleep(10); await f.load();
+  const candidate = new RelaySwarmSession({ pool: f.pool, swarmId: base.swarmId, ...(candidateSecretKey ? { secretKey: candidateSecretKey } : {}) });
+  candidate.start(); f.peers.push(candidate); state.candidate = candidate.pubkey;
+  const offers = []; candidate.onSignal(({ payload }) => { if (payload.type === "offer") offers.push(payload); });
+  const announce = (have = [playback.key], ticket = "fixture-ticket") => candidate.announcePresence({ role: "viewer",
+    transports: [{ type: "webrtc", publicKey: candidate.pubkey }], have, open: true, ticket });
+  const signal = (peer, type, requestId, extra = {}) => peer.sendSignal(f.swarm.metrics().pubkey,
+    { type, transport: "webrtc", requestId, payload: { ticket: "fixture-ticket", ...extra } });
+  return { ...f, get peakLiveConnections() { return f.peakLiveConnections; }, channels, playback, candidate, state, offers, announce, signal };
+}
+
+for (const change of ["main-zero-budget", "withdrawal", "new-ticket", "expiry", "useful-neighbours", "revoked", "stop"]) test(`neighbour admission rechecks ${change} before evicting or disclosing SDP`, async t => {
+  let release, candidate;
+  const gate = new Promise(resolve => { release = resolve; });
+  const f = await discoveryFixture({ admit: pubkey => pubkey === candidate ? gate : true }); candidate = f.candidate.pubkey;
+  try {
+    f.announce(); await until(() => f.state.checks > 0);
+    if (change === "main-zero-budget") {
+      let haveChecks = 0; const valid = NeighbourDiscovery.prototype.valid;
+      t.mock.method(NeighbourDiscovery.prototype, "valid", function (...args) { haveChecks++; return valid.apply(this, args); });
+      f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+      let completed = false;
+      new f.hls.config.fLoader({}).load({ ...context, frag: { ...context.frag, level: 1 } }, {}, { onSuccess() { completed = true; } });
+      assert.equal(completed, true); assert.equal(haveChecks, 0, "zero-budget selection invalidation does not inspect candidate HAVE");
+    } else if (change === "withdrawal") f.announce([]);
+    else if (change === "new-ticket") f.announce([f.playback.key], "replacement-ticket");
+    else if (change === "expiry") {
+      const original = Date.now; t.mock.method(Date, "now", () => original() + 15_001);
+      f.hls.media = { currentTime: 0, buffered: { length: 0 } }; await f.load();
+    } else if (change === "useful-neighbours") {
+      for (const channel of f.channels) channel.receive(JSON.stringify({ t: "have", keys: [f.playback.key] }));
+    } else if (change === "stop") f.swarm.stop();
+    if (change === "withdrawal" || change === "new-ticket") await sleep(20);
+    release(change !== "revoked"); await sleep(40);
+    assert.equal(f.connections.length, 6); assert.equal(f.swarm.metrics().peers.evicted, 0); assert.equal(f.offers.length, 0);
+    assert(f.peakLiveConnections <= 6);
+  } finally { release(false); await f.close(); }
+});
+
+test("neighbour admission rechecks concurrent incoming occupancy and the shared rotation budget", async () => {
+  let release, candidate; const gate = new Promise(resolve => { release = resolve; });
+  const f = await discoveryFixture({ evictionCooldownMs: 10_000, admit: pubkey => pubkey === candidate ? gate : true }); candidate = f.candidate.pubkey;
+  try {
+    f.announce(); await until(() => f.state.checks > 0);
+    const newcomer = new RelaySwarmSession({ pool: f.pool, swarmId: base.swarmId }); newcomer.start(); f.peers.push(newcomer);
+    f.signal(newcomer, "offer", "concurrent-peerless", { sdp: "fixture-offer", peers: 0 });
+    await until(() => f.connections.length === 7);
+    release(true); await sleep(40);
+    assert.equal(f.connections.length, 7); assert.equal(f.swarm.metrics().peers.evicted, 1); assert.equal(f.offers.length, 0);
+    assert.equal(f.peakLiveConnections, 6);
+  } finally { release(false); await f.close(); }
+});
+
+test("neighbour admission cannot evict links with active outbound reservations", async () => {
+  let release, releaseUploads, candidate, uploads = 0;
+  const admission = new Promise(resolve => { release = resolve; }), reservations = new Promise(resolve => { releaseUploads = resolve; });
+  const f = await discoveryFixture({ serve: true, maxUploadPeers: 6,
+    reserveUploadBytes: () => { uploads++; return reservations; }, admit: pubkey => pubkey === candidate ? admission : true }); candidate = f.candidate.pubkey;
+  try {
+    f.announce(); await until(() => f.state.checks > 0);
+    for (const channel of f.channels) channel.receive(JSON.stringify({ t: "want", id: 1, k: f.playback.key }));
+    await until(() => uploads === 6);
+    release(true); await sleep(40);
+    assert.equal(f.connections.length, 6); assert.equal(f.swarm.metrics().peers.evicted, 0); assert.equal(f.offers.length, 0);
+    assert.equal(f.peakLiveConnections, 6);
+  } finally { release(false); releaseUploads(false); await f.close(); }
+});
+
+test("neighbour pending main admission survives actual sibling audio loads and an audio selection change", async () => {
+  let release, candidate; const gate = new Promise(resolve => { release = resolve; });
+  const f = await discoveryFixture({ admit: pubkey => pubkey === candidate ? gate : true }); candidate = f.candidate.pubkey;
+  try {
+    f.announce(); await until(() => f.state.checks > 0);
+    for (const level of [0, 1]) await new Promise(resolve => new f.hls.config.fLoader({}).load({ ...context,
+      frag: { ...context.frag, type: "audio", level } }, {}, { onSuccess: resolve }));
+    assert.equal(f.swarm.metrics().neighbourDiscovery.contexts, 2);
+    release(true); await until(() => f.offers.length === 1);
+    assert.equal(f.swarm.metrics().peers.evicted, 1); assert.equal(f.peakLiveConnections, 6);
+  } finally { release(false); await f.close(); }
+});
+
+test("neighbour full refusal reserves once, suppresses its victim, and restores ordinary incoming at the hard deadline", async t => {
+  const f = await discoveryFixture({ retryFloorMs: 10_000, retryCeilingMs: 10_000 });
+  try {
+    f.candidate.onSignal(({ payload }) => { if (payload.type === "offer") f.signal(f.candidate, "reject", payload.requestId, { retryAfterMs: 10_000 }); });
+    f.announce(); await until(() => f.swarm.metrics().neighbourDiscovery.vacancyReserved);
+    const victimIndex = f.connections.findIndex(pc => pc.closed), victim = f.peers[victimIndex];
+    assert(victimIndex >= 0); assert.equal(f.swarm.metrics().peers.evicted, 1);
+    f.signal(victim, "offer", "victim-before-expiry", { sdp: "fixture-offer", peers: 0 });
+    victim.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: victim.pubkey }], have: [f.playback.key], ticket: "fixture-ticket" });
+    await sleep(30); assert.equal(f.connections.length, 7); assert.equal(f.swarm.metrics().peers.evicted, 1);
+    // Same actual requested rendition keeps arriving; it cannot renew the window.
+    await f.load(); const original = Date.now; t.mock.method(Date, "now", () => original() + 15_001);
+    f.signal(victim, "offer", "victim-after-expiry", { sdp: "fixture-offer", peers: 0 });
+    await until(() => f.connections.length === 8);
+    assert.equal(f.swarm.metrics().neighbourDiscovery.vacancyReserved, false);
+    assert.equal(f.swarm.metrics().neighbourDiscovery.replacementSpent, 1);
+    for (let i = 0; i < 3; i++) { await f.load(); f.announce(); }
+    await sleep(30); assert.equal(f.swarm.metrics().peers.evicted, 1); assert.equal(f.peakLiveConnections, 6);
+  } finally { await f.close(); }
+});
+
+test("neighbour remote becoming available retries its existing vacancy without another victim", async t => {
+  t.mock.method(Math, "random", () => 0);
+  const f = await discoveryFixture({ retryFloorMs: 20, retryCeilingMs: 20 });
+  try {
+    f.candidate.onSignal(({ payload }) => {
+      if (payload.type !== "offer") return;
+      f.signal(f.candidate, f.offers.length === 1 ? "reject" : "answer", payload.requestId,
+        f.offers.length === 1 ? { retryAfterMs: 20 } : { sdp: "fixture-answer" });
+    });
+    f.announce(); await until(() => f.swarm.metrics().peers.linksOpened === 7);
+    assert.equal(f.offers.length, 2); assert.equal(f.swarm.metrics().peers.evicted, 1);
+    assert.equal(f.peakLiveConnections, 6); assert.equal(f.swarm.metrics().neighbourDiscovery.replacementSpent, 1, "PC-open alone does not earn another eviction");
+  } finally { await f.close(); }
+});
+
+test("neighbour asynchronous segment keys cannot restore an old actual quality selection", async t => {
+  let release, keyCalls = 0; const gate = new Promise(resolve => { release = resolve; });
+  const playback = peerPlaybackOptions(300);
+  const f = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket() });
+  const digest = globalThis.crypto.subtle.digest.bind(globalThis.crypto.subtle);
+  let hold = true;
+  t.mock.method(globalThis.crypto.subtle, "digest", (...args) => {
+    if (hold) { hold = false; keyCalls++; return gate.then(() => digest(...args)); }
+    return digest(...args);
+  });
+  try {
+    const pending = f.load(); await until(() => keyCalls > 0);
+    f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    await new Promise(resolve => new f.hls.config.fLoader({}).load({ ...context, frag: { ...context.frag, level: 1 } }, {}, { onSuccess: resolve }));
+    release(); await pending; await sleep(20);
+    assert.equal(f.swarm.metrics().neighbourDiscovery.requestedKeys, 0, "late old key does not restore old context demand");
+    assert.equal(f.swarm.metrics().neighbourDiscovery.counters.checks, 0);
+  } finally { release(); await f.close(); }
+});
+
+test("neighbour expiry cannot retire an incoming glare generation adopted from its pending outgoing PC", async t => {
+  const keys = [1, 2].map(n => { const key = new Uint8Array(32); key[31] = n; return key; })
+    .sort((a, b) => getPublicKey(a) < getPublicKey(b) ? -1 : 1);
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  t.mock.method(PC.prototype, "createOffer", () => gate);
+  const f = await discoveryFixture({ secretKey: keys[1], candidateSecretKey: keys[0] });
+  try {
+    f.announce(); await until(() => f.connections.length === 7);
+    const pc = f.connections.at(-1); Object.assign(pc, { connectionState: "new", iceConnectionState: "new", signalingState: "stable" });
+    f.signal(f.candidate, "offer", "adopted-incoming", { sdp: "fixture-offer", peers: 5 });
+    await until(() => !f.swarm.metrics().neighbourDiscovery.opportunityActive);
+    release({ type: "offer", sdp: "fixture-offer" });
+    await until(() => f.swarm.metrics().peers.offersAccepted === 7);
+    const incoming = new RecordedChannel(), event = new Event("datachannel"); event.channel = incoming; pc.dispatchEvent(event);
+    await until(() => f.swarm.metrics().peers.linksOpened === 7);
+    const original = Date.now; t.mock.method(Date, "now", () => original() + 15_001);
+    f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    await new Promise(resolve => new f.hls.config.fLoader({}).load({ ...context, frag: { ...context.frag, level: 1 } }, {}, { onSuccess: resolve }));
+    assert.equal(pc.closed, undefined); assert.equal(incoming.readyState, "open");
+    assert.equal(f.offers.length, 0, "retired outgoing native completion discloses no stale SDP");
+    assert.equal(f.peakLiveConnections, 6);
+  } finally { release({ type: "offer", sdp: "fixture-offer" }); await f.close(); }
+});
+
+test("neighbour aborted peer payload cannot reset the spent episode", async t => {
+  const playback = peerPlaybackOptions(300), trace = [], channels = [];
+  t.mock.method(PC.prototype, "createDataChannel", () => {
+    const channel = new ServingChannel(playback.bytes, 60, trace, "aborted"); channels.push(channel); return channel;
+  });
+  const f = await discoveryFixture();
+  try {
+    f.candidate.onSignal(({ payload }) => { if (payload.type === "offer") f.signal(f.candidate, "answer", payload.requestId, { sdp: "fixture-answer" }); });
+    f.announce(); await until(() => f.swarm.metrics().peers.linksOpened === 7);
+    channels.at(-1).receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    const loader = new f.hls.config.fLoader({}); let successes = 0, aborts = 0;
+    loader.load(context, {}, { onSuccess() { successes++; }, onAbort() { aborts++; } });
+    await until(() => trace.length === 1); loader.abort(); await sleep(80);
+    assert.equal(successes, 0); assert.equal(aborts, 1); assert.equal(f.swarm.metrics().segments.peerFirstLoaded, 0);
+    assert.equal(f.swarm.metrics().neighbourDiscovery.replacementSpent, 1);
+  } finally { await f.close(); }
 });

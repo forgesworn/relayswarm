@@ -541,6 +541,34 @@ Fresh-origin coordination is bounded by safe buffered playback and measured
 HTTP fallback time. hls.js owns quality selection. These mechanisms do not
 prove optimal internet scheduling or net savings.
 
+When a peer-first viewer's current rendition has no linked serving neighbour
+or matching HAVE, bounded local discovery can replace one old idle unsuitable
+link to seek an admitted peer advertising an exact requested key. Signed
+presence HAVE and serving hints remain untrusted; the existing fresh admission
+checks precede SDP, and commitments and payload hashes still authenticate media.
+The existing peer, outgoing-dial and admission-check limits remain unchanged.
+Victim selection protects active receiving, draining and queued/active uploads,
+minimum link life, bidirectional idle time, the shared rotation cooldown and
+useful sibling audio/video neighbours. At least one established link remains.
+
+Discovery retains at most two requested keys for each selected `main` and
+`audio` context, 64 candidate hints of at most eight hashes, and one opportunity
+with an absolute maximum of 15 seconds. Quality changes invalidate only that
+media type, including zero-budget loads; those loads add no key hashing or HAVE
+lookup. A refused attempt may reuse its single vacancy before that same deadline.
+The reservation and scoped victim reconnect suppression then expire even if
+loads continue. Only an accepted commitment/hash-verified delivery for the exact
+selected context generation renews its one-replacement allowance; PC-open,
+HAVE, sibling progress and inactivity do not. Per-piece origin fallback and the
+remote peerless-only incoming rotation policy remain unchanged.
+
+This offers a bounded chance to reach a peer with room during that interval.
+A permanently full or misleading remote can still refuse; after expiry and
+refill the unchanged unmet episode cannot force another eviction. It does not
+guarantee all-rendition connectivity or establish the cause of previously missed
+field delivery. `neighbourDiscovery` metrics contain bounded counts and remaining time,
+not keys, tickets or remote identities, under the existing reporting consent.
+
 ## Authenticated peer-first loading
 
 The runnable publisher/player example and the Node-only
