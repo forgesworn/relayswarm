@@ -54,6 +54,10 @@ ordinary public/physical acceptance remain unproved.
 The v0.2.0 supervised broadcast bridge creates two live HLS renditions and
 can forward H.264/AAC separately to RTMPS with explicit TLS verification.
 These additions belong to the current candidate and are absent from v0.1.0 downloads.
+The source app and waiting listener use a 130-second HTTP keep-alive timeout
+to outlast Caddy's default 120-second upstream idle pool. Ten-second request
+and header deadlines and 128 connections remain bounded. A real 121-second
+same-socket regression passes close/handover; distributed repair is unproved.
 
 Desktop Chrome regressions and a short twelve-viewer loopback soak are recorded;
 they do not establish physical-phone, varied-NAT or sustained operation readiness.

@@ -694,6 +694,11 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Set app and waiting-listener HTTP keep-alive to 130 seconds so Caddy's
+  default 120-second upstream pool retires them first. The 128-connection cap
+  and ten-second request/header deadlines remain. A real 121-second regression
+  verifies original-socket reuse, exact replies and prompt close/handover;
+  distributed repair remains unproved.
 - Negotiate a coherent policy/public-session response so the example player
   needs one renewal GET instead of two. Legacy servers retain parallel reads;
   malformed advertised snapshots fail closed. Expiry, early OFF, admission

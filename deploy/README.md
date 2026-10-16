@@ -52,6 +52,14 @@ OBS then targets its own `127.0.0.1:1935`. Choose another local port if already 
 
 ## Existing HTTPS reverse proxy
 
+The app and waiting listener configure a 130-second HTTP keep-alive timeout,
+above Caddy's default 120-second upstream idle timeout. A shorter backend
+timeout can cause a reused connection to reset and a POST to return 502; see
+[Caddy's HTTP transport documentation](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#the-http-transport).
+Request and header deadlines stay at ten seconds, and each listener retains
+its 128-connection cap. Idle connections can occupy those slots longer.
+Check the timeout ordering when using a different proxy configuration.
+
 Add the following location to the existing Nginx HTTPS virtual host for `PUBLIC_URL`. Preserve its existing certificate, listener and other site configuration. If using a different proxy, forward WebSocket upgrades for `/relay` and preserve the Host header.
 
 ```nginx

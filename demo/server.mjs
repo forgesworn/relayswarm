@@ -172,7 +172,9 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
     await accountControls?.ready();
     server = tlsKey ? httpsServer({ key: await readFile(tlsKey), cert: await readFile(tlsCert), maxHeaderSize: 8192 }, handler) : httpServer({ maxHeaderSize: 8192 }, handler);
     server.maxConnections = 128;
-    server.requestTimeout = 10000; server.headersTimeout = 10000; server.keepAliveTimeout = 5000;
+    server.requestTimeout = 10000; server.headersTimeout = 10000;
+    // Outlast Caddy's 120s upstream idle pool; request deadlines remain separate.
+    server.keepAliveTimeout = 130000;
     relay = relays.length ? null : attachDemoRelay(server, { swarmId: publisher.swarmId, origin: () => base, publisherEvent: publisher.streamEvent, admit: admission.verify });
     requestDiagnostics = createRequestDiagnostics();
     const startedAt = Math.floor(Date.now() / 1000);

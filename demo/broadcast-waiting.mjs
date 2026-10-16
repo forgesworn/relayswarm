@@ -34,7 +34,9 @@ export async function startBroadcastWaitingServer({ host = "127.0.0.1", port = 8
   };
   const server = tlsKey ? httpsServer({ key: await readFile(tlsKey), cert: await readFile(tlsCert), maxHeaderSize: 8192 }, handler) : httpServer({ maxHeaderSize: 8192 }, handler);
   server.maxConnections = 128;
-  server.requestTimeout = 10000; server.headersTimeout = 10000; server.keepAliveTimeout = 1000;
+  server.requestTimeout = 10000; server.headersTimeout = 10000;
+  // Outlast Caddy's 120s upstream idle pool; request deadlines remain separate.
+  server.keepAliveTimeout = 130000;
   await new Promise((done, reject) => {
     const failed = (error) => { server.off("listening", listening); reject(error); };
     const listening = () => { server.off("error", failed); done(); };
