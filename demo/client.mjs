@@ -183,7 +183,7 @@ function sameIdentity(a, b) {
   return a?.swarmId === b?.swarmId && a?.streamEvent?.id === b?.streamEvent?.id && a?.admission?.epoch === b?.admission?.epoch && a?.admission?.issuer === b?.admission?.issuer;
 }
 function samePeerConfiguration(a, b) {
-  const fields = (value) => [value?.swarmId, value?.streamEvent, value?.relays, value?.admission, value?.manifest, value?.deliveryPolicyEndpoint, value?.commitmentEndpoint, value?.iceServers, iceTransportPolicy(value), turnDescriptor(value), value?.mediaCapabilities, value?.delegation, value?.revokedDelegationIds, value?.delegationRevocations];
+  const fields = (value) => [value?.swarmId, value?.streamEvent, value?.relays, value?.admission, value?.manifest, value?.deliveryPolicyEndpoint, value?.commitmentEndpoint, value?.iceServers, iceTransportPolicy(value), turnDescriptor(value), value?.mediaCapabilities, value?.delegation, value?.revokedDelegationIds, value?.delegationRevocations, value?.deliveryPolicySession];
   return JSON.stringify(fields(a)) === JSON.stringify(fields(b));
 }
 function ownCredentialFresh(configuredSession) {
@@ -397,21 +397,24 @@ function policyUnavailableNow(reason, policy) {
 const policyRenewal = createPolicyRenewal({
   async load({ signal, policy, invalidate }) {
     const base = session, credential = admissionCredential;
+    const inline = base.deliveryPolicySession === "inline-v1";
+    if (base.deliveryPolicySession !== undefined && !inline) { invalidate("invalid-session"); throw new Error("Unsupported policy session snapshot."); }
     const pair = new AbortController();
     const requestSignal = () => AbortSignal.any([signal, pair.signal, AbortSignal.timeout(5000)]);
-    // Both reads use no-store so an earlier request cannot cache-lock a renewal.
-    // Catch session failure immediately, but process eligible OFF before consuming it.
+    // Legacy reads stay parallel/no-store. Negotiated inline snapshots need
+    // only the policy request; never downgrade a malformed advertised snapshot.
     const nextPolicy = fetchDiagnostics.json("policy", base.deliveryPolicyEndpoint || "/delivery-policy.json", { cache: "no-store", signal: requestSignal() });
-    const sessionResult = fetchDiagnostics.json("session", "/session.json", { cache: "no-store", signal: requestSignal() }).then(
+    const sessionResult = inline ? null : fetchDiagnostics.json("session", "/session.json", { cache: "no-store", signal: requestSignal() }).then(
       current => ({ ok: true, current }), error => ({ ok: false, error }));
     try {
       const next = await nextPolicy;
       if (!policy(next)) return null;
       if (!next.telemetry) reportingAvailability(false, "This service has reporting switched off. No numeric measurements will be sent.", true);
-      const result = await sessionResult;
+      const result = inline ? { ok: true, current: next.session } : await sessionResult;
       if (!result.ok) throw result.error;
       const current = result.current;
-      if (current?.v !== 1 || typeof current.swarmId !== "string" || !current.streamEvent || typeof current.streamEvent.id !== "string" || !Array.isArray(current.relays) || !["all", "relay"].includes(iceTransportPolicy(current)) || current.manifest !== base.manifest) {
+      if (current?.v !== 1 || typeof current.swarmId !== "string" || !current.streamEvent || typeof current.streamEvent.id !== "string" || !Array.isArray(current.relays) || !["all", "relay"].includes(iceTransportPolicy(current)) || current.manifest !== base.manifest
+        || current.deliveryPolicySession !== undefined && current.deliveryPolicySession !== "inline-v1" || inline && current.deliveryPolicySession !== "inline-v1") {
         invalidate("invalid-session"); throw new Error("Publisher session changed incompatibly.");
       }
       try { turnDescriptor(current); }
@@ -420,7 +423,8 @@ const policyRenewal = createPolicyRenewal({
       if (identityChanged) invalidate("publisher-session-changed");
       const renewAdmission = Boolean(current.admission && startRequestedAt !== null && byId("mode").value !== "off" && next.mode !== "off" && (identityChanged || !credential || credential.expiresAt * 1000 - Date.now() <= 20000));
       const candidateCredential = renewAdmission ? await obtainAdmission(current, identityChanged ? null : credential, signal) : identityChanged ? null : credential;
-      return { base, next, current, candidateCredential, priorCredential: credential, renewAdmission };
+      const nextPolicySnapshot = inline ? { v: next.v, mode: next.mode, revision: next.revision, telemetry: next.telemetry } : next;
+      return { base, next: nextPolicySnapshot, current, candidateCredential, priorCredential: credential, renewAdmission };
     } finally {
       pair.abort();
       await sessionResult;

@@ -91,6 +91,24 @@ the configured origin; do not expose the trusted ledger methods directly or
 accept viewer-supplied account subjects as authentication. The session
 descriptor contains supported methods, bounds and fixed endpoint paths only.
 
+## Example policy and session renewal
+
+The source demo advertises `deliveryPolicySession: "inline-v1"` with
+`deliveryPolicyEndpoint: "/delivery-policy.json?session=1"`. Its GET response
+contains the existing policy fields plus `session`, built synchronously from
+the same public descriptor used by `/session.json`, after operator readiness.
+The bare policy URL and operator routes retain their existing response shapes.
+The opt-in route uses exact buffered JSON, `Content-Length` and `no-store`.
+
+The example client uses one request for an advertised inline snapshot and two
+parallel requests for legacy descriptors. It applies observed OFF first, then
+validates the session and prepares admission under the existing five-second
+issuance lifetime. Missing or incompatible advertised data fails closed without
+a legacy retry. The two-second cadence, three-pending cap and consent rules are
+unchanged. `startDemoServer({policySessionSnapshot: false})` selects the legacy
+contract programmatically; it has no CLI or viewer switch. This reduces renewal
+requests and does not establish field reliability. See [operations](OPERATIONS.md#policy-and-viewer-consent).
+
 ## ICE transport policy
 
 The core swarm and `startDemoServer` accept `iceTransportPolicy: "all" | "relay"`,

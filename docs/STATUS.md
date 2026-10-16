@@ -12,6 +12,56 @@ on `main` do not change that tag or its immutable downloaded assets.
 ## Current delivery checkpoint
 
 Checkpoint: 16 October 2026. The experimental pilot runs exact
+`44b21d69dd924fea648c2dc214df02dafa8e690c`. All nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38859102559),
+fresh consumption of 273 package members and guarded deployment passed.
+Normal HTTPS matched the 769,303-byte client to the candidate image and read
+both fresh playlists. Relay-only ICE, TLS/TCP TURN projection, admission 32
+and the explicitly selected 900-request address budget are deployed. The
+default request budget remains 600 and the global capacity 2,048.
+Private publisher/account state, permanent lease identities and the independent
+EE proxy were preserved. Reporting and forwarding remain off. Verification-source
+cleanup and a fresh independent server review passed; actual source exit 255
+is retained.
+
+Bounded rendition-neighbour discovery and cold-peer deadline allocation are
+deployed. The latter preserves useful time for an unmeasured peer while keeping
+the existing total deadline and bounded alternatives. Its original-source
+regression fails; five focused checks and all 160 swarm tests pass. These local
+checks do not establish the cause or repair of an earlier field failure.
+
+**R30 remains RED, with 36,188 ms measured.** All fourteen roles started;
+setup observed 64 connected links and 1,323,896 verified peer bytes globally.
+The failing contributor recorded an unplanned origin-only interval lasting
+82 ms before peer-first recovered. Recovery does not satisfy uninterrupted
+authority. The same page recorded a session request taking 5,146 ms; retained
+network observations include a five-second cancellation without headers and
+later connection-pool delay. Their timing fits expiry before a subsequent
+renewal completed, but exact clock/request joins and the downstream cause
+remain unproved. Final admission coverage, reconciliation and caller-abort
+recovery checks passed. All fourteen contexts, owned processes, profiles,
+tunnels and the finite source passed independent cleanup review.
+
+The defined P01–P12 feature surfaces are implemented. Nostr and an authenticated
+host-supplied account API are supported; the Nostr-only pilot is valid. Prior
+account API, focused LOW lifecycle, native iOS Simulator and Internet TURN
+component passes retain their original revisions and limits. The historical
+full-window R28 still failed both-quality coverage for two receivers; R29
+stopped at 117.240 s. Neither is a matching successful qualifier for this build.
+The matched-cost comparison remains inconclusive; payload counters do not
+establish wire or bill savings.
+
+No matching full 300 s, 7,200 s/22-churn or natural expiry acceptance exists.
+The longer run is ineligible until the short qualifier and its cleanup pass.
+Physical/browser breadth, difficult networks, matched wire/cost benefit and
+final release/download acceptance remain open. PR 8 remains open; v0.1.0 is
+published and 0.2.0 remains the source candidate. See the
+[checkpoint record](../spikes/results/44b21d6-current-delivery-checkpoint-20261016.json)
+and [P01–P12 checklist](PRODUCTION-READINESS.md#delivery-checklist).
+
+## Historical afbf052 delivery checkpoint
+
+Checkpoint: 16 October 2026. The experimental pilot runs exact
 `afbf052df93d6b4902703dddb4b5987ec6119e6e`. All nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/38821621670),
 fresh consumption of 271 package members and guarded HTTPS deployment passed.

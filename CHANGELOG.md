@@ -4,6 +4,16 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Negotiate a coherent policy/public-session response so the example player
+  needs one renewal GET instead of two. Legacy servers retain parallel reads;
+  malformed advertised snapshots fail closed. Expiry, early OFF, admission
+  and consent rules remain unchanged; field repair is unproved.
+- Discover bounded rendition neighbours when existing peer slots do not offer
+  the current media context, using signed advisory presence and existing peer,
+  admission, consent and retry limits.
+- Preserve useful time for a cold peer attempt instead of equally dividing its
+  deadline across unmeasured alternatives. Total deadlines, measured-peer
+  allocation, verification and fallback remain unchanged.
 - Expose the broadcaster's existing per-socket-address request allowance through
   `--admission-per-address-requests` (1–10,000, default 600). Other admission
   limits remain unchanged; field acceptance is separate.

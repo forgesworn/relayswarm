@@ -105,7 +105,7 @@ export function createOperatorControls({ token, telemetry = false, reportCapacit
     for (const entry of retained) for (const name of fields) totals[name] += entry.values[name];
     return { enabled: Boolean(telemetry), samples: retained.length, capacity: reportCapacity, ttlMs: reportTtlMs, totals, durable: Boolean(store), pendingMutations, mutationCapacity, scope: "Latest cumulative snapshot per temporary opted-in page report identity within retention; retries are idempotent. Identities are not unique viewers or additive savings." };
   }
-  async function handle(request, response, path, base, publisher) {
+  async function handle(request, response, path, base, publisher, publicSession) {
     if (!["/delivery-policy.json", "/operator/status", "/operator/policy", "/operator/admission", "/reports"].includes(path)) return false;
     try {
       if (stopping) throw fail("Operator controls are closing.", 503);
@@ -114,7 +114,9 @@ export function createOperatorControls({ token, telemetry = false, reportCapacit
       if (request.method !== method) { response.writeHead(405, { allow: method }).end(); return true; }
       if (path.startsWith("/operator/")) authenticate(request, base);
       let result;
-      if (path === "/delivery-policy.json") result = policy();
+      // Both public snapshots are synchronous after readiness: no split read
+      // across an operator mutation or admission rotation.
+      if (path === "/delivery-policy.json") result = publicSession ? { ...policy(), session: publicSession() } : policy();
       if (path === "/operator/status") result = { policy: policy(), origin: { ...origin }, publisher: publisher.getMetrics?.() ?? null, reports: summary(), ...(admission ? { admission: admission.metrics() } : {}), ...(operatorExtraStatus ? { broadcast: operatorExtraStatus() } : {}), ...(requestDiagnostics ? { requestDiagnostics: requestDiagnostics() } : {}) };
       if (path === "/operator/policy") {
         const input = await json(request);

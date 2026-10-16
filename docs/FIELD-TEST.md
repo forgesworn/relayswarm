@@ -12,32 +12,32 @@ key stays on the server. v0.1.0 release assets retain their original behaviour.
 
 ## Current pilot and evidence scope
 
-The experimental pilot now runs exact `5334091`, with all nine required CI
-jobs and fresh 267-member package checks. Guarded deployment and normal HTTPS
-client/two-playlist attestation passed. Relay-only ICE, TLS/TCP TURN projection
-and admission limit 32 are deployed; Nostr account allowances are enabled and
-the website resolver remains unconfigured. Reporting/forwarding remain off.
-Private state/permanent leases were preserved and the owned finite source was
-removed under all five cleanup guards, retaining actual exit 255.
+The experimental pilot runs exact `44b21d6`. Nine required CI jobs, fresh
+273-member consumption, guarded deployment and normal HTTPS client/two-playlist
+attestation passed. Relay-only ICE, TLS/TCP TURN projection, admission 32 and
+an explicitly selected 900-request address budget are deployed. Nostr account
+allowances are enabled; integrating websites supply their own authentication
+through the reusable host account API. Reporting and forwarding remain off.
+Private state, permanent leases and the independent proxy were preserved.
+Deployment and finite-source cleanup passed independent fresh reviews.
 
-A separate local two-Chrome/synthetic-HLS cohort used genuine Internet TURN
-and passed 90.043 s with 40 verified fragments/4,631,756 bytes. Independent unchanged strict replay passes the
-same rebuilt-diagnostic cohort. First local lease 60 s/real issued lease 3,600 s:
-this does not prove natural expiry, exact standalone Internet playback or an
-ordinary journey against the deployed pilot. Earlier REDs stay historical REDs.
+The latest fourteen-role R30 test measured 36.188 s before one contributor
+recorded an 82 ms origin-only interval. Peer-first recovered, but that does
+not pass uninterrupted authority. Its delayed session check and later renewal
+timings fit the interruption without proving an exact request/clock join or
+downstream cause. All fourteen contexts and owned processes, profiles, tunnels
+and source passed independent cleanup. The short qualifier remains RED;
+no matching 300 s or eligible 7,200 s/22-churn result exists.
 
-The latest ordinary public check passed playback, contribution and verified
-peer delivery over 60.034 s: one low and one high fragment, 868,936 bytes total.
-All owned cleanup passed. Sustained benefit remains unproved; only two of twelve
-accepted peer requests had verified completions. The fourteen-role test stopped
-at its local process limit before measurement. A cross-Mac account diagnostic
-exposed a device-clock rejection; its source correction and explicit Resume
-playback action still require deployed/physical acceptance.
-See [current status](STATUS.md#current-delivery-checkpoint)
-and the full [P01–P12 checklist](PRODUCTION-READINESS.md#delivery-checklist).
-Historical field sections retain their own dates/topologies; current public,
-physical/Safari, hard-NAT, cross-device budget, natural-expiry, fourteen-role,
-7,200 s/22-churn, matched wire/cost and release acceptance remain open.
+Historical ordinary public, Internet TURN, shared account API, focused LOW
+lifecycle and native iOS Simulator passes keep their original revisions and
+limits. Simulator return was still playing, so it did not reproduce the
+physical stopped-video fault. Natural expiry, browser/network breadth, full
+shared-media budgets, sustained operation and matched wire/cost benefit remain
+open. No new manual phone check is required for the accepted Simulator scope.
+See [current status](STATUS.md#current-delivery-checkpoint), the
+[checkpoint](../spikes/results/44b21d6-current-delivery-checkpoint-20261016.json)
+and [P01–P12 checklist](PRODUCTION-READINESS.md#delivery-checklist).
 
 ## Run locally
 
@@ -80,8 +80,13 @@ explicit action using a Nostr signer or the host's signed-in website account.
 It adds the service's cumulative cap to this browser's allowance and leaves
 uploading off until a fresh Apply. See [shared upload allowance](ACCOUNT-UPLOAD-BUDGET.md)
 for linking, resetting, reconnecting after reload and the service's privacy
-boundary. The deployed `5334091` pilot offers Nostr sign-in; its host website
+boundary. The deployed `44b21d6` pilot offers Nostr sign-in; its host website
 account resolver is unconfigured.
+
+The source candidate can fetch policy and publisher session together from an
+advertised `inline-v1` endpoint. Legacy descriptors retain two parallel reads;
+malformed advertised snapshots fail closed. The combined response reduces
+requests without changing authority lifetime or proving a field repair.
 
 The player checks operator policy and publisher identity every two seconds,
 with at most three independent checks in flight. A stalled check cannot block

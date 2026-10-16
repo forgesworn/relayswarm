@@ -65,7 +65,8 @@ try {
   try {
     http.createServer = (...args) => { server = createServer(...args); return server; };
     syncBuiltinESMExports();
-    demo = await startDemoServer({ mediaDir: fixture.directory, iceServers: [] }); receipt.cleanup.demo = "running";
+    // Exercise the legacy two-request cache contract with real browser HTTP.
+    demo = await startDemoServer({ mediaDir: fixture.directory, iceServers: [], policySessionSnapshot: false }); receipt.cleanup.demo = "running";
   } finally { http.createServer = createServer; syncBuiltinESMExports(); }
   assert.equal(server.address().port, Number(new URL(demo.base).port), "Wrap only the server returned by this fixture");
   const handlers = server.listeners("request"); assert.equal(handlers.length, 1);

@@ -43,7 +43,7 @@ provides authenticated operator policy, bounded admission and durable idempotent
 opt-in numeric reports. Upload budgets persist across reloads/tabs without consent.
 Optional Nostr or host website accounts share a private durable allowance across
 devices; account changes leave uploading off until fresh consent. The deployed
-3e pilot offers Nostr; integrating websites supply their own account resolver.
+44b21d6 pilot offers Nostr; integrating websites supply their own account resolver.
 Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The example origin adds bounded blocking reload for compatible complete live
 playlists across all renditions, with 24 waiters inside 32 media requests.
@@ -61,21 +61,22 @@ Peer-first media loads/bytes avoided are not net connection-data savings, and
 upload counters measure committed media payload rather than acknowledged delivery.
 Pending durable reservations can consume quota without entering those counters.
 Documentation on main can include corrections after the immutable releases.
-Current deployed source `afbf052`. Nine required CI jobs, fresh 271-member package
-consumption and guarded HTTPS deployment passed. The deployed TURN correction
-reclaims expired or failed cache entries while preserving live leases and
-unfinished work. Nostr and an authenticated host-supplied account API are
-implemented; integrating websites supply their authentication.
+Current deployed source `44b21d6`. Nine required CI jobs, fresh 273-member package
+consumption and guarded HTTPS deployment passed. Bounded rendition-neighbour
+discovery and cold-peer deadline allocation are deployed. Nostr and an
+authenticated host-supplied account API are implemented; integrating websites
+supply their authentication. The pilot selects 900 address requests per minute;
+the default remains 600 and global capacity 2,048.
 
 The agreed feature surfaces are implemented, but production acceptance is
-incomplete. The latest fourteen-context trial stopped during setup after
-admission rate-limit responses and delayed control bodies. Its measured window
-was zero; all owned cleanup passed. Explicit operator configuration for the
-shared request budget passed local checks; deployment is pending. Matching capacity, two-hour/churn,
-natural expiry, physical/browser breadth, difficult networks, measured wire/cost
-benefit and immutable release/download acceptance remain open. v0.1.0 is the
-published prerelease; 0.2.0 remains the source candidate. See the
-[P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
+incomplete. R30 measured 36.188 seconds with fourteen roles before a contributor recorded
+an 82 ms origin-only interval. Recovery does not satisfy uninterrupted authority;
+all owned cleanup passed independent review. Delayed session/renewal timings
+fit the gap, without proving exact request/clock joins or downstream cause.
+Matching capacity, two-hour/churn, natural expiry, physical/browser breadth,
+difficult networks, measured wire/cost benefit and final release/download
+acceptance remain open. v0.1.0 is published; 0.2.0 remains the source candidate.
+See the [P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
 
 ## Documentation
 

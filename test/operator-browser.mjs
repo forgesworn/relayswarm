@@ -71,7 +71,8 @@ try {
     await route.abort("timedout").catch(() => {});
   };
   const renewalSamples = [];
-  await seeder.route("**/delivery-policy.json", holdOne);
+  const policyRoute = /\/delivery-policy\.json(?:\?session=1)?$/u;
+  await seeder.route(policyRoute, holdOne);
   try {
     const started = Date.now();
     while (Date.now() - started < 9000) {
@@ -90,7 +91,7 @@ try {
     assert.ok(after.uploadBudget.spent >= renewalBefore.uploadBudget.spent, "No quota reset");
     receipt.policyRenewal = { scope: "One held loopback policy request; unchanged5s request/authority bounds, native consent unchanged", samples: renewalSamples };
     await checkpoint("single-held-policy-request-preserves-fresh-consent");
-  } finally { releaseHeld(); await seeder.unroute("**/delivery-policy.json", holdOne); }
+  } finally { releaseHeld(); await seeder.unroute(policyRoute, holdOne); }
   const beforeApply = await read(seeder);
   await seeder.locator("#start").click();
   const applied = await read(seeder);
@@ -175,7 +176,7 @@ try {
   await seeder.locator("#upload").check(); await seeder.locator("#start").click();
   await seeder.waitForFunction(() => window.relaySwarmDemo.report().current.metrics.serving);
   const outageStarted = Date.now();
-  await seeder.route("**/delivery-policy.json", (route) => route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"test policy outage"}' }));
+  await seeder.route(policyRoute, (route) => route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"test policy outage"}' }));
   await seeder.waitForFunction(() => { const report = window.relaySwarmDemo.report(); return report.deliveryPolicy.unavailable && report.current.mode === "off" && report.loaderRestored; });
   const beforeOutage = await read(seeder);
   assert.ok(Date.now() - outageStarted <= 6500, "Authority expires within5s issuance bound plus observation margin");
@@ -187,7 +188,7 @@ try {
   assert.equal(await seeder.locator("#upload").isChecked(), false);
   assert.equal(await seeder.locator("#telemetry").isChecked(), false);
   await checkpoint("policy-outage-origin-fallback");
-  await seeder.unroute("**/delivery-policy.json");
+  await seeder.unroute(policyRoute);
   await seeder.waitForFunction(() => { const report = window.relaySwarmDemo.report(); return !report.deliveryPolicy.unavailable && report.current.mode === "shadow"; });
   assert.equal((await read(seeder)).current.metrics.serving, false);
   assert.equal((await read(consumer)).current.mode, "off");

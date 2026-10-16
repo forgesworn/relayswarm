@@ -17,7 +17,7 @@ const bundle = await build({ entryPoints: ["demo/client.mjs"], bundle: true, wri
   builder.onResolve({ filter: /^(hls\.js|\.\.\/src\/browser\/hls-swarm\.mjs)$/ }, (args) => ({ path: args.path, namespace: "fixture" }));
   builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={MANIFEST_PARSED:'manifest',FRAG_LOADED:'fragment',LEVEL_SWITCHED:'level',LEVEL_UPDATED:'update',ERROR:'error'}; static isSupported(){return !globalThis.fixture.nativeHls;} constructor(){this.config={};this.callbacks=new Map();this.levels=[];this.id=globalThis.fixture.players.length;globalThis.fixture.players.push(this);} on(name,callback){this.callbacks.set(name,callback);} emit(name,data){this.callbacks.get(name)?.('',data);} loadSource(){globalThis.fixture.sourceLoads++;globalThis.fixture.playerOperations.push(['load-source',this.id]);} attachMedia(){} destroy(){this.destroyImpl?.();this.destroyed=true;globalThis.fixture.playerOperations.push(['destroy',this.id]);} stopLoad(){globalThis.fixture.playerOperations.push(['stop',this.id]);} startLoad(){globalThis.fixture.playerOperations.push(['start',this.id]);} recoverMediaError(){globalThis.fixture.playerOperations.push(['recover',this.id]);} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0, tickets:[]}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;}, updateTicket(ticket){if(record.stopped||globalThis.fixture.rejectTicketUpdates||globalThis.fixture.disabledSwarm)return false; options.ticket=ticket; record.tickets.push(ticket); return true;}, attach(hls){if(globalThis.fixture.disabledSwarm)return;hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, metrics(){return {mode:globalThis.fixture.disabledSwarm?'off':options.mode, disabledReason:globalThis.fixture.disabledSwarm?'no-webrtc':null, serving:!globalThis.fixture.disabledSwarm&&options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
 } }] });
-async function page(storage = new Map(), { realClock = false, fetchImpl, nativeHls = false, initialTurnCredentials } = {}) {
+async function page(storage = new Map(), { realClock = false, fetchImpl, nativeHls = false, initialTurnCredentials, inlinePolicySession = false } = {}) {
   const elements = new Map(), intervals = [], timers = new Map(), windowEvents = new Map(), documentEvents = new Map();
   let clock = 0; const wallStart = Date.now(), performanceStart = performance.now();
   const now = () => realClock ? performance.now() - performanceStart : clock;
@@ -33,13 +33,125 @@ async function page(storage = new Map(), { realClock = false, fetchImpl, nativeH
     pause() { fixture.pauseCalls++; video.paused = true; }, load() { fixture.nativeLoads++; video.error = null; video.readyState = 0; },
     canPlayType: () => nativeHls };
   const fixture = { nativeHls, swarms: [], players: [], playerOperations: [], playCalls: 0, pauseCalls: 0, nativeLoads: 0, sourceLoads: 0, policy: { mode: null, revision: 0, telemetry: false }, session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment", ...(initialTurnCredentials === undefined ? {} : { turnCredentials: initialTurnCredentials }) } };
+  if (inlinePolicySession) Object.assign(fixture.session, { deliveryPolicyEndpoint: "/delivery-policy.json?session=1", deliveryPolicySession: "inline-v1" });
+  fixture.requests = [];
   const context = { Date: ClockDate, fixture, location: { origin: "https://viewer.example" }, document: { visibilityState: "visible", createElement: () => ({}), addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, structuredClone, TextDecoder, TextEncoder, queueMicrotask, console,
-    fetch: async (url, init) => { if (fetchImpl) return fetchImpl(url, init); if (fixture.response) { const response = await fixture.response(url, init); if (response) return response; } const value = fixture.fetch ? await fixture.fetch(url, init) : url === "/session.json" ? fixture.session : fixture.policy; return { ok: true, json: async () => structuredClone(value) }; },
+    fetch: async (url, init) => { fixture.requests.push({ url, init }); if (fetchImpl) return fetchImpl(url, init); if (fixture.response) { const response = await fixture.response(url, init); if (response) return response; } const value = fixture.fetch ? await fixture.fetch(url, init) : url === "/session.json" ? fixture.session : inlinePolicySession ? { ...fixture.policy, session: fixture.session } : fixture.policy; return { ok: true, json: async () => structuredClone(value) }; },
     setTimeout(callback, ms) { const id = realClock ? setTimeout(() => { timers.delete(id); callback(); }, ms) : Symbol(); timers.set(id, { callback, ms }); return id; }, clearTimeout(id) { if (realClock) clearTimeout(id); timers.delete(id); },
     setInterval(callback, ms) { intervals.push({ callback, ms }); }, clearInterval() {}, window: { addEventListener(name, callback) { windowEvents.set(name, callback); } } };
   await vm.runInNewContext(`(async()=>{${bundle.outputFiles[0].text}})()`, context);
   return { fixture, element, context, video, videoEvent: name => videoEvents.get(name)?.(), sendReport: () => intervals.find(entry => entry.ms === 15000).callback(), fireTimer(matches) { const entries = [...timers].filter(([, row]) => matches(row.ms)); assert.equal(entries.length, 1); const [id, row] = entries[0]; timers.delete(id); row.callback(); }, close() { windowEvents.get("pagehide")?.(); if (realClock) for (const id of timers.keys()) clearTimeout(id); timers.clear(); }, jumpWithoutTimers(ms) { clock += ms; }, windowEvent: (name) => windowEvents.get(name)?.(), visibility(state) { context.document.visibilityState = state; documentEvents.get("visibilitychange")?.(); }, submit: () => element("settings").submit({ preventDefault() {} }), poll: () => intervals.find((entry) => entry.ms === 2000).callback() };
 }
+
+test("inline policy snapshots use one renewal GET without changing the authority bounds", async () => {
+  const p = await page(new Map(), { inlinePolicySession: true });
+  try {
+    assert.deepEqual(p.fixture.requests.map(row => row.url), ["/session.json", "/delivery-policy.json?session=1"]);
+    p.fixture.requests.length = 0; await p.poll();
+    assert.deepEqual(p.fixture.requests.map(row => row.url), ["/delivery-policy.json?session=1"]);
+    assert.equal(p.fixture.requests[0].init.cache, "no-store");
+    const r = p.context.window.relaySwarmDemo.report();
+    assert.equal(r.policyRenewal.lifetimeMs, 5000); assert.equal(r.policyRenewal.maxPending, 3);
+    assert.equal(r.policyRenewal.fresh, true); assert.equal(p.element("upload").checked, false);
+    assert.equal(Object.hasOwn(r.deliveryPolicy, "session"), false, "Do not duplicate the public session in numeric policy reports");
+  } finally { p.close(); }
+});
+
+test("inline policy snapshots reject missing or incompatible sessions without a legacy fallback", async () => {
+  for (const malformed of [undefined, null, {}, { v: 2 }, { manifest: "/other.m3u8" }, { iceTransportPolicy: "invalid" }, { turnCredentials: {} }, { deliveryPolicySession: undefined }, { deliveryPolicySession: "future" }]) {
+    const p = await page(new Map(), { inlinePolicySession: true });
+    try {
+      p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+      const current = malformed && Object.keys(malformed).length ? { ...p.fixture.session, ...malformed } : malformed;
+      p.fixture.fetch = () => ({ ...p.fixture.policy, session: current }); p.fixture.requests.length = 0;
+      assert.equal(await p.poll(), false);
+      const r = p.context.window.relaySwarmDemo.report();
+      assert.equal(r.policyRenewal.fresh, false); assert.equal(r.current.mode, "off"); assert.equal(p.element("upload").checked, false);
+      assert.deepEqual(p.fixture.requests.map(row => row.url), ["/delivery-policy.json?session=1"]);
+    } finally { p.close(); }
+  }
+});
+
+test("inline policy OFF revokes upload and reporting before inspecting a malformed session", async () => {
+  const p = await page(new Map(), { inlinePolicySession: true }); let inspected = false;
+  try {
+    p.fixture.policy = { mode: null, revision: 1, telemetry: true }; await p.poll();
+    p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit(); p.element("telemetry").checked = true;
+    p.fixture.response = async () => ({ ok: true, json: async () => ({ mode: "off", revision: 2, telemetry: false,
+      get session() { inspected = true; assert.equal(p.element("upload").checked, false); assert.equal(p.element("telemetry").checked, false); throw new Error("Malformed inline session"); } }) });
+    assert.equal(await p.poll(), false); assert.equal(inspected, true);
+    const r = p.context.window.relaySwarmDemo.report();
+    assert.equal(r.current.mode, "off"); assert.equal(r.policyRenewal.fresh, false);
+  } finally { p.close(); }
+});
+
+test("inline policy expiry rejects late success and never restores upload consent or spent allowance", async () => {
+  const p = await page(new Map(), { inlinePolicySession: true }); let release;
+  try {
+    p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+    const active = p.fixture.swarms.at(-1); assert.equal(await active.options.reserveUploadBytes(1234), true); active.uploaded = 1234;
+    p.fixture.fetch = () => new Promise(resolve => { release = () => resolve({ ...p.fixture.policy, session: p.fixture.session }); });
+    const pending = p.poll(); for (let n = 0; n < 30 && !release; n++) await Promise.resolve(); assert.ok(release);
+    p.jumpWithoutTimers(5001); assert.equal(p.context.window.relaySwarmDemo.report().policyRenewal.fresh, false);
+    release(); assert.equal(await pending, false); assert.equal(p.element("upload").checked, false);
+    p.fixture.fetch = undefined; assert.equal(await p.poll(), true);
+    const r = p.context.window.relaySwarmDemo.report(); assert.equal(r.uploadBudget.spent, 1234); assert.equal(r.current.metrics.serving, false);
+  } finally { release?.(); p.close(); }
+});
+
+test("inline policy pending checks remain capped at three and suspension rejects their late completion", async () => {
+  const p = await page(new Map(), { inlinePolicySession: true }), releases = [];
+  try {
+    p.fixture.fetch = () => new Promise(resolve => releases.push(() => resolve({ ...p.fixture.policy, session: p.fixture.session })));
+    p.fixture.requests.length = 0;
+    const pending = [p.poll(), p.poll(), p.poll()]; for (let n = 0; n < 30 && releases.length < 3; n++) await Promise.resolve();
+    assert.equal(releases.length, 3); assert.equal(await p.poll(), false); assert.equal(p.fixture.requests.length, 3);
+    assert.equal(p.context.window.relaySwarmDemo.report().policyRenewal.pending, 3);
+    p.visibility("hidden"); for (const release of releases) release();
+    assert.deepEqual(await Promise.all(pending), [false, false, false]);
+    assert.equal(p.context.window.relaySwarmDemo.report().policyRenewal.fresh, false);
+  } finally { for (const release of releases) release(); p.close(); }
+});
+
+test("inline policy stale identity cannot reinstall an older snapshot after a newer commit", async () => {
+  const p = await page(new Map(), { inlinePolicySession: true }); let release;
+  try {
+    p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+    const oldSession = structuredClone(p.fixture.session);
+    p.fixture.fetch = () => new Promise(resolve => { release = () => resolve({ ...p.fixture.policy, session: oldSession }); });
+    const old = p.poll(); for (let n = 0; n < 30 && !release; n++) await Promise.resolve(); assert.ok(release);
+    p.fixture.session = { ...p.fixture.session, swarmId: "new", streamEvent: { id: "new" } };
+    p.fixture.policy = { mode: null, revision: 1, telemetry: false }; p.fixture.fetch = undefined;
+    assert.equal(await p.poll(), true); release(); assert.equal(await old, false);
+    const r = p.context.window.relaySwarmDemo.report(); assert.equal(r.stream.swarmId, "new"); assert.equal(p.element("upload").checked, false);
+  } finally { release?.(); p.close(); }
+});
+
+test("inline policy admission prepared for an older identity cannot undo a committed replacement", async () => {
+  const p = await page(new Map(), { inlinePolicySession: true }); let finishB, finishA;
+  try {
+    const descriptor = epoch => ({ issuer: "issuer", epoch, challengeEndpoint: `/challenge-${epoch}`, ticketEndpoint: `/ticket-${epoch}`, verifyEndpoint: "/verify" });
+    const a = { ...p.fixture.session, admission: descriptor("a") }, b = { ...a, swarmId: "new", streamEvent: { id: "new" }, admission: descriptor("b") };
+    let racing = false, reads = 0;
+    const credential = s => ({ ...s.admission, swarmId: s.swarmId, challenge: "challenge", ticket: `ticket-${s.admission.epoch}`, expiresAt: Math.ceil(Date.now() / 1000) + 10 });
+    p.fixture.fetch = async url => {
+      if (url === "/delivery-policy.json?session=1") {
+        if (racing && ++reads === 1) return new Promise(resolve => { finishB = () => resolve({ ...p.fixture.policy, session: b }); });
+        return { ...p.fixture.policy, session: a };
+      }
+      if (racing && url === "/ticket-a") return new Promise(resolve => { finishA = () => resolve(credential(a)); });
+      return credential(url.endsWith("-b") ? b : a);
+    };
+    await p.poll(); p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit(); racing = true;
+    const older = p.poll(); for (let n = 0; n < 30 && !finishB; n++) await Promise.resolve(); assert.ok(finishB);
+    const newer = p.poll(); for (let n = 0; n < 50 && !finishA; n++) await Promise.resolve(); assert.ok(finishA);
+    finishB(); await older; assert.equal(p.context.window.relaySwarmDemo.report().stream.swarmId, "new");
+    finishA(); await newer;
+    const r = p.context.window.relaySwarmDemo.report(); assert.equal(r.stream.swarmId, "new");
+    assert.equal(p.fixture.swarms.at(-1).options.ticket, "ticket-b"); assert.equal(p.element("upload").checked, false);
+    assert.ok(r.policyRenewal.records.some(row => row.outcome === "stale"));
+  } finally { finishB?.(); finishA?.(); p.close(); }
+});
 
 test("Resume playback reloads native origin only on a gesture and retains earlier errors", async () => {
   const p = await page(new Map(), { nativeHls: true });
@@ -667,15 +779,17 @@ test("OFF followed by failed session validation remains off and marks authority 
 
 // Only the policy/session transport is real here. The maintained bundled client
 // runs with fixture media/swarm, real issuance clocks and no browser process.
-async function policyHTTP(t) {
+async function policyHTTP(t, { inlinePolicySession = false, boundedH1 = inlinePolicySession } = {}) {
   const state = { phase: "bootstrap", policyDelay: 0, sessionDelay: 0, holdSession: false, sessionStatus: 200, policyAfterSessionIngress: false,
     policy: { mode: null, revision: 0, telemetry: false },
     session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment" } };
+  if (inlinePolicySession) Object.assign(state.session, { deliveryPolicyEndpoint: "/delivery-policy.json?session=1", deliveryPolicySession: "inline-v1" });
   const records = [], open = new Set(), timers = new Set(), gatedPolicies = new Map(); let p;
+  const agent = boundedH1 ? new http.Agent({ keepAlive: true, maxSockets: 2 }) : null;
   const server = http.createServer((request, response) => {
-    const route = request.url === "/delivery-policy.json" ? "policy" : request.url === "/session.json" ? "session" : null;
+    const route = request.url === "/delivery-policy.json" || request.url === "/delivery-policy.json?session=1" ? "policy" : request.url === "/session.json" ? "session" : null;
     if (!route) { response.writeHead(404).end(); return; }
-    const record = { route, phase: state.phase, arrived: performance.now(), ended: null, closed: null };
+    const record = { route, phase: state.phase, httpVersion: request.httpVersion, arrived: performance.now(), ended: null, closed: null };
     records.push(record); open.add(response); let timer;
     response.once("close", () => { open.delete(response); record.closed = performance.now(); clearTimeout(timer); timers.delete(timer); gatedPolicies.delete(record); });
     if (route === "session") for (const [policy, send] of gatedPolicies) if (policy.phase === record.phase) { gatedPolicies.delete(policy); send(); }
@@ -683,7 +797,7 @@ async function policyHTTP(t) {
     const send = () => {
       timers.delete(timer); if (response.destroyed) return;
       record.ended = performance.now(); response.writeHead(route === "session" ? state.sessionStatus : 200, { "content-type": "application/json", "cache-control": "no-store" });
-      response.end(JSON.stringify(state[route]));
+      response.end(JSON.stringify(route === "policy" && request.url === "/delivery-policy.json?session=1" ? { ...state.policy, session: state.session } : state[route]));
     };
     const sendAfterIngress = () => {
       if (route === "policy" && state.policyAfterSessionIngress && !records.some(item => item.phase === record.phase && item.route === "session")) gatedPolicies.set(record, send);
@@ -693,14 +807,37 @@ async function policyHTTP(t) {
     if (wait) { timer = setTimeout(sendAfterIngress, wait); timers.add(timer); } else sendAfterIngress();
   });
   t.after(async () => {
-    p?.close(); for (const timer of timers) clearTimeout(timer); for (const response of open) response.destroy(); gatedPolicies.clear();
+    p?.close(); agent?.destroy(); for (const timer of timers) clearTimeout(timer); for (const response of open) response.destroy(); gatedPolicies.clear();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  p = await page(new Map(), { realClock: true, fetchImpl: (url, init) => fetch(new URL(url, origin), init) });
+  const fetchImpl = agent ? (url, init) => new Promise((resolve, reject) => {
+    const request = http.get(new URL(url, origin), { agent, signal: init.signal }, response => {
+      const chunks = []; let size = 0;
+      response.on("data", chunk => { size += chunk.length; if (size > 65536) response.destroy(new Error("Policy fixture response exceeded its bound.")); else chunks.push(chunk); });
+      response.on("error", reject); response.on("aborted", () => reject(new Error("Policy fixture response aborted.")));
+      response.on("end", () => resolve({ ok: response.statusCode === 200, status: response.statusCode,
+        json: async () => JSON.parse(Buffer.concat(chunks).toString("utf8")) }));
+    });
+    request.on("error", reject);
+  }) : (url, init) => fetch(new URL(url, origin), init);
+  p = await page(new Map(), { realClock: true, fetchImpl });
   return { p, state, records, open };
 }
+
+test("real HTTP inline renewal succeeds without entering a withheld separate session endpoint", { timeout: 3000 }, async t => {
+  const f = await policyHTTP(t, { inlinePolicySession: true }), { p, state, records } = f;
+  state.phase = "inline-with-separate-session-held"; state.holdSession = true;
+  const pending = p.poll();
+  try {
+    const renewed = await Promise.race([pending, delay(250).then(() => false)]);
+    assert.equal(renewed, true, "Negotiated inline renewal must not await the separate session endpoint");
+    assert.deepEqual(records.filter(row => row.phase === state.phase).map(row => row.route), ["policy"]);
+    assert(records.every(row => row.httpVersion === "1.1"));
+    assert.equal(p.context.window.relaySwarmDemo.report().policyRenewal.fresh, true);
+  } finally { p.close(); await pending; await waitForHTTP(() => f.open.size === 0); }
+});
 async function waitForHTTP(predicate, ms = 1500) {
   const deadline = performance.now() + ms;
   while (!predicate() && performance.now() < deadline) await delay(5);

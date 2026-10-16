@@ -40,8 +40,10 @@ export function httpRange(header, size) {
 
 export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host = "127.0.0.1", port = 0, publicUrl, tlsKey, tlsCert, relays = [], iceServers, iceTransportPolicy = "all",
   publisherState, operatorToken, operatorTokenFile, operatorState, telemetry = false, reportCapacity, reportTtlMs, operatorExtraStatus, beforeListen,
-  admissionOptions, accountBudget, turnCredentials, blockingPlaylistReload = true, mediaCapabilities = { parts: false }, allowEncryptedMedia = false, commitmentSecretKey, delegation, revokedDelegationIds = [], delegationRevocations = [] } = {}) {
+  admissionOptions, accountBudget, turnCredentials, policySessionSnapshot = true, blockingPlaylistReload = true, mediaCapabilities = { parts: false }, allowEncryptedMedia = false, commitmentSecretKey, delegation, revokedDelegationIds = [], delegationRevocations = [] } = {}) {
   if (!["all", "relay"].includes(iceTransportPolicy)) throw new Error("Invalid ICE transport policy; use all or relay.");
+  // Programmatic compatibility option; there is no viewer control or CLI flag.
+  if (typeof policySessionSnapshot !== "boolean") throw new Error("Invalid policy session snapshot option.");
   if (typeof blockingPlaylistReload !== "boolean") throw new Error("Invalid blocking playlist policy.");
   if (turnCredentials !== undefined) {
     if (!turnCredentials || typeof turnCredentials !== "object" || Array.isArray(turnCredentials) || iceServers !== undefined) throw new Error("Supply either static ICE servers or a TURN credential issuer.");
@@ -69,6 +71,12 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
     requestDiagnostics: () => requestDiagnostics.snapshot() });
   let requestDiagnostics, accountControls, turnControls;
   let base, activeMedia = 0;
+  const publicSession = () => ({ v: 1, swarmId: publisher.swarmId, streamEvent: publisher.streamEvent,
+    manifest: publisher.manifestPath, relays: relays.length ? relays : [`${base.replace(/^http/u, "ws")}/relay`],
+    iceTransportPolicy, ...(iceServers ? { iceServers } : {}), ...(turnControls ? { turnCredentials: turnControls.descriptor() } : {}), ...(accountControls ? { accountBudget: accountControls.descriptor() } : {}), ...(publisher.delegation ? { delegation: publisher.delegation } : {}),
+    ...(revokedDelegationIds.length ? { revokedDelegationIds } : {}), ...(delegationRevocations.length ? { delegationRevocations } : {}),
+    admission: admission.descriptor(), mediaCapabilities: { ...mediaCapabilities }, streamAdvertisementEndpoint: "/stream.json", commitmentEndpoint: "/commitment",
+    deliveryPolicyEndpoint: policySessionSnapshot ? "/delivery-policy.json?session=1" : "/delivery-policy.json", ...(policySessionSnapshot ? { deliveryPolicySession: "inline-v1" } : {}), experimental: true });
   const signingBudget = { count: 0, since: Date.now() };
   const handler = async (request, response) => {
     const requestStartedAt = performance.now();
@@ -82,7 +90,8 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
       const url = new URL(request.url, "http://localhost");
       if (turnControls && await turnControls.handle(request, response, url.pathname, base)) return;
       if (accountControls && await accountControls.handle(request, response, url.pathname, base)) return;
-      if (await controls.handle(request, response, url.pathname, base, publisher)) return;
+      if (await controls.handle(request, response, url.pathname, base, publisher,
+        policySessionSnapshot && url.pathname === "/delivery-policy.json" && url.search === "?session=1" ? publicSession : undefined)) return;
       if (await admission.handle(request, response, url.pathname, base)) return;
       if (request.method !== "GET" && request.method !== "HEAD") { response.writeHead(405, { allow: "GET, HEAD" }).end(); return; }
       const category = url.pathname === "/commitment" ? "commitment" : url.pathname.startsWith("/media/") ? "media" : null;
@@ -98,11 +107,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
       if (url.pathname === "/style.css") return send("text/css; charset=utf-8", css);
       if (url.pathname === "/client.js") return send("text/javascript; charset=utf-8", bundle.outputFiles[0].contents);
       if (url.pathname === "/stream.json") return send("application/json", JSON.stringify(advertisement));
-      if (url.pathname === "/session.json") return send("application/json", JSON.stringify({ v: 1, swarmId: publisher.swarmId, streamEvent: publisher.streamEvent,
-        manifest: publisher.manifestPath, relays: relays.length ? relays : [`${base.replace(/^http/u, "ws")}/relay`],
-        iceTransportPolicy, ...(iceServers ? { iceServers } : {}), ...(turnControls ? { turnCredentials: turnControls.descriptor() } : {}), ...(accountControls ? { accountBudget: accountControls.descriptor() } : {}), ...(publisher.delegation ? { delegation: publisher.delegation } : {}),
-        ...(revokedDelegationIds.length ? { revokedDelegationIds } : {}), ...(delegationRevocations.length ? { delegationRevocations } : {}),
-        admission: admission.descriptor(), mediaCapabilities: { ...mediaCapabilities }, streamAdvertisementEndpoint: "/stream.json", commitmentEndpoint: "/commitment", deliveryPolicyEndpoint: "/delivery-policy.json", experimental: true }));
+      if (url.pathname === "/session.json") return send("application/json", JSON.stringify(publicSession()));
       if (url.pathname === "/commitment") {
         if (Date.now() - signingBudget.since >= 10000) { signingBudget.count = 0; signingBudget.since = Date.now(); }
         if (++signingBudget.count > 240) throw new PublisherError("Commitment request budget exceeded.", 429);

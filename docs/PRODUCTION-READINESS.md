@@ -7,6 +7,31 @@ An entry remains open until the evidence described below exists.
 
 ## Current deployed pilot: 16 October 2026
 
+Exact `44b21d6` passed all nine required CI jobs, fresh 273-member consumption
+and guarded HTTPS deployment. Bounded rendition-neighbour discovery and
+cold-peer deadline allocation are deployed, with the existing deadlines and
+resource limits. The pilot selects 900 address requests per minute; the
+default remains 600 and the global capacity 2,048. Private state, permanent
+leases and the independent proxy were preserved. Deployment and finite-source
+cleanup passed independent fresh reviews.
+
+R30 remains RED after 36.188 s of measurement. All fourteen roles started, but
+one contributor recorded an 82 ms origin-only interval before recovering.
+The continuity requirement remains unchanged. A delayed session check and
+subsequent renewal timings fit the interruption; exact request/clock joins
+and the downstream cause remain unproved. All fourteen contexts and owned
+processes, profiles, tunnels and source were closed and independently checked.
+
+The defined P01–P12 source feature surfaces are implemented. Matching capacity,
+7,200 s/22-churn, natural expiry, physical/browser breadth, difficult networks,
+matched wire/cost benefit and final release/download acceptance remain open.
+The long run requires a matching successful short qualifier first. v0.1.0
+remains published and 0.2.0 the source candidate. See
+[current status](STATUS.md#current-delivery-checkpoint) and the
+[checkpoint record](../spikes/results/44b21d6-current-delivery-checkpoint-20261016.json).
+
+## Historical afbf052 checkpoint
+
 Exact `afbf052` passed all nine required CI jobs, fresh 271-member consumption
 and guarded HTTPS deployment. The TURN cache correction is deployed with its
 original limits; private state, permanent leases and the independent proxy
@@ -119,7 +144,7 @@ not claimed. v0.1.0 remains the published release; 0.2.0 is a source candidate.
 
 The remaining checkpoint sections before the delivery checklist are historical.
 Their deployment and pending-work statements belong to their named source/date;
-they do not override the current afbf summary or reclassify retained REDs.
+they do not override the current 44b21d6 summary or reclassify retained REDs.
 
 ## Historical complete-playlist blocking reload candidate
 
@@ -629,18 +654,18 @@ retains its narrower scope. Every requirement remains open for full acceptance.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Exact afbf CI and scoped historical component passes retained. R20 stopped during setup, before measurement, with rate-limit responses and control-body delays. Matching capacity, two-hour/churn and matched benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Exact `44b21d6` CI/deployment and scoped historical component passes retained. R30 measured 36.188 s before an 82 ms origin-only interval; recovery does not satisfy continuity. Full short qualification, two-hour/churn and matched benefit remain open |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
-| P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Exact afbf CI and cache correction deployed. R20 observed 37 qualifying HTTP429s; unchanged budget replay reproduces 637 calls against a shared 600-request address window, with global2048 untouched. Explicit operator configuration passes 16 CLI and four admission checks, retaining defaults. New configuration CI/deployment and field acceptance remain open |
+| P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Exact `44b21d6` CI and guarded deployment pass with explicit address budget 900; default 600/global 2,048 remain unchanged. R30 final admission coverage/reconciliation/caller-abort recovery pass, but complete capacity acceptance remains open. Prior R20 refusals and budget replay retain original scope |
 | P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Deployed 768 ordinary-Chrome trusted opt-in, real process restart, duplicate handling and natural five-minute expiry pass; reporting-off/policy/lease preservation and source cleanup pass; first deployed 219 timeout remains separately retained; backend component evidence does not replace new-client opt-in/reporting validation |
 | P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Nostr and authenticated host-supplied account API supported; Nostr-only pilot valid, no named website/human wallet required. Public cross-Mac shared-cap API PASS and focused LOW lifecycle PASS (74.412 s/seven gates) cover low verified media/reservations, reload/new key/spend, reconnect OFF/fresh consent and state withdrawal. Original 3 MB both-quality/exhaustion trial remains RED with high delivery unverified. Complete shared-media/physical acceptance remains open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Automatic worker drain by a surviving guardian is implemented and has a maintained parent-SIGKILL handoff regression in required CI. The older guarded parent-crash/operator-recovery experiment proves only its recorded path, including both-quality continuity 17. Guardian/host catastrophe remains closed for operator inspection. Final-platform crash/restart acceptance remains separate |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact afbf fresh 271-member package, eleven imports, ledger replay, installed CLI and independent native/HTTP fallback pass. Consumer semver lock differs from root lock; separate standalone ESM inputs match root-lock versions. Immutable 0.2.0 assets and downloaded-release acceptance remain open |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact `44b21d6` fresh 273-member consumption, eleven imports, ledger replay, installed CLI and independent native/HTTP fallback pass. Consumer semver resolutions differ from root lock; standalone ESM is root-lock bound. Final 0.2.0 publication and downloaded-release acceptance remain open |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact afbf nine-job CI, 271-member consumption, guarded deployment/HTTPS and independently reviewed source cleanup pass. Private state, permanent leases and proxy preserved. New operator configuration remains pending. PR8/0.2 publication, immutable downloads and final production acceptance remain open |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Prior Simulator/account/LOW lifecycle/Internet TURN passes keep original scopes. R20 acquired14 contexts but measured0ms before admission/control failures; owned cleanup passed. Idle controls did not reproduce body delays. Full capacity, two-hour/churn, physical/browser/network breadth, natural expiry and matched benefit remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact `44b21d6` nine-job CI, 273-member consumption, guarded deployment/HTTPS and independently reviewed source cleanup pass. Private state, permanent leases and proxy preserved. PR 8/0.2 publication, final downloads and production acceptance remain open |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Prior Simulator/account/LOW lifecycle/Internet TURN passes retain original scopes. R30 acquired/closed fourteen roles and measured 36.188 s before an 82 ms unplanned origin-only interval; independent cleanup passed. Full capacity, two-hour/churn, physical/browser/network breadth, natural expiry and matched benefit remain open |
 
 ## Evidence rules
 

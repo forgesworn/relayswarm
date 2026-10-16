@@ -10,17 +10,17 @@ The 0.2.0 source candidate includes further production feature work; its
 Node 22.13+; CI uses Node 24. The npm registry is unpublished.
 
 The [current experimental pilot](docs/STATUS.md#current-delivery-checkpoint)
-runs exact `afbf052`. Nine required CI jobs, fresh 271-member package
-consumption and guarded HTTPS deployment passed. The deployed TURN correction
-reclaims expired or failed cache entries while preserving live leases and
-unfinished work. Nostr and an authenticated host-supplied account API are
+runs exact `44b21d6`. Nine required CI jobs, fresh 273-member package
+consumption and guarded HTTPS deployment passed. Bounded rendition-neighbour
+discovery and cold-peer deadline allocation are deployed. Nostr and an authenticated host-supplied account API are
 implemented; integrating websites supply their authentication.
 
 The agreed feature surfaces are implemented, but production acceptance is
-incomplete. The latest fourteen-context trial stopped during setup after
-admission rate-limit responses and delayed control bodies. Its measured window
-was zero; all owned cleanup passed. Explicit operator configuration for the
-shared request budget passed local checks; deployment is pending. Matching capacity, two-hour/churn,
+incomplete. The latest fourteen-role trial measured 36.188 seconds before a
+contributor briefly switched to origin-only delivery. Peer-first recovered
+82 ms later; the interruption still fails the unchanged continuity requirement.
+All owned cleanup passed independent review. The pilot uses the explicit
+900-request address budget; the default remains 600. Matching capacity, two-hour/churn,
 natural expiry, physical/browser breadth, difficult networks, measured wire/cost
 benefit and immutable release/download acceptance remain open. v0.1.0 is the
 published prerelease; 0.2.0 remains the source candidate. See the

@@ -72,6 +72,51 @@ test("demo publishes an explicit relay policy and rejects invalid policies befor
   assert.equal(await fetch(`${demo.base}/media/shared.ts`).then((response) => response.text()), "abcdefgh");
 });
 
+test("inline policy snapshots validate the compatibility option before private reads", async () => {
+  for (const policySessionSnapshot of [null, 0, 1, "true", {}]) {
+    await assert.rejects(startDemoServer({ policySessionSnapshot, operatorTokenFile: "/must-not-read-token" }), /Invalid policy session snapshot option/u);
+  }
+});
+
+test("inline policy snapshots expose only the shared public session on the exact opt-in query", async t => {
+  const demo = await start(t, { operatorToken }), agent = new Agent({ keepAlive: true, maxSockets: 1 }); t.after(() => agent.destroy());
+  const wire = (path, options) => bufferedRoundtrip(demo.base, agent, path, options);
+  const sessionReply = await wire("/session.json"), session = JSON.parse(sessionReply.body.toString("utf8"));
+  assert.equal(session.deliveryPolicyEndpoint, "/delivery-policy.json?session=1"); assert.equal(session.deliveryPolicySession, "inline-v1");
+  const bare = JSON.parse((await wire("/delivery-policy.json")).body.toString("utf8"));
+  assert.deepEqual(bare, { v: 1, mode: null, revision: 0, telemetry: false });
+  const reply = await wire(session.deliveryPolicyEndpoint), combined = JSON.parse(reply.body.toString("utf8"));
+  assert.equal(reply.reusedSocket, true); assert.equal(reply.headers["cache-control"], "no-store");
+  assert.deepEqual(combined, { ...bare, session }); exactBufferedReply(reply, 200, Buffer.from(JSON.stringify(combined)));
+  assert.ok(!reply.body.includes(Buffer.from(operatorToken))); assert.ok(!reply.body.includes(Buffer.from("do not serve")));
+  for (const query of ["?session=0", "?session=1&extra=1", "?session=1&session=1", "?session=%31"]) {
+    assert.deepEqual(JSON.parse((await wire(`/delivery-policy.json${query}`)).body.toString("utf8")), bare);
+  }
+  for (const method of ["HEAD", "POST"]) assert.equal((await wire(session.deliveryPolicyEndpoint, { method })).status, 405);
+  // A legacy client follows the advertised endpoint but ignores the extra
+  // public field and still makes its separate session read.
+  const { session: ignored, ...oldClientPolicy } = combined;
+  assert.deepEqual(oldClientPolicy, bare); assert.deepEqual(JSON.parse((await wire("/session.json")).body.toString("utf8")), ignored);
+  const headers = { authorization: `Bearer ${operatorToken}`, "content-type": "application/json" };
+  const changedReply = await fetch(`${demo.base}/operator/policy`, { method: "POST", headers, body: JSON.stringify({ mode: "off" }) });
+  assert.equal(changedReply.ok, true); const changed = await changedReply.json();
+  assert.deepEqual(changed, { v: 1, mode: "off", revision: 1, telemetry: false });
+  const rotatedReply = await fetch(`${demo.base}/operator/admission`, { method: "POST", headers, body: JSON.stringify({ rotate: true }) });
+  assert.equal(rotatedReply.ok, true); const rotated = await rotatedReply.json();
+  const current = await fetch(`${demo.base}${session.deliveryPolicyEndpoint}`).then(r => r.json());
+  assert.deepEqual({ v: current.v, mode: current.mode, revision: current.revision, telemetry: current.telemetry }, changed);
+  assert.equal(current.session.admission.epoch, rotated.epoch); assert.notEqual(current.session.admission.epoch, session.admission.epoch);
+});
+
+test("inline policy snapshots can be disabled without changing the legacy public contract", async t => {
+  const demo = await start(t, { policySessionSnapshot: false });
+  const session = await fetch(`${demo.base}/session.json`).then(r => r.json());
+  assert.equal(session.deliveryPolicyEndpoint, "/delivery-policy.json"); assert.equal(Object.hasOwn(session, "deliveryPolicySession"), false);
+  for (const path of ["/delivery-policy.json", "/delivery-policy.json?session=1"]) {
+    assert.deepEqual(await fetch(`${demo.base}${path}`).then(r => r.json()), { v: 1, mode: null, revision: 0, telemetry: false });
+  }
+});
+
 test("control timings expose numeric headers and authenticated bounded aggregates without request details", async (t) => {
   const token = "b".repeat(64), marker = "private-query-marker";
   const demo = await start(t, { operatorToken: token });

@@ -17,6 +17,7 @@ The token is never in the player page, `/session.json`, public policy or operato
 | `/operator/status` | GET, `Authorization: Bearer TOKEN` | Policy, origin HTTP counters, publisher work/cache metrics, report aggregate, bounded request diagnostics and optional redacted broadcast worker/publication status |
 | `/operator/policy` | POST, bearer token, `application/json` | Accepts only `{"mode":null}`, `{"mode":"off"}`, `{"mode":"shadow"}` or `{"mode":"peer-first"}`; returns incremented policy revision |
 | `/delivery-policy.json` | GET, public | Mode, revision and reporting availability; no token or publisher secret |
+| `/delivery-policy.json?session=1` | GET, public, advertised by the current source | Policy plus the same public session snapshot as `/session.json`; no extra authentication or credentials |
 | `/reports` | POST, explicit server enablement and same-origin browser request | Accepts only bounded numeric measurement fields |
 | `/operator/admission` | POST, bearer token | Revokes a key or rotates the ticket epoch |
 | `/admission/challenge`, `/admission/ticket`, `/admission/verify` | POST, same-origin | Bounded key-possession challenge, short-lived ticket and live verification |
@@ -27,13 +28,31 @@ Unconfigured operator controls return 503; absent/incorrect credentials return 4
 
 `mode: null` leaves mode choice to the viewer. `off` requests origin-only playback. `shadow` or `peer-first` selects behaviour **only after the viewer has chosen a peer mode**: viewer origin-only selection and `Use origin only` always win. A policy can never opt the viewer into uploading. Valid publisher-signed redistribution authorisation is also required by the browser engine; operator policy is not an authorisation bypass.
 
-The page polls policy and the publisher session every two seconds, with a single in-flight poll and five-second fetch budgets. Disablement is cooperative browser behaviour, not an immediate revocation of already delivered media or a claim that every client honours policy. On operator off or policy/session failure, it restores origin loading and clears the upload checkbox. Later enablement leaves uploading off until the viewer opts in again. Playback's video instance remains running; origin availability still determines whether playback can continue. Session identity changes on the same manifest trigger swarm rejoining without resetting page counters or reloading the playback instance. A changed manifest requires an appropriate host-page transition; this page fails to origin rather than guessing.
+The page checks policy and publisher session every two seconds, with at most
+three independent checks pending. Authority expires five seconds after a
+check was issued; response arrival cannot extend it. The source candidate
+advertises `deliveryPolicySession: "inline-v1"` and returns both public snapshots
+in one response from `/delivery-policy.json?session=1`. Older server descriptors
+retain the two parallel requests. Missing or malformed advertised session data
+fails closed; it does not trigger a legacy fallback. Bare policy and operator
+responses keep their existing shapes. Programmatic hosts can use
+`startDemoServer({policySessionSnapshot: false})` for the legacy contract.
+
+Disablement is cooperative browser behaviour, not immediate revocation of
+already delivered media. An observed operator OFF takes effect before session
+validation or admission work. Expired authority restores origin loading and
+clears upload/reporting consent; later success cannot restore those opt-ins.
+Playback's video instance remains running; origin availability still determines
+whether playback continues. Same-manifest identity changes rejoin without
+resetting page counters. A changed manifest fails to origin rather than guessing.
+The combined response reduces request count; it has no new deployed field
+qualification and does not guarantee uninterrupted authority.
 
 ## Upload and measurement limits
 
 The page offers 10 MB, 100 MB (default) or 1 GB of cumulative **media payload** allowance, plus a separate upload rate choice. Web Locks and origin storage reserve payloads atomically across settings, rejoining, reloads and tabs. Interrupted sends are not refunded; oversized next segments do not spend the smaller balance. Exhaustion stops contribution while playback continues. Storage failure disables uploading. Consent is requested anew after reload; the viewer can explicitly raise or reset the allowance. This local allowance covers one browser profile at the origin.
 
-The current source also offers an optional [shared account allowance](ACCOUNT-UPLOAD-BUDGET.md), using explicit Nostr sign-in or the integrating website's authenticated account. Devices using one identity and ledger share cumulative reservations in addition to their local allowances. Account connection, linking, settings changes and resets leave uploading off until fresh viewer consent. Keep the private ledger through upgrades; disconnecting or reloading does not refund its charges. Neither allowance counts complete physical wire traffic. The deployed `8f482b4` pilot offers Nostr sign-in; no website resolver is configured there.
+The current source also offers an optional [shared account allowance](ACCOUNT-UPLOAD-BUDGET.md), using explicit Nostr sign-in or the integrating website's authenticated account. Devices using one identity and ledger share cumulative reservations in addition to their local allowances. Account connection, linking, settings changes and resets leave uploading off until fresh viewer consent. Keep the private ledger through upgrades; disconnecting or reloading does not refund its charges. Neither allowance counts complete physical wire traffic. The deployed `44b21d6` pilot offers Nostr sign-in; no website resolver is configured there.
 
 The library option is `maxUploadBytesPerSession`; omission means unlimited and zero means no media uploads. Its metrics expose configured cap, remaining allowance and exhaustion. Host applications that recreate a swarm must carry their own cumulative allowance forward, as the page does. Rate limits use a token bucket with up to a two-second burst. Signalling, transport overhead, commitment fetches and shadow downloads are additional traffic; an upload media cap is not a wire-traffic limit.
 
