@@ -13,6 +13,11 @@ async function json(request) {
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw fail("Invalid admission JSON."); }
 }
 
+function sendJson(response, status, value) {
+  const body = Buffer.from(JSON.stringify(value), "utf8");
+  response.writeHead(status, { "content-type": "application/json", "content-length": body.length }).end(body);
+}
+
 /** Tickets authorise bounded keys, not unique people. Forwarded IP headers are never trusted. */
 export function createAdmissionControls({ secretKey = generateSecretKey(), swarmId, now = Date.now, ticketTtlSeconds = 120, capacity = 512,
   perAddressTickets = 12, globalTickets = 120, requestCapacity = 2048, perAddressRequests = 600 } = {}) {
@@ -85,8 +90,8 @@ export function createAdmissionControls({ secretKey = generateSecretKey(), swarm
         if (!input || Object.keys(input).length !== 2 || !key(input.pubkey) || typeof input.ticket !== "string" || Buffer.byteLength(input.ticket) > 2048) throw fail("Supply pubkey and bounded ticket.");
         result = { admitted: verify(input.pubkey, input.ticket), epoch };
       }
-      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(result));
-    } catch (error) { response.writeHead(error.status || 500, { "content-type": "application/json" }).end(JSON.stringify({ error: error.status ? error.message : "Admission unavailable." })); }
+      sendJson(response, 200, result);
+    } catch (error) { sendJson(response, error.status || 500, { error: error.status ? error.message : "Admission unavailable." }); }
     return true;
   }
   return { descriptor, handle, verify, revoke, rotate, metrics: () => { prune(); return { tickets: tickets.size, challenges: challenges.size, revoked: revoked.size, capacity, ticketTtlSeconds, perAddressTickets, globalTickets, perAddressRequests, requestCapacity }; } };
