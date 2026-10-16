@@ -1,0 +1,74 @@
+{
+  "v": 1,
+  "date": "2026-10-14",
+  "kind": "relayswarm-complete-playlist-blocking-reload-source-checks",
+  "sourceBase": "fc39e32fe5aed775393bd9ed32ce08898d75c48e",
+  "uncommittedFeatureBytesPinned": true,
+  "sourceFiles": [
+    {
+      "path": "demo/blocking-playlist-reload.mjs",
+      "sha256": "dcabe320d95e798402aa7b2cf677222a76d58bc9765d4aed6a7d4783207f5a69"
+    },
+    {
+      "path": "demo/server.mjs",
+      "sha256": "773a83f1fb0f86ec3ae3a7bcb85849777850bf96980f917d6c9dbc5bc8015e6f"
+    },
+    {
+      "path": "src/hls-publisher.mjs",
+      "sha256": "c92516784935e8f171711bc7ee8367a53b9c16dcc86cb6e8a1d395e9290e3c42"
+    },
+    {
+      "path": "test/blocking-playlist-reload.test.mjs",
+      "sha256": "742d1d9cda147fc80b37122a203da7fa7f645037e4000f36482d60bca15a7409"
+    },
+    {
+      "path": "test/blocking-playlist-http.test.mjs",
+      "sha256": "793fac1b86c3d6e5473a41d00e2ebae489771ebd8dee8bd4a1d56afc47f230dd"
+    }
+  ],
+  "implementation": {
+    "defaultEnabled": true,
+    "legacyOption": false,
+    "completeLiveOnly": true,
+    "presentationWide": true,
+    "targetDurationSeconds": [
+      1,
+      3
+    ],
+    "blockedLimit": 24,
+    "existingMediaLimit": 32,
+    "deadline": "three initial target durations from HTTP handler entry; filesystem scheduling is not hard-cancelled",
+    "rawMediaFilesAndPeerDeadlinesUnchanged": true
+  },
+  "review": {
+    "rounds": 4,
+    "allReportedCorrectnessIssuesAddressed": true,
+    "scope": "watch identity/rearm and revision races, authorisation, bounded wait/cancellation, response transmission admission"
+  },
+  "focusedChecks": {
+    "ok": true,
+    "tests": 49,
+    "httpTests": 5,
+    "helperTests": 18,
+    "publisherAndDemoRegressionTests": 26,
+    "elapsedMs": 7146,
+    "workerReaped": true,
+    "groupAbsent": true,
+    "leaderBirthAbsent": true,
+    "resourceSamplerProof": false,
+    "scope": "filesystem, pure/fake-clock and loopback HTTP only"
+  },
+  "priorExactCI": {
+    "source": "fc39e32fe5aed775393bd9ed32ce08898d75c48e",
+    "run": 38640084885,
+    "attempt": 1,
+    "requiredPassed": 8,
+    "requiredFailed": 1,
+    "failedGate": "broadcast initial low-quality peer delivery",
+    "highAndRestartReached": false,
+    "priorFailuresPreserved": true
+  },
+  "browserAcceptance": "pending",
+  "physicalAndPublicNATAcceptance": "open",
+  "releaseOrDeployment": false
+}

@@ -1,0 +1,27 @@
+# RelaySwarm local broadcaster bridge, tested with MediaMTX v1.21.2.
+# Only local clients can publish/read. Remote ingest needs its own TLS and
+# authentication policy; the browser publisher has a separate HTTPS boundary.
+logLevel: warn
+rtmp: true
+rtmpAddress: 127.0.0.1:1935
+rtsp: true
+rtspAddress: 127.0.0.1:8554
+rtspTransports: [tcp]
+hls: false
+webrtc: false
+moq: false
+srt: false
+api: false
+metrics: false
+authInternalUsers:
+  - user: any
+    ips: [127.0.0.1, '::1']
+    permissions:
+      - action: publish
+        path: live
+      - action: read
+        path: live
+paths:
+  live:
+    source: publisher
+    overridePublisher: false

@@ -1,0 +1,333 @@
+{
+  "v": 1,
+  "sourceSha": "fa79c2260431cf7901921fab4eaca251c4988f4b",
+  "gates": {
+    "playback": {
+      "status": "green",
+      "scope": "Actual frame/time plus native audio decoded-byte progress at each requested quality; zero fatal/native/page errors. Decode does not prove audible output."
+    },
+    "contribution": {
+      "status": "green",
+      "scope": "Both explicitly consented contributors remain serving and send media within100MB each; no reconsent/reset."
+    },
+    "verifiedPeerPayload": {
+      "status": "green",
+      "scope": "Receive-only actor records verified peer bytes/fragments at low and high qualities during the measured window; links alone do not pass."
+    }
+  },
+  "measurementMs": 60011,
+  "browserVersion": "155.0.8059.41",
+  "client": {
+    "sha256": "398ac43764774747fa2fa9a3d15805d66c30101057f664212c05f56cf5250702",
+    "bytes": 728551
+  },
+  "scope": {
+    "programmaticDropdownSelection": true,
+    "nativeDropdownInteractionProved": false,
+    "metricsProjection": {
+      "version": 1,
+      "maxDeliveryMeasurements": 6,
+      "maxBufferedRanges": 4,
+      "perLoadBudgetObserved": false,
+      "remoteHaveObserved": false
+    },
+    "diagnosticOnly": false,
+    "serverProtocolTrial": false,
+    "permanentDeployedProtocolEvidence": true,
+    "ordinaryDefaultTransportEvidence": true,
+    "networkTransportOverride": false,
+    "automatedHeadlessChrome": true,
+    "ordinaryTLS": true,
+    "additionalRTCOrMediaFlags": false,
+    "fakeMedia": false,
+    "getUserMedia": false,
+    "permissionGrants": false,
+    "mdnsOverride": false,
+    "personalProfiles": false,
+    "reporting": false,
+    "contributorAllowanceBytes": 100000000,
+    "contributorRateBytesPerSecond": 512000,
+    "noQuotaReset": true,
+    "noAutomaticReconsent": true,
+    "contributorWarmupMs": 15000,
+    "plannedMeasurementMs": 60000,
+    "maxOwnedBrowserLifetimeMs": 150000,
+    "physicalDevice": false,
+    "NATClassProved": false,
+    "financialSavingsProved": false,
+    "chromeFlags": [
+      "--user-data-dir=<owned-private-temporary-profile>",
+      "--headless=new",
+      "--remote-debugging-address=127.0.0.1",
+      "--remote-debugging-port=0",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "about:blank"
+    ]
+  },
+  "permanentProxy": {
+    "sourceSha": "ee1510d429ac85f3738c03f10a09b753ec4eb037",
+    "baselineBindingSHA256": "2c9574b8a718fd43bfd7c32b2aa50b79594c86b75511c1c5186f64e52710cccc",
+    "fileSHA256": "a3a14482c367123c4182188d36f7932033d73ea2a68378e10693c0b194a52f4a",
+    "runtimeProtocols": {
+      "srv0": [
+        "h1"
+      ]
+    },
+    "version": "v2.11.7"
+  },
+  "ci": {
+    "runId": 38496983011,
+    "sourceSha": "fa79c2260431cf7901921fab4eaca251c4988f4b",
+    "conclusion": "success",
+    "nineRequiredJobsValidated": true
+  },
+  "roles": [
+    {
+      "role": "contributor-low",
+      "totals": {
+        "peerFirstBytes": 0,
+        "uploaded": 3168552,
+        "peerFirstLoads": 0
+      },
+      "peers": {
+        "connected": 2,
+        "dialling": 0,
+        "linksOpened": 2,
+        "linksClosed": 0,
+        "dialsFailed": 0,
+        "dialsTimedOut": 0,
+        "candidatePairs": {
+          "host/host": 2
+        }
+      },
+      "fatal": 0,
+      "native": 0,
+      "pageErrorCount": 0,
+      "lifetimeStalls": 0,
+      "lifetimeStallMs": 0,
+      "zeroFrameIntervals": 0,
+      "unavailableReads": 0,
+      "contributionWithdrawn": false,
+      "uploadConsent": true,
+      "serving": true,
+      "videoQualities": [
+        "low"
+      ],
+      "audioQualities": [
+        "low"
+      ]
+    },
+    {
+      "role": "contributor-high",
+      "totals": {
+        "peerFirstBytes": 0,
+        "uploaded": 10037696,
+        "peerFirstLoads": 0
+      },
+      "peers": {
+        "connected": 2,
+        "dialling": 0,
+        "linksOpened": 2,
+        "linksClosed": 0,
+        "dialsFailed": 0,
+        "dialsTimedOut": 0,
+        "candidatePairs": {
+          "host/host": 2
+        }
+      },
+      "fatal": 0,
+      "native": 0,
+      "pageErrorCount": 0,
+      "lifetimeStalls": 0,
+      "lifetimeStallMs": 0,
+      "zeroFrameIntervals": 0,
+      "unavailableReads": 0,
+      "contributionWithdrawn": false,
+      "uploadConsent": true,
+      "serving": true,
+      "videoQualities": [
+        "high"
+      ],
+      "audioQualities": [
+        "high"
+      ]
+    },
+    {
+      "role": "origin-baseline-low",
+      "totals": {
+        "peerFirstBytes": 0,
+        "uploaded": 0,
+        "peerFirstLoads": 0
+      },
+      "peers": {
+        "connected": 0,
+        "dialling": 0,
+        "linksOpened": 0,
+        "linksClosed": 0,
+        "dialsFailed": 0,
+        "dialsTimedOut": 0,
+        "candidatePairs": {}
+      },
+      "fatal": 0,
+      "native": 0,
+      "pageErrorCount": 0,
+      "lifetimeStalls": 0,
+      "lifetimeStallMs": 0,
+      "zeroFrameIntervals": 0,
+      "unavailableReads": 0,
+      "contributionWithdrawn": false,
+      "uploadConsent": false,
+      "serving": false,
+      "videoQualities": [
+        "low"
+      ],
+      "audioQualities": [
+        "low"
+      ]
+    },
+    {
+      "role": "receive-only",
+      "totals": {
+        "peerFirstBytes": 13206248,
+        "uploaded": 0,
+        "peerFirstLoads": 30
+      },
+      "peers": {
+        "connected": 2,
+        "dialling": 0,
+        "linksOpened": 2,
+        "linksClosed": 0,
+        "dialsFailed": 0,
+        "dialsTimedOut": 0,
+        "candidatePairs": {
+          "host/host": 2
+        }
+      },
+      "fatal": 0,
+      "native": 0,
+      "pageErrorCount": 0,
+      "lifetimeStalls": 0,
+      "lifetimeStallMs": 0,
+      "zeroFrameIntervals": 0,
+      "unavailableReads": 0,
+      "contributionWithdrawn": false,
+      "uploadConsent": false,
+      "serving": false,
+      "videoQualities": [
+        "low",
+        "high"
+      ],
+      "audioQualities": [
+        "low",
+        "high"
+      ]
+    }
+  ],
+  "receiverPeer": [
+    {
+      "level": 0,
+      "loads": 15,
+      "bytes": 3168552,
+      "method": "Deduplicated retained sample fragment rings by atMs/level/sequence/cc; reconciled to cumulative receipt totals."
+    },
+    {
+      "level": 1,
+      "loads": 15,
+      "bytes": 10037696,
+      "method": "Deduplicated retained sample fragment rings by atMs/level/sequence/cc; reconciled to cumulative receipt totals."
+    }
+  ],
+  "inputWitnesses": {
+    "trustedNativeControlCount": 8,
+    "totalNativeControlWitnesses": 8,
+    "controls": {
+      "upload": 4,
+      "start": 4
+    },
+    "programmaticDropdownSelection": true,
+    "nativeDropdownInteractionProved": false
+  },
+  "cdpBeforeCleanup": {
+    "records": 393,
+    "routes": {
+      "session": 148,
+      "policy": 144,
+      "admissionChallenge": 3,
+      "admissionTicket": 3,
+      "admissionVerify": 61,
+      "commitment": 34
+    },
+    "protocols": {
+      "http/1.1": 393
+    },
+    "statuses": {
+      "200": 393
+    },
+    "failed": 0,
+    "finished": 393,
+    "responseExtra": 393,
+    "dropped": 0,
+    "unknownDropped": 0
+  },
+  "cleanup": {
+    "browser": {
+      "chromeLeaderStopped": true,
+      "chromeGroupStopped": true,
+      "knownOwnedProcessesRemaining": [],
+      "profileRemoved": true,
+      "sourceCleanupPerformedByObserver": false
+    },
+    "wrapper": {
+      "browserProved": true,
+      "providerProved": true
+    },
+    "allWrapperGroupsAbsent": true,
+    "rootSourceRemoved": true,
+    "rootSourceExitCode": 255,
+    "sourceRunningWhenInspected": true,
+    "strictV2Validation": true,
+    "stableIdentityMatched": true,
+    "helperFilesByteMatched": true,
+    "reviewedInputsByteMatched": true,
+    "helperSHA256": "5f859ca90e081793ce7fce24271c34ca539e5e0d54ae646c2166420b20e54365",
+    "reviewedInputsSHA256": "a32ccdaac9b974accaa66d3c531982f5d569627ade4458bb8586d144264e07cb",
+    "deploymentJournalSHA256": "d00fe3e5e3b099ba0a4b982839908462eba7933bbb71c1cc750eee004c567939",
+    "cleanupJournalBeforeSHA256": "d00fe3e5e3b099ba0a4b982839908462eba7933bbb71c1cc750eee004c567939",
+    "cleanupJournalAfterSHA256": "3e4677720abbc82abb3b8f93c29b31dd22f47e4265d45cc71a61eedc91629cb2",
+    "guardWitnesses": {
+      "inspectedBeforeRemoval": true,
+      "journalOwnedSourceMatched": true,
+      "createdSourceMatched": true,
+      "appAndProxyGuardMatched": true,
+      "birthImageMountsMatched": true
+    },
+    "negativeProofRejections": {
+      "missing-source": true,
+      "wrong-birth": true,
+      "wrong-journal": true,
+      "wrong-input-pin": true
+    },
+    "validationScope": "Retained actual receipt and local immutable-input comparison; no new host inspection. Journal hashes bind actual guarded receipts; journal bodies were not newly fetched."
+  },
+  "longCompatibility": {
+    "exactCIContractShortCleanupPrerequisitesPass": true,
+    "localR6Rejected": true,
+    "longQualified": false,
+    "reasons": [
+      "The same-source r6 local qualification stopped RED after91.990 of300 seconds on seven admission address-request-limit HTTP429 refusals.",
+      "R6 observed zero RTC links and verified peer payload; the cause of unavailable peer connections remains unproved.",
+      "No7200-second14-context ordinary field run or22 scheduled lifecycle returns has been performed."
+    ]
+  },
+  "limits": [
+    "Four-role60.011-second M1 public Chrome scope; no14-role7200-second, physical-device, NAT-diversity or financial proof.",
+    "All observed peer pairs were host/host on one machine; the public origin does not make this cross-device evidence.",
+    "Programmatic dropdowns are explicitly untrusted; native Start/upload controls retain trusted event witnesses.",
+    "34 commitment HTTP requests are not34 verified media loads; capture extends beyond final media samples.",
+    "Earlier REDs and unknown historical transport causes remain preserved.",
+    "No source, host, browser or phone action was performed by this analysis."
+  ],
+  "kind": "permanent-public-short-acceptance",
+  "analysisSHA256": "5a2d72383b7a6d5fa47ff34c39cbdef125f2cb26b5ee9679aff4b393a115b05b"
+}

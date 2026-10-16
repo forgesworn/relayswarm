@@ -1,0 +1,193 @@
+{
+  "v": 1,
+  "recordedAt": "2026-10-13T11:42:12.587746+00:00",
+  "youtube": {
+    "v": 1,
+    "recordedAt": "2026-10-13T10:51:09.935228+00:00",
+    "revision": "4bffa96e4507ea43398573ee6f35431831f6c8fa",
+    "platform": "YouTube",
+    "authorisedPrivateTest": true,
+    "title": "RelaySwarm private acceptance test",
+    "visibilityConfirmedPrivateBeforeAndDuringBroadcast": true,
+    "automaticStartObserved": true,
+    "streamHealth": "Excellent",
+    "ownerWatchPlayback": {
+      "width": 1280,
+      "height": 720,
+      "elapsedSeconds": 14.268351,
+      "decodedVideoFramesAdvanced": 428,
+      "decodedAudioBytesAdvanced": 232756,
+      "muted": false,
+      "playbackError": null
+    },
+    "broadcastEnded": true,
+    "archiveDeleted": true,
+    "deletionVerifiedByOwnerWatch": [
+      "Video unavailable",
+      "This video has been removed by the uploader"
+    ],
+    "forwardingDisabled": true,
+    "secretMountRemoved": true,
+    "localAndRemoteTaskCredentialCopiesRemoved": true,
+    "channelDefaultStreamKeyUnchanged": true,
+    "scope": "Synthetic FFmpeg source through deployed RelaySwarm to private external-platform playback; no OBS workstation or public-broadcast acceptance claim."
+  },
+  "obs": {
+    "source": "Installed OBS32.1.2; isolated synthetic video/audio scene; localhost-only SSH-forwarded RTMP ingest",
+    "captureSources": false,
+    "credentials": false,
+    "configurationRoutingRestored": true,
+    "ownedApplicationClosed": true,
+    "browserObserver": {
+      "ok": true,
+      "kind": "obs-public-origin-player-ninety-second-observer",
+      "source": "8d5cae3bacf1f90cc5d7b4ce4ca213837cc14ae8",
+      "clientSHA256": "ca7c2708572dc098c30debb0b18925eefde2167bbdd7a3be095148b8d0187b90",
+      "initialIdentity": {
+        "publisher": "f1422f27f503e1c9ff1338a5ebd5f47f31274180be69768179befd7cb0715ca4",
+        "eventId": "05ce10f55bf82901ecf53c5c81de79ddba8eaf1360bb1f218cdeb7a780a9dc04",
+        "swarmId": "publisher-05ce10f55bf82901ecf53c5c81de79dd",
+        "manifest": "/media/master.m3u8"
+      },
+      "initialLevels": [
+        {
+          "quality": "low",
+          "mediaSequence": 5891,
+          "discontinuitySequence": 11,
+          "segments": 12
+        },
+        {
+          "quality": "high",
+          "mediaSequence": 5891,
+          "discontinuitySequence": 11,
+          "segments": 12
+        }
+      ],
+      "finalLevels": [
+        {
+          "quality": "low",
+          "mediaSequence": 5940,
+          "discontinuitySequence": 11,
+          "segments": 12
+        },
+        {
+          "quality": "high",
+          "mediaSequence": 5940,
+          "discontinuitySequence": 11,
+          "segments": 12
+        }
+      ],
+      "elapsedPlaybackMs": 92666,
+      "elapsedMs": 100215,
+      "qualities": [
+        {
+          "quality": 0,
+          "intervalsWithVideoAndAudioDecodedProgress": 5,
+          "frameDeltaSum": 751,
+          "audioDecodedByteDeltaSum": 410609,
+          "firstAt": "2026-10-13T11:35:22.522Z",
+          "lastAt": "2026-10-13T11:36:45.114Z",
+          "lastFragmentSequence": 5948,
+          "discontinuity": 11
+        },
+        {
+          "quality": 1,
+          "intervalsWithVideoAndAudioDecodedProgress": 12,
+          "frameDeltaSum": 1874,
+          "audioDecodedByteDeltaSum": 1016946,
+          "firstAt": "2026-10-13T11:35:27.601Z",
+          "lastAt": "2026-10-13T11:36:25.006Z",
+          "lastFragmentSequence": 5937,
+          "discontinuity": 11
+        }
+      ],
+      "finalDecodedVideoFrames": 2632,
+      "finalAudioDecodedBytes": 1432100,
+      "fatal": 0,
+      "native": 0,
+      "stalls": 0,
+      "recovery": {
+        "attempted": 0,
+        "outcome": "idle",
+        "records": []
+      },
+      "cleanup": {
+        "chromeLeaderStopped": true,
+        "chromeGroupStopped": true,
+        "profileRemoved": true
+      },
+      "scope": {
+        "headless": true,
+        "originOnly": true,
+        "uploadConsent": false,
+        "telemetryConsent": false,
+        "microphoneRequested": false,
+        "permissionOverrides": false,
+        "samePageThroughSwitches": true,
+        "physicalDevice": false,
+        "unmodifiedPlaylists": true,
+        "maxDurationMs": 150000,
+        "plannedPlaybackMs": 90000,
+        "loadedSource": "8d5cae3bacf1f90cc5d7b4ce4ca213837cc14ae8",
+        "expectedClientSHA256": "ca7c2708572dc098c30debb0b18925eefde2167bbdd7a3be095148b8d0187b90",
+        "browserVersion": "155.0.8059.40"
+      },
+      "notes": [
+        "Chrome webkitAudioDecodedByteCount is a browser decode counter, not transmitted audio bytes or physical audibility.",
+        "Each positive interval also observed actual selected-quality origin fragments at CC11.",
+        "OBS publishing provenance and physical audio output are separately owned evidence.",
+        "No upload, microphone, permission override, reload or reset was used."
+      ]
+    },
+    "scope": "Video/audio decoding at both origin qualities; no physical audibility, camera/screen capture, peer delivery or same-run OBS-to-YouTube claim."
+  },
+  "liveRestart": {
+    "deployedBeforeCorrection": "8d5cae3bacf1f90cc5d7b4ce4ca213837cc14ae8",
+    "sameVolumeIdentitySequenceAndLeasesPreserved": true,
+    "existingPageFinalRestartPassed": false,
+    "observedFailure": "Successful fresh playlists with obsolete previous continuity, no decoded-frame/time progress, zero fatal/native errors",
+    "candidateValidation": {
+      "at": "2026-10-13T11:30:00.413Z",
+      "baseCommit": "8d5cae3bacf1f90cc5d7b4ce4ca213837cc14ae8",
+      "sourceSha256": {
+        "demo/client.mjs": "1b63039dc4f5f6b2b0dc2d0944e0cc343e5e4ccbb6a8ebe89d6dbc8838613d6b",
+        "demo/media-recovery.mjs": "ae869e134da24c6afdfdd8b57d990604c50a38f9efdf40e2f9ad16870a859140",
+        "test/media-recovery.test.mjs": "ac3e16c120f99cdb63cb5ac9d8c68762c5e4e2d985e30ff761bf757229f5ce2d",
+        "test/live-restart-browser.mjs": "8086b2b56ef85849a62ca46bb25f0e8d58ad6f4707d0424636da8271dffe8126",
+        "test/hls-playback-browser.mjs": "92efd0e8ecfaab67671c5c05cd6328802b72f52bee7a538d28e4f9b9a81c33b9",
+        "package.json": "2f887b7e969f29bf9498309690c0e0e5a17ddc67c0164e419827239e8f7d8490",
+        ".github/workflows/test.yml": "6ca796f0415ce58ceb2e4c2fb37dbb0ece1019dab9883ec34f74923fb875472f"
+      },
+      "checks": {
+        "focusedClientAndRecoveryTests": 10,
+        "syntaxModules": 90,
+        "diffCheck": true
+      },
+      "evidence": {
+        "observedHostedFailure": "artifacts/restart-observer-8d/receipt.json",
+        "readOnlyHostedState": "artifacts/restart-observer-8d/read-only-hls-internals.json",
+        "negativeLiveControl": "artifacts/live-restart-switch-baseline/live-restart.json",
+        "liveTreatmentCancellationDeadline": "artifacts/live-restart-fenced/live-restart.json",
+        "qualityPeerCheckpoints": "artifacts/playback-quality-checkpoint/hls-playback.json"
+      },
+      "scope": {
+        "historicalMSECauseEstablished": false,
+        "localLiveFailureReproduced": true,
+        "localLiveRepairProved": true,
+        "hostedNewRuntimeAcceptance": false
+      },
+      "cleanup": {
+        "allOwnedBrowserAndFixtureRunsClosed": true,
+        "hostSourceChanged": false,
+        "deviceOrEmulatorChanges": false
+      }
+    },
+    "repairTriggerNoProgressMs": 10000,
+    "repairProgressDeadlineMs": 10000,
+    "repairAttemptsPerPage": 1,
+    "originOnlyUploadConsentRevoked": true,
+    "uploadAllowancePreserved": true,
+    "historicalMSECauseEstablished": false,
+    "newRuntimeHostedRepeatPending": true
+  }
+}

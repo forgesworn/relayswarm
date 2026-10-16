@@ -19,10 +19,11 @@ function waitForListening(server) {
   });
 }
 
-export async function startLocalRelay() {
+export async function startLocalRelay({ replayEphemeral = true } = {}) {
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   const subscriptions = new WeakMap();
   const events = [];
+  const replayedKinds = [];
   await waitForListening(server);
 
   server.on("connection", (socket) => {
@@ -35,7 +36,12 @@ export async function startLocalRelay() {
       if (frame[0] === "REQ" && typeof frame[1] === "string" && frame[2] && typeof frame[2] === "object") {
         subscriptions.get(socket).set(frame[1], frame[2]);
         for (const event of events) {
-          if (matches(event, frame[2])) socket.send(JSON.stringify(["EVENT", frame[1], event]));
+          // `events` is diagnostic capture, not an assertion of relay storage.
+          if (!replayEphemeral && event.kind >= 20000 && event.kind < 30000) continue;
+          if (matches(event, frame[2])) {
+            replayedKinds.push(event.kind);
+            socket.send(JSON.stringify(["EVENT", frame[1], event]));
+          }
         }
         socket.send(JSON.stringify(["EOSE", frame[1]]));
         return;
@@ -57,6 +63,7 @@ export async function startLocalRelay() {
   return {
     url: `ws://127.0.0.1:${address.port}`,
     events,
+    replayedKinds,
     async close() {
       for (const client of server.clients) client.terminate();
       await new Promise((resolve) => server.close(resolve));

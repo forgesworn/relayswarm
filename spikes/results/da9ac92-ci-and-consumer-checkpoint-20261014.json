@@ -1,0 +1,198 @@
+{
+  "v": 1,
+  "kind": "source-bound-ci-and-clean-consumer-checkpoint",
+  "sourceSha": "da9ac9202fd8794a68d6d707a1ab5d8109bbbb34",
+  "ci": {
+    "runId": 38620173084,
+    "attempt": 1,
+    "status": "completed",
+    "conclusion": "failure",
+    "requiredPass": 8,
+    "requiredFail": 1,
+    "optionalSoak": "skipped",
+    "failedJob": "hls.js playback and field-test demo",
+    "failedGate": {
+      "file": "test/broadcast-browser.mjs",
+      "line": 194,
+      "timeoutMs": 60000,
+      "predicate": "post-restart progression, newer discontinuity and verified consumer peer media",
+      "unchanged": true
+    },
+    "beforeRestartLowAndHighPeerPassed": true
+  },
+  "broadcast": {
+    "browser": "Linux Chrome155.0.8059.79",
+    "diagnosticInjected": true,
+    "ordinaryQualificationEvidence": false,
+    "verifiedLoads": 4,
+    "verifiedBytes": 1730352,
+    "lowUploadedAcceptedPayloadBytes": 219772,
+    "highUploadedAcceptedPayloadBytes": 1510580,
+    "cc1ConsumerFragments": 31,
+    "cc1PeerFragments": 0,
+    "cc1ZeroBudgetRecords": 31,
+    "playableAheadMs": {
+      "min": 1158.596,
+      "max": 1202.097
+    },
+    "originReserveMs": 2000,
+    "donorCompletionBeforeConsumerLoadingMs": {
+      "min": 338.9,
+      "max": 386.0
+    },
+    "acceptedHaveRowsAreNotMembershipProof": true,
+    "stalls": {
+      "low": 1,
+      "high": 1,
+      "baseline": 0,
+      "consumer": 0
+    },
+    "fatalNativeAppendErrors": 0,
+    "availabilityRows": 1183,
+    "rowsDropped": 0,
+    "unknown": 0,
+    "unlabelled": 0,
+    "extractionsPassed": 4,
+    "cleanup": {
+      "requestObserverReleased": true,
+      "fullActorApiAndOsCleanupProvedByReceipt": false
+    }
+  },
+  "mockRenewal": {
+    "local": {
+      "elapsedMs": 47010,
+      "browser": "Mac Chrome155.0.8059.41",
+      "allFiveCheckpointsPass": true,
+      "newSwarmVerifiedLoads": 2,
+      "newSwarmVerifiedBytes": 590508,
+      "rolloverRefreshCounts": [
+        4,
+        4,
+        4
+      ],
+      "scopedWorkerApiGroupScratchCleanup": true
+    },
+    "hosted": {
+      "elapsedMs": 50433,
+      "supervisorElapsedMs": 50879,
+      "browser": "Linux Chrome155.0.8059.79",
+      "allFiveCheckpointsPass": true,
+      "receiverVerifiedLoads": 14,
+      "receiverVerifiedBytes": 3811512,
+      "newSwarmVerifiedLoads": 3,
+      "newSwarmVerifiedBytes": 899956,
+      "rolloverRefreshCounts": [
+        6,
+        7,
+        7
+      ],
+      "accountGrantRenewals": [
+        3,
+        3
+      ],
+      "scopedWorkerApiGroupScratchCleanup": true
+    },
+    "credentialTtlSeconds": 15,
+    "issuer": "owned fake response; no issuer network request",
+    "relayEndpoint": "unavailable loopback port9",
+    "media": "real loopback host WebRTC",
+    "consentAndNondecreasingAcceptedSpendRetained": true,
+    "physicalDevices": false,
+    "actualInternetTurnRenewalProved": false
+  },
+  "consumer": {
+    "sourceArchive": {
+      "filename": "candidate-source.tar",
+      "bytes": 3973120,
+      "sha256": "1dc7186e29321d432dfc1bd7de06e2517f9ff047435376fbccde92df09f2cdda"
+    },
+    "package": {
+      "bytes": 1082277,
+      "files": 237,
+      "sha256": "6d618c25d15032a79cb07a5050dd51f2aa9273575f511c1b83a1b1906e475412",
+      "all237RegularSafeMembersExactGitArchive": true
+    },
+    "standalone": {
+      "file": "relayswarm-hls-swarm-0.2.0.mjs",
+      "bytes": 121478,
+      "sha256": "612f5f502964462d8eba8909e5041db1030da96edbaea7dd5caa1088d1eac171"
+    },
+    "productionOnly": true,
+    "offlineCacheOnly": true,
+    "documentedNamedImports": 11,
+    "installedCli": true,
+    "ledger": {
+      "spent": 61,
+      "remaining": 39,
+      "overCapRefused": true,
+      "reopenReplayIdempotent": true,
+      "scope": "sequential two page keys in trusted core, not simultaneous HTTP account authentication"
+    },
+    "native": {
+      "bytes": 131097,
+      "verified": true,
+      "httpRequests": 0
+    },
+    "fallback": {
+      "bytes": 131097,
+      "verified": true,
+      "httpRequests": 1
+    },
+    "optionalTurnDisabledSmoke": true,
+    "elapsedMs": 8962,
+    "cleanup": {
+      "consumerAndStandaloneReapedAndGroupsAbsent": true,
+      "allSampledPsDirectChildrenReaped": true,
+      "noRejectedOrUnknownProbe": true,
+      "oneObservedOwnedScratchAbsent": true,
+      "servicesClosed": true,
+      "sourceCleanAfter": true,
+      "groupSignalsSent": false,
+      "scope": "Direct sampler child reaping separately recorded from the two Node phase groups; no new host observation by this audit"
+    },
+    "firstAttempt": {
+      "ok": false,
+      "elapsedMs": 3846,
+      "testExpectation": "disabled POST404",
+      "actualContract": "POST405",
+      "runtimeChanged": false,
+      "standaloneNotStarted": true,
+      "consumerAndScratchCleanupProved": true,
+      "originalAllPlannedGroupsGoneFlag": false,
+      "relabelledPass": false
+    }
+  },
+  "internetRenewal": {
+    "status": "pending",
+    "resultClaimed": false
+  },
+  "deployment": {
+    "sourceSha": "8f482b4528a671acfe9f1afc336cce5743aaaefd",
+    "reportingEnabled": false,
+    "forwardingEnabled": false,
+    "optionalRenewalDeployed": false
+  },
+  "publication": {
+    "publishedRelease": "v0.1.0",
+    "candidateAssetsPublished": false,
+    "pr8Open": true,
+    "allP01ThroughP12Closed": false
+  },
+  "remainingGates": [
+    "ordinary sharing and same-topology sustained capacity",
+    "physical devices and complete Safari acceptance",
+    "real TURN renewal, expired-credential fresh allocation/reconnection and continuous relay use",
+    "7200seconds and22churn",
+    "server allocation quotas and matched total-wire/billed cost",
+    "exact final all-required CI, immutable downloaded release assets and production acceptance"
+  ],
+  "history": "Earlier07all-ninePASS, abbWindowsRED,426mediaRED and prior ordinary/fourteen-role failures remain source-bound and unchanged.",
+  "proofDigests": {
+    "artifacts/candidate-da9ac92-ci-analysis-20261014/analysis.json": "3e87e93a68353fa2738822428fc25495ac6516eb81dad6867401c77a7966a40a",
+    "artifacts/candidate-da9ac92-ci-analysis-20261014/FINAL-EVIDENCE-MANIFEST.json": "b7f7761eb0db3ff9f4b1a70ab9ffb7d1c3fc596f00d7217be5e065a6d74fbe05",
+    "artifacts/clean-consumer-da9ac92-r2-20261014/analysis/analysis.json": "f2ad0516d19a2d13d40de09a68c09373dd6dd0e35f424cc9cbdeb6e5d26f416e",
+    "artifacts/clean-consumer-da9ac92-r2-20261014/analysis/EVIDENCE-MANIFEST.json": "9a4f5793588369b98d65f3e5ce72927f41afae2541a23646caec4dcf47b1dc84",
+    "artifacts/clean-consumer-da9ac92-r2-20261014/R1-FAILURE.json": "c880453989fafe51dae5b1cfc4e6b0a1479fffa0ff83db0907d179f6ac2c8399",
+    "artifacts/candidate-da9ac92-root-delivery-20261014/browser-execution-summary.json": "c5739ff027686653dd14c9a117ae1b54a261078bde97cbcc8219fcce685633a8"
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "v": 1,
+  "scope": "Optional application-selected secure TCP TURN URLs; local fake issuer/VM/loopback tests, no Internet allocation or field proof.",
+  "baseHead": "e7330694dbcd7a16d5ac305dbde74f95162fbdc7",
+  "rawIssuedLeaseUnchanged": true,
+  "oldPendingGenerationFenced": true,
+  "freshApplyAndUploadConsentRequiredOnSelectionChange": true,
+  "defaultDescriptorByteCompatible": true,
+  "initialGuardedRun": {
+    "manifest": "artifacts/turn-tls-tcp-projection-focused-validation-20261015/EVIDENCE-MANIFEST.json",
+    "sha256": "a6401b820f9c5af07e6ca139ff01276e3ae388d44e8e66ed8ed2eb9a5b88d553",
+    "verdict": "RED",
+    "elapsedMs": 14743,
+    "syntaxModulesPassed": 142,
+    "tests": {
+      "executed": 59,
+      "passed": 57,
+      "failed": 2,
+      "cancelled": 0,
+      "skipped": 0,
+      "phaseCounts": [
+        [
+          29,
+          29,
+          0,
+          0,
+          0
+        ],
+        [
+          30,
+          28,
+          2,
+          0,
+          0
+        ]
+      ],
+      "failedNames": [
+        "invalid initial TURN projection unknown enum cannot establish peer authority",
+        "invalid initial TURN projection extra field cannot establish peer authority"
+      ],
+      "docsExecuted": false
+    },
+    "cleanup": {
+      "workerReaped": true,
+      "groupAbsent": true,
+      "leaderBirthAbsent": true,
+      "allAttemptedResourceProbeChildrenReaped": true,
+      "allAcceptedResourceProbeChildrenReaped": true
+    },
+    "resources": {
+      "samples": 14,
+      "peakRssBytes": 531988480,
+      "peakProcesses": 11,
+      "minimumFreePercent": 38,
+      "allAcceptedWithinCaps": true,
+      "limits": {
+        "rssBytes": 3221225472,
+        "processes": 64,
+        "minFreePercent": 25,
+        "probeSeconds": 2
+      }
+    }
+  },
+  "testOnlyCorrection": "Model actual initially-disabled HTML Start button; use enabled/active/pending/refreshes and policy/peer/consent witnesses rather than treating disabled-helper available=true as credential authority.",
+  "successorGuardedRun": {
+    "manifest": "artifacts/turn-tls-tcp-projection-focused-validation-r2-20261015/EVIDENCE-MANIFEST.json",
+    "sha256": "50f2438d94a50744edfb4cb2f33da7a8b32e1fbc4982ee86f234665c36d5a86b",
+    "verdict": "PASS_FOCUSED_SUCCESSOR",
+    "elapsedMs": 7942,
+    "tests": {
+      "fullDemoClient": 52,
+      "passed": 52,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "docs": {
+      "authoredFiles": 23,
+      "links": 327,
+      "generatedContextFresh": true
+    },
+    "cleanup": {
+      "workerReaped": true,
+      "groupAbsent": true,
+      "leaderBirthAbsent": true,
+      "allAttemptedResourceProbeChildrenReaped": true,
+      "allAcceptedResourceProbeChildrenReaped": true
+    },
+    "resources": {
+      "samples": 8,
+      "peakRssBytes": 464437248,
+      "peakProcesses": 6,
+      "minimumFreePercent": 52,
+      "limits": {
+        "rssBytes": 3221225472,
+        "processes": 64,
+        "minFreePercent": 25,
+        "probeSeconds": 2
+      }
+    },
+    "runtimeUnchanged": true
+  },
+  "independentEvidenceRecordsVerified": 21,
+  "independentSuccessorSourceRecordsVerified": 387,
+  "remaining": "Exact-head CI/package, Internet selected TLS/renewal, ordinary public, physical and sustained gates remain separate. Pilot still54; no shared service configuration changed."
+}

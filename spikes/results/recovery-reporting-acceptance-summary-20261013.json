@@ -1,0 +1,113 @@
+{
+  "v": 1,
+  "checkpointUTC": "2026-10-13T18:43:02.956019+00:00",
+  "productionReadinessClaim": false,
+  "deployedSource": "768a3a4f20d91bf2194513181354be70f6a8e5da",
+  "deployedRequiredCI": {
+    "successfulJobs": 9,
+    "runId": 38439565770,
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/38439565770"
+  },
+  "deployment": {
+    "initialImageStartup": "failed-public-directory-permissions",
+    "explicitAuditedRollback": {
+      "stateDeleted": false,
+      "fenceDeleted": false,
+      "writerAuditComplete": true,
+      "publisherIdentityPreserved": true,
+      "freshPublicationHealthy": true
+    },
+    "correctedImagePreflight": {
+      "nonRootUID": 1000,
+      "network": "none",
+      "copiedRuntimeFiles": 50,
+      "exactArchiveBytes": true,
+      "criticalModuleImports": true,
+      "actualEntrypointHelp": true
+    },
+    "publicTLSClientAndTwoFreshPlaylistsPassed": true,
+    "compiledClientBytes": 722414,
+    "compiledClientSHA256": "1e63662e12b392c9d2a61c1adb95d65253f4e41061adfb9c50855e0da5d36549"
+  },
+  "deployedReporting": {
+    "receipt": "artifacts/deployment-768a3a4-preparation-r2/p05-public-run/receipt.json",
+    "receiptSHA256": "b2c559101524e93575c4d8c4eecf2fe473ce42424bf77905d7dde61b9021ca8e",
+    "passed": true,
+    "trustedStart": true,
+    "trustedReportingOptIn": true,
+    "normalTLS": true,
+    "browserOverrideArguments": [],
+    "reportValues": {
+      "durationMs": 30001,
+      "peerBytes": 0,
+      "uploadedBytes": 0,
+      "originMediaRequests": 17,
+      "originMediaBytes": 9236816,
+      "stalls": 0,
+      "stallMs": 0,
+      "fatalErrors": 0
+    },
+    "sameVolumeProcessRestart": true,
+    "duplicateTotalsAndAcceptanceTimePreserved": true,
+    "browserClosedBeforeIdleRetention": true,
+    "retainedNearExpiry": {
+      "ageMs": 295610,
+      "present": true
+    },
+    "naturalExpiry": {
+      "ageMs": 301767,
+      "privateEntryAbsent": true,
+      "noClockOrTimestampMutation": true
+    },
+    "elapsedMs": 343468,
+    "originalPolicyRestored": {
+      "v": 1,
+      "mode": null,
+      "revision": 0,
+      "telemetry": false
+    },
+    "temporarySourceRemoved": true,
+    "firstDeployed219TimeoutCause": "unproved"
+  },
+  "lowOnlyRecovery": {
+    "baseSource": "768a3a4f20d91bf2194513181354be70f6a8e5da",
+    "recoveryCommit": "bf4b992c5f95ad7034e4cd37cbe5207b9997a3ce",
+    "recoveryModuleSHA256": "d271b294db83a909454f2e8a8befa92a83f3a9f6647d9ed1c105b45fe3e8f208",
+    "receipt": "artifacts/p02-sparse-aac-low-only-reattached-768a3a4/receipt.json",
+    "receiptSHA256": "aae7cf0656b2cbd1ffad65548ab6690b0b9fc98fc130e448e7f68b7ae31459c4",
+    "constructedSingleVariantTwoSegmentVOD": true,
+    "unchangedSyntheticTSBytes": true,
+    "normalChromeTrustedStart": true,
+    "originalFatalErrorsRetained": 1,
+    "attempts": 1,
+    "outcome": "recovered",
+    "recoveryMs": 403,
+    "requestedPositionSeconds": 2,
+    "decodedFrames": 60,
+    "decodedAudioBytes": 4206,
+    "highMediaRequests": 0,
+    "spentAllowanceBeforeAndAfter": 1234,
+    "uploadAndReportingConsent": false,
+    "nativeErrors": 0,
+    "originalHosted673678683CauseEstablished": false,
+    "overlap": "18:33:03-18:33:09 UTC with deployed P05 server retention reads; its browser was already closed",
+    "rootIntegratedRegression": {
+      "receipt": "artifacts/candidate-recovery-integration-20261013/sparse-aac/receipt.json",
+      "receiptSHA256": "969c2f0f485873e2da24e0dc920d0fd527f2c17e9c7e9eccdb51262544d2ccf0",
+      "passed": true,
+      "cleanup": {
+        "browserClosed": true,
+        "demoHTTPAndRelayClosed": true,
+        "profileAndMediaScratchRemoved": true
+      }
+    }
+  },
+  "remainingFullScope": [
+    "final source CI, image, package and downloaded release verification",
+    "repeated concurrent updated hosted playback",
+    "sustained public peer contribution",
+    "complete Safari and physical Android/iPhone peer/background journeys",
+    "varied and hard NAT acceptance",
+    "matched resource, wire traffic and provider cost attribution"
+  ]
+}

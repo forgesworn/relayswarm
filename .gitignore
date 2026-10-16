@@ -1,2 +1,6 @@
 node_modules/
 artifacts/
+deploy/.env
+operator-header
+**/account-budget.json*
+.interop-sdk/

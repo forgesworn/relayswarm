@@ -1,0 +1,199 @@
+{
+  "v": 1,
+  "kind": "control-path-and-media-investigation-summary",
+  "recordedUTC": "2026-10-13T17:05:56.872921+00:00",
+  "productionReadinessClaim": false,
+  "releaseClaim": false,
+  "deployedCheckpoint": {
+    "sourceSha": "219719843f3f7175725d16535749b303c8e34cc4",
+    "requiredCIJobsPassed": 9,
+    "ciURL": "https://github.com/forgesworn/relayswarm/actions/runs/38420116433",
+    "publicClientSHA256": "3e97b497acf0fc7ff6d79781e48a0d54d1ca7c70a05f9cf41585ec8d390c0ce9"
+  },
+  "sparseAACReplay": {
+    "browser": "155.0.8059.40",
+    "hlsVersion": "1.7.3",
+    "trustedStart": true,
+    "mediaBytesTransformed": false,
+    "exactRetainedBodiesServed": true,
+    "videoOnlySequence": 784,
+    "audioIntroducedSequence": 785,
+    "fatalType": "mediaError",
+    "fatalDetails": "bufferAppendError",
+    "exceptionName": "HlsJsTrackRemovedError",
+    "mechanism": "Audio appears after the first segment created only a video SourceBuffer; hls.js refuses the new track and its append executor cannot find the audio buffer.",
+    "nativeErrorCount": 0,
+    "sourceBufferAsyncErrorCount": 0,
+    "historical673678683CauseEstablished": false,
+    "limits": [
+      "Constructed VOD from later retained raw clips; original live failing segment bytes and append state unavailable.",
+      "Chrome155 differs from original Chrome154."
+    ]
+  },
+  "existingRecovery": {
+    "attempts": 1,
+    "outcome": "recovered",
+    "recoveryMs": 603,
+    "decodedFrames": 66,
+    "initialFatalRetained": true,
+    "nativeErrorsZero": true,
+    "uploadAndReportingOff": true,
+    "quotaSpentUnchanged": true,
+    "recoveredViaAlternateRendition": true,
+    "lowOnlyRecoveryProved": false,
+    "earlierHarnessFailurePreserved": true,
+    "strictLowOnlyAssertionFailed": true,
+    "limits": [
+      "Original master metadata is byte-identical; independently retained low/high clips have an eight-second timestamp offset.",
+      "One integration recovery does not establish the original historical cause or repeated concurrent field acceptance."
+    ]
+  },
+  "diagnosticsCandidate": {
+    "baseSha": "219719843f3f7175725d16535749b303c8e34cc4",
+    "testedFileHashes": {
+      "demo/client.mjs": "fe935f9a90505481ce3b7d57988a8b662869b0285634f34726e6de2fa6dde777",
+      "demo/server.mjs": "d164c445c3650989507f8afb8b4a3344cf50207967bb1cb7abcab8a03948e35a",
+      "demo/operator.mjs": "8cf7baf9f71fd012d7297463e1350cdb0710deabeefdbaa5d5132f3d2bd108dc",
+      "demo/fetch-diagnostics.mjs": "c9ea0d59ef03a51e0d142e35032e8a01c81ca5cedadd93aee3b0df23b01b65eb",
+      "demo/request-diagnostics.mjs": "328b84c5f37f36d14fe485ca517edd6c02a6f8a84468844a281a340c6a009605",
+      "src/ice-config.mjs": "b0755ad590cfcb3db3eb4d842a2372e1ee4edc57720eb59413282c5c1befb7ca",
+      "package-lock.json": "3859db0333af3f8fbad57945787924fa981cbaeb4d18ad61ca41185f4b1995d4",
+      "test/operator-browser.mjs": "f50f2ad35a0e9155fcf3a24356752a50902ddab533e42c286e78e33ef64bd47f",
+      "test/hls-playback-browser.mjs": "92efd0e8ecfaab67671c5c05cd6328802b72f52bee7a538d28e4f9b9a81c33b9"
+    },
+    "publisherTests": {
+      "total": 94,
+      "passed": 93,
+      "failed": 0,
+      "optInSkipped": 1
+    },
+    "operator": {
+      "exitCode": 0,
+      "ok": true,
+      "failures": [],
+      "checkpoints": [
+        "visible-cumulative-allowance-after-apply-kill-rejoin",
+        "explicit-numeric-report-consent",
+        "authenticated-remote-off-restores-origin-playback",
+        "remote-on-preserves-upload-opt-in-and-viewer-off",
+        "policy-outage-origin-fallback",
+        "policy-recovery-retains-consent-boundaries",
+        "full-reload-cross-tab-budget-and-explicit-reset"
+      ],
+      "reports": 1,
+      "pageErrors": []
+    },
+    "playback": {
+      "exitCode": 0,
+      "ok": true,
+      "failures": [],
+      "browser": "155.0.8059.40",
+      "consumer": {
+        "totals": {
+          "peerFirstBytes": 7805572,
+          "uploaded": 0,
+          "peerFirstLoads": 28
+        },
+        "fatalErrors": 0,
+        "nativeErrors": [],
+        "stalls": 0,
+        "seekRecoveryMs": [
+          118,
+          38
+        ],
+        "peerLevels": [
+          0,
+          1
+        ],
+        "peerDiscontinuities": [
+          1
+        ]
+      },
+      "pageErrors": [],
+      "controlRouteOutcomeCountsInFinalBoundedReceipts": {
+        "session:ok": 76,
+        "policy:ok": 72,
+        "admissionChallenge:ok": 1,
+        "admissionTicket:ok": 1,
+        "admissionVerify:ok": 47,
+        "commitment:ok": 32,
+        "commitment:cancelled": 1
+      }
+    },
+    "cleanupPassed": true,
+    "requiredCIForNewSourcePending": true,
+    "scope": "Local loopback Chrome acceptance; existing fake media permission and mDNS fixture flags. No public or physical acceptance.",
+    "features": [
+      "Bounded fixed-route numeric request and JSON timings; no identities, URLs, bodies or credentials retained.",
+      "Event-loop delay, utilisation and scheduler drift in authenticated server status.",
+      "Private POSIX STUN/TURN browser-credential configuration for demo and broadcaster CLIs.",
+      "Failed TLS startup releases diagnostic timers and operational lease."
+    ],
+    "turnTransportOrPhysicalAcceptanceProved": false
+  },
+  "firstDeployedReportingAttempt": {
+    "sourceSha": "219719843f3f7175725d16535749b303c8e34cc4",
+    "ok": false,
+    "elapsedMs": 87018,
+    "trustedStartAndReportOptIn": true,
+    "reportResponseWithin17Seconds": false,
+    "acceptedReportCheckpointReached": false,
+    "causeEstablished": false,
+    "runtimeTelemetryFalseRestored": true,
+    "ownedSourceRemoved": true,
+    "normalTLS": true,
+    "extraBrowserArguments": [],
+    "uploadConsent": false,
+    "originalReceiptPreserved": true,
+    "limits": [
+      "The original receipt lacks request lifecycle and later checkbox/policy state; no send, transport or collector cause is inferred."
+    ]
+  },
+  "namedLocalReceipts": [
+    {
+      "path": "artifacts/p02-sparse-aac-replay-20261013/finding.json",
+      "sha256": "6696f325b1a90a9730a2942f4335f46d363b040f0c3d551a057bb53b1942bb03"
+    },
+    {
+      "path": "artifacts/p02-sparse-aac-current-recovery-20261013/finding.json",
+      "sha256": "11174096b02a5a03ffa0d0a7b245d4e6f0fc22e11ae3024e67f77df82bd46628"
+    },
+    {
+      "path": "artifacts/control-diagnostics-browser-20261013/validation.json",
+      "sha256": "6917372d16110cd2417d231722f59ef1dd3dff93877e31a96d3d508c3d8de8c1"
+    },
+    {
+      "path": "artifacts/p05-deployed-2197198/public-run/receipt.json",
+      "sha256": "16cfa8f6e5124b933397d57e60276fa9c62cae343521e2079eb1e3da593a5bc7"
+    },
+    {
+      "path": "artifacts/p05-deployed-2197198/public-run/root-controller.json",
+      "sha256": "137794d0aaf98c39c2a5cb99ccc26d13e972895db068c41308acd2acf2397adb"
+    },
+    {
+      "path": "artifacts/p05-deployed-2197198-retry-20261013/root-prepare.log",
+      "sha256": "6f728f2f5048da62b516cab2d36932268e3690ad63e4967917ec965221903b07"
+    }
+  ],
+  "privacy": {
+    "privateDeviceIdentifiersExcluded": true,
+    "credentialsAndKeysExcluded": true,
+    "personalPathsExcluded": true,
+    "addressesExcluded": true,
+    "rawReceiptsNamedNotRepublished": true
+  },
+  "diagnosticRetrySetup": {
+    "browserStarted": false,
+    "guardedPrepareExit": 1,
+    "prepareSSHTimedOutSeconds": 100,
+    "remoteExecutionOrFixtureCreationVerified": false,
+    "independentFreshSSHConnectionTimedOut": true,
+    "publicHTTPSAndGitHubConnectionsAlsoTimedOut": true,
+    "remoteInspectionAndOwnedCleanupPending": true,
+    "sourceLifetimeMaximumSecondsIfCreated": 600,
+    "limitations": [
+      "Local connection failures do not establish whether the remote preparation ran or the cause of the outage.",
+      "No test is accepted and no restoration/cleanup claim is made for the interrupted setup."
+    ]
+  }
+}

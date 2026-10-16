@@ -1,0 +1,290 @@
+{
+  "v": 1,
+  "kind": "relayswarm-ci-restart-failure",
+  "date": "2026-10-14",
+  "sourceHead": "a2c99a9cbf3bfc7c9d7746ccdd5c3b9b03a39080",
+  "scope": {
+    "network": "loopback",
+    "browser": "Chrome",
+    "fixtureRtcAndMediaFlags": true,
+    "syntheticRealTimeH264Aac": true,
+    "physicalDevices": false,
+    "ordinaryWanQualification": false,
+    "rerun": false
+  },
+  "ci": {
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/38569064323",
+    "runId": 38569064323,
+    "attempt": 1,
+    "status": "completed",
+    "conclusion": "failure",
+    "requiredPassed": 8,
+    "requiredTotal": 9,
+    "jobs": [
+      {
+        "name": "hls.js playback and field-test demo",
+        "conclusion": "failure"
+      },
+      {
+        "name": "documentation and AI context",
+        "conclusion": "success"
+      },
+      {
+        "name": "current Swift SDK and browser interoperability",
+        "conclusion": "success"
+      },
+      {
+        "name": "native (windows-latest)",
+        "conclusion": "success"
+      },
+      {
+        "name": "hls.js (shadow)",
+        "conclusion": "success"
+      },
+      {
+        "name": "native (ubuntu-latest)",
+        "conclusion": "success"
+      },
+      {
+        "name": "hls.js (peer-first)",
+        "conclusion": "success"
+      },
+      {
+        "name": "native (macos-latest)",
+        "conclusion": "success"
+      },
+      {
+        "name": "hls.js optional twelve-viewer soak",
+        "conclusion": "skipped"
+      },
+      {
+        "name": "browser transport against live relays",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "originalResult": false,
+  "failedGate": "consumer CC1 verified peer fragment after producer restart",
+  "originalTimeoutMs": 60000,
+  "inputReceipt": {
+    "bytes": 1676192,
+    "sha256": "6d087122358bb398a475de342f0099152aa4ef2a7cb3ac4ae3f055f45c6fea31"
+  },
+  "roles": {
+    "contributor-low": {
+      "currentTime": 73.838954,
+      "fragmentsLoaded": 38,
+      "fragmentCounts": {
+        "cc0/level0/origin": 7,
+        "cc1/level0/origin": 31
+      },
+      "fatalErrors": 0,
+      "nativeErrors": 0,
+      "appendFailures": 0,
+      "stalls": 1,
+      "mode": "peer-first",
+      "upload": true,
+      "serving": true,
+      "peerCounters": {
+        "connected": 2,
+        "linksOpened": 2,
+        "linksClosed": 0,
+        "dialsFailed": 0,
+        "dialsTimedOut": 0,
+        "admitRefused": 0
+      },
+      "cc1DecisionCounts": {
+        "no-budget": 31
+      },
+      "cc1BudgetRange": [
+        0,
+        0
+      ]
+    },
+    "contributor-high": {
+      "currentTime": 73.340979,
+      "fragmentsLoaded": 37,
+      "fragmentCounts": {
+        "cc0/level1/origin": 7,
+        "cc1/level1/origin": 30
+      },
+      "fatalErrors": 0,
+      "nativeErrors": 0,
+      "appendFailures": 0,
+      "stalls": 1,
+      "mode": "peer-first",
+      "upload": true,
+      "serving": true,
+      "peerCounters": {
+        "connected": 2,
+        "linksOpened": 2,
+        "linksClosed": 0,
+        "dialsFailed": 0,
+        "dialsTimedOut": 0,
+        "admitRefused": 0
+      },
+      "cc1DecisionCounts": {
+        "no-budget": 30
+      },
+      "cc1BudgetRange": [
+        0,
+        0
+      ]
+    },
+    "baseline": {
+      "currentTime": 71.945016,
+      "fragmentsLoaded": 39,
+      "fragmentCounts": {
+        "cc0/level0/origin": 5,
+        "cc0/level1/origin": 3,
+        "cc1/level1/origin": 31
+      },
+      "fatalErrors": 0,
+      "nativeErrors": 0,
+      "appendFailures": 0,
+      "stalls": 0,
+      "mode": "off",
+      "upload": false,
+      "serving": false,
+      "peerCounters": {
+        "connected": 0,
+        "linksOpened": 0,
+        "linksClosed": 0,
+        "dialsFailed": 0,
+        "dialsTimedOut": 0,
+        "admitRefused": 0
+      },
+      "cc1DecisionCounts": {},
+      "cc1BudgetRange": null,
+      "beforeRestart": {
+        "currentTime": 5.228225,
+        "fragmentsLoaded": 7,
+        "maxCC": 0
+      },
+      "predicateAtFinal": {
+        "timeProgress": true,
+        "fragmentProgress": true,
+        "newCC": true,
+        "requiredNewCCSource": true
+      }
+    },
+    "consumer": {
+      "currentTime": 71.485875,
+      "fragmentsLoaded": 38,
+      "fragmentCounts": {
+        "cc0/level0/origin": 4,
+        "cc0/level0/peer": 1,
+        "cc0/level1/peer": 3,
+        "cc1/level1/origin": 30
+      },
+      "fatalErrors": 0,
+      "nativeErrors": 0,
+      "appendFailures": 0,
+      "stalls": 0,
+      "mode": "peer-first",
+      "upload": false,
+      "serving": false,
+      "peerCounters": {
+        "connected": 2,
+        "linksOpened": 2,
+        "linksClosed": 0,
+        "dialsFailed": 0,
+        "dialsTimedOut": 0,
+        "admitRefused": 0
+      },
+      "cc1DecisionCounts": {
+        "no-have-wait": 31,
+        "wait-aborted": 17,
+        "wait-expired": 13
+      },
+      "cc1BudgetRange": [
+        286.84600000000046,
+        337.1729999999998
+      ],
+      "beforeRestart": {
+        "currentTime": 4.769444,
+        "fragmentsLoaded": 6,
+        "maxCC": 0
+      },
+      "predicateAtFinal": {
+        "timeProgress": true,
+        "fragmentProgress": true,
+        "newCC": true,
+        "requiredNewCCSource": false
+      }
+    }
+  },
+  "consumerCc1Waits": {
+    "entry": 31,
+    "aborted": 17,
+    "expired": 13,
+    "pending": 1,
+    "budgetMs": [
+      286.84600000000046,
+      337.1729999999998
+    ]
+  },
+  "timingComparison": {
+    "count": 30,
+    "minMs": 53.0,
+    "maxMs": 108.0,
+    "supportedBoundary": "All 30 matching high donor FRAG_LOADED events occur after consumer origin completion, itself after peer fallback. Source holds donor bytes asynchronously after invoking player success. Subject to the documented cross-page clock limitation, these newly loaded donor bytes were too late for those original consumer peer deadlines. No HAVE-send timestamp is inferred."
+  },
+  "limitations": [
+    "Fragment completion clocks combine millisecond wall-clock startedAt with rounded page-monotonic atMs; no independent cross-page clock calibration.",
+    "FRAG_LOADED is not HAVE send/receive time or a per-object cache journal.",
+    "Eligibility records omit sequence; the 30 terminal CC1 decisions and 30 completed CC1 fragments align by ordered level/CC cadence, not an exported request ID.",
+    "wait-aborted includes the ordinary fallback timer abort; it does not by itself prove player cancellation.",
+    "One final CC1 wait remains pending; it is not a completed failure."
+  ],
+  "cleanup": {
+    "receiptWrittenAfterAwaitedCloseCalls": true,
+    "explicitProcessGroupAbsenceProof": false,
+    "childRecords": [
+      {
+        "code": 0,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 255,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 1,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 1,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 1,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 1,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 0,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 255,
+        "signal": null,
+        "error": null
+      }
+    ],
+    "scope": "Recorded browser/demo/pipeline/producer/router close calls completed before receipt writing. Child records have exit codes. No independent process/group/profile absence attestation is present."
+  },
+  "conclusion": "Playback and both pre-restart peer qualities passed. The post-restart peer gate failed. No integrity, consent, quota, MSE or lost-notification repair is established. Current deadlines remain unchanged.",
+  "followUp": "Add bounded observations of already-read per-load buffer geometry and existing fixture request lifecycle timings. Do not alter media playlists, request policy, reserve, fallback cap or acceptance assertions.",
+  "production": "The df51 pilot is unchanged; PR 8 and full P01-P12 remain open. This failure and any later observation run are separate results."
+}

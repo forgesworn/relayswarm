@@ -1,0 +1,17 @@
+.git
+node_modules
+target
+artifacts
+review
+state
+.env
+.env.*
+**/*.key
+**/*.pem
+**/operator-token
+**/publisher.json
+**/account-budget.json*
+**/youtube-url
+**/*secrets*
+
+**/operator-header

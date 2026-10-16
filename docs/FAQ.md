@@ -5,11 +5,13 @@
 
 ## What is released?
 
-[v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0) is an
+[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0) is an
 experimental GitHub prerelease with an installable tarball, a standalone browser
 ESM bundle and checksums. It includes the browser loader, local publisher/player
-and native transfer PoC. There is no npm-registry publication or hosted RelaySwarm
-service. See [Getting started](GETTING-STARTED.md).
+and native transfer PoC, plus the live broadcaster, private publisher state and
+operator controls. The npm registry remains unpublished; the release does
+not provision hosting. See
+[Getting started](GETTING-STARTED.md) and [the broadcaster guide](BROADCASTING.md).
 
 ## Why use Nostr instead of a tracker?
 
@@ -36,10 +38,20 @@ It does not remove ingest, origin hosting or operator costs.
 
 ## Does NIP-53 automatically configure the swarm?
 
-No. The host selects the trusted kind-30311 stream event, swarm id, relays and
-ICE servers. The library does not discover a stream, read its relay/STUN policy
-or establish trust in an arbitrary publisher. NIP-53 can carry relay information;
-the redistribution tag and commitment kind are RelaySwarm's experimental contract.
+No. The host selects trusted authors, allowed media origins, the swarm id, relays
+and ICE servers. The released loader accepts the selected event. An optional
+adapter in v0.2.0 filters a host-supplied query using those explicit
+allowlists; it does not choose infrastructure or establish trust in arbitrary
+publishers. NIP-53 can carry relay information; the redistribution tag and
+commitment kind are RelaySwarm's experimental contract.
+
+## Can it send a broadcast to YouTube?
+
+The v0.2.0 broadcaster can send the same H.264/AAC source to a separately
+configured RTMPS endpoint while producing HLS for RelaySwarm viewers. That
+forwarder has its own process and retries. A valid platform stream key, account
+configuration and an actual platform playback test are still needed. YouTube
+does not participate in the viewer peer swarm. See [broadcasting](BROADCASTING.md).
 
 ## Is signalling encrypted?
 
@@ -101,8 +113,9 @@ relay and ICE policy.
 ## Does it use STUN, TURN or super-peers?
 
 The browser loader defaults to Google's public STUN endpoint and accepts host
-`iceServers`; the demo accepts `--stun`. It implements no TURN or super-peer
-strategy. Difficult NATs can fall back to origin. Native HyperDHT uses its own
+`iceServers`; the demo accepts `--stun`. Hosts can supply TURN credentials
+through `iceServers`; no managed TURN or super-peer service is supplied.
+Difficult NATs can fall back to origin. Native HyperDHT uses its own
 bootstrap/routing infrastructure rather than STUN/TURN and has no automatic
 origin fallback in its CLI journey. See [Native transport](NATIVE-TRANSPORT.md).
 
@@ -114,29 +127,48 @@ their own integration and distribution work.
 
 ## Does RelaySwarmKit interoperate with this release?
 
-That has not been established. The separate
-[Swift project's README](https://github.com/forgesworn/relayswarm-kit) describes
-version-2 signalling; this repository uses version 3 for the shared session.
-Shared event kinds and successful NIP-44 vectors do not prove matching wire
-envelopes, native transport or signed HLS commitments. No RelaySwarm NIP is
-accepted yet.
+The current 0.2.0 source candidate passes author, delegated-signing and
+adversarial transfer journeys with the published RelaySwarmKit v0.5.0 public
+SDK. These are macOS arm64/Chrome loopback checks, not physical iPhone
+acceptance. The earlier version-2 Kit baseline is incompatible with the
+candidate's version-3 signalling. Published RelaySwarm v0.1.0 assets keep their
+original protocol; do not infer compatibility from matching event kinds alone.
+See [the recorded SDK evidence](STATUS.md) and [interop guide](interop/README.md).
+No RelaySwarm NIP is accepted yet.
+
+## Can one upload allowance cover my phone and computers?
+
+The current source offers an optional [shared account allowance](ACCOUNT-UPLOAD-BUDGET.md).
+Devices explicitly connect using the same Nostr identity or an account
+authenticated by the host website, and use one durable ledger. Both methods
+are supported; linking them requires fresh proof of both. Their recorded spend
+is added and the lower cap is retained. Local browser allowances still apply,
+and each page separately requests upload consent. The deployed `8f482b4` pilot
+offers Nostr sign-in; integrating sites supply their own website resolver.
+Actual owner and complete physical acceptance remain open. The allowance counts
+reserved media payload rather than total device traffic.
 
 ## Do the receipts measure money or data saved?
 
 `peerFirstBytes` measures verified media delivered in place of starting an
 origin fragment load. It excludes commitment, signalling and protocol traffic.
 Shadow transfers add traffic. `bytes.uploaded` counts full payloads accepted
-against the quota, including interrupted transfers; it is not acknowledged
-network delivery. Receipts stay local until downloaded. Use paired device/network
+for serving after any host reservation callback succeeds and current serving
+checks pass. Pending or refused callbacks do not enter that counter. Interrupted
+accepted transfers can send less; durable allowances can also retain charges
+for media never handed to the transport. These are not acknowledged network
+delivery totals. Receipts stay local until downloaded. Use paired device/network
 measurements to establish total data cost. See [receipt interpretation](FIELD-TEST.md#collect-comparable-receipts).
 
 ## What remains before production?
 
-Physical devices, separate-network/NAT trials, sustained resource and cost
-measurements, broader adaptive bitrate and fMP4 coverage, stronger adversarial
-testing and independent-client interoperability. [Status](STATUS.md) records
-which evidence exists. There is no prediction that audience upload capacity
-will cover a given deployment.
+Complete physical-device journeys, separate-network/hard-NAT trials, sustained
+resource/churn and matched cost measurements, and final immutable release
+acceptance remain open. Current deployed sharing and fourteen-role qualification
+are red; earlier short passes retain their own source and scope. Wider-media
+and independent SDK fixtures have passing evidence, which does not close those
+field gates. [Status](STATUS.md) records both results. There is no prediction
+that audience upload capacity will cover a given deployment.
 
 ## What permission does a contributing viewer need?
 
@@ -145,3 +177,11 @@ expresses the publisher's opt-in; it does not establish ownership of every
 right or settle a viewer's legal/contractual obligations. The demo should be
 used with media participants are authorised to redistribute. Host policy and
 explicit viewer consent remain application responsibilities.
+
+## What does the current production candidate add?
+
+[Production features](PRODUCTION-FEATURES.md) covers wider HLS, scoped delegation,
+full linked stream advertisements, bounded admission, persistent browser upload
+budgets, durable idempotent reports, worker supervision and native HTTP fallback.
+[Delivery requirements](PRODUCTION-READINESS.md) separates implementation from
+publication, physical devices, varied networks and sustained acceptance.

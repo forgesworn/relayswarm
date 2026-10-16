@@ -1,0 +1,184 @@
+{
+  "v": 1,
+  "checkpointDate": "2026-10-16",
+  "sourceSha": "afbf052df93d6b4902703dddb4b5987ec6119e6e",
+  "productionComplete": false,
+  "scope": "Actual afbf052 CI/package/deployment and original R20 setup RED; no field repair, burst readiness, full capacity or release claim",
+  "deployed": {
+    "sourceSha": "afbf052df93d6b4902703dddb4b5987ec6119e6e",
+    "appId": "f7ef7ec70bf33b1534e31f93459ea0213a68e068a62dc0b21354975c0577a609",
+    "appStartedUTC": "2026-10-15T23:22:50.407008439Z",
+    "image": "sha256:9bd9f848d0ad5affa271b29060072d81e2f953b44fdae91274a50bdf97de9229",
+    "client": {
+      "sha256": "1831fd319442467a1ad16de1a9b6cf0f9f11a38d27952c7f3c7c5fdb9b53ac29",
+      "bytes": 762188
+    },
+    "proxySourceSha": "ee1510d429ac85f3738c03f10a09b753ec4eb037"
+  },
+  "ci": {
+    "run": 38821621670,
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/38821621670",
+    "requiredJobsPassed": 9,
+    "optionalHostedSoak": "skipped"
+  },
+  "package": {
+    "filename": "relayswarm-0.2.0.tgz",
+    "bytes": 1242302,
+    "files": 271,
+    "sha256": "720ec925d6eba405003134163a7c4b3080510b8eb229a2a270ee5623a5a44a3f",
+    "npmIntegrity": "sha512-OLn1Vrh/OWo3/iX8YP8Y1YwK4RhaElmee3T4eI1sIcGUFm+a04PNP6aTe99i9PRlzJqDt2t7IZpIDnlK3rjBpA=="
+  },
+  "turnCacheCorrection": {
+    "deployed": true,
+    "originalRegressionsFailed": 2,
+    "finalServiceTestsPassed": 16,
+    "combinedTURNChecksPassed": 49,
+    "defaultLimitsChanged": false,
+    "fieldCausalityProved": false
+  },
+  "accountScope": "Nostr plus authenticated host-supplied API; Nostr-only pilot valid; no named external website required",
+  "r20": {
+    "verdict": "SETUP_RED",
+    "measurementMs": 0,
+    "acquiredContexts": 14,
+    "intendedPeerParticipants": 12,
+    "latestPreflightSnapshotsAllPeerFirstWithTURNAvailable": true,
+    "laterPolicyExpiryOffSessionObserved": true,
+    "qualifiedPeerReadiness": false,
+    "qualifyingHTTP429": 37,
+    "finalHTTP429": 38,
+    "qualifyingFailedRequests": 2,
+    "nativeSemanticCoverageComplete": false,
+    "allOwnedCleanupIndependentPASS": true,
+    "allOriginalGatesPreserved": true
+  },
+  "admissionReplay": {
+    "sourceUnchanged": true,
+    "oneSharedSocketWindowRequests": 637,
+    "perAddressRequestsPerMinute": 600,
+    "accepted": 600,
+    "addressBudgetRefusals": 37,
+    "globalRequestsPerMinute": 2048,
+    "exactIndividualTimingComplete": false,
+    "pacingCounterfactualProvesRepair": false
+  },
+  "idleControlProbe": {
+    "requests": 48,
+    "allCompleted200": true,
+    "maximumBodyMs": {
+      "M1": 1.9,
+      "M4": 11.7,
+      "TillPublic": 0.9,
+      "TillLoopback": 2.0
+    },
+    "scope": "Idle fresh-connection HTTP/1.1 probes; no loaded-browser or causal equivalence"
+  },
+  "candidateOperatorConfiguration": {
+    "defaultPerAddressRequests": 600,
+    "plannedPilotPerAddressRequests": 900,
+    "globalRequestCapacityUnchanged": 2048,
+    "newCLIValidation": {
+      "focusedCLIChecksPassed": 16,
+      "admissionTestsPassed": 4,
+      "syntaxModules": 146,
+      "deployed": false
+    },
+    "deployed": false,
+    "capacityProof": false
+  },
+  "release": {
+    "published": "v0.1.0",
+    "candidate": "0.2.0",
+    "pr": 8,
+    "merged": false,
+    "candidatePublished": false,
+    "npmPublished": false
+  },
+  "remaining": [
+    "matching complete300 qualifier",
+    "7200seconds and22churn",
+    "natural3600secondTURNexpiry",
+    "physical/browserbreadth",
+    "difficultNATandnetworks",
+    "matchedwireandcostbenefit",
+    "immutable0.2releaseanddownloadacceptance"
+  ],
+  "priorEvidence": "18bbfd7-current-delivery-checkpoint-20261016.json",
+  "evidence": [
+    {
+      "path": "artifacts/deployment-afbf052-turn-capacity-r2-20261016/runtime-contract.json",
+      "bytes": 11590,
+      "sha256": "a2a759c770737c9acfeb57f5fc7c9d82abb855c73ccf8e77ffbb1b401ab1e153"
+    },
+    {
+      "path": "artifacts/deployment-afbf052-turn-capacity-r2-20261016/NEXT-RUNTIME-CONTEXT.json",
+      "bytes": 3468,
+      "sha256": "62e33fbfb759fa4a50521f4d6463d12a10cc3647505dae08e809fac44f8deb32"
+    },
+    {
+      "path": "artifacts/deployment-afbf052-turn-capacity-r2-20261016/host-cleanup-verification-source.json",
+      "bytes": 7314,
+      "sha256": "589460d4949fb3df42095c7dfd6a63e7d828ddb6a79dc1e69da07023a7e78d4a"
+    },
+    {
+      "path": "artifacts/independent-deployment-afbf052-turn-capacity-r2-review-20261016/review.json",
+      "bytes": 12799,
+      "sha256": "a3e94b3e90244d3a958ab03475155e9cdd4b17b1790baa976b4b156b4d720d7a"
+    },
+    {
+      "path": "artifacts/clean-consumer-afbf052-20261016/analysis/analysis.json",
+      "bytes": 4283,
+      "sha256": "98bf3075310efda376032aae3eac6ccb2f6dafd54159e25dacc1fdccc3f96458"
+    },
+    {
+      "path": "artifacts/turn-capacity-deployment-preparation-20261016/NEXT-PACKAGE-REVIEW.json",
+      "bytes": 6108,
+      "sha256": "90ab33fce39f93f49457bdcff36a0f6f5b849390d4e9aea80388f51b616be5fd"
+    },
+    {
+      "path": "artifacts/turn-capacity-diagnosis-18bbfd7-20261016/ci-current-observation.json",
+      "bytes": 21988,
+      "sha256": "5905275f0074a2e61983cab4bb46e848fc0c0a2320b12991ed83aa3153b42bdf"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-afbf052-r20-run-20261016/browser/receipt.json",
+      "bytes": 2789062,
+      "sha256": "63a5238f0f4ff8fa7e82da57b1548a71c683e766957bd59855c9ef13a4d48882"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-afbf052-r20-cleanup-review-20261016/review.json",
+      "bytes": 71008,
+      "sha256": "25f073d67fe4fdda35c4ad43df7b5d91891875540d8be85741aef71b7150bf7f"
+    },
+    {
+      "path": "artifacts/admission-budget-r20-offline-replay-20261016/EVIDENCE-MANIFEST.json",
+      "bytes": 1594,
+      "sha256": "56e21eed2199e4d094fe28a2997c731c99c65f50c7e87181c4a2ae91a0808d60"
+    },
+    {
+      "path": "artifacts/turn-capacity-reclaim-18bbfd7-20261016/EVIDENCE-MANIFEST.json",
+      "bytes": 2320,
+      "sha256": "51695f38c0bd37863a76b29d05cedc3eee84fd5742d1ff1a9e22be59b5393a0d"
+    },
+    {
+      "path": "artifacts/turn-capacity-diagnosis-18bbfd7-20261016/idle-control-M1.json",
+      "bytes": 1616,
+      "sha256": "a7b24f57b35b896784a32272f605638215ae2056128b4eba066dfc6a2c8c3a01"
+    },
+    {
+      "path": "artifacts/turn-capacity-diagnosis-18bbfd7-20261016/idle-control-M4.json",
+      "bytes": 1618,
+      "sha256": "698de77f13390fb89de5b2f40dc89d8eee638e5effdea350ceb010036cbb1cce"
+    },
+    {
+      "path": "artifacts/turn-capacity-diagnosis-18bbfd7-20261016/idle-control-Till.json",
+      "bytes": 10350,
+      "sha256": "09d07ebe4546e355a277d7561c630433e355005635e19a88d9c28d18899e3051"
+    },
+    {
+      "path": "artifacts/admission-request-limit-cli-afbf052-20261016/EVIDENCE-MANIFEST.json",
+      "bytes": 1958,
+      "sha256": "d4da5949053d54bbc6d5cee0b9ccc31b5650033892e9fef21ef14d5de7c0efb0"
+    }
+  ]
+}

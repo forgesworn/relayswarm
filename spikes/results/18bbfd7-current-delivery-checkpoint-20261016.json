@@ -1,0 +1,639 @@
+{
+  "v": 1,
+  "draftOnly": false,
+  "checkpointDate": "2026-10-16",
+  "sourceSha": "18bbfd71e459c2a4bfa0c0ed0b43bb43525be310",
+  "productionComplete": false,
+  "scope": "Applied documentation checkpoint through completed R19 and later one-request capacity diagnostic; original acceptance REDs retained; no final release claim",
+  "release": {
+    "published": "v0.1.0",
+    "candidate": "0.2.0",
+    "pr": 8,
+    "prMerged": false,
+    "candidatePublished": false,
+    "npmPublished": false
+  },
+  "implementation": {
+    "assessment": "Defined P01-P12 feature surfaces implemented; no additional missing implementation established by bounded source review",
+    "acceptanceComplete": false,
+    "outOfScope": "Advanced global multi-peer/ABR scheduling and acceptance of a RelaySwarm NIP are not established"
+  },
+  "deployed": {
+    "sourceSha": "18bbfd71e459c2a4bfa0c0ed0b43bb43525be310",
+    "appId": "2563375a9d03c047f353aaf5f28b3aeaf1bdca03e2fdaf285afe7f7f14d4e6a7",
+    "appStartedUTC": "2026-10-15T21:29:33.648297758Z",
+    "image": "sha256:3696dfd42ce4e318594283c986846ab404c399551844028d612a7d8632921657",
+    "clientBytes": 762188,
+    "clientSHA256": "1831fd319442467a1ad16de1a9b6cf0f9f11a38d27952c7f3c7c5fdb9b53ac29",
+    "normalHTTPSAttestation": true,
+    "requiredCIJobsPassed": 9,
+    "ciRun": 38804221165,
+    "ciURL": "https://github.com/forgesworn/relayswarm/actions/runs/38804221165",
+    "optionalHostedSoak": "skipped",
+    "icePolicy": "relay",
+    "turnProjection": "tls-tcp",
+    "admissionPerAddressTickets": 32,
+    "accountMode": "Nostr",
+    "hostResolverConfigured": false,
+    "reporting": false,
+    "forwarding": false,
+    "privateStatePermanentLeasesEEProxyPreserved": true,
+    "verificationSourceCleanup": {
+      "allFiveGuardsPassed": true,
+      "sourceRemoved": true,
+      "actualSourceExitCode": 255
+    }
+  },
+  "package": {
+    "verdict": "PASS_FRESH_OFFLINE_CONSUMER",
+    "memberCount": 270,
+    "bytes": 1230650,
+    "sha256": "e9f241c73bf3210134caa042bbb546e3ef41379ea33809f627444de6593761e0",
+    "archiveSHA256": "3d710e72bc053c5fdd893fb733f19d7699cd6756529499306f32b7fa21cdca5f",
+    "installedImportRows": 11,
+    "installedCLI": true,
+    "ledgerReplay": true,
+    "nativeAndVerifiedHTTPFallback": true,
+    "consumerDependencies": {
+      "rootMatches": 106,
+      "semverDifferences": 28,
+      "rootLockExact": false,
+      "actualConsumerLockRetained": true
+    },
+    "standalone": {
+      "path": "artifacts/clean-consumer-18bbfd7-20261015/standalone/relayswarm-hls-swarm-0.2.0.mjs",
+      "bytes": 126009,
+      "sha256": "c81c19635cf192a4438a20c00ef9136c7a194bd1e453d5d4f9244e166f9f6598",
+      "sourceInputCount": 6,
+      "dependencyInputCount": 20,
+      "dependencyVersionsMatchRootLock": true
+    },
+    "allOwnedCleanup": true,
+    "immutableReleaseArtifact": false
+  },
+  "admissionCorrection": {
+    "state": "IMPLEMENTED_CI_PASSED_DEPLOYED",
+    "originalMaintainedRegression": "RED_EXPECTED_RETAINED",
+    "focusedTestsPassed": 12,
+    "swarmTestsPassed": 137,
+    "rememberedChangedTicketBounded": true,
+    "newerCandidatePreservedAcrossEarlierValidation": true,
+    "deadlinesQuotasExpiryUnchanged": true,
+    "earlierFieldFailureCauseOrRepairEstablished": false
+  },
+  "internetTURNR4": {
+    "verdict": "PASS_DECLARED_DIRECTIONAL_COMPONENT",
+    "proofVersion": "selected-send-and-resolved-transport-v1",
+    "measuredMs": 90045,
+    "samples": 88,
+    "verifiedFragments": 40,
+    "verifiedPeerBytes": 4631756,
+    "postBoundaryFragments": 23,
+    "postBoundaryPeerBytes": 2656252,
+    "directionalCheckpointIndices": [
+      7,
+      42,
+      87
+    ],
+    "legacyStrictAtStoredDirectionalAnchors": "RED_RETAINED",
+    "initialSelectedPairReceiveCounters": 0,
+    "supplementalStrictNumericFlow": "PASS_AT_SEPARATE_ANCHORS",
+    "strictCheckpointIndices": [
+      23,
+      42,
+      87
+    ],
+    "realIssuanceCalls": 3,
+    "sourceTtlSeconds": 3600,
+    "firstLocalTtlSeconds": 60,
+    "diagnosticBundleBytes": 128640,
+    "diagnosticBundleSHA256": "e36f88331cd284980fa151c639ef30ed07fff53526eab8b7f5f8c6e8caf95e35",
+    "exactStandaloneBytesUnderTest": false,
+    "deployedPublicPlayback": false,
+    "naturalExpiryProved": false,
+    "allOwnedCleanupAndFreshAbsence": true
+  },
+  "accountScope": "Both Nostr and authenticated host-supplied reusable account API; Nostr-only pilot valid; no named website or human wallet required",
+  "priorComponentEvidence": {
+    "sourceSha": "a416f7e1ee2d73acc6535b313baac018f2baab8a",
+    "accountAPI": {
+      "verdict": "PASS_API_ONLY",
+      "sharedCapReplayConflictReopenGrantFencing": true,
+      "simultaneousServerArrivalProved": false
+    },
+    "focusedLOWBrowser": {
+      "verdict": "PASS_COMPONENT_ONLY",
+      "elapsedMs": 74412,
+      "gatesPassed": 7,
+      "fullBothQualityExhaustionAcceptance": false
+    },
+    "originalBothQualityExhaustion": "RED_HIGH_VERIFIED_MEDIA_RETAINED",
+    "nativeSafariSimulator": {
+      "verdict": "PASS_NATIVE_SIMULATOR_HOME_RETURN_TRUSTED_RESUME",
+      "runtime": "iOS26.5/23F77",
+      "frameDeltas": [
+        59,
+        61
+      ],
+      "clockAndPixelsAdvanced": true,
+      "fatalNativePageErrors": 0,
+      "uploadReportConsents": false,
+      "returnedPaused": false,
+      "physicalStoppedFaultReproduced": false,
+      "ownedCleanup": true,
+      "physicalAudiblePublicNATOrEnabledUploadWithdrawalProved": false
+    }
+  },
+  "broadcasterRecovery": {
+    "survivingGuardianAutomaticDrainImplemented": true,
+    "maintainedParentSIGKILLAutomaticHandoffRegressionInRequiredCI": true,
+    "olderFieldProof": "Guarded parent crash, scoped writer audit, permanent lease preservation and explicit dirty-marker operator recovery; both-quality playback at continuity17. Does not measure automatic clean-drain.",
+    "guardianOrHostCatastrophe": "Closed for explicit operator inspection",
+    "permanentLeaseInodesMustNeverBeDeleted": true
+  },
+  "capacityAndSustained": {
+    "r13": {
+      "verdict": "RED",
+      "measurementMs": 257301,
+      "causeProved": false,
+      "allOwnedCleanup": true
+    },
+    "r14": {
+      "verdict": "SETUP_RED",
+      "measurementMs": 0,
+      "reason": "M4 Chrome changed from the pinned executable/version",
+      "productPagesStarted": false,
+      "allAllocatedOwnedCleanup": true
+    },
+    "r15": {
+      "verdict": "SETUP_RED",
+      "measurementMs": 0,
+      "failedVerifyHTTPStatus": null,
+      "observedHTTPRefusals": 0,
+      "observedUnknowns": 2,
+      "browserAbortDurationsMs": [
+        3002,
+        3005
+      ],
+      "allAcquiredContextsClosed": true,
+      "contextsAcquired": 8,
+      "contextsExpected": 14,
+      "fullContextAcquisitionComplete": false,
+      "browserAcceptanceCleanupFlags": {
+        "contextsClosed": false,
+        "cdpDetached": true,
+        "browserCleanupProved": false
+      },
+      "independentOwnedResourceCleanup": "PASS",
+      "freshOwnedAbsence": "PASS",
+      "causeProved": false
+    },
+    "r16": {
+      "verdict": "RED_RETAINED",
+      "measurementMs": 302582,
+      "all14Roles": true,
+      "all8ContributorsActuallyUploaded": true,
+      "each4ReceiversVerifiedBothQualities": true,
+      "gates": {
+        "complete300": true,
+        "all14": true,
+        "all8ActuallyUploaded": true,
+        "each4BothQualityPeer": true,
+        "fourteenFrameAudioProgress": true,
+        "steadyNoChurn": true,
+        "contributorConsent": true,
+        "bothQualityDecode": true,
+        "rssWithinBound": true,
+        "actualPeerReadiness": true,
+        "observedInPlaceRenewal": false,
+        "admissionObservedWithoutRefusalOrUnknown": true,
+        "inputProvenance": true,
+        "admissionSemanticCoverage": true
+      },
+      "httpAdmissionRefusals": 0,
+      "httpAdmissionUnknown": 0,
+      "httpAdmissionPendingAtBoundary": 0,
+      "admissionSemanticCoverageComplete": true,
+      "peerRolesWithRenewalRecords": 12,
+      "recordsPerPeerRole": 3,
+      "allRenewalRecordsUnambiguousIdentityPubkeySessionRetained": true,
+      "aggregateLinkContinuityMissingForRoles": [
+        "M1-contributor-high-2",
+        "receiver-1",
+        "receiver-2"
+      ],
+      "directPeerConnectionObjectIdentityProved": false,
+      "renewalCausedDisconnectProved": false,
+      "renewalWitnessReview": "Source-derived conservative surviving-link-renewal-v1 adopted prospectively before R17; original R16 RED retained",
+      "recordedBrowserCleanup": {
+        "contextsClosed": true,
+        "cdpDetached": true,
+        "browserCleanupProved": true
+      },
+      "recordedControllerCleanup": {
+        "diagnosticReaped": true,
+        "providerReaped": true,
+        "providerProved": true,
+        "M1": {
+          "ok": true,
+          "runnerReaped": true,
+          "scenarioResourcesOK": true,
+          "mainBirthAbsent": true,
+          "stageRemoved": true
+        },
+        "M4": {
+          "ok": true,
+          "runnerReaped": true,
+          "scenarioResourcesOK": true,
+          "mainBirthAbsent": true,
+          "stageRemoved": true
+        },
+        "forwardReaped": true
+      },
+      "rootSourceCleanupExitCode": 0,
+      "rootCleanupFailure": null,
+      "independentCleanupReview": "PASS",
+      "sourceCleanupReceiptVersion": 2,
+      "sourceCleanupRecordedOK": true,
+      "actualFiniteSourceExitCode": 255
+    },
+    "matching300SecondAcceptanceEstablishedByCompletedAttempts": false,
+    "long7200SecondsAnd22ChurnAcceptance": false,
+    "r17": {
+      "verdict": "RED_RETAINED",
+      "kind": "distributed-M1-three-one-profile-M4-eleven-six-five-profiles-steady300-scoped-admission-surviving-renewal-v4",
+      "measurementMs": 303597,
+      "gates": {
+        "complete300": true,
+        "all14": true,
+        "all8ActuallyUploaded": true,
+        "each4BothQualityPeer": false,
+        "fourteenFrameAudioProgress": true,
+        "steadyNoChurn": true,
+        "contributorConsent": true,
+        "bothQualityDecode": true,
+        "rssWithinBound": true,
+        "actualPeerReadiness": true,
+        "observedInPlaceRenewal": true,
+        "admissionObservedWithoutRefusalOrUnknown": true,
+        "inputProvenance": true,
+        "admissionSemanticCoverage": true
+      },
+      "recordedBrowserCleanup": {
+        "contextsClosed": true,
+        "cdpDetached": true,
+        "browserCleanupProved": true
+      },
+      "failedActualPeerModes": []
+    },
+    "r18": {
+      "verdict": "RED_RETAINED",
+      "kind": "distributed-M1-three-one-profile-M4-eleven-six-five-profiles-steady300-scoped-admission-surviving-renewal-v4",
+      "measurementMs": 0,
+      "gates": {
+        "admissionSemanticCoverage": false
+      },
+      "recordedBrowserCleanup": {
+        "contextsClosed": false,
+        "cdpDetached": true,
+        "browserCleanupProved": false
+      },
+      "failedActualPeerModes": [],
+      "fixtureDefect": "The original one-second native observation deadline included request/header wait; prospectively corrected to response-body phase in v2 before R19"
+    },
+    "r19": {
+      "verdict": "RED_RETAINED",
+      "kind": "distributed-M1-three-one-profile-M4-eleven-six-five-profiles-steady300-scoped-admission-v2-surviving-renewal-v5",
+      "measurementMs": 304134,
+      "gates": {
+        "complete300": true,
+        "all14": true,
+        "all8ActuallyUploaded": true,
+        "each4BothQualityPeer": false,
+        "fourteenFrameAudioProgress": true,
+        "steadyNoChurn": true,
+        "contributorConsent": true,
+        "bothQualityDecode": true,
+        "rssWithinBound": true,
+        "actualPeerReadiness": true,
+        "observedInPlaceRenewal": false,
+        "admissionObservedWithoutRefusalOrUnknown": true,
+        "inputProvenance": true,
+        "admissionSemanticCoverage": false
+      },
+      "recordedBrowserCleanup": {
+        "contextsClosed": true,
+        "cdpDetached": true,
+        "browserCleanupProved": true
+      },
+      "failedActualPeerModes": [
+        {
+          "role": "receiver-2",
+          "intendedMode": "peer-first",
+          "actualMode": "off",
+          "turnOutcome": "unavailable"
+        },
+        {
+          "role": "receiver-3",
+          "intendedMode": "peer-first",
+          "actualMode": "off",
+          "turnOutcome": "unavailable"
+        },
+        {
+          "role": "receiver-4",
+          "intendedMode": "peer-first",
+          "actualMode": "off",
+          "turnOutcome": "unavailable"
+        }
+      ]
+    }
+  },
+  "remainingAcceptance": [
+    "Complete both-quality/shared-budget browser acceptance",
+    "Physical/browser breadth and original stopped-video recovery",
+    "Difficult networks and natural TURN expiry",
+    "Matching 300-second capacity and 7200-second/22-churn operation",
+    "Matched wire/cost benefit and server-quota evidence",
+    "Final immutable 0.2.0 release/download acceptance"
+  ],
+  "historicalRule": "Earlier passes and RED verdicts keep their source revision and original protocol; no splicing or reclassification.",
+  "evidence": [
+    {
+      "path": "artifacts/deployment-18bbfd7-r4-runtime-bound-20261015/runtime-contract.json",
+      "bytes": 11536,
+      "sha256": "2379b6527633b7a12405a98d4e5738717589e6ecd8267983d8892f11643ff151"
+    },
+    {
+      "path": "artifacts/deployment-18bbfd7-r4-runtime-bound-20261015/ROOT-EVIDENCE-MANIFEST.json",
+      "bytes": 5551,
+      "sha256": "b63eed836cf9d1a07028155c15ca88b916fb3a94fe727e438545849ac0834e58"
+    },
+    {
+      "path": "artifacts/independent-deployment-18bbfd7-r4-cleanup-prerequisite-review-20261015/review.json",
+      "bytes": 10567,
+      "sha256": "011d0e66bc57fd72670eb9a0f91b88f472e354622b0f65c95ee13d3f22281c28"
+    },
+    {
+      "path": "artifacts/ticket-renewal-fix-20261015/ci-exact-head.json",
+      "bytes": 21988,
+      "sha256": "7272477f1fc745dce8d5cbba31d813a3070e914e4a264e3ebe1494b43b20c9e3"
+    },
+    {
+      "path": "artifacts/clean-consumer-18bbfd7-20261015/analysis/analysis.json",
+      "bytes": 4281,
+      "sha256": "2c36296ac623a9ae77eac65fefa805107e860634f4ef79ae904ea5bf185da7f7"
+    },
+    {
+      "path": "artifacts/clean-consumer-18bbfd7-20261015/EVIDENCE-MANIFEST.json",
+      "bytes": 5627,
+      "sha256": "e0936a114da8f5f0a712474bb47f9f020347b9b86b4ceaed64ba594205752113"
+    },
+    {
+      "path": "artifacts/independent-clean-consumer-18bbfd7-review-20261015/review.json",
+      "bytes": 25006,
+      "sha256": "7a791ff9bd8b19ac16fbebf4e7150aabe8a8b28fed62d7b3735793487d585ba3"
+    },
+    {
+      "path": "artifacts/ticket-renewal-fix-20261015/focused-r2.json",
+      "bytes": 458,
+      "sha256": "87c83d994e3cc90b95b4874a1d2442ffd33cde953c9f1b4975ea71714e06be85"
+    },
+    {
+      "path": "artifacts/ticket-renewal-fix-20261015/swarm.json",
+      "bytes": 486,
+      "sha256": "ea3020961c5d522a160fbf83716d9e75ee519b2d9ebbb04e685b6fd4ca4a374b"
+    },
+    {
+      "path": "artifacts/turn-renewal-18bbfd7-r4-run-20261015/existing-turn-renewal-supervised.json",
+      "bytes": 12833496,
+      "sha256": "50ee18eed25b2d39e0d67b5d3a06dfb064c1a82bdd12e685f7ef37596872b242"
+    },
+    {
+      "path": "artifacts/turn-renewal-18bbfd7-r4-run-20261015/analysis/publisher-audit/AUDIT.json",
+      "bytes": 12179,
+      "sha256": "549067d6a8a92b6ef5414565703621323258bb2a0e4d2af9adb9bc81022a8129"
+    },
+    {
+      "path": "artifacts/turn-renewal-18bbfd7-r4-run-20261015/analysis/publisher-audit/model-replay.json",
+      "bytes": 67449,
+      "sha256": "54d60565b5f8975b587657ce945897123574c8dbf3e556a8b06b6a9023ab0cf5"
+    },
+    {
+      "path": "artifacts/turn-renewal-18bbfd7-r4-run-20261015/analysis/ROOT-CLEANUP-OBSERVATION.json",
+      "bytes": 845,
+      "sha256": "5656cb007833c8e02b63c3bd170d860460bb291f082694a9d438ba88a930eec6"
+    },
+    {
+      "path": "artifacts/internet-18bbfd7-r4-actual-proof-references-20261015/internet-proof-inputs.json",
+      "bytes": 71215,
+      "sha256": "53ac4869a5f5d0ca37e01212c8bf5bfe71663374762aca555c387ef265c70385"
+    },
+    {
+      "path": "artifacts/current-feature-audit-18bbfd7-20261015/FEATURE-LEDGER.json",
+      "bytes": 10580,
+      "sha256": "328e1f4282bdba9473923940346a0df1ef28cc992d97d336a23b91f06bae733c"
+    },
+    {
+      "path": "artifacts/current-feature-audit-18bbfd7-20261015/EVIDENCE-MANIFEST.json",
+      "bytes": 587,
+      "sha256": "9f5ec6cae37c72bec445ab604e8da561ea11d9d89774392ecae6f1e4f4394a41"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r13-run-20261015/browser/receipt.json",
+      "bytes": 2496560,
+      "sha256": "f23e0cf2e7085749e53a0641c98c24326fc9516421e10fa7cd8b255da0f557c9"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-18bbfd7-r13-actual-review-20261015/review.json",
+      "bytes": 21239,
+      "sha256": "a8e6abd22b01349a685dbac23080165c285c6500b2e7430db986e05f908b2f9a"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r14-run-20261015/controller-receipt.json",
+      "bytes": 2214,
+      "sha256": "4b17a4d99346202517d1c88440be3aab5390f84d51c3b442dd8d7052395dfadb"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-18bbfd7-r14-cleanup-review-20261015/review.json",
+      "bytes": 23144,
+      "sha256": "9d5efd0baf20723b59578fd2540b3d20929bdde61e6b6e1c502b4460eca24a1a"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r15-run-20261015/browser/receipt.json",
+      "bytes": 1234930,
+      "sha256": "ad816c48bf6fd9ad35ff327827fcc0db6bdfe9b07c36b1436281820132d77cf7"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-18bbfd7-r15-cleanup-review-20261015/review.json",
+      "bytes": 55633,
+      "sha256": "d8c17e54099643dfa1be321e424e596b05dc9f59ac5172810f8dc307666524cd"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-18bbfd7-r15-cleanup-review-20261015/FRESH-OWNED-ABSENCE.json",
+      "bytes": 2929,
+      "sha256": "7c0cfe9f3d9b869619fee149de24876db3d8b774133899a283dc2bdf2e099b5a"
+    },
+    {
+      "path": "spikes/results/a416f7e-current-delivery-checkpoint-20261015.json",
+      "bytes": 9633,
+      "sha256": "2c16a9acefe6a0c6d18be4b2dd3681f6aaa209eeb0a52653c83b2fdf12d45fe6"
+    },
+    {
+      "path": "src/broadcast-worker-guardian.mjs",
+      "bytes": 6996,
+      "sha256": "442754ee3c13ca008302f704e6f8ca8803485cdcbbd9af091cc713e67473f9e9"
+    },
+    {
+      "path": "src/broadcast-worker-group.mjs",
+      "bytes": 7972,
+      "sha256": "9aaee81ac9dc659f56aeff129b18f05916fe3de2678a3f50bf83f1389c64a9c0"
+    },
+    {
+      "path": "test/broadcast-guards.test.mjs",
+      "bytes": 38933,
+      "sha256": "292f9c343d08c6af993eae1b3fd9a87b00209875aa356da9a5b54caa33c5ec11"
+    },
+    {
+      "path": ".github/workflows/test.yml",
+      "bytes": 6823,
+      "sha256": "f48f1bbc28a1fa1aaa7a6c0c00515d24b2360f5b02b08457fde9e7a99ddadb68"
+    },
+    {
+      "path": "artifacts/public-account-budget-cross-host-r4-actual-a416f7e-20261015/SUMMARY.json",
+      "bytes": 2187,
+      "sha256": "b863a9a6c4bcc6645a05a9e899fff5a2c1075d5ea32689e909168ea4240ec8ac"
+    },
+    {
+      "path": "artifacts/independent-public-account-budget-cross-host-r4-actual-review-a416f7e-20261015/review.json",
+      "bytes": 3328,
+      "sha256": "1bcc33a6e8a3e9136c1efd54a39f21fa48fa28412001837fd267c96b4926e474"
+    },
+    {
+      "path": "artifacts/ios-simulator-safari-resume-anchor-r3-a416f7e-root-20261015/EVIDENCE-MANIFEST.json",
+      "bytes": 8829,
+      "sha256": "69a6efd59876a46c53340ed7c6948d0478218a86ed29698d21ec802898a6e74b"
+    },
+    {
+      "path": "artifacts/independent-ios-simulator-safari-resume-anchor-r3-a416f7e-review-20261015/review.json",
+      "bytes": 3538,
+      "sha256": "5a9420d9ed4343c027b423b25a869c5f07443c1b7b2630a218ecea00668ffeba"
+    },
+    {
+      "path": "artifacts/public-account-browser-lifecycle-low-a416f7e-fourth-root-20261015/EVIDENCE-MANIFEST.json",
+      "bytes": 48599,
+      "sha256": "f9a0667ac48c56126feac2eccd0088e06fe93ddecbc3ab6aea08fe149c0e7faf"
+    },
+    {
+      "path": "artifacts/independent-public-account-browser-lifecycle-low-a416f7e-fourth-actual-review-20261015/review.json",
+      "bytes": 16273,
+      "sha256": "099c9c92cbbd8aa4ddc9e838b5b3601dc7f1aa772311ff2af43c2099b69aec64"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r16-run-20261015/browser/receipt.json",
+      "bytes": 2655279,
+      "sha256": "735634d49e144411087348f70f0ff12cde17b80904df6053f5f3d6a6fe765cd0"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r16-run-20261015/controller-receipt.json",
+      "bytes": 3247,
+      "sha256": "3d542b3928299b82b685f4b7a7b6b3f99b322445b0855040bb2cd4a30dd13fe7"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r16-run-20261015/outer-guardian.json",
+      "bytes": 1416,
+      "sha256": "bf939484227a554bbc979f89d43e95f99900cba9083a954c651a35bd8a3ca78a"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r16-run-20261015/M1-cleanup.json",
+      "bytes": 3312,
+      "sha256": "160a2edaf86c4829b85126bd2212c38e28ce93b98260469bd4f994964b846b1e"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r16-run-20261015/M4-cleanup.json",
+      "bytes": 4762,
+      "sha256": "f83eb84a899557daa332c023565001aa932a662793837a96a5483dc1a36797e6"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r16-run-20261015/metadata-helper-cleanup.json",
+      "bytes": 56,
+      "sha256": "429fd58a17cdda33628161329e52b2ff51c7e8ccce180035b97ba0ff27a295a0"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r16-run-20261015/source-guard.json",
+      "bytes": 565,
+      "sha256": "7e192c1828f3e7a877d81c143d376ead1591323a67be5df15c490a64b4a25c1b"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r16-root-20261015/ROOT-LIFECYCLE.json",
+      "bytes": 1809,
+      "sha256": "92baaab17d9418be8e116f0d4b4105c263ffab1b1d468f1b9e528d8e62daff2e"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r16-source-bound-20261015/host-cleanup.json",
+      "bytes": 3289,
+      "sha256": "d66ac013f173715b7656f353cae506fda8facfd593fbb4cc0b373b5a9b1968f1"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r17-run-20261015/browser/receipt.json",
+      "bytes": 2676616,
+      "sha256": "082415ca56d5bec067d24888a01656e0721b6857c3027c2bbeb2c72f62d84aff"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-18bbfd7-r17-cleanup-review-20261015/review.json",
+      "bytes": 60925,
+      "sha256": "6a6655ab5bae4bf6873d8f38af7f3b7ac2311d8be90690eef3966835ea281544"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r18-run-20261015/browser/receipt.json",
+      "bytes": 1957096,
+      "sha256": "0a6f1a697abdf77c397950cd03986728db04dbbaaa87f902599993bb43d63346"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-18bbfd7-r18-cleanup-review-20261015/review.json",
+      "bytes": 62880,
+      "sha256": "8534c9fd3cb8ea3c160edcc4d759fed4f212ade00d95d359a04caf903a753bfd"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-18bbfd7-r19-run-20261015/browser/receipt.json",
+      "bytes": 2962662,
+      "sha256": "3a96741cf20087d97b706d0080772db5b1cd6f93016222b21d026de25d646a9f"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-18bbfd7-r19-cleanup-review-20261016/review.json",
+      "bytes": 67414,
+      "sha256": "f334423db30a12582bef8f71ecf3bd7f001bb384f519221aaf1adcaee06f4303"
+    },
+    {
+      "path": "artifacts/turn-capacity-diagnosis-18bbfd7-20261016/public-capacity-probe.json",
+      "bytes": 344,
+      "sha256": "b4b05ce8add4d9b341e39b5ccb35af507242b3c05d1edb6175428087365084bd"
+    },
+    {
+      "path": "artifacts/turn-capacity-reclaim-18bbfd7-20261016/EVIDENCE-MANIFEST.json",
+      "bytes": 2320,
+      "sha256": "51695f38c0bd37863a76b29d05cedc3eee84fd5742d1ff1a9e22be59b5393a0d"
+    }
+  ],
+  "turnCacheDiagnosis": {
+    "postRunDiagnostic": {
+      "v": 1,
+      "scope": "One ordinary TLS same-origin-shaped POST after R19 cleanup; no credentials/cookies retained; non-browser capacity diagnostic only",
+      "startedUTC": "2026-10-15T23:01:30.612Z",
+      "endedUTC": "2026-10-15T23:01:30.994Z",
+      "status": 429,
+      "error": "turn-viewer-capacity",
+      "retryAfter": "3",
+      "credentialsRead": false
+    },
+    "originalBrowserResponseCodeCaptured": false,
+    "sourceFinding": "Expired cached leases and failed initial issuance retain a settled viewer slot for up to three hours; 64-slot bound unchanged",
+    "correctionFieldAccepted": false,
+    "correction": {
+      "state": "Local source and focused regression checks passed; new CI/deployment/field acceptance pending",
+      "originalRegressionsFailed": 2,
+      "finalServiceTestsPassed": 16,
+      "freshLeaseOrPendingEviction": false,
+      "boundsChanged": false
+    }
+  }
+}

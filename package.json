@@ -1,21 +1,33 @@
 {
   "name": "relayswarm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Experimental peer-assisted HLS video over WebRTC and Nostr relays, with signed segment commitments and a native HyperDHT proof of concept",
   "scripts": {
     "poc": "node poc.mjs",
     "poc:native": "node native-poc.mjs",
     "test": "node test/e2e.mjs",
-    "test:native": "node --test test/native-*.test.mjs",
+    "test:native": "node --test --test-reporter=tap test/native-*.test.mjs",
     "check": "node scripts/check-syntax.mjs",
     "audit": "npm audit --audit-level=high",
     "test:browser": "node test/hls-swarm-browser.mjs",
-    "test:swarm": "node --test test/hls-swarm.test.mjs test/browser-hardening.test.mjs",
-    "test:publisher": "node --test test/hls-publisher.test.mjs test/demo-server.test.mjs",
+    "test:swarm": "node --test test/hls-swarm.test.mjs test/browser-hardening.test.mjs test/stream-discovery.test.mjs",
+    "test:publisher": "node --test test/hls-publisher.test.mjs test/blocking-playlist-reload.test.mjs test/blocking-playlist-http.test.mjs test/hls-media.test.mjs test/commitment-delegation.test.mjs test/publisher-advertisement.test.mjs test/publisher-state.test.mjs test/demo-server.test.mjs test/keepalive-listeners.test.mjs test/demo-operator.test.mjs test/demo-client.test.mjs test/policy-renewal.test.mjs test/media-recovery.test.mjs test/broadcast-waiting.test.mjs test/admission.test.mjs test/account-upload-budget.test.mjs test/exclusive-state-lease.test.mjs test/private-state-filesystem.test.mjs test/account-budget-http.test.mjs test/account-budget-client.test.mjs test/account-browser-guard.test.mjs test/upload-budget.test.mjs test/production-adversarial.test.mjs test/ice-config.test.mjs test/turn-credentials.test.mjs test/turn-lease-observation.test.mjs test/peer-link-drain.test.mjs test/turn-credential-service.test.mjs test/request-diagnostics.test.mjs test/fetch-diagnostics.test.mjs test/probe-control-path.test.mjs test/broadcast-request-timings.test.mjs test/cli-entry.test.mjs",
     "test:playback": "node test/hls-playback-browser.mjs",
+    "test:playback:resume": "node test/playback-resume-browser.mjs",
     "demo": "node demo/server.mjs",
     "docs:generate": "node scripts/build-ai-context.mjs",
-    "check:docs": "node scripts/check-docs.mjs"
+    "check:docs": "node scripts/check-docs.mjs",
+    "test:operator": "node test/operator-browser-suite.mjs",
+    "test:broadcast": "node scripts/install-test-mediamtx.mjs && node --test test/broadcast-guards.test.mjs test/exclusive-state-lease.test.mjs test/broadcast-integration.test.mjs",
+    "test:broadcast:browser": "node test/broadcast-browser.mjs",
+    "broadcast": "node scripts/broadcast.mjs",
+    "broadcast:install": "node scripts/install-test-mediamtx.mjs",
+    "test:media-browser": "node test/hls-fmp4-browser.mjs && node test/hls-media-browser.mjs && node test/hls-ll-browser.mjs",
+    "native:fetch": "node scripts/native-client.mjs",
+    "test:interop": "node test/interop-swift.mjs",
+    "test:interop:kit": "node test/interop-current-sdk-browser.mjs",
+    "test:media-recovery": "node test/media-recovery-browser.mjs && node test/sparse-aac-recovery-browser.mjs",
+    "test:live-recovery": "node test/live-restart-browser.mjs --baseline --resultsDir artifacts/live-restart-browser/baseline && node test/live-restart-browser.mjs --resultsDir artifacts/live-restart-browser/treatment"
   },
   "keywords": [
     "nostr",
@@ -40,17 +52,20 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
+  },
+  "bin": {
+    "relayswarm-native": "./scripts/native-client.mjs"
   },
   "dependencies": {
+    "esbuild": "0.28.2",
+    "hls.js": "1.7.3",
     "hyperdht": "6.33.2",
     "nostr-tools": "^2.24.1",
     "werift": "^0.24.3",
     "ws": "8.21.3"
   },
   "devDependencies": {
-    "esbuild": "0.28.2",
-    "hls.js": "1.7.3",
     "playwright-core": "1.63.0"
   },
   "exports": {
@@ -59,7 +74,13 @@
     "./package.json": "./package.json",
     "./*": "./*",
     "./segment-commitment": "./src/browser/segment-commitment.mjs",
-    "./hls-publisher": "./src/hls-publisher.mjs"
+    "./hls-publisher": "./src/hls-publisher.mjs",
+    "./publisher-state": "./src/publisher-state.mjs",
+    "./stream-discovery": "./src/browser/stream-discovery.mjs",
+    "./broadcast-pipeline": "./src/broadcast-pipeline.mjs",
+    "./native-client": "./src/native-client.mjs",
+    "./publisher-advertisement": "./src/publisher-advertisement.mjs",
+    "./account-upload-budget": "./src/account-upload-budget.mjs"
   },
   "bugs": {
     "url": "https://github.com/forgesworn/relayswarm/issues"

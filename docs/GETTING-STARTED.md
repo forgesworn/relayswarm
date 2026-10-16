@@ -26,10 +26,10 @@ Browser peer participation requires HTTPS or a loopback secure context,
 WebCrypto, WebRTC data channels and WebSocket. Native HLS alone does not attach
 this hls.js loader.
 
-A Git dependency can also be pinned to the released commit:
+A Git dependency can also be pinned to the immutable release tag:
 
 ```sh
-npm install 'git+https://github.com/forgesworn/relayswarm.git#3e480e19dfe4d675f14bcb2968f3dc4926fbca25'
+npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.1.0'
 ```
 
 ## Use the standalone browser bundle
@@ -70,11 +70,12 @@ libx264. Existing media does not require ffmpeg:
 npm run demo -- --media-dir /path/to/hls --manifest master.m3u8
 ```
 
-Keep uploading off until a viewer opts in. The demo has no participant admission
-service and is intended for controlled trials. See [FIELD-TEST.md](FIELD-TEST.md)
+Keep uploading off until a viewer opts in. The published demo is intended for
+controlled trials; current source adds bounded ticket admission. See [FIELD-TEST.md](FIELD-TEST.md)
 for supported playlist features, TLS/reverse-proxy setup, relay/ICE choices and
-baseline/swarm receipts. For documentation tooling introduced after the release,
-use a current `main` checkout rather than the immutable `v0.1.0` source tag.
+baseline/swarm receipts. Current source adds the broadcaster workflow; it is
+absent from v0.1.0. See [Broadcasting](BROADCASTING.md) for live input and
+optional independent RTMPS forwarding.
 
 ## Run the transfer proofs
 
@@ -99,8 +100,40 @@ See [Native transport](NATIVE-TRANSPORT.md) for those boundaries.
 | Synthetic demo fails to start | `ffmpeg -version`; build must include libx264, or supply existing media |
 | Remote page remains origin-only | Use device-trusted HTTPS; plain LAN HTTP lacks browser WebCrypto |
 | No peer-first fragments | Opted-in seeder availability, shared swarm/context, trusted signed event and a working commitment endpoint; startup uses origin |
-| No direct connection across networks | Relay/ICE policy and NAT reachability; TURN and super-peers are not implemented |
+| No direct connection across networks | Relay/ICE policy and NAT reachability; hosts may supply TURN credentials, but managed TURN and super-peers are absent |
 | `metrics().mode` is `off` | Inspect `disabledReason`; see integration options and validation |
 | Public-relay test fails | Re-run before treating policy/availability changes as a code regression |
 
 Current evidence and remaining device/network gates are in [STATUS.md](STATUS.md).
+
+## Current production source candidate
+
+The published commands above install v0.1.0. The current 0.2.0 candidate is
+tracked on [PR 8](https://github.com/forgesworn/relayswarm/pull/8); its
+[production features](PRODUCTION-FEATURES.md) and
+[delivery requirements](PRODUCTION-READINESS.md) have separate evidence.
+For its source preview, use the feature branch (a mutable development reference):
+
+```sh
+git clone --branch feat/broadcaster-pilot --depth 1 https://github.com/forgesworn/relayswarm.git
+cd relayswarm
+npm ci
+npm run demo
+```
+
+This source requires Node 22.13+ and adds the installed native executable,
+verified HTTP fallback and wider-media tests:
+
+```sh
+npm run native:fetch -- --help
+npm run test:media-browser
+npm run test:media-recovery          # actual corrupt-media repair/cancel/deadline journeys
+npm run test:interop
+npm run test:interop:kit             # published SDK API, not the historical adapter
+```
+
+The historical adapter fixture requires macOS arm64 and read-only authenticated
+`gh` access to its pinned public sources. The current SDK fixture uses published
+Kit v0.5.0 in `../relayswarm-kit` (or `RELAYSWARM_KIT_DIR`) and requires Swift 6,
+macOS arm64, Chrome and ffmpeg. Its verified transfer and acceptance boundaries
+are in the [interop guide](interop/README.md).

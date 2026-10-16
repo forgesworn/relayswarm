@@ -4,10 +4,27 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.1.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0),
-MIT licensed, Node 22+; CI uses Node 24. This is a proof of concept with a
-bounded hls.js loader and a runnable publisher/player, not a production engine.
-The npm registry is unpublished.
+**Status:** [v0.1.0 is the published GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0).
+The 0.2.0 source candidate includes further production feature work; its
+[delivery requirements](docs/PRODUCTION-READINESS.md) remain open. MIT licensed,
+Node 22.13+; CI uses Node 24. The npm registry is unpublished.
+
+The [current experimental pilot](docs/STATUS.md#current-delivery-checkpoint)
+runs exact `44b21d6`. Nine required CI jobs, fresh 273-member package
+consumption and guarded HTTPS deployment passed. Bounded rendition-neighbour
+discovery and cold-peer deadline allocation are deployed. Nostr and an authenticated host-supplied account API are
+implemented; integrating websites supply their authentication.
+
+The agreed feature surfaces are implemented, but production acceptance is
+incomplete. The latest fourteen-role trial measured 36.188 seconds before a
+contributor briefly switched to origin-only delivery. Peer-first recovered
+82 ms later; the interruption still fails the unchanged continuity requirement.
+All owned cleanup passed independent review. The pilot uses the explicit
+900-request address budget; the default remains 600. Matching capacity, two-hour/churn,
+natural expiry, physical/browser breadth, difficult networks, measured wire/cost
+benefit and immutable release/download acceptance remain open. v0.1.0 is the
+published prerelease; 0.2.0 remains the source candidate. See the
+[P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
 
 [Documentation](docs/README.md) · [Installation](docs/GETTING-STARTED.md) ·
 [hls.js integration](INTEGRATION.md) · [API reference](docs/API.md) ·
@@ -41,6 +58,16 @@ See [the field-test guide](docs/FIELD-TEST.md) for the supported HLS subset,
 HTTPS access from separate devices and receipt interpretation. Synthetic
 media requires ffmpeg; serving an existing directory does not.
 
+The current source candidate includes a **broadcaster**: live
+RTMP-to-HLS ingest, persistent publisher identity, cumulative viewer upload
+allowances, measured peer choice and authenticated operator controls.
+Optional RTMPS forwarding can send the source to an external platform
+independently of RelaySwarm delivery. These features are absent from the
+immutable v0.1.0 downloads. The [production feature guide](docs/PRODUCTION-FEATURES.md)
+also describes wider media, delegation, admission, durable budgets/reports and
+native fallback. See [broadcasting](docs/BROADCASTING.md),
+[operations](docs/OPERATIONS.md) and [container setup](deploy/README.md).
+
 ## Install the library
 
 The release supplies an installable tarball, a standalone browser ESM bundle
@@ -56,7 +83,7 @@ import { createHlsPublisher } from 'relayswarm/hls-publisher'; // Node only
 ```
 
 The host supplies hls.js. Install it separately for a host-page integration;
-the source demo already lists it as a development dependency. The release
+the source demo includes it as a runtime dependency. The release
 bundle includes the browser loader's runtime dependencies. Pinned Git
 installation and bundle usage are in [Getting started](docs/GETTING-STARTED.md).
 
@@ -80,7 +107,7 @@ The browser loader has three modes:
 
 Peer-first requires a trusted signed kind-30311 stream event with the
 experimental `["relayswarm", "redistribute", "1"]` tag and an expiring
-commitment signed by that same author. Delegated signers are not supported.
+commitment signed by that author or a host-trusted, author-scoped delegate.
 Kinds 24170/24171/24172 and this authorisation tag are experimental assignments,
 not an accepted RelaySwarm NIP or a stable interoperability guarantee.
 
@@ -93,7 +120,7 @@ signals, then sends media over the direct peer connection.
 
 [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) kind-30311
 events can list relays. A host can reuse that selection, but this library does
-not discover stream events or automatically read relay/STUN policy from them:
+not automatically read relay/STUN policy from them:
 the host passes `streamEvent`, `swarmId`, `relays` and `iceServers` explicitly.
 The HTTP origin remains responsible for initial media availability and fallback.
 
@@ -112,9 +139,11 @@ flowchart TB
 
 Other approaches and the narrow comparison are in [Landscape](docs/LANDSCAPE.md).
 [RelaySwarmKit](https://github.com/forgesworn/relayswarm-kit) is a separate Swift
-signalling/transport project. Its README describes wire version 2; the current
-Node/browser session here uses version 3. Shared kinds and NIP-44 test vectors
-do not establish current cross-client or signed-HLS interoperability.
+signalling/transport project. Published Kit v0.5.0 supports session version 3
+and signed media. Its public SDK received verified author/delegate HLS bytes
+from the production browser loader and rejected corruption and revocation.
+That measured macOS arm64/Chrome loopback journey and its boundaries are in the
+[protocol draft](docs/NIP-DRAFT.md); physical-device and NAT acceptance remain open.
 
 ## Evidence
 
@@ -149,8 +178,16 @@ on physical phones or a broad range of internet networks.
 | `npm run docs:generate` | Regenerate `llms-full.txt` from maintained Markdown |
 | `npm run test:swarm` | Browser-loader and hardening unit tests |
 | `npm run test:publisher` | Publisher context/range and demo HTTP/relay tests |
+| `npm run broadcast:install` | Fetch the platform-pinned MediaMTX test router |
+| `npm run broadcast` | Unreleased live ingest launcher; FFmpeg, H.264/AAC input |
+| `npm run test:broadcast` | Real ingest/reconnect/forwarding plus control guards; FFmpeg/OpenSSL |
+| `npm run test:broadcast:browser` | Real-time two-quality Chrome playback; installed router and FFmpeg |
+| `npm run test:operator` | Actual Chrome allowance, remote policy and reporting controls |
+| `npm run test:media-browser` | Actual fMP4/ABR, audio/AES/mixed-codec and low-latency-part Chrome journeys |
+| `npm run native:fetch -- --help` | Installed native client with verified HTTP fallback |
 | `npm run test:native` | Local relay and local HyperDHT bootstrap; no external network |
 | `npm run test:playback` | Two-rendition real Chrome regression; Chrome and ffmpeg |
+| `npm run test:playback:resume` | Trusted Resume click, decoded media and fresh consent; Chrome and ffmpeg |
 | `npm run test:browser -- --mode shadow` | Live HLS Chrome harness; Chrome and ffmpeg |
 | `npm run test:browser -- --mode peer-first` | Authenticated peer-first harness; Chrome and ffmpeg |
 | `npm test` / `npm run poc` | Original WebRTC PoC/fan-out against public Nostr relays |
@@ -171,16 +208,27 @@ Origin-only mode avoids swarm participation; the origin still receives normal
 HLS requests. Upload consent and publisher redistribution permission are
 separate requirements.
 
+The optional [shared upload allowance](docs/ACCOUNT-UPLOAD-BUDGET.md) uses
+explicit Nostr sign-in or a host website account to coordinate media reservations
+across devices. Its private service can associate those devices; linking both
+identities also reveals their association to that service. Stable account
+identities and grants stay out of swarm traffic and receipts. Sign-in never
+enables uploading or reporting. The
+[current pilot](docs/STATUS.md#current-delivery-checkpoint) offers Nostr sign-in;
+integrating websites supply their own authenticated account resolver.
+
 The browser defaults to Google's public STUN server unless the host supplies
 `iceServers`; the native path uses HyperDHT bootstrap/routing nodes instead.
-No TURN or super-peer path is implemented. For browser HLS, blocking peers or
+No managed TURN or super-peer service is supplied. Hosts can pass TURN ICE
+credentials through `iceServers`. For browser HLS, blocking peers or
 relays leaves the normal origin loader as fallback. The native CLI reports
-failure; its host must supply fallback. The swarm provides neither durable
+failure; the installed native client adds verified HTTP fallback. The swarm provides neither durable
 storage nor availability after every source disappears.
 
 Still outstanding: physical-phone and varied-NAT trials, sustained operation,
-broad adaptive bitrate scheduling, fMP4 playback coverage, a full Sybil suite,
-delegated commitment keys, an accepted NIP and independent-client interoperability.
+broad internet scheduling/cost evidence, a full Sybil suite, an accepted NIP
+and physical/public-NAT independent-client acceptance. Actual fMP4/adaptive-quality
+and wider-media fixtures are recorded separately from physical acceptance.
 See [Threat model](docs/THREAT-MODEL.md) and [the field gates](docs/FIELD-TEST.md).
 
 ## Documentation and AI readers
@@ -190,9 +238,10 @@ The canonical public repository is
 [`llms.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms.txt)
 is a short index with direct Markdown links;
 [`llms-full.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms-full.txt)
-is generated from the maintained guides. Released code is pinned at `v0.1.0`;
+is generated from the maintained guides. Published code is pinned at `v0.1.0`;
 documentation on `main` can include later corrections. [Maintaining the docs](docs/MAINTAINING-DOCS.md)
-explains regeneration and publication checks. [Changelog](CHANGELOG.md) records
+explains regeneration and publication checks. The release assets remain v0.1.0
+until a new release is actually published. [Changelog](CHANGELOG.md) records
 release and documentation changes.
 
 [MIT licence](LICENSE).

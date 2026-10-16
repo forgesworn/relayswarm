@@ -1,0 +1,107 @@
+{
+  "v": 1,
+  "date": "2026-10-15",
+  "sourceBaseCommit": "f3eeef340213a009f7986f1d8d69073e7e0edda1",
+  "sourceHashes": {
+    "src/broadcast-worker-group.mjs": "9aaee81ac9dc659f56aeff129b18f05916fe3de2678a3f50bf83f1389c64a9c0",
+    "test/exclusive-state-lease.test.mjs": "45d0d13cff4dd0962d3d86fba527e69371f23f2ac8f9cce0872831428c42c30f"
+  },
+  "correction": "Refuse additional TERM/KILL IPC after the first force request or an accepted drain witness.",
+  "scope": "Source race correction and focused local qualification; original hosted CI cause remains unproved.",
+  "oldSourceNegative": {
+    "exitCode": 1,
+    "specificEPIPEFailures": 2,
+    "elapsedMs": 160
+  },
+  "focused": {
+    "counts": {
+      "tests": 21,
+      "pass": 21,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "guardElapsedMs": 6645,
+    "testPhaseMs": 5832,
+    "bounds": {
+      "workSeconds": 40,
+      "wholeSeconds": 60,
+      "cleanupReserveSeconds": 20
+    },
+    "resources": {
+      "limits": {
+        "rssBytes": 3221225472,
+        "processes": 64,
+        "minFreePercent": 25,
+        "probeSeconds": 2
+      },
+      "samples": 6,
+      "sampledRSSHighwater": 332201984,
+      "sampledProcessHighwater": 8,
+      "minimumObservedFreePercent": 40,
+      "rejectedResourceObservation": null
+    },
+    "cleanup": {
+      "workerReaped": true,
+      "groupAbsent": true,
+      "leaderBirthAbsent": true,
+      "allAttemptedResourceProbeChildrenReaped": true,
+      "allAcceptedResourceProbeChildrenReaped": true
+    },
+    "cleanupScope": "worker group/birth proof does not prove detached test groups or scratch absence; no foreign signals",
+    "evidenceManifestSHA256": "0e5a675417c698e3795267e4fd28931ee5699d9e77db6076e01d1a6ce1640d79"
+  },
+  "earlierBroadLocal": {
+    "verdict": "RED",
+    "originalWorkTimeoutSeconds": 40,
+    "unrelatedMalformedPlaylistCaseTimeoutMs": 6000,
+    "originalGroupAbsent": false,
+    "notPromotedToPass": true
+  },
+  "laterExactResidualRecovery": {
+    "ok": true,
+    "originalValidationStillRED": true,
+    "stillLivingOwnFixtureStopped": true,
+    "fixtureAndOriginalGroupAbsent": true,
+    "groupSignalSent": false,
+    "receiptSHA256": "04acc44f4c2685a72f7049f9cfc6677fe2a02d321b24c3fc51b04e0e6cf70e49"
+  },
+  "priorCommittedCheckpoint": {
+    "commit": "f3eeef340213a009f7986f1d8d69073e7e0edda1",
+    "packageFiles": 259,
+    "packageSHA256": "011514e2884251607c9944394ce8bc32421e7b973c05cbd7f059aa80cd5c0b51",
+    "CIrun": 38691157253,
+    "requiredPass": 8,
+    "requiredFail": 1,
+    "optionalSoak": "skipped",
+    "failedAwait": "RTMPS capability guard value.close()",
+    "guardianStage": "worker-group-probe",
+    "guardianReason": "unknown",
+    "causeEstablished": false,
+    "broadcastBrowserExecuted": false
+  },
+  "ordinaryResponseDiagnostic": {
+    "deployedCommit": "54da3840a6a057d2112945b3b465704a030aac32",
+    "verdict": "RED-before-measurement",
+    "gates": "unmeasured",
+    "failedProbe": "unchanged 0.5-second controller ownership ps snapshot",
+    "newPeerConclusion": false,
+    "M4ActualEndpointCleanupFlags": 10,
+    "allM4ActualEndpointCleanupTrue": true,
+    "originalM4ControllerAssertionRetained": true,
+    "laterActorStageAndSourceAbsenceProved": true,
+    "auditManifestSHA256": "769b4545a3372d4b4179b8d7fa94d02d9e3a7121297d70b0094fd4917395f240"
+  },
+  "correctedSourceCI": "pending",
+  "correctedSourcePackage": "pending",
+  "deployedSourceChanged": false,
+  "releaseComplete": false,
+  "remaining": [
+    "ordinary public verified peer payload at both qualities",
+    "complete Safari and physical devices",
+    "natural TURN expiry and reconnection",
+    "sustained load and churn",
+    "matched wire and cost evidence",
+    "immutable final release download acceptance"
+  ]
+}

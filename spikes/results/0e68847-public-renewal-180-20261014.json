@@ -1,0 +1,824 @@
+{
+  "v": 1,
+  "kind": "permanent-public-four-role-ticket-renewal-acceptance",
+  "sourceSha": "0e688470b6746b3a9afe80e1192ac4d46fa6aaea",
+  "proxySourceSha": "ee1510d429ac85f3738c03f10a09b753ec4eb037",
+  "measurementMs": 180015,
+  "measurementStartedUTC": "2026-10-14T02:44:18.102Z",
+  "measurementEndedUTC": "2026-10-14T02:47:18.117Z",
+  "browserVersion": "155.0.8059.41",
+  "client": {
+    "sha256": "9daf8749141d4282cdb4b5198a6b03e5495abdec2261eff186787d441a43ee4b",
+    "bytes": 729998
+  },
+  "gates": {
+    "ticketRenewal": {
+      "status": "green",
+      "scope": "All three peer actors: successful own-ticket JSON correlated to an accepted fresh settled policy check; passive before/after configured-session/pubkey/complete-peer-set/link-counter and monotonic allowance equality. No direct credential/CAS or RTCPeerConnection object identity claim."
+    },
+    "playback": {
+      "status": "green",
+      "scope": "Actual frame/time plus native audio decoded-byte progress at each requested quality; zero fatal/native/page errors. Decode does not prove audible output."
+    },
+    "contribution": {
+      "status": "green",
+      "scope": "Both explicitly consented contributors remain serving and send media within100MB each; no reconsent/reset."
+    },
+    "verifiedPeerPayload": {
+      "status": "green",
+      "scope": "Receive-only actor records verified peer bytes/fragments at low and high qualities during the measured window; links alone do not pass."
+    }
+  },
+  "scope": {
+    "programmaticDropdownSelection": true,
+    "nativeDropdownInteractionProved": false,
+    "metricsProjection": {
+      "version": 1,
+      "maxDeliveryMeasurements": 6,
+      "maxBufferedRanges": 4,
+      "perLoadBudgetObserved": false,
+      "remoteHaveObserved": false
+    },
+    "diagnosticOnly": false,
+    "serverProtocolTrial": false,
+    "permanentDeployedProtocolEvidence": true,
+    "ordinaryDefaultTransportEvidence": true,
+    "networkTransportOverride": false,
+    "automatedHeadlessChrome": true,
+    "ordinaryTLS": true,
+    "additionalRTCOrMediaFlags": false,
+    "fakeMedia": false,
+    "getUserMedia": false,
+    "permissionGrants": false,
+    "mdnsOverride": false,
+    "personalProfiles": false,
+    "reporting": false,
+    "contributorAllowanceBytes": 100000000,
+    "contributorRateBytesPerSecond": 512000,
+    "noQuotaReset": true,
+    "noAutomaticReconsent": true,
+    "contributorWarmupMs": 15000,
+    "plannedMeasurementMs": 180000,
+    "maxOwnedBrowserLifetimeMs": 270000,
+    "ownTicketRenewalWitness": true,
+    "renewalObservationOnly": true,
+    "pcObjectIdentityProved": false,
+    "physicalDevice": false,
+    "NATClassProved": false,
+    "financialSavingsProved": false,
+    "chromeFlags": [
+      "--user-data-dir=<owned-private-temporary-profile>",
+      "--headless=new",
+      "--remote-debugging-address=127.0.0.1",
+      "--remote-debugging-port=0",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "about:blank"
+    ]
+  },
+  "permanentProxy": {
+    "sourceSha": "ee1510d429ac85f3738c03f10a09b753ec4eb037",
+    "baselineBindingSHA256": "c2f73f4a29273fc107bba9ccff707999eba354ff0dfa3d436d5fc528cb464096",
+    "fileSHA256": "a3a14482c367123c4182188d36f7932033d73ea2a68378e10693c0b194a52f4a",
+    "runtimeProtocols": {
+      "srv0": [
+        "h1"
+      ]
+    },
+    "version": "v2.11.7"
+  },
+  "ci": {
+    "runId": 38500343145,
+    "sourceSha": "0e688470b6746b3a9afe80e1192ac4d46fa6aaea",
+    "conclusion": "success",
+    "nineRequiredJobsValidated": true
+  },
+  "roles": [
+    {
+      "role": "contributor-low",
+      "totals": {
+        "peerFirstBytes": 0,
+        "uploaded": 9488548,
+        "peerFirstLoads": 0
+      },
+      "peers": {
+        "connected": 2,
+        "dialling": 0,
+        "linksOpened": 2,
+        "linksClosed": 0,
+        "dialsFailed": 0,
+        "dialsTimedOut": 0,
+        "candidatePairs": {
+          "host/host": 2
+        }
+      },
+      "fatal": 0,
+      "native": 0,
+      "pageErrors": 0,
+      "zeroFrameIntervals": 0,
+      "unavailableReads": 0,
+      "stalls": {
+        "lifetimeCount": 1,
+        "lifetimeMs": 550,
+        "atMeasurementStartCount": 1,
+        "atMeasurementStartMs": 550,
+        "duringMeasurementCount": 0,
+        "activeAtMeasurementStartMs": 0,
+        "errorRecords": [
+          {
+            "atMs": 17342,
+            "type": "mediaError",
+            "details": "bufferStalledError",
+            "fatal": false,
+            "mediaType": null,
+            "nativeErrorCode": null
+          }
+        ],
+        "classification": "completed after warm-up sample and before measurement-start sample",
+        "zeroStallWarmupSampleUTC": "2026-10-14T02:44:14.493Z",
+        "alreadyCompletedMeasurementSampleUTC": "2026-10-14T02:44:18.099Z"
+      },
+      "uploadConsent": true,
+      "serving": true,
+      "contributionWithdrawn": false,
+      "videoQualities": [
+        "low"
+      ],
+      "audioQualities": [
+        "low"
+      ],
+      "budgetSpent": 9488548,
+      "budgetRemaining": 90511452,
+      "renewalsMeetingGate": [
+        {
+          "ticketCompletedAtMs": 101077,
+          "policyAttempt": 51,
+          "observedAtMs": 101816.59999990463,
+          "previousObservedAtMs": 100815.20000004768,
+          "preIssuanceGapMs": 1.8999998569488525,
+          "postCompletionGapMs": 739.5999999046326,
+          "observationGapMs": 1001.3999998569489,
+          "beforeConnected": 2,
+          "afterConnected": 2,
+          "beforeOpened": 2,
+          "afterOpened": 2,
+          "beforeClosed": 0,
+          "afterClosed": 0,
+          "beforeSpent": 8426912,
+          "afterSpent": 8426912,
+          "configuredSessionStartSame": true,
+          "streamIdentitySame": true,
+          "ownPubkeySame": true,
+          "peerSetSame": true,
+          "linksOpenedSame": true,
+          "linksClosedSame": true,
+          "sessionCountSame": true,
+          "uptimeNondecreasing": true,
+          "spentNondecreasing": true,
+          "uploadedNondecreasing": true,
+          "consentSame": true,
+          "servingSame": true,
+          "policyFresh": true,
+          "policySettled": true,
+          "preserved": true
+        }
+      ]
+    },
+    {
+      "role": "contributor-high",
+      "totals": {
+        "peerFirstBytes": 0,
+        "uploaded": 30120232,
+        "peerFirstLoads": 0
+      },
+      "peers": {
+        "connected": 2,
+        "dialling": 0,
+        "linksOpened": 2,
+        "linksClosed": 0,
+        "dialsFailed": 0,
+        "dialsTimedOut": 0,
+        "candidatePairs": {
+          "host/host": 2
+        }
+      },
+      "fatal": 0,
+      "native": 0,
+      "pageErrors": 0,
+      "zeroFrameIntervals": 0,
+      "unavailableReads": 0,
+      "stalls": {
+        "lifetimeCount": 1,
+        "lifetimeMs": 2372,
+        "atMeasurementStartCount": 1,
+        "atMeasurementStartMs": 2372,
+        "duringMeasurementCount": 0,
+        "activeAtMeasurementStartMs": 0,
+        "errorRecords": [
+          {
+            "atMs": 17303,
+            "type": "mediaError",
+            "details": "bufferStalledError",
+            "fatal": false,
+            "mediaType": null,
+            "nativeErrorCode": null
+          }
+        ],
+        "classification": "completed after warm-up sample and before measurement-start sample",
+        "zeroStallWarmupSampleUTC": "2026-10-14T02:44:14.493Z",
+        "alreadyCompletedMeasurementSampleUTC": "2026-10-14T02:44:18.099Z"
+      },
+      "uploadConsent": true,
+      "serving": true,
+      "contributionWithdrawn": false,
+      "videoQualities": [
+        "high"
+      ],
+      "audioQualities": [
+        "high"
+      ],
+      "budgetSpent": 30120232,
+      "budgetRemaining": 69879768,
+      "renewalsMeetingGate": [
+        {
+          "ticketCompletedAtMs": 101131,
+          "policyAttempt": 51,
+          "observedAtMs": 101809.20000004768,
+          "previousObservedAtMs": 100809.59999990463,
+          "preIssuanceGapMs": 57.200000047683716,
+          "postCompletionGapMs": 678.2000000476837,
+          "observationGapMs": 999.6000001430511,
+          "beforeConnected": 2,
+          "afterConnected": 2,
+          "beforeOpened": 2,
+          "afterOpened": 2,
+          "beforeClosed": 0,
+          "afterClosed": 0,
+          "beforeSpent": 0,
+          "afterSpent": 0,
+          "configuredSessionStartSame": true,
+          "streamIdentitySame": true,
+          "ownPubkeySame": true,
+          "peerSetSame": true,
+          "linksOpenedSame": true,
+          "linksClosedSame": true,
+          "sessionCountSame": true,
+          "uptimeNondecreasing": true,
+          "spentNondecreasing": true,
+          "uploadedNondecreasing": true,
+          "consentSame": true,
+          "servingSame": true,
+          "policyFresh": true,
+          "policySettled": true,
+          "preserved": true
+        }
+      ]
+    },
+    {
+      "role": "origin-baseline-low",
+      "totals": {
+        "peerFirstBytes": 0,
+        "uploaded": 0,
+        "peerFirstLoads": 0
+      },
+      "peers": {
+        "connected": 0,
+        "dialling": 0,
+        "linksOpened": 0,
+        "linksClosed": 0,
+        "dialsFailed": 0,
+        "dialsTimedOut": 0,
+        "candidatePairs": {}
+      },
+      "fatal": 0,
+      "native": 0,
+      "pageErrors": 0,
+      "zeroFrameIntervals": 0,
+      "unavailableReads": 0,
+      "stalls": {
+        "lifetimeCount": 0,
+        "lifetimeMs": 0,
+        "atMeasurementStartCount": 0,
+        "atMeasurementStartMs": 0,
+        "duringMeasurementCount": 0,
+        "activeAtMeasurementStartMs": 0,
+        "errorRecords": [],
+        "classification": "no retained stall"
+      },
+      "uploadConsent": false,
+      "serving": false,
+      "contributionWithdrawn": false,
+      "videoQualities": [
+        "low"
+      ],
+      "audioQualities": [
+        "low"
+      ],
+      "budgetSpent": 0,
+      "budgetRemaining": 100000000,
+      "renewalsMeetingGate": []
+    },
+    {
+      "role": "receive-only",
+      "totals": {
+        "peerFirstBytes": 39608780,
+        "uploaded": 0,
+        "peerFirstLoads": 90
+      },
+      "peers": {
+        "connected": 2,
+        "dialling": 0,
+        "linksOpened": 2,
+        "linksClosed": 0,
+        "dialsFailed": 0,
+        "dialsTimedOut": 0,
+        "candidatePairs": {
+          "host/host": 2
+        }
+      },
+      "fatal": 0,
+      "native": 0,
+      "pageErrors": 0,
+      "zeroFrameIntervals": 0,
+      "unavailableReads": 0,
+      "stalls": {
+        "lifetimeCount": 0,
+        "lifetimeMs": 0,
+        "atMeasurementStartCount": 0,
+        "atMeasurementStartMs": 0,
+        "duringMeasurementCount": 0,
+        "activeAtMeasurementStartMs": 0,
+        "errorRecords": [],
+        "classification": "no retained stall"
+      },
+      "uploadConsent": false,
+      "serving": false,
+      "contributionWithdrawn": false,
+      "videoQualities": [
+        "low",
+        "high"
+      ],
+      "audioQualities": [
+        "low",
+        "high"
+      ],
+      "budgetSpent": 0,
+      "budgetRemaining": 100000000,
+      "renewalsMeetingGate": [
+        {
+          "ticketCompletedAtMs": 103514,
+          "policyAttempt": 52,
+          "observedAtMs": 104337.40000009537,
+          "previousObservedAtMs": 102334,
+          "preIssuanceGapMs": 898.7000000476837,
+          "postCompletionGapMs": 823.4000000953674,
+          "observationGapMs": 2003.4000000953674,
+          "beforeConnected": 2,
+          "afterConnected": 2,
+          "beforeOpened": 2,
+          "afterOpened": 2,
+          "beforeClosed": 0,
+          "afterClosed": 0,
+          "beforeSpent": 0,
+          "afterSpent": 0,
+          "configuredSessionStartSame": true,
+          "streamIdentitySame": true,
+          "ownPubkeySame": true,
+          "peerSetSame": true,
+          "linksOpenedSame": true,
+          "linksClosedSame": true,
+          "sessionCountSame": true,
+          "uptimeNondecreasing": true,
+          "spentNondecreasing": true,
+          "uploadedNondecreasing": true,
+          "consentSame": true,
+          "servingSame": true,
+          "policyFresh": true,
+          "policySettled": true,
+          "preserved": true
+        }
+      ]
+    }
+  ],
+  "receiverPeer": [
+    {
+      "level": 0,
+      "loads": 45,
+      "bytes": 9488548
+    },
+    {
+      "level": 1,
+      "loads": 45,
+      "bytes": 30120232
+    }
+  ],
+  "peerLoadDeduplication": {
+    "method": "Repeated retained sample-ring observations deduplicated by atMs/level/sequence/discontinuity, preserving separate completed reloads. Counts and bytes reconcile to cumulative metrics and donor uploads.",
+    "completedLoads": 90,
+    "uniqueSegmentContexts": 89,
+    "repeatedContexts": [
+      {
+        "level": 1,
+        "sequence": 16708,
+        "discontinuity": 55,
+        "completedLoads": 2,
+        "bytesPerLoad": [
+          648976,
+          648976
+        ],
+        "atPageMs": [
+          93633,
+          94474
+        ]
+      }
+    ]
+  },
+  "controlBeforeCleanup": {
+    "records": 1009,
+    "routes": {
+      "session": 390,
+      "policy": 386,
+      "admissionChallenge": 8,
+      "admissionTicket": 8,
+      "admissionVerify": 125,
+      "commitment": 92
+    },
+    "outcomes": {
+      "finished": 1009
+    },
+    "protocols": {
+      "http/1.1": 1009
+    },
+    "statuses": {
+      "200": 1009
+    },
+    "clientJSONNumericRecords": 1009,
+    "clientJSONOutcomes": {
+      "ok": 1009
+    },
+    "clientJSONDeduplication": "Role plus complete fixed-route numeric record; aggregate count matches lifecycle/CDP, not exact per-request identity attribution.",
+    "responseExtra200": 1009,
+    "dropped": 0,
+    "policyUnavailableAfterStartRows": {},
+    "initialLoadingPolicyUnavailableRows": {
+      "origin-baseline-low": 1,
+      "receive-only": 1
+    },
+    "diagnosticRows": 203,
+    "diagnosticDropped": 0
+  },
+  "providerMeasurement": {
+    "completeOneSecondWindows": 179,
+    "routes": {
+      "session": {
+        "started": 356,
+        "finished": 356,
+        "cancelled": 0,
+        "expired": 0,
+        "dropped": 0,
+        "maxAppHeaderMs": 0.7
+      },
+      "policy": {
+        "started": 356,
+        "finished": 356,
+        "cancelled": 0,
+        "expired": 0,
+        "dropped": 0,
+        "maxAppHeaderMs": 1.5
+      },
+      "admissionChallenge": {
+        "started": 3,
+        "finished": 3,
+        "cancelled": 0,
+        "expired": 0,
+        "dropped": 0,
+        "maxAppHeaderMs": 0.4
+      },
+      "admissionTicket": {
+        "started": 3,
+        "finished": 3,
+        "cancelled": 0,
+        "expired": 0,
+        "dropped": 0,
+        "maxAppHeaderMs": 11.3
+      },
+      "admissionVerify": {
+        "started": 103,
+        "finished": 103,
+        "cancelled": 0,
+        "expired": 0,
+        "dropped": 0,
+        "maxAppHeaderMs": 2.6
+      },
+      "report": {
+        "started": 0,
+        "finished": 0,
+        "cancelled": 0,
+        "expired": 0,
+        "dropped": 0,
+        "maxAppHeaderMs": 0
+      },
+      "commitment": {
+        "started": 92,
+        "finished": 92,
+        "cancelled": 0,
+        "expired": 0,
+        "dropped": 0,
+        "maxAppHeaderMs": 69.9
+      }
+    },
+    "scope": "Only complete retained one-second windows wholly inside measurement; boundary windows omitted. Numeric server handoff, shared app audience, no exact browser-request attribution."
+  },
+  "renewalFirstObservedUTC": {
+    "contributor-low": "2026-10-14T02:45:39.198Z",
+    "contributor-high": "2026-10-14T02:45:39.198Z",
+    "receive-only": "2026-10-14T02:45:59.232Z"
+  },
+  "ticketLifecycle": {
+    "contributor-low": [
+      {
+        "requestUTC": "2026-10-14T02:43:58.635Z",
+        "networkFinishUTC": "2026-10-14T02:43:58.709Z",
+        "durationMs": 74
+      },
+      {
+        "requestUTC": "2026-10-14T02:45:38.370Z",
+        "networkFinishUTC": "2026-10-14T02:45:38.444Z",
+        "durationMs": 74
+      },
+      {
+        "requestUTC": "2026-10-14T02:47:18.419Z",
+        "networkFinishUTC": "2026-10-14T02:47:18.498Z",
+        "durationMs": 79
+      }
+    ],
+    "contributor-high": [
+      {
+        "requestUTC": "2026-10-14T02:43:58.640Z",
+        "networkFinishUTC": "2026-10-14T02:43:58.732Z",
+        "durationMs": 92
+      },
+      {
+        "requestUTC": "2026-10-14T02:45:38.435Z",
+        "networkFinishUTC": "2026-10-14T02:45:38.506Z",
+        "durationMs": 71
+      },
+      {
+        "requestUTC": "2026-10-14T02:47:18.477Z",
+        "networkFinishUTC": "2026-10-14T02:47:18.552Z",
+        "durationMs": 75
+      }
+    ],
+    "origin-baseline-low": [],
+    "receive-only": [
+      {
+        "requestUTC": "2026-10-14T02:44:17.197Z",
+        "networkFinishUTC": "2026-10-14T02:44:17.293Z",
+        "durationMs": 96
+      },
+      {
+        "requestUTC": "2026-10-14T02:45:58.309Z",
+        "networkFinishUTC": "2026-10-14T02:45:58.386Z",
+        "durationMs": 77
+      }
+    ]
+  },
+  "lateFinalControlsRenewals": {
+    "contributor-low": [
+      {
+        "ticketCompletedAtMs": 101077,
+        "policyAttempt": 51,
+        "observedAtMs": 101816.59999990463,
+        "previousObservedAtMs": 100815.20000004768,
+        "preIssuanceGapMs": 1.8999998569488525,
+        "postCompletionGapMs": 739.5999999046326,
+        "observationGapMs": 1001.3999998569489,
+        "beforeConnected": 2,
+        "afterConnected": 2,
+        "beforeOpened": 2,
+        "afterOpened": 2,
+        "beforeClosed": 0,
+        "afterClosed": 0,
+        "beforeSpent": 8426912,
+        "afterSpent": 8426912,
+        "configuredSessionStartSame": true,
+        "streamIdentitySame": true,
+        "ownPubkeySame": true,
+        "peerSetSame": true,
+        "linksOpenedSame": true,
+        "linksClosedSame": true,
+        "sessionCountSame": true,
+        "uptimeNondecreasing": true,
+        "spentNondecreasing": true,
+        "uploadedNondecreasing": true,
+        "consentSame": true,
+        "servingSame": true,
+        "policyFresh": true,
+        "policySettled": true,
+        "preserved": true
+      },
+      {
+        "ticketCompletedAtMs": 201133,
+        "policyAttempt": 101,
+        "observedAtMs": 201940,
+        "previousObservedAtMs": 199936.20000004768,
+        "preIssuanceGapMs": 881.6999998092651,
+        "postCompletionGapMs": 807,
+        "observationGapMs": 2003.7999999523163,
+        "beforeConnected": 2,
+        "afterConnected": 2,
+        "beforeOpened": 2,
+        "afterOpened": 2,
+        "beforeClosed": 0,
+        "afterClosed": 0,
+        "beforeSpent": 9488548,
+        "afterSpent": 9488548,
+        "configuredSessionStartSame": true,
+        "streamIdentitySame": true,
+        "ownPubkeySame": true,
+        "peerSetSame": true,
+        "linksOpenedSame": true,
+        "linksClosedSame": true,
+        "sessionCountSame": true,
+        "uptimeNondecreasing": true,
+        "spentNondecreasing": true,
+        "uploadedNondecreasing": true,
+        "consentSame": true,
+        "servingSame": true,
+        "policyFresh": true,
+        "policySettled": true,
+        "preserved": true
+      }
+    ],
+    "contributor-high": [
+      {
+        "ticketCompletedAtMs": 101131,
+        "policyAttempt": 51,
+        "observedAtMs": 101809.20000004768,
+        "previousObservedAtMs": 100809.59999990463,
+        "preIssuanceGapMs": 57.200000047683716,
+        "postCompletionGapMs": 678.2000000476837,
+        "observationGapMs": 999.6000001430511,
+        "beforeConnected": 2,
+        "afterConnected": 2,
+        "beforeOpened": 2,
+        "afterOpened": 2,
+        "beforeClosed": 0,
+        "afterClosed": 0,
+        "beforeSpent": 0,
+        "afterSpent": 0,
+        "configuredSessionStartSame": true,
+        "streamIdentitySame": true,
+        "ownPubkeySame": true,
+        "peerSetSame": true,
+        "linksOpenedSame": true,
+        "linksClosedSame": true,
+        "sessionCountSame": true,
+        "uptimeNondecreasing": true,
+        "spentNondecreasing": true,
+        "uploadedNondecreasing": true,
+        "consentSame": true,
+        "servingSame": true,
+        "policyFresh": true,
+        "policySettled": true,
+        "preserved": true
+      },
+      {
+        "ticketCompletedAtMs": 201180,
+        "policyAttempt": 101,
+        "observedAtMs": 201932.5,
+        "previousObservedAtMs": 199928.90000009537,
+        "preIssuanceGapMs": 937.6999998092651,
+        "postCompletionGapMs": 752.5,
+        "observationGapMs": 2003.5999999046326,
+        "beforeConnected": 2,
+        "afterConnected": 2,
+        "beforeOpened": 2,
+        "afterOpened": 2,
+        "beforeClosed": 0,
+        "afterClosed": 0,
+        "beforeSpent": 29450952,
+        "afterSpent": 30120232,
+        "configuredSessionStartSame": true,
+        "streamIdentitySame": true,
+        "ownPubkeySame": true,
+        "peerSetSame": true,
+        "linksOpenedSame": true,
+        "linksClosedSame": true,
+        "sessionCountSame": true,
+        "uptimeNondecreasing": true,
+        "spentNondecreasing": true,
+        "uploadedNondecreasing": true,
+        "consentSame": true,
+        "servingSame": true,
+        "policyFresh": true,
+        "policySettled": true,
+        "preserved": true
+      }
+    ],
+    "origin-baseline-low": [],
+    "receive-only": [
+      {
+        "ticketCompletedAtMs": 103514,
+        "policyAttempt": 52,
+        "observedAtMs": 104337.40000009537,
+        "previousObservedAtMs": 102334,
+        "preIssuanceGapMs": 898.7000000476837,
+        "postCompletionGapMs": 823.4000000953674,
+        "observationGapMs": 2003.4000000953674,
+        "beforeConnected": 2,
+        "afterConnected": 2,
+        "beforeOpened": 2,
+        "afterOpened": 2,
+        "beforeClosed": 0,
+        "afterClosed": 0,
+        "beforeSpent": 0,
+        "afterSpent": 0,
+        "configuredSessionStartSame": true,
+        "streamIdentitySame": true,
+        "ownPubkeySame": true,
+        "peerSetSame": true,
+        "linksOpenedSame": true,
+        "linksClosedSame": true,
+        "sessionCountSame": true,
+        "uptimeNondecreasing": true,
+        "spentNondecreasing": true,
+        "uploadedNondecreasing": true,
+        "consentSame": true,
+        "servingSame": true,
+        "policyFresh": true,
+        "policySettled": true,
+        "preserved": true
+      }
+    ]
+  },
+  "nonfatalErrors": {
+    "networkFailures": [
+      {
+        "role": "contributor-high",
+        "atUTC": "2026-10-14T02:43:58.845Z",
+        "route": "media",
+        "code": "net::ERR_ABORTED"
+      }
+    ],
+    "receiverPlayerErrors": [
+      {
+        "atMs": 92924,
+        "type": "networkError",
+        "details": "aborted",
+        "fatal": false,
+        "mediaType": "main",
+        "nativeErrorCode": null
+      }
+    ]
+  },
+  "cleanup": {
+    "browser": {
+      "chromeLeaderStopped": true,
+      "chromeGroupStopped": true,
+      "knownOwnedProcessesRemaining": [],
+      "profileRemoved": true,
+      "sourceCleanupPerformedByObserver": false
+    },
+    "wrapper": {
+      "browserProved": true,
+      "providerProved": true
+    },
+    "allWrapperChildGroupsAbsent": true,
+    "providerSamples": 19,
+    "providerAvailableSamples": 19,
+    "providerReadProcessStopped": true,
+    "rootSourceRemoved": true,
+    "sourceCleanupExitCode": 255,
+    "sourceRunningAtStart": true,
+    "sourceRunningBeforeCleanup": true,
+    "strictRetainedV2Validation": true,
+    "helperSHA256": "ec70bfd4de86cd6863056f553f165a3d8ded72bd0ae2a8e0e6bf48cfced6249b",
+    "reviewedInputsSHA256": "dfa3ce46a31044b19a99280f6ad66852aeae7554b2f51a4f367a017cae1b4707",
+    "sourceJournalAtStartSHA256": "bc5f2af760bb8cef84737a9b6daff0e100bceca80e0a69c8ab7d93f3022d1e61",
+    "cleanupJournalBeforeSHA256": "bc5f2af760bb8cef84737a9b6daff0e100bceca80e0a69c8ab7d93f3022d1e61",
+    "cleanupJournalAfterSHA256": "98ed0967e5d77afecbc66376e955e0b150a2e19b5a2b15c82e745a325d747850",
+    "guardFlags": {
+      "inspectedBeforeRemoval": true,
+      "journalOwnedSourceMatched": true,
+      "createdSourceMatched": true,
+      "appAndProxyGuardMatched": true,
+      "birthImageMountsMatched": true
+    },
+    "remoteJournalBodiesIndependentlyRehashed": false,
+    "hostStartReceiptSHA256": "5afb7ec2d4d9f9b47026cd8cfe5c68b9d1eb961acf76122242f4eca0d57a571a",
+    "hostCleanupReceiptSHA256": "9b125d9e74446f0fb1356351d02f6a940a00099e41ec5cabe5ffaf70a8980a65",
+    "operatorAudit29PASS": true,
+    "operatorAuditReceiptSHA256": "525d55991c54f00d1a54e623d7ab41534e4bc9e4a807b78d1af44f8b9dc7248b"
+  },
+  "historicalEvidenceUnchanged": true,
+  "limits": [
+    "Four owned isolated contexts in one M1 Chrome process, public origin/permanent H1; observed peers host/host. This is not cross-machine, physical-device, NAT-class or14-role/two-hour/22-churn evidence.",
+    "Programmatic dropdown choices remain explicitly untrusted; Start/upload controls retain trusted input witnesses. Video/native audio decode does not prove audible output.",
+    "Equality witnesses compare sampled configured-session/stream/pubkey/complete-peer-set/link counts and monotonic quota around accepted settled policy+ticket JSON success; no ticket bodies/credentials or PC object identity were read. Changes between samples may be missed.",
+    "The first preserved renewal per peer actor met the declared gate and five-second follow-up; later contributor ticket completions after the measured window are retained separately without that follow-up claim.",
+    "Both contributor stalls completed in post-warm-up setup before measured sampling. Lifetime stalls remain one each; no zero-lifetime-stall claim.",
+    "Retained cleanup proofs and matching executed helper/input hashes authenticate before/after journal digest claims. Raw remote journal bodies were not fetched or independently rehashed, and no new host/process inspection was performed.",
+    "Earlier REDs, refusals and unknown RTC/transport causes remain preserved. Separate cross-machine HLS failure is not overwritten by this four-context pass. Financial savings, full production acceptance and final release remain open."
+  ]
+}

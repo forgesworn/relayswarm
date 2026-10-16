@@ -1,0 +1,603 @@
+{
+  "v": 1,
+  "recordedAt": "2026-10-14T11:04:25.827Z",
+  "baseHead": "2589f5569727f10d476baeda4337d427452c5cfd",
+  "result": "PASS local implementation acceptance; not deployed or final production acceptance",
+  "sourceSHA256": {
+    "src/account-upload-budget.mjs": "31a051498cca8d80ab846743b80daddeb9d0a980096ab125852191d67047b048",
+    "demo/account-budget.mjs": "2bdab6e0cab1c5fd1f5a47f44a22b030106013bb096a61ba69b0956f54a4d30e",
+    "demo/account-budget-client.mjs": "4e2e495bd13e49e9548c1e045bc01694ca06f5fd9bb445af8f7ef2e413e6a505",
+    "demo/server.mjs": "2db8e60df8c2f46de04be161903f49bc32b95f1109309f3efe482b00d809281d",
+    "demo/client.mjs": "02d2b54d5ccfd04bea1e665e3f26aae1b302b4beb8c02ae5bd175df381336415",
+    "demo/index.html": "b3e4ce2c7c1176a316b4f90846db3125022d340214caa337ae9504e1f249d220",
+    "demo/style.css": "3361e1e2501a861aad2a01187fa4262b524f5085a829cd4338e9c3fac0b20eaf",
+    "test/account-upload-budget.test.mjs": "c7b271e3c13c17120f3615cfc7758289effbfb70864fea3f5a3e378b968a14f2",
+    "test/account-budget-http.test.mjs": "06b377f56d20a53da9495d3bcefc1a6eadd919b33f656c8645a2e26a0c94e111",
+    "test/account-budget-client.test.mjs": "dfb47158a4c421517b4aac14510ff37f97b4cb2f831ebc103ed4ec4e83efe813",
+    "test/demo-client.test.mjs": "7906908d8ccbe39803ea09f638a0b552152ec8a6d8dd4e23de0fd0e6d164d9ed",
+    "test/account-budget-browser.mjs": "256e742eb1779a6dde47d2dd700607a07b6328abc8b8cc3f0b7b188d9d249d94",
+    "test/support/account-budget-browser-worker.mjs": "6ae1581e6ea3d3c415c152d7a204f2aa004623153d42ff953212a7cfeeb54666",
+    "test/support/account-browser-chrome.mjs": "f5b9b2cc1ba07b13695e2a8c15b358dc511e01dcba4e830a812db50ec641252e",
+    "test/support/account-browser-guard.mjs": "c348a0e0c3f0bcb42bca7625183b4b86a74119c43aabad1784cad38ba2f7356c",
+    "test/account-browser-guard.test.mjs": "beee7f309f3794ac1190bb97d7c0071934717dd81f6fa698e5cea14837fbd448",
+    "package.json": "1d64db675bdc8214f5b7ea635634fa3add03beb72440ee7525bdb56e2fbc569a",
+    "test/operator-browser-suite.mjs": "ab2c197e92592767b4d2fe50ad42bbdb80a120bb69b367d7deecc1d9135254f5",
+    "src/browser/hls-swarm.mjs": "dcf49565c6c5e43192581f2c61989782ef204d08ac5a298a6d274e5f0ec63188",
+    "test/browser-hardening.test.mjs": "5bc76be2f925ffe3cbb0f50292a42202cb4e00dc2520b1661c4f855887aaa493",
+    "INTEGRATION.md": "25a06a9a0e9651533a29c323a370754329dc4141b445fa552f151e0cd11161d1"
+  },
+  "receiptSHA256": "32d36a41d4d7dbc66e7956b8b7ea53a1c4a9e61ebc3b3545e466cf8336825c6c",
+  "rootDecisionSHA256": "c70710b7eb7e80fafaac7195dd3f815a303f497543986b209a011c8bb353fcf7",
+  "localValidation": {
+    "publisher": {
+      "passed": 177,
+      "failed": 0,
+      "skipped": 2,
+      "total": 179,
+      "logSHA256": "ebda0025d2947eefe1148e40be02b507fe5a5c38f5d16274f1dc8ddb90d8100a",
+      "boundary": "macOS; actual Windows refusal cases await Windows CI"
+    },
+    "swarm": {
+      "passed": 92,
+      "failed": 0,
+      "logSHA256": "eef4df082bc08fa793fd8bc64d46b8f8e3b1f5a43c9bd80a6fb4a6cd320b75b9"
+    }
+  },
+  "reviews": {
+    "guard": "db7aac6dcdcc38333276f2440c15d41d3b0ca088af4663a761462038a213246a",
+    "counter": "9faa5bf252b99a8efb7c7137a274da77bdddf5ff8593da5b53968ee200d7a252"
+  },
+  "retainedPriorEvidence": {
+    "firstBrowser": "spikes/results/account-budget-browser-20261014-attempt1.json",
+    "firstBrowserReceiptSHA256": "897c715c08722cce9450f84f39a1104b8036822fc31bf7e1ac3bea841a120246",
+    "firstBrowserResult": "PASS49.043s with provisional sender-counter/archive caveat, subsequently fixed",
+    "originalPublisherFailureSHA256": "461aa22d7c0fef4ea0ca6edccd810fff7b0a2cf903f0e4ced06897a8a8cb1ea2",
+    "originalPublisherFailure": "Guard trivial-child probe EPERM; exact PID not retained and original cleanup unknown. Later current-program census found none; cause unproved. Final corrected suite passes separately."
+  },
+  "remaining": [
+    "Exact final-source CI and clean consumer package verification",
+    "Deployment and authenticated host website integration acceptance",
+    "Real owner signer and physical phone journeys",
+    "Ordinary separate-network/hard-NAT, sustained cohort/churn, matched total-wire/cost and immutable release acceptance"
+  ],
+  "receipt": {
+    "v": 1,
+    "kind": "relayswarm-account-budget-browser",
+    "at": "2026-10-14T11:02:10.974Z",
+    "ok": true,
+    "scope": {
+      "network": "loopback",
+      "physicalDevices": false,
+      "wholeMs": 180000,
+      "browserFlags": [
+        "--autoplay-policy=no-user-gesture-required",
+        "--disable-features=WebRtcHideLocalIpsWithMdns",
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream"
+      ],
+      "signer": "disposable NIP-07 bridge with real signatures",
+      "websiteAccount": "test-owned authenticated session",
+      "quota": "durable accepted media reservations; not wire metering or NAT acceptance",
+      "chromeProcessIdentityMatched": true,
+      "browserVersion": "155.0.8059.41",
+      "accountGrantTtlSeconds": 30
+    },
+    "checkpoints": [
+      {
+        "name": "both-authentication-paths-reserve-before-real-peer-upload",
+        "atMs": 52422,
+        "viewers": [
+          {
+            "name": "nostr-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 111860,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 111860,
+              "limit": 100000000,
+              "revision": 2,
+              "available": true,
+              "remaining": 99888140
+            },
+            "shared": {
+              "required": true,
+              "connected": true,
+              "available": true,
+              "limit": 100000000,
+              "spent": 111860,
+              "remaining": 99888140,
+              "revision": 1,
+              "generation": 1
+            },
+            "uploadChecked": true,
+            "telemetryChecked": false,
+            "serving": true,
+            "currentTime": 35.384942,
+            "fatalErrors": 0
+          },
+          {
+            "name": "website-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 5942868,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 5942868,
+              "limit": 100000000,
+              "revision": 22,
+              "available": true,
+              "remaining": 94057132
+            },
+            "shared": {
+              "required": true,
+              "connected": true,
+              "available": true,
+              "limit": 100000000,
+              "spent": 5942868,
+              "remaining": 94057132,
+              "revision": 1,
+              "generation": 1
+            },
+            "uploadChecked": true,
+            "telemetryChecked": false,
+            "serving": true,
+            "currentTime": 34.612541,
+            "fatalErrors": 0
+          },
+          {
+            "name": "receive-only",
+            "totals": {
+              "peerFirstBytes": 6054728,
+              "uploaded": 0,
+              "peerFirstLoads": 22
+            },
+            "local": {
+              "v": 1,
+              "spent": 0,
+              "limit": 100000000,
+              "revision": 1,
+              "available": true,
+              "remaining": 100000000
+            },
+            "shared": {
+              "required": false,
+              "connected": false,
+              "available": true,
+              "limit": null,
+              "spent": null,
+              "remaining": null,
+              "revision": null,
+              "generation": null
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 34.083701,
+            "fatalErrors": 0
+          }
+        ]
+      },
+      {
+        "name": "explicit-link-preserves-spend-and-withdraws-old-page-consent",
+        "atMs": 53439,
+        "viewers": [
+          {
+            "name": "nostr-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 111860,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 111860,
+              "limit": 100000000,
+              "revision": 2,
+              "available": true,
+              "remaining": 99888140
+            },
+            "shared": {
+              "required": true,
+              "connected": true,
+              "available": true,
+              "limit": 100000000,
+              "spent": 6337480,
+              "remaining": 93662520,
+              "revision": 2,
+              "generation": 2
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 36.404662,
+            "fatalErrors": 0
+          },
+          {
+            "name": "website-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 6225620,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 6225620,
+              "limit": 100000000,
+              "revision": 23,
+              "available": true,
+              "remaining": 93774380
+            },
+            "shared": {
+              "required": true,
+              "connected": false,
+              "available": false,
+              "limit": 100000000,
+              "spent": 6225620,
+              "remaining": 0,
+              "revision": 1,
+              "generation": 1
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 35.633065,
+            "fatalErrors": 0
+          },
+          {
+            "name": "receive-only",
+            "totals": {
+              "peerFirstBytes": 6337480,
+              "uploaded": 0,
+              "peerFirstLoads": 23
+            },
+            "local": {
+              "v": 1,
+              "spent": 0,
+              "limit": 100000000,
+              "revision": 1,
+              "available": true,
+              "remaining": 100000000
+            },
+            "shared": {
+              "required": false,
+              "connected": false,
+              "available": true,
+              "limit": null,
+              "spent": null,
+              "remaining": null,
+              "revision": null,
+              "generation": null
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 35.100584,
+            "fatalErrors": 0
+          }
+        ]
+      },
+      {
+        "name": "server-restart-and-explicit-page-reconnection-retain-shared-spend",
+        "atMs": 53879,
+        "viewers": [
+          {
+            "name": "nostr-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 0,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 111860,
+              "limit": 100000000,
+              "revision": 2,
+              "available": true,
+              "remaining": 99888140
+            },
+            "shared": {
+              "required": true,
+              "connected": true,
+              "available": true,
+              "limit": 100000000,
+              "spent": 6337480,
+              "remaining": 93662520,
+              "revision": 2,
+              "generation": 2
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 0,
+            "fatalErrors": 0
+          },
+          {
+            "name": "website-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 6225620,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 6225620,
+              "limit": 100000000,
+              "revision": 23,
+              "available": true,
+              "remaining": 93774380
+            },
+            "shared": {
+              "required": true,
+              "connected": false,
+              "available": false,
+              "limit": 100000000,
+              "spent": 6225620,
+              "remaining": 0,
+              "revision": 1,
+              "generation": 1
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 36.0721,
+            "fatalErrors": 0
+          },
+          {
+            "name": "receive-only",
+            "totals": {
+              "peerFirstBytes": 6337480,
+              "uploaded": 0,
+              "peerFirstLoads": 23
+            },
+            "local": {
+              "v": 1,
+              "spent": 0,
+              "limit": 100000000,
+              "revision": 1,
+              "available": true,
+              "remaining": 100000000
+            },
+            "shared": {
+              "required": false,
+              "connected": false,
+              "available": true,
+              "limit": null,
+              "spent": null,
+              "remaining": null,
+              "revision": null,
+              "generation": null
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 35.542223,
+            "fatalErrors": 0
+          }
+        ]
+      },
+      {
+        "name": "fresh-owner-reset-and-explicit-disconnection-never-enable-uploading",
+        "atMs": 54077,
+        "viewers": [
+          {
+            "name": "nostr-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 0,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 111860,
+              "limit": 100000000,
+              "revision": 2,
+              "available": true,
+              "remaining": 99888140
+            },
+            "shared": {
+              "required": true,
+              "connected": false,
+              "available": false,
+              "limit": 100000000,
+              "spent": 0,
+              "remaining": 0,
+              "revision": 3,
+              "generation": 3
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 0,
+            "fatalErrors": 0
+          },
+          {
+            "name": "website-contributor",
+            "totals": {
+              "peerFirstBytes": 0,
+              "uploaded": 6225620,
+              "peerFirstLoads": 0
+            },
+            "local": {
+              "v": 1,
+              "spent": 6225620,
+              "limit": 100000000,
+              "revision": 23,
+              "available": true,
+              "remaining": 93774380
+            },
+            "shared": {
+              "required": true,
+              "connected": false,
+              "available": false,
+              "limit": 100000000,
+              "spent": 6225620,
+              "remaining": 0,
+              "revision": 1,
+              "generation": 1
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 36.272799,
+            "fatalErrors": 0
+          },
+          {
+            "name": "receive-only",
+            "totals": {
+              "peerFirstBytes": 6337480,
+              "uploaded": 0,
+              "peerFirstLoads": 23
+            },
+            "local": {
+              "v": 1,
+              "spent": 0,
+              "limit": 100000000,
+              "revision": 1,
+              "available": true,
+              "remaining": 100000000
+            },
+            "shared": {
+              "required": false,
+              "connected": false,
+              "available": true,
+              "limit": null,
+              "spent": null,
+              "remaining": null,
+              "revision": null,
+              "generation": null
+            },
+            "uploadChecked": false,
+            "telemetryChecked": false,
+            "serving": false,
+            "currentTime": 35.737753,
+            "fatalErrors": 0
+          }
+        ]
+      }
+    ],
+    "failures": [],
+    "cleanup": {
+      "browserClosed": true,
+      "serverClosed": true,
+      "mediaFixtureRemoved": true
+    },
+    "stage": "complete",
+    "renewals": {
+      "nostr-contributor": 3,
+      "website-contributor": 2
+    },
+    "elapsedMs": 55359,
+    "finishedAt": "2026-10-14T11:03:06.355Z",
+    "deadlineExpired": false,
+    "pageErrors": [],
+    "supervisor": {
+      "v": 1,
+      "at": "2026-10-14T11:02:10.613Z",
+      "finishedAt": "2026-10-14T11:03:06.395Z",
+      "elapsedMs": 55780,
+      "bounds": {
+        "wholeMs": 180000,
+        "workMs": 150000,
+        "gracefulCleanupEndsMs": 165000,
+        "groupReapEndsMs": 175000
+      },
+      "worker": {
+        "code": 0,
+        "signal": null
+      },
+      "failures": [],
+      "cleanup": {
+        "workerGroupAbsent": true,
+        "workerReaped": true,
+        "chromeGroupAbsent": true,
+        "ownedScratchRemoved": true
+      },
+      "ok": true
+    }
+  },
+  "finalIndependentIntegrationReview": {
+    "manifestSHA256": "bd80960b79b7bf5533a210836674885873c1e58887fe5c56ebd180fb19cc898e",
+    "publicSummary": {
+      "kind": "account-budget-local-integration-public-safe-summary",
+      "recordedUTC": "2026-10-14T11:04:44.345351+00:00",
+      "ok": true,
+      "sourceSHA256": {
+        "src/account-upload-budget.mjs": "31a051498cca8d80ab846743b80daddeb9d0a980096ab125852191d67047b048",
+        "demo/account-budget.mjs": "2bdab6e0cab1c5fd1f5a47f44a22b030106013bb096a61ba69b0956f54a4d30e",
+        "demo/account-budget-client.mjs": "4e2e495bd13e49e9548c1e045bc01694ca06f5fd9bb445af8f7ef2e413e6a505",
+        "demo/client.mjs": "02d2b54d5ccfd04bea1e665e3f26aae1b302b4beb8c02ae5bd175df381336415",
+        "src/browser/hls-swarm.mjs": "dcf49565c6c5e43192581f2c61989782ef204d08ac5a298a6d274e5f0ec63188"
+      },
+      "actualReceiptSHA256": "32d36a41d4d7dbc66e7956b8b7ea53a1c4a9e61ebc3b3545e466cf8336825c6c",
+      "observed": {
+        "wholeMs": 55780,
+        "workerMs": 55359,
+        "checkpoints": 4,
+        "nostrRenewalHTTP200": 3,
+        "websiteRenewalHTTP200": 2,
+        "firstNostrAcceptedServingAndSharedAndLocal": 111860,
+        "firstWebsiteAcceptedServingAndSharedAndLocal": 5942868,
+        "firstReceiverVerifiedPeerBytes": 6054728,
+        "atLinkNostrAcceptedServingBytes": 111860,
+        "atLinkWebsiteAcceptedServingAndLocalAndStaleShared": 6225620,
+        "atLinkSumAcceptedAndMergedSharedAndReceiverVerified": 6337480,
+        "atLinkReceiverPeerLoads": 23,
+        "sameOriginRestartRetainedSharedSpent": 6337480,
+        "freshResetSharedSpent": 0,
+        "freshResetLocalSpentPreserved": 111860,
+        "pageErrors": 0,
+        "contributorFatalErrors": 0,
+        "reportingOptIn": false
+      },
+      "rootTests": {
+        "swarm": {
+          "tests": 92,
+          "passed": 92,
+          "failed": 0
+        },
+        "publisher": {
+          "tests": 179,
+          "passed": 177,
+          "failed": 0,
+          "windowsOnlySkipped": 2
+        },
+        "reviewerReran": false
+      },
+      "cleanup": {
+        "workerAPIs": true,
+        "workerGroupAbsent": true,
+        "workerReaped": true,
+        "chromeGroupAbsent": true,
+        "ownedScratchRemoved": true
+      },
+      "conclusion": [
+        "Both explicit account-authentication paths reserve before actual loopback peer serving and retain consent/identity separation.",
+        "Current actual committed serving counters equal shared/local spend and verified receiver payload at retained checkpoints, including after archive/link; earlier provisional mismatch is absent.",
+        "Explicit alias link preserves summed usage and revokes other page authority; fresh same-origin server restart and explicit reconnect preserve6337480B.",
+        "Fresh owner reset changes shared spent only and does not enable uploading/reporting; explicit disconnect stays required and unavailable.",
+        "No remaining concrete security/integration blocker identified within reviewed exact-byte local scope."
+      ],
+      "preservedHistoricalEvidence": {
+        "first49_043msPassMetricCaveat": "Original897c715c… receipt and independent audit retained; not upgraded to successor semantics.",
+        "originalGuardFullPublisherFailure": "Original461aa22d… log retained; original exact child PID absent/cleanup unknown, no installed-kernel cause proved.",
+        "heldDecision": "Earlier counter-only run decision was never executed; not an additional attempted actor."
+      },
+      "limits": [
+        "One headless Chrome155.0.8059.41 local loopback journey with declared fakegUM/autoplay/mDNS flags, disposable real-signing NIP07 bridge and host-owned cookie callback.",
+        "No actual production website login provider, external signer/user prompt, public deployment, physical device, hardNAT, long-duration or release acceptance is implied.",
+        "30s grant fixture tests successful page-key renewal and stable signer-call assertions; response200 counts alone are not admitted-body proof.",
+        "No per-quality load counts retained; original worker both-quality verified peer assertions ran successfully.",
+        "Reserved/accepted serving payload is not wire ACK, delivered network metering or financial savings; accepted unknown/interruptions remain conservatively charged.",
+        "Cross-restart grant expiry trusts hostUTC plus durable highwater; no independently observed physical elapsed-time claim.",
+        "No exact per-operation durable rows retained after cleanup; same-origin restart plus verified server/source contracts are component evidence.",
+        "Cleanup assertions are retained actual supervisor proofs, not fresh reviewer kernel scans; private paths/PIDs/nonces stay in ignored private inputs.",
+        "No reviewer actors, tests, host/network calls or tracked edits."
+      ]
+    }
+  }
+}

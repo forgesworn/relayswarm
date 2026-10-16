@@ -1,0 +1,104 @@
+{
+  "v": 1,
+  "date": "2026-10-15",
+  "fieldSourceSha": "54da3840a6a057d2112945b3b465704a030aac32",
+  "releaseComplete": false,
+  "existingSharedTurn": {
+    "reused": true,
+    "serverOrFirewallChanged": false
+  },
+  "forcedEarlyRenewal": {
+    "ok": true,
+    "measuredMs": 90006,
+    "actualCredentialTtlSeconds": 3600,
+    "firstLocalLeaseSeconds": 60,
+    "distinctIssuances": 3,
+    "strictSelectedTlsBeforeAndAfter": true,
+    "verifiedFragments": 40,
+    "verifiedPayloadBytes": 4632696,
+    "postBoundaryVerifiedFragments": 23,
+    "postBoundaryVerifiedPayloadBytes": 2654936,
+    "workerAndSupervisorCleanupPassed": true,
+    "naturalExpiryProved": false,
+    "physicalDevice": false,
+    "earlierFailedRunsReclassified": false
+  },
+  "pilot": {
+    "sourceSha": "54da3840a6a057d2112945b3b465704a030aac32",
+    "image": "sha256:228858cf7fe81a7df76feab759995514e8def07c506c5b06c7307fbc1d808424",
+    "clientBytes": 756084,
+    "clientSHA256": "06b713e5ea8f0845a7d0d357d4c3f936445cb304eefa46bd408cd1d25496d1ac",
+    "normalHttpsClientAndTwoPlaylistBodiesPassed": true,
+    "turnDescriptorEnabled": true,
+    "identityAndPermanentLeasesMatched": true,
+    "privateBudgetFilesRetained": true,
+    "accountJsonAtomicInodeChangeRetained": true,
+    "verificationSourceRemoved": true,
+    "sourceExitCode": 255,
+    "newPlaybackProvedByAttestation": false
+  },
+  "ordinaryPublic": {
+    "ok": false,
+    "measuredMs": 60072,
+    "playback": "green",
+    "acceptedContribution": "green",
+    "verifiedPeerPayload": "red",
+    "receiverVerifiedPeerLoads": 0,
+    "receiverVerifiedPeerBytes": 0,
+    "qualitiesRequired": [
+      "low",
+      "high"
+    ],
+    "matchingHaveOpportunities": 5,
+    "commitmentRequests": 5,
+    "requestTimeouts": 5,
+    "lowAcceptedUploadBytes": 422624,
+    "highAcceptedUploadBytes": 1999944,
+    "acceptedUploadCountersProveWireCompletion": false,
+    "originalM4CleanupPassed": false,
+    "laterOriginalBirthAndGroupAbsencePassed": true,
+    "laterOwnedStageRemovedWithoutSignals": true,
+    "finiteSourceRemoved": true,
+    "failureCauseEstablished": false,
+    "timingRateActorAndResourceLimitsChanged": false
+  },
+  "newAdmissionOption": {
+    "flag": "--admission-per-address-tickets",
+    "minimum": 1,
+    "maximum": 120,
+    "default": 12,
+    "focusedTestsPassed": 33,
+    "focusedTestsFailed": 0,
+    "syntaxModules": 142,
+    "validationElapsedMs": 28445,
+    "deployed": false,
+    "largerCohortProved": false
+  },
+  "remaining": [
+    "ordinary verified peer delivery at both qualities",
+    "natural TURN credential expiry and reconnection",
+    "fourteen-role capacity and 300-second qualification",
+    "7200-second load with 22 churn events",
+    "Safari and complete physical-device journeys",
+    "matched wire and billing measurements",
+    "immutable release assets and download acceptance"
+  ],
+  "evidence": {
+    "renewal": {
+      "path": "artifacts/existing-turn-renewal-54da384-r7-run-20261015/existing-turn-renewal-supervised.json",
+      "sha256": "dbd81502e022146af33cfc8f2544a770db35427cfa7a0a5f8984c1020ffc68be"
+    },
+    "deploymentContract": {
+      "path": "artifacts/deployment-54da384-r2-bound-20261015/runtime-contract.json",
+      "sha256": "d38abe2f99f35ba78887ee3612c46f03d7544e2adc04b917301588396dff4ccd"
+    },
+    "ordinaryAudit": {
+      "path": "artifacts/public-cross-hls-eligibility-54da384-r2-run-20261015/analysis/EVIDENCE-MANIFEST.json",
+      "sha256": "6a3acdd2eb60b477841a4b4b9437f5a7904e3a40504231f05168c93eadf0cda0"
+    },
+    "admissionValidation": {
+      "path": "artifacts/broadcast-admission-validation-20261015/receipt.json",
+      "sha256": "cb8020d8e798d219d438ba14e76f2c52cf42e6b348f0c2994fc1f0d4ce943e83"
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "v": 1,
+  "date": "2026-10-14",
+  "sourceSha": "f393abf3d55215bdf58241a4a2af74245d646117",
+  "scope": "Installed desktopSafari17.6 onM1, two installed headlessChrome155.0.8059.40 contributors onM4; not physicaliPhone",
+  "result": "RED",
+  "outerElapsedSeconds": 32.97278112499043,
+  "measurementMs": 0,
+  "resourceScope": {
+    "M1CompleteOwnedTreeUnionCurrentUserSafariWebKit": {
+      "summedRSSCapBytes": 3221225472,
+      "processCap": 48
+    },
+    "M4CompleteOwnedTree": {
+      "summedRSSCapBytes": 12884901888,
+      "processCap": 96
+    },
+    "minimumReportedFreePercent": 25,
+    "resourceGatesPassed": true,
+    "processCap32ProposalNotBoundOrRun": true,
+    "count48SeparatelyReviewedFromObservedBaseline": true
+  },
+  "startup": {
+    "driverStatusReady": true,
+    "exactSessionCreationKnown": true,
+    "M4TrustedUploadAndStartWitnesses": 4,
+    "SafariDropdownsOrTrustedStartWitnessRetained": false,
+    "failureStage": "Safari-native-start",
+    "failureClass": "Error",
+    "failedReadinessTermOrUnderlyingCause": "not retained; no button/codec/network cause proved"
+  },
+  "cleanup": {
+    "exactSafariSessionDeleted": true,
+    "onlyJournalledSessionTargeted": true,
+    "wireWorkersReaped": true,
+    "ownDriverStopped": true,
+    "driverExitCode": 0,
+    "sharedSafariSignalled": false,
+    "M4ChromeGroupsProfileAndScratchRemoved": true,
+    "bothEndpointMainBirthsAbsentAndStagesRemoved": true,
+    "providerObserverForwardAndOuterReaped": true,
+    "actualSourceCleanupV2Removed": true,
+    "sourceExitCode": 255
+  },
+  "SafariMediaAudioPeerInputAcceptanceProved": false,
+  "separateOlderM4Safari26UnknownSessionDeletionProved": false,
+  "releaseReadiness": false
+}
