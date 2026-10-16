@@ -934,9 +934,14 @@ class HlsSwarm {
       const alternatives = [...this.links.values()].filter((peer) => !peer.closed && !peer.busy && !tried.has(peer.pubkey) && peer.have.has(key)).length;
       const remainingMs = deadline - now();
       const estimateMs = this.peerSelection.estimate(link, commitment.size);
+      // Give an unmeasured route time to complete, retaining the existing
+      // 25ms minimum opportunity for up to two quick alternative attempts.
+      // Equal slices can time out every cold route before any can be measured.
+      const coldAttemptMs = remainingMs - Math.min(2, alternatives) * 25;
       // A measured delivery that fits the original origin deadline must not
       // be cut short by an equal share intended for unmeasured alternatives.
-      const attemptMs = Math.min(remainingMs, Math.max(25, remainingMs / Math.min(3, alternatives + 1), estimateMs === null ? 0 : estimateMs * 1.25 + 25));
+      const attemptMs = estimateMs === null ? Math.min(remainingMs, Math.max(25, coldAttemptMs))
+        : Math.min(remainingMs, Math.max(25, remainingMs / Math.min(3, alternatives + 1), estimateMs * 1.25 + 25));
       const bytes = await link.request(key, Math.max(1, attemptMs), { signal, expectedSize: commitment.size });
       if (!bytes || signal.aborted || this.stopped) {
         if (!signal.aborted && !this.stopped) this.peerSelection.record(link, now() - requestedAt);

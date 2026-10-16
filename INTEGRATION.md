@@ -265,8 +265,10 @@ viewer reset or increase can change the quota.
 
 Peer-first ranks eligible advertised media by measured completion time,
 payload rate and failure history. Healthy measured peers take priority over
-fast refusals; cold peers receive bounded exploration. A known delivery gets
-headroom within the original peer deadline, rather than an equal share of it.
+fast refusals. A cold route gets the remaining time minus 25 ms for each of
+up to two alternatives; this reserves quick retries while allowing an unknown
+route to complete and acquire a measurement. A known delivery gets headroom
+within the original peer deadline, rather than an equal share of it.
 Attempts remain serial and capped by `maxPeers` and the original deadline.
 A timed-out or cancelled request resolves promptly for origin fallback. On a
 known ordered, fully reliable channel, the link stays busy while discarding

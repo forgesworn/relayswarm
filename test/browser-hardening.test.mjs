@@ -908,6 +908,23 @@ test("a failing eligible peer yields to another peer within the existing origin 
   } finally { await fixture.close(); }
 });
 
+test("cold peers keep enough of the original deadline to finish one verified delivery", async () => {
+  const playback = peerPlaybackOptions(1500), trace = [];
+  const fixture = await linkedFixture(playback.options);
+  try {
+    for (let i = 0; i < 3; i++) {
+      const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 900, trace, `cold-${i}`));
+      channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    }
+    const started = performance.now(), response = await fixture.load();
+    assert.deepEqual(new Uint8Array(response.data), playback.bytes);
+    assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 1);
+    assert.equal(fixture.swarm.metrics().segments.originFallbacks, 0);
+    assert.deepEqual(trace, ["cold-0"]);
+    assert.ok(performance.now() - started < 1500, "the original origin deadline is respected");
+  } finally { await fixture.close(); }
+});
+
 test("known 900ms verified delivery keeps enough of a 1500ms deadline when alternatives are available", async () => {
   const playback = peerPlaybackOptions(1500), trace = [];
   const fixture = await linkedFixture(playback.options);
