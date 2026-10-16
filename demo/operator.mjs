@@ -27,6 +27,11 @@ export async function readOperatorTokenFile(path) {
 
 const fields = ["durationMs", "peerBytes", "uploadedBytes", "originMediaRequests", "originMediaBytes", "stalls", "stallMs", "fatalErrors"];
 const fail = (message, status) => Object.assign(new Error(message), { status });
+function sendJson(request, response, status, value) {
+  const bytes = Buffer.from(JSON.stringify(value), "utf8");
+  response.writeHead(status, { "content-type": "application/json", "content-length": bytes.length });
+  response.end(request.method === "HEAD" ? undefined : bytes);
+}
 export function createOperatorControls({ token, telemetry = false, reportCapacity = 256, reportTtlMs = 300000, now = Date.now, operatorExtraStatus, requestDiagnostics, statePath, admission, mutationCapacity = 64 } = {}) {
   if (token !== undefined && (typeof token !== "string" || token.length < 32 || token.length > 256 || /\s/u.test(token))) throw new Error("Operator token must contain 32-256 non-whitespace characters.");
   if (!Number.isSafeInteger(reportCapacity) || reportCapacity < 1 || reportCapacity > 4096 || !Number.isSafeInteger(reportTtlMs) || reportTtlMs < 1000 || reportTtlMs > 3600000) throw new Error("Invalid report retention limits.");
@@ -148,8 +153,8 @@ export function createOperatorControls({ token, telemetry = false, reportCapacit
           return { accepted: true };
         });
       }
-      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(result));
-    } catch (error) { response.writeHead(error.status ?? 500, { "content-type": "application/json" }).end(JSON.stringify({ error: error.status ? error.message : "Operator unavailable." })); }
+      sendJson(request, response, 200, result);
+    } catch (error) { sendJson(request, response, error.status ?? 500, { error: error.status ? error.message : "Operator unavailable." }); }
     return true;
   }
   return { handle, policy, summary, origin, ready: () => readyPromise, flush: () => mutate(() => { reports = reports.filter((entry) => now() - entry.at < reportTtlMs); }), close: () => { if (closePromise) return closePromise; stopping = true; clearInterval(retentionTimer); clearTimeout(originFlushTimer); originFlushTimer = undefined; closePromise = (async () => { try { await mutations; await mutate(() => { reports = reports.filter((entry) => now() - entry.at < reportTtlMs); }, { shutdown: true }); } finally { lease?.close(); } })(); return closePromise; } };

@@ -1,10 +1,13 @@
-import { get as httpGet } from "node:http";
+import { Agent, get as httpGet, request as httpRequest } from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm, realpath, chmod } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm, realpath, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import WebSocket from "ws";
+import { build } from "esbuild";
+import { fileURLToPath } from "node:url";
+import { PublisherError } from "../src/hls-publisher.mjs";
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { resolveTrustedStream } from "../src/browser/stream-discovery.mjs";
 import { startDemoServer } from "../demo/server.mjs";
@@ -289,4 +292,68 @@ test("beforeListen validation and rejected preparation preserve the waiting list
   await assert.rejects(start(t, { port: waiting.port, beforeListen: async () => { throw new Error("Host declined handoff"); } }), /Host declined handoff/u);
   const response = await fetch(waiting.base);
   assert.equal(response.status, 200); assert.match(await response.text(), /Waiting for the broadcast/u);
+});
+
+
+function bufferedRoundtrip(base, agent, path, { method = "GET", headers = {}, body } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(new URL(path, base), { method, agent, headers }, (response) => {
+      const chunks = []; let size = 0;
+      response.on("data", (chunk) => { size += chunk.length; if (size > 2 * 1024 * 1024) request.destroy(new Error("Fixture response exceeded bound.")); else chunks.push(chunk); });
+      response.on("error", reject);
+      response.on("aborted", () => reject(new Error("Fixture response aborted.")));
+      response.on("end", () => resolve({ status: response.statusCode, version: response.httpVersion, complete: response.complete, headers: response.headers, body: Buffer.concat(chunks), reusedSocket: request.reusedSocket }));
+    });
+    request.setTimeout(3000, () => request.destroy(new Error("Fixture response timed out.")));
+    request.on("error", reject); request.end(body);
+  });
+}
+function exactBufferedReply(reply, status, expected, { head = false } = {}) {
+  assert.equal(reply.status, status); assert.equal(reply.version, "1.1"); assert.equal(reply.complete, true);
+  assert.equal(reply.headers["content-length"], String(expected.length));
+  assert.equal(reply.headers["transfer-encoding"], undefined);
+  assert.deepEqual(reply.body, head ? Buffer.alloc(0) : expected);
+}
+
+test("buffered demo responses preserve exact UTF-8, Buffer and Uint8Array bytes over HTTP/1.1", { timeout: 15000 }, async (t) => {
+  const marker = "viewer-£-🎥", iceServers = [{ urls: "turn:fixture.invalid:3478?transport=tcp", username: marker, credential: "fixture-only" }];
+  const demo = await start(t, { iceServers }), agent = new Agent({ keepAlive: true, maxSockets: 1 });
+  t.after(() => agent.destroy());
+  const wire = (path, options) => bufferedRoundtrip(demo.base, agent, path, options);
+  const session = await wire("/session.json"), value = JSON.parse(session.body.toString("utf8"));
+  assert.deepEqual(value.iceServers, iceServers);
+  assert.ok(session.body.length > session.body.toString("utf8").length, "UTF-8 byte length differs from character count");
+  const sessionBytes = Buffer.from(JSON.stringify(value), "utf8"); exactBufferedReply(session, 200, sessionBytes);
+  const repeated = await wire("/session.json"); assert.equal(repeated.reusedSocket, true); exactBufferedReply(repeated, 200, sessionBytes);
+  const built = await build({ entryPoints: [fileURLToPath(new URL("../demo/client.mjs", import.meta.url))], bundle: true, format: "esm", platform: "browser", write: false, minify: true, logLevel: "silent" });
+  assert.ok(built.outputFiles[0].contents instanceof Uint8Array);
+  for (const [path, bytes] of [["/", await readFile(new URL("../demo/index.html", import.meta.url))], ["/style.css", await readFile(new URL("../demo/style.css", import.meta.url))], ["/client.js", Buffer.from(built.outputFiles[0].contents)]]) {
+    exactBufferedReply(await wire(path), 200, bytes);
+    exactBufferedReply(await wire(path, { method: "HEAD" }), 200, bytes, { head: true });
+  }
+  const media = demo.publisher.media, message = "Fixture unavailable: £-🎥", errorBytes = Buffer.from(JSON.stringify({ error: message }), "utf8");
+  demo.publisher.media = async () => { throw new PublisherError(message, 409); };
+  try {
+    exactBufferedReply(await wire("/media/shared.ts"), 409, errorBytes);
+    exactBufferedReply(await wire("/media/shared.ts", { method: "HEAD" }), 409, errorBytes, { head: true });
+  } finally { demo.publisher.media = media; }
+  exactBufferedReply(await wire("/session.json"), 200, sessionBytes);
+});
+
+test("buffered operator policy, UTF-8 status and JSON errors retain exact HTTP/1.1 framing", { timeout: 15000 }, async (t) => {
+  const marker = "operator-£-🎥", demo = await start(t, { operatorToken, operatorExtraStatus: () => ({ label: marker }) });
+  const agent = new Agent({ keepAlive: true, maxSockets: 1 }); t.after(() => agent.destroy());
+  const wire = (path, options) => bufferedRoundtrip(demo.base, agent, path, options), bytes = (value) => Buffer.from(JSON.stringify(value), "utf8");
+  exactBufferedReply(await wire("/delivery-policy.json"), 200, bytes({ v: 1, mode: null, revision: 0, telemetry: false }));
+  const status = await wire("/operator/status", { headers: { authorization: `Bearer ${operatorToken}` } });
+  assert.equal(status.reusedSocket, true); const value = JSON.parse(status.body.toString("utf8")); assert.deepEqual(value.broadcast, { label: marker });
+  assert.ok(status.body.length > status.body.toString("utf8").length); exactBufferedReply(status, 200, bytes(value));
+  exactBufferedReply(await wire("/operator/status"), 401, bytes({ error: "Unauthorised." }));
+  const update = async (mode) => {
+    const body = bytes({ mode });
+    return wire("/operator/policy", { method: "POST", headers: { authorization: `Bearer ${operatorToken}`, "content-type": "application/json", "content-length": body.length }, body });
+  };
+  exactBufferedReply(await update("invalid"), 400, bytes({ error: "Supply only mode: null, off, shadow or peer-first." }));
+  const changed = bytes({ v: 1, mode: "off", revision: 1, telemetry: false });
+  exactBufferedReply(await update("off"), 200, changed); exactBufferedReply(await wire("/delivery-policy.json"), 200, changed);
 });

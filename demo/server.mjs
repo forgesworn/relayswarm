@@ -23,6 +23,12 @@ import { createTurnCredentialService, validateTurnCredentialsUrl, validateTurnUr
 
 const here = dirname(fileURLToPath(import.meta.url));
 
+function sendBufferedResponse(request, response, status, type, body) {
+  const bytes = Buffer.isBuffer(body) ? body : typeof body === "string" ? Buffer.from(body, "utf8") : Buffer.from(body);
+  response.writeHead(status, { "content-type": type, "content-length": bytes.length });
+  response.end(request.method === "HEAD" ? undefined : bytes);
+}
+
 export function httpRange(header, size) {
   if (!header) return null;
   const match = /^bytes=(\d+)-(\d*)$/u.exec(header);
@@ -87,7 +93,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
         response.write = (chunk, encoding, callback) => { count(chunk, encoding); return write(chunk, encoding, callback); };
         response.end = (chunk, encoding, callback) => { count(chunk, encoding); return end(chunk, encoding, callback); };
       }
-      const send = (type, body) => { response.writeHead(200, { "content-type": type }); response.end(request.method === "HEAD" ? undefined : body); };
+      const send = (type, body) => sendBufferedResponse(request, response, 200, type, body);
       if (url.pathname === "/") return send("text/html; charset=utf-8", page);
       if (url.pathname === "/style.css") return send("text/css; charset=utf-8", css);
       if (url.pathname === "/client.js") return send("text/javascript; charset=utf-8", bundle.outputFiles[0].contents);
@@ -151,7 +157,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
     } catch (error) {
       if (response.headersSent) { response.destroy(); return; }
       const status = error instanceof PublisherError ? error.status : error.code === "ENOENT" ? 404 : 500;
-      response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ error: status === 500 ? "Publisher unavailable." : error instanceof PublisherError ? error.message : "Unknown media." }));
+      sendBufferedResponse(request, response, status, "application/json", JSON.stringify({ error: status === 500 ? "Publisher unavailable." : error instanceof PublisherError ? error.message : "Unknown media." }));
     }
   };
   let server, relay, advertisement, renewal, closing, advertisementPool;
