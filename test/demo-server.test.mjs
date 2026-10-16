@@ -7,20 +7,23 @@ import { tmpdir } from "node:os";
 import WebSocket from "ws";
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { PublisherError } from "../src/hls-publisher.mjs";
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { resolveTrustedStream } from "../src/browser/stream-discovery.mjs";
 import { startDemoServer } from "../demo/server.mjs";
 import { startBroadcastWaitingServer } from "../demo/broadcast-waiting.mjs";
 import { appServerTiming } from "../demo/fetch-diagnostics.mjs";
+import { startObservedFmp4Demo } from "./support/fmp4-observed-demo.mjs";
+import { startObservedDemo } from "./support/broadcast-observed-demo.mjs";
 
-async function start(t, options = {}) {
+async function start(t, options = {}, startServer = startDemoServer) {
   const directory = await mkdtemp(join(tmpdir(), "relayswarm-demo-test-"));
   await writeFile(join(directory, "index.m3u8"), "#EXTM3U\n#EXTINF:2,\n#EXT-X-BYTERANGE:4@0\nshared.ts\n#EXTINF:2,\n#EXT-X-BYTERANGE:4\nshared.ts\n#EXT-X-ENDLIST\n");
   await writeFile(join(directory, "shared.ts"), "abcdefgh");
   await writeFile(join(directory, "private.key"), "do not serve");
   let demo;
-  try { demo = await startDemoServer({ mediaDir: directory, manifest: "index.m3u8", iceServers: [], ...options }); }
+  try { demo = await startServer({ mediaDir: directory, manifest: "index.m3u8", iceServers: [], ...options }); }
   catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
   t.after(async () => { await demo.close(); await rm(directory, { recursive: true, force: true }); });
   return demo;
@@ -356,4 +359,26 @@ test("buffered operator policy, UTF-8 status and JSON errors retain exact HTTP/1
   exactBufferedReply(await update("invalid"), 400, bytes({ error: "Supply only mode: null, off, shadow or peer-first." }));
   const changed = bytes({ v: 1, mode: "off", revision: 1, telemetry: false });
   exactBufferedReply(await update("off"), 200, changed); exactBufferedReply(await wire("/delivery-policy.json"), 200, changed);
+});
+
+test("observed bundles retain their own exact HTTP lengths and production headers", { timeout: 15000 }, async (t) => {
+  for (const [name, factory, lengthField, hashField] of [
+    ["fmp4", startObservedFmp4Demo, "bytes", "observedClientSHA256"],
+    ["broadcast", startObservedDemo, "observedBytes", "observedSHA256"],
+  ]) await t.test(name, async (t) => {
+    const demo = await start(t, {}, factory), agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    t.after(() => agent.destroy());
+    const reply = await bufferedRoundtrip(demo.base, agent, "/client.js");
+    assert.equal(reply.status, 200); assert.equal(reply.complete, true);
+    assert.equal(reply.headers["content-length"], String(demo.observation[lengthField]));
+    assert.equal(reply.body.length, demo.observation[lengthField]);
+    assert.equal(createHash("sha256").update(reply.body).digest("hex"), demo.observation[hashField]);
+    assert.equal(reply.headers["transfer-encoding"], undefined);
+    assert.equal(reply.headers["content-type"], "text/javascript; charset=utf-8");
+    assert.equal(reply.headers["cache-control"], "no-store");
+    assert.equal(reply.headers["x-content-type-options"], "nosniff");
+    assert.ok(reply.headers["content-security-policy"].includes("default-src 'self'"));
+    const head = await bufferedRoundtrip(demo.base, agent, "/client.js", { method: "HEAD" });
+    assert.equal(head.reusedSocket, true); exactBufferedReply(head, 200, reply.body, { head: true });
+  });
 });

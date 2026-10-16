@@ -32,7 +32,10 @@ export async function startObservedFmp4Demo(options) {
     const handlers = server.listeners("request"); assert.equal(handlers.length, 1); server.removeListener("request", handlers[0]);
     server.on("request", (req, res) => {
       if (new URL(req.url, demo.base).pathname === "/client.js") {
-        const end = res.end; res.end = function (_body, ...rest) { return end.call(this, req.method === "HEAD" ? undefined : bytes, ...rest); };
+        const end = res.end, writeHead = res.writeHead;
+        // The observed bundle has its own length; preserve all other server headers.
+        res.writeHead = function (status, headers) { return writeHead.call(this, status, status === 200 ? { ...headers, "content-length": bytes.byteLength } : headers); };
+        res.end = function (body, ...rest) { return end.call(this, this.statusCode === 200 ? req.method === "HEAD" ? undefined : bytes : body, ...rest); };
       }
       handlers[0](req, res);
     });
