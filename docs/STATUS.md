@@ -3,13 +3,57 @@
 [Documentation](README.md) · [Field-test guide](FIELD-TEST.md) ·
 [Changelog](../CHANGELOG.md)
 
-Checkpoint: 16 October 2026. The published experimental release is
+Checkpoint: 18 October 2026. The published experimental release is
 [v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0), which points to
 `3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. The 0.2.0 production feature
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
+
+Checkpoint: 18 October 2026. The experimental pilot runs exact
+`2911ea55f1bd21335a979df8a3fd38ed83cc6bee`. All nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39148186931),
+fresh consumption of 275 package members and guarded HTTPS deployment passed.
+The 769,958-byte client matched its image. Relay-only ICE, TLS/TCP TURN,
+admission 32 and the selected 900-request address budget remain configured.
+Nostr account allowances are enabled; the authenticated host-supplied account
+API is implemented. Reporting and forwarding remain off. Private state,
+permanent leases and the independent proxy were preserved.
+
+**R51 remains RED after 306.350 s.** All fourteen roles progressed video and
+audio, all eight contributors uploaded, and in-place renewal, admission,
+reconciliation, recovery and resource checks passed. Only the requirement
+that each receiver obtain verified peer media at both qualities failed:
+receivers 1 and 2 obtained both; receiver 3 obtained only LOW; receiver 4 only
+HIGH. All owned contexts, processes, profiles, tunnels and the finite source
+passed independent cleanup review. Cleanup does not change the failed verdict.
+The matching short qualifier has not passed, so the two-hour run is ineligible.
+
+Receiver 3 saw positive HAVE and valid commitments without completing HIGH
+peer delivery. Its observed wait-to-HAVE median was 651 ms, leaving at most
+849 ms of the initial 1,500 ms budget before further work. Receiver 4 recorded
+80 LOW decisions with no eligible neighbour; its bounded replacement dial
+was rejected. Precise transfer/refusal and network causes remain unproved.
+
+Later local source changes add bounded request-outcome and upload-refusal
+diagnostics and correct a separate allocation inconsistency: alternatives
+already excluded by the selector's measured deadline-fit rule reserve no time
+from a cold peer. A controlled 670 kB delivery at 1,470 ms fails before the
+correction and passes afterwards within the unchanged 1,500 ms deadline.
+All 187 combined loader, discovery and receiver tests pass. These changes are
+not deployed or field-qualified at this checkpoint and do not prove an R51 fix.
+
+The P01–P12 source surfaces are implemented; production acceptance and the
+0.2.0 release remain incomplete. Both-quality account lifecycle, durable
+reporting, crash recovery, natural expiry/churn, browser/device breadth,
+difficult networks, matched wire/cost benefit and downloaded-release checks
+remain open at their declared evidence gates. Other work on the Macs must
+keep running; the test resource limits remain unchanged. See the
+[checkpoint record](../spikes/results/2911ea5-current-delivery-checkpoint-20261018.json)
+and [P01–P12 checklist](PRODUCTION-READINESS.md#delivery-checklist).
+
+## Historical 44b21d6 delivery checkpoint
 
 Checkpoint: 16 October 2026. The experimental pilot runs exact
 `44b21d69dd924fea648c2dc214df02dafa8e690c`. All nine required

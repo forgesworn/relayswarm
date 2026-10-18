@@ -5,7 +5,34 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
-## Current deployed pilot: 16 October 2026
+## Current deployed pilot: 18 October 2026
+
+Exact `2911ea5` passed all nine required CI jobs, fresh 275-member consumption
+and guarded HTTPS deployment. Private state, permanent leases and the
+independent proxy were preserved. Nostr accounts are enabled, with an
+implemented host-supplied authenticated account API; reporting and forwarding
+remain off.
+
+R51 measured 306.350 s and remains RED solely on each receiver obtaining peer
+media at both qualities. All fourteen progressed video/audio and all eight
+contributors uploaded; renewal, admission and resource gates passed. Two
+receivers obtained both qualities, one only LOW and one only HIGH. Independent
+cleanup passed for all owned contexts/processes/profiles/tunnels/source.
+
+Later local request-outcome/refusal diagnostics and a deadline-fit alternative
+allocation correction pass 187 combined tests, including an original-source
+regression. They are not deployed or field-qualified at this checkpoint.
+
+P01–P12 source surfaces are implemented. The successful matching short
+qualifier, two-hour/churn/natural-expiry run, both-quality account lifecycle,
+durable-report/crash-recovery acceptance, browser/device/network breadth,
+matched wire/cost benefit and final release/download acceptance remain open.
+The long run is ineligible until a matching short qualifier passes. Other
+work on the Macs must keep running; resource limits remain unchanged. See
+[current status](STATUS.md#current-delivery-checkpoint) and the
+[checkpoint record](../spikes/results/2911ea5-current-delivery-checkpoint-20261018.json).
+
+## Historical 44b21d6 checkpoint
 
 Exact `44b21d6` passed all nine required CI jobs, fresh 273-member consumption
 and guarded HTTPS deployment. Bounded rendition-neighbour discovery and

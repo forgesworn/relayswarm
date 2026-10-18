@@ -100,8 +100,34 @@ export class PeerLink {
   }
 
   // Resolves with the bytes, or null when the peer does not serve them in time.
-  request(key, timeoutMs, { signal, expectedSize } = {}) {
-    if (this.closed || this.pending || signal?.aborted) return Promise.resolve(null);
+  // Optional diagnostics describe that logical result once, before any late drain.
+  request(key, timeoutMs, { signal, expectedSize, onResult } = {}) {
+    let startedAt = null;
+    if (typeof onResult === "function") { try { startedAt = performance.now(); } catch {} }
+    let reported = false;
+    const report = (outcome, pending = null) => {
+      if (reported) return;
+      reported = true;
+      if (typeof onResult !== "function") return;
+      try {
+        let elapsedMs = null;
+        if (Number.isFinite(startedAt)) { try { elapsedMs = performance.now() - startedAt; } catch {} }
+        const receivedBytes = pending?.received ?? 0;
+        onResult({ outcome,
+          elapsedMs: Number.isFinite(elapsedMs) && elapsedMs >= 0 ? elapsedMs : null,
+          timeoutMs: Number.isFinite(timeoutMs) && timeoutMs >= 0 ? timeoutMs : null,
+          expectedBytes: Number.isSafeInteger(expectedSize) && expectedSize >= 0 ? expectedSize : null,
+          receivedBytes: Number.isSafeInteger(receivedBytes) && receivedBytes >= 0 ? receivedBytes : null,
+          metadataReceived: pending ? pending.size >= 0 : false,
+          draining: pending?.draining === true,
+          closeReason: CLOSE_REASONS.has(this.closeReason) ? this.closeReason : null });
+      } catch {}
+    };
+    if (this.closed || this.pending || signal?.aborted) {
+      const result = Promise.resolve(null);
+      report(this.closed ? "closed" : this.pending ? "busy" : "abort");
+      return result;
+    }
     return new Promise((resolve) => {
       const id = this.nextId++;
       const settle = (bytes) => {
@@ -109,13 +135,14 @@ export class PeerLink {
         signal?.removeEventListener("abort", cancel);
         resolve(bytes);
       };
-      const finish = (bytes) => {
+      const finish = (bytes, outcome = bytes ? "payload" : "none", reportNow = true) => {
         if (this.pending?.id !== id) return;
-        const drained = this.pending.draining;
+        const pending = this.pending, drained = pending.draining;
         settle(bytes);
         this.pending = null;
         if (bytes) this.lastDeliveredAt = Date.now();
         if (drained && !this.closed) this.onScheduleChange?.(this);
+        if (reportNow) report(outcome, pending);
       };
       const abandon = (reason) => {
         const pending = this.pending;
@@ -127,19 +154,25 @@ export class PeerLink {
           reliable = this.channel.ordered === true && this.channel.maxRetransmits === null &&
             this.channel.maxPacketLifeTime === null && this.channel.readyState === "open";
         } catch {}
-        if (!reliable) { finish(null); this.close(reason); return; }
+        const outcome = reason === "request-abort" ? "abort" : "timeout";
+        if (!reliable) {
+          finish(null, outcome, false);
+          try { this.close(reason); } finally { report(outcome, pending); }
+          return;
+        }
         pending.draining = true;
         pending.parts.length = 0;
         settle(null);
         pending.timer = setTimeout(() => {
           if (this.pending === pending && pending.draining) this.close(reason);
         }, this.drainTimeoutMs);
+        report(outcome, pending);
       };
       const cancel = () => abandon("request-abort");
       const timeout = () => abandon("request-timeout");
       this.pending = { id, key, expectedSize, size: -1, parts: [], chunks: 0, received: 0, draining: false, finish, timer: setTimeout(timeout, Math.max(1, timeoutMs)) };
       signal?.addEventListener("abort", cancel, { once: true });
-      if (!this.#sendText({ t: "want", id, k: key })) finish(null);
+      if (!this.#sendText({ t: "want", id, k: key })) finish(null, "send-error");
     });
   }
 
@@ -149,7 +182,7 @@ export class PeerLink {
     this.closeReason = CLOSE_REASONS.has(reason) ? reason : "host";
     this.fetching.clear();
     this.renditions.clear();
-    this.pending?.finish(null);
+    this.pending?.finish(null, this.closeReason === "send-error" ? "send-error" : "closed");
     try { this.channel.close(); } catch {}
     try { this.pc.close(); } catch {}
     this.onClose?.(this);

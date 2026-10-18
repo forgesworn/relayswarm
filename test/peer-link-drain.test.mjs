@@ -32,6 +32,12 @@ function fixture(t, options = {}) {
   return { channel, pc, link, closed, scheduled };
 }
 function clock(t) { t.mock.timers.enable({ apis: ["setTimeout"] }); }
+function result(row, expected) {
+  const { elapsedMs, ...fields } = row;
+  assert.equal(typeof elapsedMs, "number"); assert.ok(Number.isFinite(elapsedMs) && elapsedMs >= 0);
+  assert.deepEqual(fields, expected);
+  assert.equal(JSON.stringify(row).includes(KEY), false, "result contains no requested key");
+}
 
 // Exercise the actual receiver with untagged binary frames; the second WANT
 // must not be sent until the abandoned first response has a valid boundary.
@@ -214,5 +220,145 @@ test("active invalid responses also fail closed instead of freeing an untagged s
   ]) {
     const { channel, link } = fixture(t), request = link.request(KEY, 1500);
     attack(channel); assert.equal(await request, null); assert.equal(link.closeReason, "protocol");
+  }
+});
+
+test("request results retain timeout progress before metadata or partial payload without a second late result", async (t) => {
+  clock(t);
+  for (const partial of [false, true]) {
+    const { channel, link } = fixture(t), rows = [];
+    const request = link.request(KEY, 10, { expectedSize: 4, onResult: row => rows.push(row) });
+    if (partial) { channel.control("meta", { size: 4 }); channel.chunk([1, 2]); }
+    t.mock.timers.tick(10);
+    assert.equal(await request, null); assert.equal(rows.length, 1);
+    result(rows[0], { outcome: "timeout", timeoutMs: 10, expectedBytes: 4,
+      receivedBytes: partial ? 2 : 0, metadataReceived: partial, draining: true, closeReason: null });
+    if (!partial) channel.control("meta", { size: 4 });
+    channel.chunk(partial ? [3, 4] : [1, 2, 3, 4]); channel.control("eof");
+    assert.equal(link.busy, false); assert.equal(rows.length, 1);
+    assert.equal(rows[0].receivedBytes, partial ? 2 : 0, "late bytes do not rewrite the logical timeout");
+    assert.equal(rows[0].metadataReceived, partial);
+    t.mock.timers.tick(3000); assert.equal(link.closed, false);
+    link.close("host-stop"); assert.equal(rows.length, 1);
+  }
+});
+
+test("request results distinguish none from a completed payload and retain the original payload promise", async (t) => {
+  clock(t);
+  const { channel, link } = fixture(t), rows = [], busyAtResult = [];
+  const onResult = row => { busyAtResult.push(link.busy); rows.push(row); };
+  const unavailable = link.request(KEY, 100, { onResult }); channel.control("none");
+  assert.equal(await unavailable, null);
+  result(rows[0], { outcome: "none", timeoutMs: 100, expectedBytes: null,
+    receivedBytes: 0, metadataReceived: false, draining: false, closeReason: null });
+  const delivered = link.request(KEY, 100, { expectedSize: 3, onResult });
+  channel.control("meta", { id: 2, size: 3 }); channel.chunk([7, 8, 9]); channel.control("eof", { id: 2 });
+  assert.deepEqual(await delivered, new Uint8Array([7, 8, 9])); assert.equal(rows.length, 2);
+  result(rows[1], { outcome: "payload", timeoutMs: 100, expectedBytes: 3,
+    receivedBytes: 3, metadataReceived: true, draining: false, closeReason: null });
+  assert.deepEqual(busyAtResult, [false, false], "normal completion frees the slot before diagnostics");
+  t.mock.timers.tick(3100); link.close(); assert.equal(rows.length, 2);
+});
+
+test("request abort results distinguish reliable draining from immediate unreliable closure", async (t) => {
+  clock(t);
+  for (const reliable of [true, false]) {
+    const { channel, link } = fixture(t), rows = [], controller = new AbortController();
+    channel.ordered = reliable;
+    const request = link.request(KEY, 100, { signal: controller.signal, expectedSize: 4, onResult: row => rows.push(row) });
+    channel.control("meta", { size: 4 }); channel.chunk([1]); controller.abort();
+    assert.equal(await request, null); assert.equal(rows.length, 1);
+    result(rows[0], { outcome: "abort", timeoutMs: 100, expectedBytes: 4,
+      receivedBytes: 1, metadataReceived: true, draining: reliable, closeReason: reliable ? null : "request-abort" });
+    controller.abort(); t.mock.timers.tick(3000); assert.equal(rows.length, 1);
+    assert.equal(link.closed, true);
+  }
+});
+
+test("active protocol and host closure report their fixed reason with observed request progress", async (t) => {
+  clock(t);
+  for (const protocol of [true, false]) {
+    const { channel, link } = fixture(t), rows = [];
+    const request = link.request(KEY, 100, { expectedSize: 4, onResult: row => rows.push(row) });
+    channel.control("meta", { size: 4 }); channel.chunk([1]);
+    if (protocol) channel.control("eof"); else link.close("host-stop");
+    assert.equal(await request, null); assert.equal(rows.length, 1);
+    result(rows[0], { outcome: "closed", timeoutMs: 100, expectedBytes: 4,
+      receivedBytes: 1, metadataReceived: true, draining: false, closeReason: protocol ? "protocol" : "host-stop" });
+    t.mock.timers.tick(3100); assert.equal(rows.length, 1);
+  }
+});
+
+test("early busy, aborted and closed requests report only their own result without another WANT", async (t) => {
+  clock(t);
+  const { channel, link } = fixture(t), rows = [];
+  const first = link.request(KEY, 100, { expectedSize: 4 });
+  channel.control("meta", { size: 4 }); channel.chunk([1, 2]);
+  assert.equal(await link.request(KEY, 20, { expectedSize: 2, onResult: row => rows.push(row) }), null);
+  result(rows[0], { outcome: "busy", timeoutMs: 20, expectedBytes: 2,
+    receivedBytes: 0, metadataReceived: false, draining: false, closeReason: null });
+  channel.chunk([3, 4]); channel.control("eof"); await first;
+  const controller = new AbortController(); controller.abort();
+  assert.equal(await link.request(KEY, Number.NaN, { signal: controller.signal,
+    expectedSize: Infinity, onResult: row => rows.push(row) }), null);
+  result(rows[1], { outcome: "abort", timeoutMs: null, expectedBytes: null,
+    receivedBytes: 0, metadataReceived: false, draining: false, closeReason: null });
+  link.close("private arbitrary reason");
+  assert.equal(await link.request(KEY, 20, { onResult: row => rows.push(row) }), null);
+  result(rows[2], { outcome: "closed", timeoutMs: 20, expectedBytes: null,
+    receivedBytes: 0, metadataReceived: false, draining: false, closeReason: "host" });
+  assert.equal(channel.sent.length, 1); assert.equal(rows.length, 3);
+});
+
+test("send failures report once whether the channel throws or is no longer open", async (t) => {
+  clock(t);
+  for (const throws of [true, false]) {
+    const { channel, link } = fixture(t), rows = [];
+    if (throws) t.mock.method(channel, "send", () => { throw new Error("private transport detail"); });
+    else channel.readyState = "closing";
+    assert.equal(await link.request(KEY, 100, { onResult: row => rows.push(row) }), null);
+    assert.equal(rows.length, 1);
+    result(rows[0], { outcome: "send-error", timeoutMs: 100, expectedBytes: null,
+      receivedBytes: 0, metadataReceived: false, draining: false, closeReason: throws ? "send-error" : null });
+    assert.equal(link.closed, throws); assert.equal(link.busy, false);
+    t.mock.timers.tick(3100); assert.equal(rows.length, 1);
+  }
+});
+
+test("a throwing request result callback cannot change payload delivery, refusal or timeout drain", async (t) => {
+  clock(t);
+  const { channel, link } = fixture(t); let callbacks = 0;
+  const onResult = () => { callbacks++; throw new Error("diagnostic consumer failed"); };
+  const payload = link.request(KEY, 100, { onResult });
+  channel.control("meta", { size: 1 }); channel.chunk([5]); channel.control("eof");
+  assert.deepEqual(await payload, new Uint8Array([5])); assert.equal(link.closed, false);
+  const none = link.request(KEY, 100, { onResult }); channel.control("none", { id: 2 });
+  assert.equal(await none, null);
+  const timeout = link.request(KEY, 10, { onResult }); t.mock.timers.tick(10);
+  assert.equal(await timeout, null); assert.equal(link.pending.draining, true);
+  assert.equal(await link.request(KEY, 100, { onResult }), null);
+  channel.control("none", { id: 3 }); assert.equal(link.busy, false);
+  assert.equal(callbacks, 4); assert.equal(link.closed, false);
+});
+
+test("diagnostic start or settlement clock failures preserve payload and one result with unknown elapsed time", async (t) => {
+  clock(t);
+  for (const failedRead of ["start", "settlement"]) {
+    const { channel, link } = fixture(t), rows = [];
+    let clockFails = failedRead === "start";
+    const time = t.mock.method(performance, "now", () => {
+      if (clockFails) throw new Error("diagnostic clock unavailable");
+      return 1000;
+    });
+    try {
+      const request = link.request(KEY, 100, { expectedSize: 3, onResult: row => rows.push(row) });
+      clockFails = failedRead === "settlement";
+      channel.control("meta", { size: 3 }); channel.chunk([1, 2, 3]); channel.control("eof");
+      assert.deepEqual(await request, new Uint8Array([1, 2, 3]));
+      assert.deepEqual(rows, [{ outcome: "payload", elapsedMs: null, timeoutMs: 100, expectedBytes: 3,
+        receivedBytes: 3, metadataReceived: true, draining: false, closeReason: null }]);
+      assert.equal(link.busy, false); assert.equal(link.closed, false); assert.equal(channel.sent.length, 1);
+      t.mock.timers.tick(100); channel.control("eof"); assert.equal(rows.length, 1);
+    } finally { time.mock.restore(); }
   }
 });

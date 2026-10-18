@@ -11,6 +11,7 @@ import { commitmentContent, KIND_SEGMENT_COMMITMENT, verifySegmentCommitment } f
 import { startLocalRelay } from "./support/local-relay.mjs";
 import { boundedOperation } from "../src/browser/bounded-operation.mjs";
 import { NeighbourDiscovery } from "../src/browser/neighbour-discovery.mjs";
+import { PeerSelection } from "../src/browser/peer-selection.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(predicate, timeoutMs = 5_000) {
@@ -168,6 +169,7 @@ test("an oversized next payload is refused and an interrupted reservation is nev
     assert.equal(fixture.swarm.metrics().bytes.uploadRemaining, 16);
     assert.equal(fixture.swarm.metrics().bytes.uploaded, 32);
     assert.equal(fixture.swarm.metrics().bytes.uploadsRefused, 1);
+    assert.equal(fixture.swarm.metrics().uploadRefusalDiagnostics.counters["session-allowance"], 1);
     assert.equal(fixture.swarm.metrics().serving, true);
   } finally { await fixture.close(); }
 });
@@ -905,6 +907,38 @@ test("a failing eligible peer yields to another peer within the existing origin 
     assert.deepEqual(trace, ["failing", "healthy", "healthy"]);
     assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 2);
     assert.equal(fixture.swarm.metrics().segments.originFallbacks, 0);
+    const diagnostic = fixture.swarm.metrics().peerRequestDiagnostics;
+    assert.equal(diagnostic.counters.none, 1);
+    assert.equal(diagnostic.counters.payload, 2);
+    assert.deepEqual(diagnostic.records.map(row => row.outcome), ["none", "payload", "payload"]);
+    assert.deepEqual(diagnostic.records.map(row => row.id), [1, 2, 2], "request outcomes join the existing local connection IDs");
+    for (const row of diagnostic.records) {
+      assert.equal(row.cc, 0); assert.equal(row.level, 0); assert.equal(row.expectedBytes, 32);
+      assert.ok(row.remainingMs > 0 && row.remainingMs <= 200);
+      assert.ok(row.timeoutMs > 0 && row.timeoutMs <= row.remainingMs);
+      assert.equal(row.metadataReceived, row.outcome === "payload");
+      assert.equal(row.receivedBytes, row.outcome === "payload" ? 32 : 0);
+    }
+  } finally { await fixture.close(); }
+});
+
+test("peer request diagnostics bound and copy local records without reporting transport payload as verification", async () => {
+  const playback = peerPlaybackOptions(500), trace = [];
+  const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket() });
+  try {
+    const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 0, trace, "peer"));
+    channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    for (let i = 0; i < 70; i++) await fixture.load();
+    const snapshot = fixture.swarm.metrics().peerRequestDiagnostics;
+    assert.equal(snapshot.counters.payload, 70); assert.equal(snapshot.records.length, 64); assert.equal(snapshot.dropped, 6);
+    snapshot.counters.payload = 0; snapshot.records[0].outcome = "private-value";
+    assert.equal(fixture.swarm.metrics().peerRequestDiagnostics.counters.payload, 70);
+    assert.equal(fixture.swarm.metrics().peerRequestDiagnostics.records[0].outcome, "payload");
+    const before = fixture.swarm.metrics().peerRequestDiagnostics;
+    const encoded = JSON.stringify(before);
+    for (const privateValue of [context.url, playback.key, fixture.peers[0].pubkey, "address-bearing-sdp", "peer"])
+      assert.ok(!encoded.includes(privateValue), `diagnostics exclude ${privateValue}`);
+    fixture.swarm.stop(); assert.deepEqual(fixture.swarm.metrics().peerRequestDiagnostics, before);
   } finally { await fixture.close(); }
 });
 
@@ -1300,6 +1334,7 @@ test("persistent upload reservation refuses safely and concurrent reservations c
     assert.equal(reserved, 32);
     assert.equal(peers.flatMap((peer) => peer.sent).filter((frame) => frame.t === "eof").length, 1);
     assert.equal(fixture.swarm.metrics().bytes.uploaded, 32);
+    assert.equal(fixture.swarm.metrics().uploadRefusalDiagnostics.counters["reservation-refused"], 1);
   } finally { await fixture.close(); }
 });
 
@@ -1315,6 +1350,7 @@ test("a revoked connected peer loses media access before any new accepted upload
     await until(() => peer.readyState === "closed");
     assert.equal(fixture.swarm.metrics().bytes.uploaded, 0);
     assert.equal(peer.sent.filter((frame) => frame.t === "meta").length, 0);
+    assert.equal(fixture.swarm.metrics().uploadRefusalDiagnostics.counters.admission, 1);
   } finally { await fixture.close(); }
 });
 
@@ -2197,7 +2233,7 @@ test("neighbour aborted peer payload cannot reset the spent episode", async t =>
 
 
 // One signed HIGH-sized payload; only event ordering and the clock are controlled.
-async function overlapControlledFixture(t, { expiresAt, wrongRendition = false } = {}) {
+async function overlapControlledFixture(t, { expiresAt, wrongRendition = false, extraPeers = 0 } = {}) {
   const realTimer = setTimeout, realNow = performance.now.bind(performance);
   const bytes = new Uint8Array(670000).fill(9);
   const key = createHash("sha256").update(`${base.swarmId}\n/seg.ts`).digest("hex");
@@ -2212,6 +2248,8 @@ async function overlapControlledFixture(t, { expiresAt, wrongRendition = false }
   const restoreTimers = () => { if (timersMocked) { t.mock.timers.reset(); timersMocked = false; } };
   try {
   const peer = await fixture.addPeer(new RecordedChannel());
+  const otherPeers = [];
+  for (let i = 0; i < extraPeers; i++) otherPeers.push(await fixture.addPeer(new RecordedChannel()));
   peer.receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:1" }));
   fixture.hls.media = { currentTime: 0, buffered: { length: 1, start: () => 0, end: () => 5 } };
   let clock = realNow();
@@ -2241,13 +2279,40 @@ async function overlapControlledFixture(t, { expiresAt, wrongRendition = false }
   };
   const stop = () => { restoreTimers(); fixture.swarm.stop(); };
   const close = async () => { restoreTimers(); performanceMock.mock.restore(); await fixture.close(); };
-  return { fixture, peer, signed, bytes, key, phase, advance, wants, callbacks, pending, loader: result.loader,
+  return { fixture, peer, otherPeers, signed, bytes, key, phase, advance, wants, callbacks, pending, loader: result.loader,
     metadataCalls: () => metadataCalls, metadataSignal: () => metadataSignal,
     resolveMetadata: event => resolveMetadata(event ?? signed.event), rejectMetadata, deliver, stop, close };
   } catch (error) {
     restoreTimers(); performanceMock?.mock.restore(); await fixture.close(); throw error;
   }
 }
+
+test("cold delivery retains deadline time when measured alternatives cannot fit", async t => {
+  const f = await overlapControlledFixture(t, { extraPeers: 2 });
+  const originalSelect = PeerSelection.prototype.select;
+  let seeded = false;
+  t.mock.method(PeerSelection.prototype, "select", function (links, ...args) {
+    const active = [...links];
+    if (!seeded) {
+      for (const link of active.slice(1)) this.record(link, 2000, f.bytes.byteLength);
+      seeded = true;
+    }
+    return originalSelect.call(this, active, ...args);
+  });
+  try {
+    for (const channel of [f.peer, ...f.otherPeers]) channel.receive(JSON.stringify({ t: "have", keys: [f.key] }));
+    f.resolveMetadata(); await f.phase(() => f.wants().length === 1);
+    f.advance(1470); f.deliver();
+    await f.phase(() => f.callbacks.success + f.callbacks.abort + f.callbacks.error > 0);
+    const response = await f.pending;
+    assert.equal(response.data.byteLength, f.bytes.byteLength, "the cold peer completes before the unchanged1500ms origin deadline");
+    assert.deepEqual(new Uint8Array(response.data), f.bytes);
+    assert.equal(f.fixture.swarm.metrics().segments.peerFirstLoaded, 1);
+    assert.equal(f.fixture.swarm.metrics().segments.originFallbacks, 0);
+    assert(f.otherPeers.every(peer => !peer.sent.some(frame => frame?.t === "want")), "unfit alternatives are never requested");
+    assert.equal(f.fixture.swarm.metrics().peerRequestDiagnostics.records.at(-1).timeoutMs, 1500);
+  } finally { await f.close(); }
+});
 
 test("commitment overlap starts metadata before HAVE and verifies HIGH inside the original deadline", async t => {
   const f = await overlapControlledFixture(t);

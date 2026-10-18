@@ -1,0 +1,214 @@
+{
+  "v": 1,
+  "checkpointDate": "2026-10-18",
+  "sourceSha": "2911ea55f1bd21335a979df8a3fd38ed83cc6bee",
+  "productionComplete": false,
+  "scope": "Exact2911 CI, clean consumption and deployment pass; actual R51 coverage RED and independent cleanup pass. Later local correction is separate from field acceptance.",
+  "ci": {
+    "run": 39148186931,
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/39148186931",
+    "requiredJobsPassed": 9
+  },
+  "consumer": {
+    "files": 275,
+    "elapsedMs": 9247,
+    "scope": "Exact committed source, not downloaded final release assets",
+    "semverDependencyDifferencesFromRootLock": 28
+  },
+  "deployed": {
+    "sourceSha": "2911ea55f1bd21335a979df8a3fd38ed83cc6bee",
+    "appId": "0a5b7a4bab8f84a8f685edf24c0f5c4ce099155e00c5c43c6d6ceb96f4f29995",
+    "appStartedUTC": "2026-10-18T17:24:04.090320255Z",
+    "image": "sha256:bfa64d885699064bbfd22dc970472f3017b971da7236a530240e8503d677505d",
+    "client": {
+      "bytes": 769958,
+      "sha256": "341b86bdc0fd4de7240a7bbecdd668393b4909b28b6581a1622a3aa0ae512e6c"
+    },
+    "independentDeploymentReviewPassed": true
+  },
+  "configuration": {
+    "iceTransportPolicy": "relay",
+    "turnUrlProjection": "tls-tcp",
+    "perAddressTickets": 32,
+    "perAddressRequests": 900,
+    "globalRequestCapacity": 2048,
+    "reporting": false,
+    "forwarding": false,
+    "accountMethods": [
+      "nostr"
+    ],
+    "hostSuppliedAccountAPIImplemented": true,
+    "websiteResolverConfigured": false,
+    "privateStateAndPermanentLeasesPreserved": true,
+    "independentProxyPreserved": true
+  },
+  "r51": {
+    "verdict": "RED",
+    "measurementElapsedMs": 306350,
+    "gates": {
+      "complete300": true,
+      "all14": true,
+      "all8ActuallyUploaded": true,
+      "each4BothQualityPeer": false,
+      "fourteenFrameAudioProgress": true,
+      "steadyNoChurn": true,
+      "contributorConsent": true,
+      "bothQualityDecode": true,
+      "rssWithinBound": true,
+      "actualPeerReadiness": true,
+      "observedInPlaceRenewal": true,
+      "admissionObservedWithoutRefusalOrUnknown": true,
+      "inputProvenance": true,
+      "admissionSemanticCoverage": true,
+      "admissionTerminalReconciliation": true,
+      "admissionCallerAbortRecovery": true
+    },
+    "receivers": [
+      {
+        "receiver": 1,
+        "low": {
+          "loads": 40,
+          "bytes": 8420896
+        },
+        "high": {
+          "loads": 1,
+          "bytes": 664580
+        }
+      },
+      {
+        "receiver": 2,
+        "low": {
+          "loads": 8,
+          "bytes": 1693316
+        },
+        "high": {
+          "loads": 3,
+          "bytes": 2014044
+        }
+      },
+      {
+        "receiver": 3,
+        "low": {
+          "loads": 38,
+          "bytes": 7996768
+        },
+        "high": {
+          "loads": 0,
+          "bytes": 0
+        }
+      },
+      {
+        "receiver": 4,
+        "low": {
+          "loads": 0,
+          "bytes": 0
+        },
+        "high": {
+          "loads": 1,
+          "bytes": 669468
+        }
+      }
+    ],
+    "independentFiniteCleanupPassed": true,
+    "sourceExitCode": 255,
+    "strict300Passed": false,
+    "longEligible": false,
+    "zeroBrowserResourceCountersAreNotNativeRSSProof": true
+  },
+  "diagnosis": {
+    "receiver3High": "Positive HAVE and available commitments followed by unsuccessful delivery; precise request outcome unrecorded",
+    "receiver3HighObservedWaitToHavePairs": 67,
+    "receiver3HighWaitToHaveMedianMs": 651,
+    "receiver3HighWaitToHaveP90Ms": 1285,
+    "receiver4Low": "All80 local eligibility outcomes no-have-no-wait; bounded replacement dial rejected739ms after creation",
+    "uploadAllowanceExhaustionObserved": false,
+    "specificNetworkOrCPUCauseProved": false
+  },
+  "laterLocalWork": {
+    "state": "WORKING_TREE_TESTED_NOT_DEPLOYED",
+    "sourceFiles": {
+      "src/browser/hls-swarm.mjs": "b4c4ebad148fa1a5d20856dcbbc6d10b2ae1ea45bf1368ac41492ca3fe53df3c",
+      "src/browser/peer-link.mjs": "c98893f0a080cdf7ad0847b54ed7e2621970ec28236e4e8e4ecc331097190247"
+    },
+    "fix": "Only deadline-fit alternatives reserve time from a cold peer",
+    "baselineRegressionPassed": false,
+    "correctedRegressionPassed": true,
+    "controlledDeliveryMs": 1470,
+    "originalPeerDeadlineMs": 1500,
+    "fullLocalTestsPassed": 187,
+    "fullLocalElapsedMs": 43163.139,
+    "boundedLocalRequestAndUploadDiagnostics": true,
+    "r51CauseProved": false,
+    "newCIPassed": false,
+    "fieldQualified": false
+  },
+  "release": {
+    "published": "v0.1.0",
+    "candidate": "0.2.0",
+    "pr": 8,
+    "merged": false,
+    "candidatePublished": false,
+    "npmPublished": false
+  },
+  "remaining": [
+    "matching successful300second qualifier",
+    "7200seconds and22churn with natural TURN expiry",
+    "both-quality cross-device upload-budget lifecycle",
+    "durable opt-in reports and parent-crash recovery acceptance",
+    "physical/browser breadth within available devices and Simulator scope",
+    "difficult networks and matched wire/cost benefit",
+    "final0.2release and downloaded-asset acceptance"
+  ],
+  "evidence": [
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-2911ea5-r51-run-20261018/browser/receipt.json",
+      "bytes": 2178817,
+      "sha256": "18ba915b82d4c4509e3f376291fee6dcb8f7b7fb56a31e57cc3d622f875518be"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-2911ea5-r51-cleanup-review-20261018/review.json",
+      "bytes": 21770,
+      "sha256": "5ecb8831333346a5255c8067d153a836fedf6316ca2559453b5ae4f2788d4106"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-2911ea5-r51-cleanup-review-20261018/EVIDENCE-MANIFEST.json",
+      "bytes": 3320,
+      "sha256": "89db6c7e8b3375fe6abb155d1e50ecab28b4128cdf6299751cd2e8afcd8f6d49"
+    },
+    {
+      "path": "artifacts/deployment-2911ea5-account-and-commitment-20261018/runtime-contract.json",
+      "bytes": 12178,
+      "sha256": "362edce6b5c5e22c0125f21eb402206faf401d233cf6a10eb0cd162a0f2538c0"
+    },
+    {
+      "path": "artifacts/independent-deployment-2911ea5-review-20261018/review.json",
+      "bytes": 27501,
+      "sha256": "01ae71a60d8cf58c4d69545c7ee2ecf86853fb640243ca949fcf7afea3bba2f9"
+    },
+    {
+      "path": "artifacts/ci-2911ea5-39148186931-20261018/ci-terminal-success.json",
+      "bytes": 22062,
+      "sha256": "a5de7d3e267b5498cab04ac2ac08335c04bafefee0ad1f4e33ebc5b642a5bf3e"
+    },
+    {
+      "path": "artifacts/clean-consumer-2911ea5-20261018/package-review.json",
+      "bytes": 6106,
+      "sha256": "731aecd7c9820d9973b54bf1a7d9b35b2cae70a6fd5189705c86cd0c65275164"
+    },
+    {
+      "path": "artifacts/peer-request-outcomes-full-root-20261018/RESULTS.json",
+      "bytes": 1397,
+      "sha256": "1fcbfe9168ec5ace7682e81d8422657ed0760f23edbf99d401f752a747c69905"
+    },
+    {
+      "path": "artifacts/peer-request-alternatives-baseline-root-r3-20261018/RESULTS.json",
+      "bytes": 1354,
+      "sha256": "a6ef7a6384b58e91b48d4f64e579668abd7be55b191e550ccf0548c090fed7ef"
+    },
+    {
+      "path": "artifacts/peer-request-alternatives-fixed-root-20261018/RESULTS.json",
+      "bytes": 1354,
+      "sha256": "7f220b42b22e247339be2c804353634fbcf0c56f21fb23e9b3cca31d1303a428"
+    }
+  ]
+}

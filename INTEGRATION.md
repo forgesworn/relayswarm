@@ -205,6 +205,31 @@ They remain readable after stop and use the existing local/reporting-consent
 boundary; they add no requests, authority checks or deadline changes. These
 observations do not establish the cause of a failed peer transfer.
 
+`peerRequestDiagnostics` records the outcome of each peer-first transport
+request, after peer selection. Its fixed counters distinguish `payload`, `none`,
+`timeout`, `abort`, `closed`, `busy` and `send-error`. At most 64 rows are retained;
+`dropped` counts evicted rows. Rows contain elapsed `atMs`, the same page-local
+connection `id` as transport diagnostics, numeric `cc` and `level`, the original
+deadline's `remainingMs` at selection, the actual request `timeoutMs`, request
+`elapsedMs`, `expectedBytes`, `receivedBytes`, `metadataReceived`, `draining`
+and a fixed `closeReason` or null. Unavailable numeric values are null. A
+`payload` means the transport assembled bytes; signature, size, hash, expiry
+and final loader-deadline checks still decide whether playback accepts them.
+Each logical request contributes one outcome. A timeout or abort may leave an
+ordered reliable channel draining late bytes; those bytes and its later EOF do
+not contribute another outcome or turn that request into a delivered segment.
+This field does not count eligibility decisions or commitment failures before
+selection, and shadow-mode requests are outside its scope.
+
+`uploadRefusalDiagnostics.counters` classifies the existing upload refusal
+branches: `admission`, `not-held`, `not-serving`, `banned`, `session-allowance`,
+`peer-limit`, `rate-limit`, `reservation-refused` and `reservation-inactive`.
+These count local decisions, not wire delivery or remote receipt. Both fields
+are local metrics, contain no media keys, URLs, peer identities or addresses,
+and are excluded from automatic numeric reporting. They add no network traffic,
+timers, retries, upload permission or deadline changes. Returned snapshots own
+their copies, and retained outcomes remain readable after stop.
+
 Deployed source `f393abf` includes `transportDiagnostics` within metrics version
 2. It contains fixed-enum
 `counters`, a ring of at most 64 `records`, `capacity` and an eviction `dropped`
@@ -266,7 +291,8 @@ viewer reset or increase can change the quota.
 Peer-first ranks eligible advertised media by measured completion time,
 payload rate and failure history. Healthy measured peers take priority over
 fast refusals. A cold route gets the remaining time minus 25 ms for each of
-up to two alternatives; this reserves quick retries while allowing an unknown
+up to two alternatives that also pass the selector's measured deadline-fit
+check; excluded alternatives reserve no time. This reserves quick retries while allowing an unknown
 route to complete and acquire a measurement. A known delivery gets headroom
 within the original peer deadline, rather than an equal share of it.
 Attempts remain serial and capped by `maxPeers` and the original deadline.

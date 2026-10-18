@@ -143,6 +143,11 @@ const PEER_ELIGIBILITY_REASONS = Object.freeze([
   "no-budget", "aborted-before-eligibility", "no-have-no-wait", "no-have-wait",
   "wait-no-longer-eligible", "wait-aborted", "wait-expired", "have-at-entry", "have-after-wait",
 ]);
+const PEER_REQUEST_OUTCOMES = Object.freeze(["payload", "none", "timeout", "abort", "closed", "busy", "send-error"]);
+const UPLOAD_REFUSAL_REASONS = Object.freeze([
+  "admission", "not-held", "not-serving", "banned", "session-allowance", "peer-limit", "rate-limit",
+  "reservation-refused", "reservation-inactive",
+]);
 
 function gathered(pc, capMs = 1_200, signal, observed) {
   return new Promise((resolve) => {
@@ -270,6 +275,10 @@ class HlsSwarm {
     this.peerEligibilityRecords = [];
     this.peerEligibilityDropped = 0;
     this.peerEligibilityCounters = Object.fromEntries(PEER_ELIGIBILITY_REASONS.map((reason) => [reason, 0]));
+    this.peerRequestRecords = [];
+    this.peerRequestDropped = 0;
+    this.peerRequestCounters = Object.fromEntries(PEER_REQUEST_OUTCOMES.map((outcome) => [outcome, 0]));
+    this.uploadRefusalCounters = Object.fromEntries(UPLOAD_REFUSAL_REASONS.map((reason) => [reason, 0]));
     this.disabledReason = this.#validate();
     this.stopped = false;
     this.lifecycle = new AbortController();
@@ -509,6 +518,13 @@ class HlsSwarm {
         counters: { ...this.peerEligibilityCounters },
         records: this.peerEligibilityRecords.map((record) => ({ ...record, budgetGeometry: { ...record.budgetGeometry } })),
       },
+      peerRequestDiagnostics: {
+        capacity: 64,
+        dropped: this.peerRequestDropped,
+        counters: { ...this.peerRequestCounters },
+        records: this.peerRequestRecords.map((record) => ({ ...record })),
+      },
+      uploadRefusalDiagnostics: { counters: { ...this.uploadRefusalCounters } },
       signalling: {
         samples: this.signallingSamples.length,
         medianMs: percentile(this.signallingSamples, 0.5),
@@ -942,8 +958,9 @@ class HlsSwarm {
       }
       tried.add(link.pubkey);
       const requestedAt = now();
-      const alternatives = [...this.links.values()].filter((peer) => !peer.closed && !peer.busy && !tried.has(peer.pubkey) && peer.have.has(key)).length;
       const remainingMs = deadline - now();
+      const alternatives = [...this.links.values()].filter((peer) => !peer.closed && !peer.busy && !tried.has(peer.pubkey) && peer.have.has(key)
+        && (this.peerSelection.estimate(peer, commitment.size) === null || this.peerSelection.estimate(peer, commitment.size) * 1.25 + 25 <= remainingMs)).length;
       const estimateMs = this.peerSelection.estimate(link, commitment.size);
       // Give an unmeasured route time to complete, retaining the existing
       // 25ms minimum opportunity for up to two quick alternative attempts.
@@ -953,7 +970,8 @@ class HlsSwarm {
       // be cut short by an equal share intended for unmeasured alternatives.
       const attemptMs = estimateMs === null ? Math.min(remainingMs, Math.max(25, coldAttemptMs))
         : Math.min(remainingMs, Math.max(25, remainingMs / Math.min(3, alternatives + 1), estimateMs * 1.25 + 25));
-      const bytes = await link.request(key, Math.max(1, attemptMs), { signal, expectedSize: commitment.size });
+      const bytes = await link.request(key, Math.max(1, attemptMs), { signal, expectedSize: commitment.size,
+        onResult: (result) => this.#peerRequestResult(context, link, remainingMs, result) });
       if (!bytes || signal.aborted || this.stopped) {
         if (!signal.aborted && !this.stopped) this.peerSelection.record(link, now() - requestedAt);
         continue;
@@ -973,6 +991,30 @@ class HlsSwarm {
       return { key, bytes, discoveryContext };
     }
     return null;
+  }
+
+  #peerRequestResult(context, link, remainingMs, result) {
+    try {
+      if (!PEER_REQUEST_OUTCOMES.includes(result.outcome)) return;
+      const numeric = (value) => Number.isFinite(value) && value >= 0 ? value : null;
+      const integer = (value) => Number.isSafeInteger(value) && value >= 0 ? value : null;
+      let cc = null, level = null;
+      try { cc = integer(context?.frag?.cc); } catch {}
+      try { level = integer(context?.frag?.level); } catch {}
+      const record = { atMs: Math.max(0, Math.round(now() - this.transportStartedAt)),
+        id: this.transportConnections.get(link.pc)?.id || 0, cc, level,
+        remainingMs: numeric(remainingMs), outcome: result.outcome,
+        elapsedMs: numeric(result.elapsedMs), timeoutMs: numeric(result.timeoutMs),
+        expectedBytes: integer(result.expectedBytes), receivedBytes: integer(result.receivedBytes),
+        metadataReceived: result.metadataReceived === true, draining: result.draining === true,
+        closeReason: TRANSPORT_EVENTS["link-close"].includes(result.closeReason) ? result.closeReason : null };
+      this.peerRequestCounters[result.outcome] = increment(this.peerRequestCounters[result.outcome]);
+      if (this.peerRequestRecords.length === 64) {
+        this.peerRequestRecords.shift();
+        this.peerRequestDropped = increment(this.peerRequestDropped);
+      }
+      this.peerRequestRecords.push(record);
+    } catch {}
   }
 
   #shadowLoader(BaseLoader) {
@@ -1244,30 +1286,29 @@ class HlsSwarm {
 
   async #serveRequest(link, key) {
     if (this.options.admit && !(await this.#admits(link.pubkey, this.admitted.get(link.pubkey)?.ticket))) {
-      this.counters.uploadsRefused += 1;
+      this.#refuseUpload("admission");
       link.close("admission");
       return null;
     }
     const bytes = this.held.get(key);
-    if (!bytes || !this.#servingAllowed() || this.banned.has(link.pubkey)) {
-      this.counters.uploadsRefused += 1;
-      return null;
-    }
+    if (!bytes) { this.#refuseUpload("not-held"); return null; }
+    if (!this.#servingAllowed()) { this.#refuseUpload("not-serving"); return null; }
+    if (this.banned.has(link.pubkey)) { this.#refuseUpload("banned"); return null; }
     const remaining = this.#uploadRemaining();
     if (remaining !== null && bytes.byteLength > remaining) {
-      this.counters.uploadsRefused += 1;
+      this.#refuseUpload("session-allowance");
       return null;
     }
     const recentUploaders = [...this.links.values()].filter((candidate) => candidate !== link && (candidate.outboundInFlight > 0 || Date.now() - candidate.lastServedAt < 30_000)).length;
     if (Date.now() - link.lastServedAt >= 30_000 && recentUploaders >= this.options.maxUploadPeers) {
-      this.counters.uploadsRefused += 1;
+      this.#refuseUpload("peer-limit");
       return null;
     }
     const elapsed = (now() - this.uploadRefilledAt) / 1_000;
     this.uploadRefilledAt = now();
     this.uploadTokens = Math.min(this.options.maxUploadBytesPerSecond * 2, this.uploadTokens + elapsed * this.options.maxUploadBytesPerSecond);
     if (this.uploadTokens < bytes.byteLength) {
-      this.counters.uploadsRefused += 1;
+      this.#refuseUpload("rate-limit");
       return null;
     }
     this.uploadTokens -= bytes.byteLength;
@@ -1281,7 +1322,7 @@ class HlsSwarm {
       catch { this.#noteError("upload-reservation"); }
       if (!accepted || this.stopped || link.closed || this.options.serve !== true || (!this.options.serveOnCellular && onCellular())) {
         if (!accepted) this.uploadQuotaBytes -= bytes.byteLength;
-        this.counters.uploadsRefused += 1;
+        this.#refuseUpload(accepted ? "reservation-inactive" : "reservation-refused");
         return null;
       }
     }
@@ -1293,6 +1334,11 @@ class HlsSwarm {
       return tampered;
     }
     return bytes;
+  }
+
+  #refuseUpload(reason) {
+    this.counters.uploadsRefused += 1;
+    this.uploadRefusalCounters[reason] = increment(this.uploadRefusalCounters[reason]);
   }
 
   // --- rendezvous -----------------------------------------------------------
