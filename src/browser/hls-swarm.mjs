@@ -892,6 +892,17 @@ class HlsSwarm {
       }
       this.#peerEligibility(context, budgetMs, "no-have-wait", false, budgetGeometry);
       this.counters.coordinatedWaits += 1;
+    }
+    const commitmentRemaining = deadline - now();
+    if (signal.aborted || this.stopped || commitmentRemaining <= 0) return null;
+    // Every null/error, load abort and stop reaches the original loader's
+    // cancellation path. Catch both outcomes before waiting for HAVE.
+    this.counters.commitmentRequests += 1;
+    const commitmentResult = boundedOperation((operationSignal) => {
+      if (signal.aborted || this.stopped || now() >= deadline) throw new Error("Commitment load no longer active.");
+      return this.options.getCommitment(context, { signal: operationSignal });
+    }, signal, commitmentRemaining).then((event) => ({ ok: true, event }), () => ({ ok: false }));
+    if (coordinated) {
       // No playlist manipulation or origin prefetch. The elected contributor
       // loads normally; all advisory leases expire before the HTTP deadline.
       while (!signal.aborted && !this.stopped && now() < deadline && ![...this.links.values()].some((peer) => peer.have.has(key))) {
@@ -910,9 +921,9 @@ class HlsSwarm {
     this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry);
     let commitment;
     try {
-      this.counters.commitmentRequests += 1;
-      const event = await boundedOperation((operationSignal) => this.options.getCommitment(context, { signal: operationSignal }), signal, Math.max(1, deadline - now()));
-      commitment = verifySegmentCommitment(event, {
+      const result = await commitmentResult;
+      if (!result.ok) throw new Error("Commitment unavailable.");
+      commitment = verifySegmentCommitment(result.event, {
         streamEvent: this.options.streamEvent, swarmId: this.options.swarmId, key, context,
         maxSegmentBytes: this.options.maxSegmentBytes,
         delegation: this.options.delegation, revokedDelegationIds: this.options.revokedDelegationIds, delegationRevocations: this.options.delegationRevocations,

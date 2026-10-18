@@ -365,10 +365,19 @@ the host's current revocation view are supported; see
 
 Signature validation, peer discovery, transfer and SHA-256 verification must
 all finish within `originFallbackMs`. With a thin playback buffer the wait is
-shortened to reserve `originReserveMs` for origin loading; startup, an
-empty buffer or a fragment no peer advertises goes directly to origin.
-Otherwise the original loader starts
-and owns its usual HTTP retries and errors. Invalid peer bytes are discarded
+shortened to reserve `originReserveMs` for origin loading. Startup, an empty
+buffer, or a fragment with neither advertised availability nor an eligible
+contributor goes directly to origin.
+
+When an eligible same-rendition contributor is fetching a new segment, the
+loader requests its signed commitment while waiting for availability. It
+verifies the commitment after availability arrives, before requesting peer
+bytes. Both operations share the original deadline. An eligible wait may make
+one commitment request even if availability never arrives. A failed commitment
+request still falls back to origin, without a commitment retry.
+
+If peer work fails or exceeds its budget, the original loader starts and owns
+its usual HTTP retries and errors. Invalid peer bytes are discarded
 and the peer is banned. Init segments and, by default, low-latency parts use
 the original loader directly. `abort()`, `destroy()` and `stop()` cancel
 pending peer work; stopping also immediately releases a waiting load to its

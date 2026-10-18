@@ -806,7 +806,7 @@ test("peer eligibility preserves origin errors and pending loader aborts without
   } finally { await fixture.close(); }
 });
 
-test("peer eligibility observes existing coordination outcomes and matching HAVE without extra requests", async (t) => {
+test("peer eligibility observes coordination with one bounded commitment per eligible load", async (t) => {
   const playback = peerPlaybackOptions(60), requested = [];
   const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket() });
   const realSetTimeout = setTimeout;
@@ -848,7 +848,7 @@ test("peer eligibility observes existing coordination outcomes and matching HAVE
     ended.records[0].budgetGeometry.currentTime = 999;
     assert.equal(ended.records.at(-1).budgetGeometry.currentTime, 10, "rows do not share mutable geometry snapshots");
     assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.records.at(-1).budgetGeometry.currentTime, 10);
-    assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 0);
+    assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 1, "an eligible wait owns one overlapping metadata request even when HAVE never arrives");
     assert.deepEqual(requested, []);
     const pending = fixture.load();
     await phase(() => fixture.swarm.metrics().peerEligibilityDiagnostics.counters["no-have-wait"] === 2);
@@ -865,7 +865,7 @@ test("peer eligibility observes existing coordination outcomes and matching HAVE
     await phase(() => fixture.swarm.metrics().segments.peerFirstLoaded === 2);
     assert.deepEqual(new Uint8Array((await present).data), playback.bytes);
     assert.equal(fixture.swarm.metrics().peerEligibilityDiagnostics.counters["have-at-entry"], 1);
-    assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 2);
+    assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 3);
     assert.deepEqual(requested, ["existing-peer", "existing-peer"]);
     assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 2);
     assert.equal(fixture.swarm.metrics().segments.originFallbacks, 1);
@@ -2192,5 +2192,161 @@ test("neighbour aborted peer payload cannot reset the spent episode", async t =>
     await until(() => trace.length === 1); loader.abort(); await sleep(80);
     assert.equal(successes, 0); assert.equal(aborts, 1); assert.equal(f.swarm.metrics().segments.peerFirstLoaded, 0);
     assert.equal(f.swarm.metrics().neighbourDiscovery.replacementSpent, 1);
+  } finally { await f.close(); }
+});
+
+
+// One signed HIGH-sized payload; only event ordering and the clock are controlled.
+async function overlapControlledFixture(t, { expiresAt, wrongRendition = false } = {}) {
+  const realTimer = setTimeout, realNow = performance.now.bind(performance);
+  const bytes = new Uint8Array(670000).fill(9);
+  const key = createHash("sha256").update(`${base.swarmId}\n/seg.ts`).digest("hex");
+  const signed = signedFixture({ key, rendition: wrongRendition ? "0" : "1", size: bytes.byteLength,
+    sha256: createHash("sha256").update(bytes).digest("hex"), ...(expiresAt === undefined ? {} : { expiresAt }) });
+  let resolveMetadata, rejectMetadata, metadataSignal, metadataCalls = 0;
+  const metadata = new Promise((resolve, reject) => { resolveMetadata = resolve; rejectMetadata = reject; });
+  const fixture = await linkedFixture({ mode: "peer-first", streamEvent: signed.options.streamEvent,
+    WebSocketImpl: memoryRelaySocket(), originFallbackMs: 1500,
+    getCommitment: (_context, { signal }) => { metadataCalls++; metadataSignal = signal; return metadata; } });
+  let performanceMock, timersMocked = false;
+  const restoreTimers = () => { if (timersMocked) { t.mock.timers.reset(); timersMocked = false; } };
+  try {
+  const peer = await fixture.addPeer(new RecordedChannel());
+  peer.receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:1" }));
+  fixture.hls.media = { currentTime: 0, buffered: { length: 1, start: () => 0, end: () => 5 } };
+  let clock = realNow();
+  performanceMock = t.mock.method(performance, "now", () => clock);
+  t.mock.timers.enable({ apis: ["setTimeout"] }); timersMocked = true;
+  const phase = async predicate => {
+    const end = realNow() + 3000;
+    while (!predicate()) { assert(realNow() < end, "expected controlled overlap phase"); await new Promise(resolve => realTimer(resolve, 1)); }
+  };
+  const advance = ms => { clock += ms; if (timersMocked) t.mock.timers.tick(ms); };
+  const wants = () => peer.sent.filter(frame => frame?.t === "want");
+  const callbacks = { success: 0, abort: 0, error: 0 };
+  let result;
+  const pending = new Promise(resolve => {
+    const loader = new fixture.hls.config.fLoader({}); result = { loader };
+    loader.load({ ...context, frag: { ...context.frag, level: 1, type: "main" } }, {}, {
+      onSuccess: response => { callbacks.success++; resolve(response); },
+      onAbort: () => { callbacks.abort++; resolve(null); },
+      onError: () => { callbacks.error++; resolve(null); },
+    });
+  });
+  const deliver = (payload = bytes) => {
+    const request = wants().at(-1); assert(request);
+    peer.receive(JSON.stringify({ t: "meta", id: request.id, size: bytes.byteLength }));
+    for (let offset = 0; offset < payload.byteLength; offset += 16384) peer.receive(payload.slice(offset, offset + 16384).buffer);
+    peer.receive(JSON.stringify({ t: "eof", id: request.id }));
+  };
+  const stop = () => { restoreTimers(); fixture.swarm.stop(); };
+  const close = async () => { restoreTimers(); performanceMock.mock.restore(); await fixture.close(); };
+  return { fixture, peer, signed, bytes, key, phase, advance, wants, callbacks, pending, loader: result.loader,
+    metadataCalls: () => metadataCalls, metadataSignal: () => metadataSignal,
+    resolveMetadata: event => resolveMetadata(event ?? signed.event), rejectMetadata, deliver, stop, close };
+  } catch (error) {
+    restoreTimers(); performanceMock?.mock.restore(); await fixture.close(); throw error;
+  }
+}
+
+test("commitment overlap starts metadata before HAVE and verifies HIGH inside the original deadline", async t => {
+  const f = await overlapControlledFixture(t);
+  try {
+    await f.phase(() => f.fixture.swarm.metrics().peerEligibilityDiagnostics.counters["no-have-wait"] === 1);
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(f.metadataCalls(), 1, "the original serial source fails here before any HAVE or extended wait");
+    assert.equal(f.wants().length, 0);
+    f.advance(300); f.resolveMetadata(); await Promise.resolve();
+    f.advance(200); f.peer.receive(JSON.stringify({ t: "have", keys: [f.key] }));
+    await f.phase(() => f.wants().length === 1);
+    f.advance(800); f.deliver();
+    const response = await f.pending;
+    assert.deepEqual(new Uint8Array(response.data), f.bytes);
+    assert.equal(f.fixture.swarm.metrics().segments.peerFirstLoaded, 1);
+    assert.equal(f.fixture.swarm.metrics().segments.originFallbacks, 0);
+    assert.equal(f.metadataCalls(), 1);
+  } finally { await f.close(); }
+});
+
+test("commitment overlap cancels lost waits, loader abort and stop with late rejection handled", async t => {
+  for (const cause of ["withdrawal", "deadline", "abort", "stop"]) {
+    const f = await overlapControlledFixture(t), unhandled = [];
+    const recordUnhandled = error => unhandled.push(error);
+    process.on("unhandledRejection", recordUnhandled);
+    try {
+      await f.phase(() => f.metadataCalls() === 1);
+      if (cause === "withdrawal") { f.peer.receive(JSON.stringify({ t: "contribution", serving: false, rendition: "main:1" })); f.advance(100); }
+      if (cause === "deadline") f.advance(1500);
+      if (cause === "abort") f.loader.abort();
+      if (cause === "stop") f.stop();
+      await f.phase(() => f.metadataSignal().aborted);
+      f.rejectMetadata(new Error("synthetic late metadata rejection"));
+      await new Promise(resolve => setImmediate(resolve));
+      f.peer.receive(JSON.stringify({ t: "have", keys: [f.key] })); f.advance(2000);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(f.wants().length, 0);
+      assert.equal(f.fixture.swarm.metrics().segments.peerFirstLoaded, 0);
+      assert.equal(f.callbacks.success + f.callbacks.abort + f.callbacks.error, 1);
+      assert.equal(f.metadataCalls(), 1);
+      assert.deepEqual(unhandled, []);
+      if (["withdrawal", "deadline"].includes(cause)) assert.equal(f.fixture.swarm.metrics().segments.originFallbacks, 1);
+    } finally { process.removeListener("unhandledRejection", recordUnhandled); await f.close(); }
+  }
+});
+
+test("commitment overlap retains post-HAVE expiry and exact-context verification", async t => {
+  for (const mode of ["expired", "wrong-context"]) {
+    const wall = Date.now(), f = await overlapControlledFixture(t, { expiresAt: Math.floor(wall / 1000) + 60, wrongRendition: mode === "wrong-context" });
+    let dateMock;
+    try {
+      await f.phase(() => f.metadataCalls() === 1);
+      f.resolveMetadata(); await Promise.resolve(); await Promise.resolve();
+      if (mode === "expired") dateMock = t.mock.method(Date, "now", () => wall + 61000);
+      f.advance(500); f.peer.receive(JSON.stringify({ t: "have", keys: [f.key] }));
+      const response = await f.pending;
+      assert.equal(response.data.byteLength, 32);
+      assert.equal(f.wants().length, 0);
+      assert.equal(f.fixture.swarm.metrics().segments.commitmentRejected, 1);
+      assert.equal(f.fixture.swarm.metrics().segments.peerFirstLoaded, 0);
+      assert.equal(f.fixture.swarm.metrics().segments.originFallbacks, 1);
+    } finally { dateMock?.mock.restore(); await f.close(); }
+  }
+});
+
+test("commitment overlap handles early metadata failure once without a late peer request", async t => {
+  const f = await overlapControlledFixture(t), unhandled = [];
+  const recordUnhandled = error => unhandled.push(error);
+  process.on("unhandledRejection", recordUnhandled);
+  try {
+    await f.phase(() => f.metadataCalls() === 1);
+    f.rejectMetadata(new Error("synthetic early metadata refusal"));
+    await new Promise(resolve => setImmediate(resolve));
+    f.advance(500); f.peer.receive(JSON.stringify({ t: "have", keys: [f.key] }));
+    const response = await f.pending;
+    assert.equal(response.data.byteLength, 32);
+    assert.equal(f.wants().length, 0);
+    assert.equal(f.fixture.swarm.metrics().segments.commitmentUnavailable, 1);
+    assert.equal(f.fixture.swarm.metrics().segments.originFallbacks, 1);
+    assert.equal(f.callbacks.success, 1);
+    assert.deepEqual(unhandled, []);
+  } finally { process.removeListener("unhandledRejection", recordUnhandled); await f.close(); }
+});
+
+test("commitment overlap still rejects corrupt peer bytes before the original origin fallback", async t => {
+  const f = await overlapControlledFixture(t);
+  try {
+    await f.phase(() => f.metadataCalls() === 1);
+    f.resolveMetadata();
+    f.advance(500); f.peer.receive(JSON.stringify({ t: "have", keys: [f.key] }));
+    await f.phase(() => f.wants().length === 1);
+    const corrupt = f.bytes.slice(); corrupt[0] ^= 1;
+    f.deliver(corrupt);
+    const response = await f.pending;
+    assert.equal(response.data.byteLength, 32);
+    assert.equal(f.fixture.swarm.metrics().segments.peerCorrupt, 1);
+    assert.equal(f.fixture.swarm.metrics().peers.banned, 1);
+    assert.equal(f.fixture.swarm.metrics().segments.peerFirstLoaded, 0);
+    assert.equal(f.fixture.swarm.metrics().segments.originFallbacks, 1);
+    assert.equal(f.callbacks.success, 1);
   } finally { await f.close(); }
 });
