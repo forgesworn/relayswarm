@@ -7,6 +7,32 @@ An entry remains open until the evidence described below exists.
 
 ## Current deployed pilot: 18 October 2026
 
+Exact `3515d5b` passed all nine required CI jobs, fresh 277-member consumption,
+guarded HTTPS deployment and independent verification-source cleanup.
+Private state, permanent leases and the proxy were preserved. Nostr accounts
+are enabled; the authenticated host-supplied API is implemented. Reporting and
+forwarding remain off. The demo selects four neighbours; the SDK default is six.
+
+R54 completed 303.647 seconds of measurement but remains RED. Fifteen gates
+passed, including all fourteen viewers, eight contributors, both-quality
+decode, consent, resources, renewal and admission. Only every receiver's
+both-quality peer coverage failed: receiver 2 lacked measured LOW peer bytes;
+receiver 3 lacked measured HIGH peer bytes. Provider observations recorded
+zero refusals and a peak of 731 admission calls per aligned minute against
+the selected 900-request address limit. Independent finite cleanup passed;
+it does not change the failed qualification.
+
+P01–P12 source surfaces are implemented. Matching short qualification,
+two-hour/churn/natural expiry, both-quality account lifecycle, durable-report
+and crash-recovery acceptance, browser/device/network breadth, matched
+wire/cost benefit and final release/download checks remain open. Long
+eligibility requires a matching successful short qualifier. Other work must
+keep running; the original resource limits remain unchanged. See
+[current status](STATUS.md#current-delivery-checkpoint) and the
+[checkpoint record](../spikes/results/3515d5b-current-delivery-checkpoint-20261018.json).
+
+## Historical c0f337d checkpoint
+
 Exact `c0f337d` passed all nine required CI jobs, fresh 276-member consumption
 and guarded HTTPS deployment. Private state, permanent leases and the
 independent proxy were preserved. Nostr accounts are enabled, with an
@@ -687,18 +713,18 @@ retains its narrower scope. Every requirement remains open for full acceptance.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Exact c0 CI, consumption and guarded deployment pass. R52 stopped after156.325s on a resource timestamp refusal; R53 after17.135s on admission refusal. Both cleanup reviews pass. Full short qualification, two-hour/churn and matched benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Exact3515 CI, consumption and deployment pass. R54 measured303.647s; only every receiver's both-quality peer gate failed, with other15gates TRUE. Independent cleanup passes. Matching short, two-hour/churn and matched benefit remain open |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
-| P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Exact c0 CI/deployment retain selected address budget900, default600/global2048. R53 contains12HTTP429 and a900-success/refusal/reset pattern, supporting address-budget exhaustion without a retained error body. Capacity acceptance remains open; the local four-neighbour demo profile is unqualified |
+| P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Exact3515 selects four demo neighbours and address budget900, retaining SDKdefault6/default600/global2048. R54 admission checks pass with0refusals/unknowns and provider peak731/alignedminute; full field capacity remains unqualified |
 | P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Deployed 768 ordinary-Chrome trusted opt-in, real process restart, duplicate handling and natural five-minute expiry pass; reporting-off/policy/lease preservation and source cleanup pass; first deployed 219 timeout remains separately retained; backend component evidence does not replace new-client opt-in/reporting validation |
 | P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Nostr and authenticated host-supplied account API supported; Nostr-only pilot valid, no named website/human wallet required. Public cross-Mac shared-cap API PASS and focused LOW lifecycle PASS (74.412 s/seven gates) cover low verified media/reservations, reload/new key/spend, reconnect OFF/fresh consent and state withdrawal. Original 3 MB both-quality/exhaustion trial remains RED with high delivery unverified. Complete shared-media/physical acceptance remains open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Automatic worker drain by a surviving guardian is implemented and has a maintained parent-SIGKILL handoff regression in required CI. The older guarded parent-crash/operator-recovery experiment proves only its recorded path, including both-quality continuity 17. Guardian/host catastrophe remains closed for operator inspection. Final-platform crash/restart acceptance remains separate |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact c0 fresh276-member consumption/install/import/native/HTTP smoke checks pass. Consumer semver resolutions differ from root lock; standalone ESM is root-lock bound. Final0.2publication and downloaded-release acceptance remain open |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact3515 fresh277-member consumption/install/import/native/HTTP smoke checks pass. Consumer semver resolutions differ from root lock; standalone ESM is root-lock bound. Final0.2publication and downloaded-release acceptance remain open |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact c0 nine-job CI,276-member consumption, guarded deployment/HTTPS and independent source cleanup pass. Private state, permanent leases and proxy preserved. Later local replay/diagnostic/four-neighbour changes are separate and unqualified. PR8/0.2publication, final downloads and production acceptance remain open |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Prior Simulator/account/LOW lifecycle/Internet TURN passes retain original scopes. Current R52/R53 both stopped early and remain RED; independent cleanup passes. Full capacity, two-hour/churn, browser/device/network breadth, natural expiry and matched benefit remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact3515 nine-job CI,277-member consumption, guarded deployment/HTTPS and independent source cleanup pass. Replay/diagnostic/four-neighbour changes are deployed; strict field qualification remains RED. Private state, permanent leases and proxy preserved. PR8/0.2publication and final acceptance remain open |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Prior Simulator/account/LOW lifecycle/Internet TURN passes retain original scopes. Current R54 completed303.647s but failed both-quality peer coverage for2receivers; other15gates and independent cleanup pass. Full capacity, two-hour/churn, browser/device/network breadth, natural expiry and matched benefit remain open |
 
 ## Evidence rules
 

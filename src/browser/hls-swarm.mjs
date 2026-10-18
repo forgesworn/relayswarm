@@ -1488,22 +1488,24 @@ class HlsSwarm {
   }
 
   /**
-   * Rotate only for a caller with no peers at all, and only while we would
-   * still be left with a link of our own. Measured on a swarm whose viewers
-   * hold two links each, rotating for anyone who asked cost late joiners far
+   * Rotate for a caller with no peers, or a caller seeking an exact object
+   * we currently hold and may serve. Keep at least one link of our own.
+   * Measured on a swarm whose viewers hold two links each, rotating for
+   * anyone who asked cost late joiners far
    * more than it won: an evicted peer re-dials at once and displaces a third,
-   * and the cascade leaves everybody re-connecting instead of fetching. A
-   * viewer topping up from one peer to two can wait for a free slot; a viewer
-   * with none is the case this exists for.
+   * and the cascade leaves everybody re-connecting instead of fetching.
+   * A caller with existing peers must therefore name an object held here.
    *
    * The count comes from the caller, who could of course claim to have none.
-   * What that buys is one rotation per evictionCooldownMs, of a link that was
-   * idle anyway - the same thing an honest newcomer gets, and bounded by the
-   * same budget.
+   * A requested key is untrusted advice, with the same rotation budget as a
+   * peerless caller. It grants no permission to upload or accept media.
    */
-  #evictForOffer(askerPeers) {
+  #evictForOffer(askerPeers, requestedKey) {
     if (this.discovery.reserved()) return null;
-    if (askerPeers !== 0) return null;
+    const heldRepair = Number.isSafeInteger(askerPeers) && askerPeers > 0
+      && typeof requestedKey === "string" && /^[0-9a-f]{64}$/u.test(requestedKey)
+      && this.held.has(requestedKey) && this.#servingAllowed();
+    if (askerPeers !== 0 && !heldRepair) return null;
     if (this.links.size < 2) return null;
     if (Date.now() - this.lastEvictionAt < this.options.evictionCooldownMs) return null;
     const link = this.#rotationCandidate();
@@ -1845,10 +1847,11 @@ class HlsSwarm {
         }
         if (!this.#currentNegotiation(dial, negotiation)) return;
         dial.offerSentAt = now();
-        // The offer says how alone the caller is: a peer with none at all is the
-        // only one worth rotating somebody out for.
+        // This still-current discovery names only its exact demanded object.
+        // A saturated holder may use that advice for the same bounded rotation.
         const ticket = this.#ownTicket();
-        const sent = this.#sendSignal(pubkey, "offer", requestId, { sdp: pc.localDescription.sdp, peers: this.links.size, ...(ticket ? { ticket } : {}) });
+        const sent = this.#sendSignal(pubkey, "offer", requestId, { sdp: pc.localDescription.sdp, peers: this.links.size,
+          ...(dial.discovery ? { requestedKey: dial.discovery.key } : {}), ...(ticket ? { ticket } : {}) });
         this.#transport(pc, sent ? "signal-send" : "signal-failed", "offer");
         if (!sent) this.#failDial(dial, "failed");
       });
@@ -1955,7 +1958,7 @@ class HlsSwarm {
       dial = existing; reuse = true;
     } else {
       if (existing) this.#failDial(existing, "superseded");
-      if (!this.#hasCapacity() && !this.#evictForOffer(payload.payload?.peers)) {
+      if (!this.#hasCapacity() && !this.#evictForOffer(payload.payload?.peers, payload.payload?.requestedKey)) {
         this.counters.offersRefused += 1;
         this.counters.evictionsUnavailable += 1;
         this.#sendSignal(from, "reject", payload.requestId, this.#refusalPayload(from));

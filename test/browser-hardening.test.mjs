@@ -2066,6 +2066,133 @@ test("full idle neighbourhood discovers an admitted requested-rendition seeder w
   } finally { await f.close(); }
 });
 
+test("saturated requested-rendition repair replaces one idle link at each admitted endpoint", { timeout: 5_000 }, async t => {
+  const playback = peerPlaybackOptions(300), WebSocketImpl = memoryRelaySocket();
+  const requesterSecret = generateSecretKey(), targetSecret = generateSecretKey();
+  const requesterKey = getPublicKey(requesterSecret), targetKey = getPublicKey(targetSecret);
+  const realNow = Date.now; let age = 0, repair = false;
+  t.mock.method(Date, "now", () => realNow() + age);
+  let requester, target, targetSignals, requesterSignals;
+  try {
+    requester = await linkedFixture({ ...playback.options, WebSocketImpl, maxPeers: 4,
+      secretKey: requesterSecret, ticket: "requester-ticket",
+      admit: (key, ticket) => ticket === "fixture-ticket" || repair && key === targetKey && ticket === "target-ticket" });
+    target = await linkedFixture({ ...playback.options, WebSocketImpl, maxPeers: 4, serve: true,
+      secretKey: targetSecret, ticket: "target-ticket",
+      admit: (key, ticket) => ticket === "fixture-ticket" || repair && key === requesterKey && ticket === "requester-ticket" });
+    const requesterChannels = [], targetChannels = [];
+    for (let i = 0; i < 4; i++) {
+      requesterChannels.push(await requester.addPeer());
+      targetChannels.push(await target.addPeer());
+    }
+    // Three useful sibling-audio links must survive a missing-main repair.
+    await new Promise(resolve => new requester.hls.config.fLoader({}).load({ ...context,
+      url: "https://origin.example/audio.ts", frag: { ...context.frag, type: "audio" } }, {}, { onSuccess: resolve }));
+    for (const channel of requesterChannels.slice(0, 3)) channel.receive(JSON.stringify({
+      t: "contribution", serving: true, rendition: "audio:0",
+    }));
+    await target.load(); await until(() => target.swarm.metrics().bytes.held === playback.bytes.byteLength);
+    assert(targetChannels.every(channel => channel.sent.some(frame => frame.t === "have" && frame.add?.includes(playback.key))));
+    assert.equal(target.swarm.metrics().serving, true);
+    // Age real links past the unchanged 15s minimum-life and 20s idle guards;
+    // the audio hints remain within their original 30s freshness window.
+    age = 21_001;
+    await requester.load();
+    assert.equal(requester.swarm.metrics().peers.connected, 4);
+    assert.equal(target.swarm.metrics().peers.connected, 4);
+    repair = true;
+    // Observe the genuine encrypted offer to the real target swarm, rather
+    // than replacing that saturated target with an always-answering peer.
+    targetSignals = new RelaySwarmSession({ pool: target.pool, swarmId: base.swarmId, secretKey: targetSecret });
+    targetSignals.start(); const offers = [];
+    targetSignals.onSignal(({ from, payload }) => { if (from === requesterKey && payload.type === "offer") offers.push(payload); });
+    targetSignals.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: targetKey }],
+      have: [playback.key], open: true, ticket: "target-ticket" });
+    await until(() => offers.length === 1 && (target.swarm.metrics().peers.offersRefused > 0
+      || target.swarm.metrics().peers.offersAccepted > 4));
+    assert.equal(requester.swarm.metrics().peers.evicted, 1);
+    assert(requesterChannels.slice(0, 3).every(channel => channel.readyState === "open"), "useful audio siblings are protected");
+    assert.equal(requesterChannels[3].readyState, "closed", "only the requester's idle main victim is replaced");
+    assert.equal(offers[0].payload.peers, 3, "the repair never claims the requester is peerless");
+    assert.equal(target.swarm.metrics().peers.evicted, 1,
+      "a serving saturated target holding the exact requested key must permit the same bounded idle replacement");
+    assert.equal(offers[0].payload.requestedKey, playback.key, "only this actual discovery key is advised");
+    const incoming = new Event("datachannel"); incoming.channel = new RecordedChannel();
+    target.connections[4].dispatchEvent(incoming);
+    await until(() => requester.swarm.metrics().peers.connected === 4 && target.swarm.metrics().peers.connected === 4);
+    assert.equal(targetChannels.filter(channel => channel.readyState === "closed").length, 1);
+    assert.equal(requester.peakLiveConnections, 4); assert.equal(target.peakLiveConnections, 4);
+    assert.equal(requester.swarm.metrics().segments.peerFirstLoaded, 0, "opening a link is not verified media delivery");
+    const checks = target.swarm.metrics().admissionDiagnostics.calls.offerIncoming;
+    requesterSignals = new RelaySwarmSession({ pool: requester.pool, swarmId: base.swarmId, secretKey: requesterSecret });
+    requesterSignals.start(); requesterSignals.sendSignal(targetKey, offers[0]);
+    await sleep(20);
+    assert.equal(target.swarm.metrics().admissionDiagnostics.calls.offerIncoming, checks, "replay cannot reacquire admission authority");
+    assert.equal(target.swarm.metrics().peers.evicted, 1); assert.equal(target.connections.length, 5);
+  } finally {
+    targetSignals?.close(); requesterSignals?.close();
+    await Promise.all([requester?.close(), target?.close()]);
+  }
+});
+
+test("saturated requested-rendition repair refuses invalid advice and rechecks serving after admission", { timeout: 5_000 }, async t => {
+  const playback = peerPlaybackOptions(300), realNow = Date.now;
+  let age = 0, pendingAdmission = false, release;
+  t.mock.method(Date, "now", () => realNow() + age);
+  const admission = new Promise(resolve => { release = resolve; });
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator"), connection = { type: "wifi" };
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { connection } });
+  let target, sender;
+  try {
+    target = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(), maxPeers: 4, serve: true,
+      ticket: "target-ticket", admit: (_key, ticket) => {
+        if (ticket === "held-admission") { pendingAdmission = true; return admission; }
+        return ticket === "fixture-ticket";
+      } });
+    const channels = [];
+    for (let i = 0; i < 4; i++) channels.push(await target.addPeer());
+    await target.load(); await until(() => target.swarm.metrics().bytes.held === playback.bytes.byteLength);
+    age = 21_001;
+    sender = new RelaySwarmSession({ pool: target.pool, swarmId: base.swarmId }); sender.start();
+    const offer = (requestId, requestedKey, ticket = "fixture-ticket") => sender.sendSignal(target.swarm.metrics().pubkey, {
+      type: "offer", transport: "webrtc", requestId, payload: { sdp: "fixture-offer", peers: 3, requestedKey, ticket },
+    });
+    const unchanged = () => {
+      assert.equal(target.swarm.metrics().peers.evicted, 0); assert.equal(target.swarm.metrics().peers.connected, 4);
+      assert.equal(target.connections.length, 4); assert.equal(target.peakLiveConnections, 4);
+      assert(channels.every(channel => channel.readyState === "open"));
+    };
+    // Missing advice retains the legacy nonzero-peer refusal; neither malformed
+    // values nor another valid hash may promote it to a held-object repair.
+    const unheld = (playback.key[0] === "0" ? "1" : "0") + playback.key.slice(1);
+    for (const [index, key] of [undefined, 7, playback.key.toUpperCase(), unheld].entries()) {
+      const refused = target.swarm.metrics().peers.offersRefused;
+      offer(`invalid-repair-${index}`, key);
+      await until(() => target.swarm.metrics().peers.offersRefused === refused + 1); unchanged();
+    }
+    connection.type = "cellular";
+    assert.equal(target.swarm.metrics().serving, false);
+    let refused = target.swarm.metrics().peers.offersRefused;
+    offer("not-serving-repair", playback.key);
+    await until(() => target.swarm.metrics().peers.offersRefused === refused + 1); unchanged();
+    connection.type = "wifi";
+    assert.equal(target.swarm.metrics().serving, true);
+    refused = target.swarm.metrics().peers.offersRefused;
+    offer("serving-withdrawn-during-admission", playback.key, "held-admission");
+    await until(() => pendingAdmission);
+    unchanged(); connection.type = "cellular"; release(true);
+    await until(() => target.swarm.metrics().peers.offersRefused === refused + 1);
+    assert.equal(target.swarm.metrics().bytes.held, playback.bytes.byteLength, "the exact key remains held, so serving revocation is the discriminator");
+    assert.equal(target.swarm.metrics().serving, false); unchanged();
+  } finally {
+    release(false); sender?.close();
+    try { await target?.close(); } finally {
+      if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+      else delete globalThis.navigator;
+    }
+  }
+});
+
 function advisoryFixture() {
   let at = 100_000;
   const state = new NeighbourDiscovery(() => at), key = "a".repeat(64), pubkey = "b".repeat(64);

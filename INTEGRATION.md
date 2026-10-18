@@ -333,10 +333,19 @@ lookup. A refused attempt may reuse its single vacancy before that same deadline
 The reservation and scoped victim reconnect suppression then expire even if
 loads continue. Only an accepted commitment/hash-verified delivery for the exact
 selected context generation renews its one-replacement allowance; PC-open,
-HAVE, sibling progress and inactivity do not. Per-piece origin fallback and the
-remote peerless-only incoming rotation policy remain unchanged.
+HAVE, sibling progress and inactivity do not. Per-piece origin fallback remains
+unchanged.
 
-This offers a bounded chance to reach a peer with room during that interval.
+A still-current discovery offer can include the exact demanded `requestedKey`
+inside its existing pairwise NIP-44 payload, alongside the truthful peer count.
+After fresh incoming admission, a full recipient may apply the existing idle
+rotation policy when it currently holds that exact key and serving is allowed.
+The same cooldown, link lifetime, idle, transfer, reserved-slot and keep-one
+guards apply. The digest is untrusted advice, not upload or media authority;
+it is not echoed in presence or rejections. Older peers ignore this optional
+wire-version-3 field and retain their existing full-recipient behaviour.
+
+This offers a bounded chance to reach a peer during that interval.
 A permanently full or misleading remote can still refuse; after expiry and
 refill the unchanged unmet episode cannot force another eviction. It does not
 guarantee all-rendition connectivity or establish the cause of previously missed

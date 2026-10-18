@@ -12,6 +12,62 @@ on `main` do not change that tag or its immutable downloaded assets.
 ## Current delivery checkpoint
 
 Checkpoint: 18 October 2026. The experimental pilot runs exact
+`3515d5b0acad4d18811ed08e4d9f7648781e55cf`. All nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39157143848),
+fresh consumption of 277 package members and guarded HTTPS deployment passed.
+The 773,254-byte browser client matched its image. Private state, permanent
+leases and the independent proxy were preserved. Nostr account allowances
+are enabled; the authenticated host-supplied account API is implemented.
+Reporting and forwarding remain off.
+
+**R54 remains RED after 303.647 s of measurement.** Fifteen of sixteen gates
+passed: all fourteen viewers progressed video and audio, all eight
+contributors uploaded, both qualities decoded, and consent, resources,
+in-place renewal and all admission checks passed. The requirement for every
+receiver to obtain verified peer media at both qualities failed: receiver 2
+had no measured LOW peer bytes; receiver 3 had no measured HIGH peer bytes.
+The successful elapsed window does not supply strict qualification. The
+two-hour run remains ineligible.
+
+The deployed demo explicitly selects four neighbours; the SDK default stays
+six. Provider observations recorded zero admission refusals and a peak of 731
+calls per aligned minute against the selected 900-request address budget.
+This is a healthy measured run, not proof of six-neighbour capacity or the
+individual effect of replay dropping versus the changed profile. The original
+fourteen-viewer, eight-contributor, every-receiver both-quality and resource
+requirements remain unchanged.
+
+The complete receiver request tails reconcile with all cumulative outcome
+counters. Receiver 2 made no LOW request, with 88 `no-have-no-wait`
+observations. Receiver 3 recorded 34 HIGH timeouts, 27 with partial bodies;
+its only HIGH completion occurred before measurement. Upload refusals were
+exclusively token-bucket rate refusals. These observations do not identify a
+specific network, queue, CPU or receiver-to-uploader cause.
+
+All fourteen contexts and the owned processes, profiles, stages and finite
+source passed independent cleanup review. The public pilot, router and proxy
+remain running intentionally. Other work on the Macs remains untouched.
+
+A later local correction lets an admitted discovery caller advise the exact
+requested key to a full serving peer. It permits the same bounded idle
+replacement when the peer holds that key, without changing admission, consent,
+rotation or connection limits. A two-swarm regression fails on the original
+source and passes after the correction; malformed advice and serving withdrawal
+during admission are refused. All 196 combined loader, discovery and receiver
+tests pass. This is separate from R54: neither its precise cause nor a field
+repair is established. The correction still requires CI and deployment.
+
+P01–P12 source surfaces are implemented; production acceptance and release
+remain incomplete. Matching short qualification, two-hour/churn/natural
+expiry, both-quality account lifecycle, durable reports and crash recovery,
+browser/device/network breadth, matched wire/cost benefit and final
+release/download checks remain open. See the
+[checkpoint record](../spikes/results/3515d5b-current-delivery-checkpoint-20261018.json)
+and [P01–P12 checklist](PRODUCTION-READINESS.md#delivery-checklist).
+
+## Historical c0f337d delivery checkpoint
+
+Checkpoint: 18 October 2026. The experimental pilot runs exact
 `c0f337d0fe0439c64b05aed847e9d49ee4350e15`. All nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39152159082),
 fresh consumption of 276 package members and guarded HTTPS deployment passed.
