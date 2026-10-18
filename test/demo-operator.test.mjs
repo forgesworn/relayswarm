@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
-import { mkdtemp, writeFile, chmod, symlink, rm, realpath, open, appendFile, rename } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, chmod, symlink, rm, realpath, open, appendFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createOperatorControls, readOperatorTokenFile } from "../demo/operator.mjs";
@@ -118,6 +118,69 @@ test("durable reports reopen idempotently, bound identities and reject counter r
   assert.equal(await send("b".repeat(32), 1), 200);
   assert.equal(await send("c".repeat(32), 1), 429);
   const duplicateOwner = createOperatorControls(options); await assert.rejects(duplicateOwner.ready(), /locked/u);
+});
+
+test("durable policy revisions include startup reporting changes and same-config restarts are stable", { skip: process.platform === "win32" }, async (t) => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "relayswarm-policy-revision-"))), statePath = join(directory, "operator.json");
+  let controls;
+  t.after(async () => { await controls?.close().catch(() => {}); await rm(directory, { recursive: true, force: true }); });
+  async function restart(telemetry) {
+    await controls?.close(); controls = createOperatorControls({ statePath, telemetry }); await controls.ready();
+    const persisted = JSON.parse(await readFile(statePath, "utf8"));
+    assert.equal(persisted.telemetry, telemetry); assert.equal(persisted.revision, controls.policy().revision);
+    return controls.policy();
+  }
+  const initial = await restart(false); assert.equal(initial.revision, 0);
+  controls.origin.mediaRequests = 123; await controls.flush();
+  const enabled = await restart(true); assert.equal(enabled.revision, initial.revision + 1); assert.equal(enabled.telemetry, true);
+  assert.equal(controls.origin.mediaRequests, 123);
+  assert.deepEqual(await restart(true), enabled);
+  const restored = await restart(false); assert.equal(restored.revision, enabled.revision + 1); assert.equal(restored.telemetry, false);
+  assert.deepEqual(await restart(false), restored);
+});
+
+test("legacy policy state migrates once and invalid or exhausted revisions are never overwritten", { skip: process.platform === "win32" }, async (t) => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "relayswarm-policy-migration-"))), statePath = join(directory, "operator.json");
+  let controls;
+  t.after(async () => { await controls?.close().catch(() => {}); await rm(directory, { recursive: true, force: true }); });
+  const legacy = { v: 1, mode: "off", revision: 7, origin: { mediaRequests: 12, mediaResponseBytes: 34, commitmentRequests: 5, commitmentResponseBytes: 6 }, reports: [] };
+  await writeFile(statePath, JSON.stringify(legacy), { mode: 0o600 });
+  controls = createOperatorControls({ statePath, telemetry: false }); await controls.ready();
+  assert.deepEqual(controls.policy(), { v: 1, mode: "off", revision: 8, telemetry: false });
+  assert.deepEqual(JSON.parse(await readFile(statePath, "utf8")), { ...legacy, revision: 8, telemetry: false });
+  await controls.close(); controls = createOperatorControls({ statePath, telemetry: false }); await controls.ready();
+  assert.equal(controls.policy().revision, 8); await controls.close();
+  for (const bad of [null, 0, "false"]) {
+    const raw = JSON.stringify({ ...legacy, telemetry: bad }); await writeFile(statePath, raw);
+    controls = createOperatorControls({ statePath }); await assert.rejects(controls.ready(), /Invalid durable/u);
+    await controls.close().catch(() => {}); assert.equal(await readFile(statePath, "utf8"), raw);
+  }
+  for (const saved of [{ ...legacy, revision: Number.MAX_SAFE_INTEGER }, { ...legacy, revision: Number.MAX_SAFE_INTEGER, telemetry: false }]) {
+    const raw = JSON.stringify(saved); await writeFile(statePath, raw);
+    controls = createOperatorControls({ statePath, telemetry: true }); await assert.rejects(controls.ready(), /revision exhausted/u);
+    await controls.close().catch(() => {}); assert.equal(await readFile(statePath, "utf8"), raw);
+  }
+  const raw = JSON.stringify({ ...legacy, revision: Number.MAX_SAFE_INTEGER, telemetry: true }); await writeFile(statePath, raw);
+  const token = "revision-overflow-test-operator-token";
+  controls = createOperatorControls({ statePath, telemetry: true, token }); await controls.ready();
+  const request = Readable.from([Buffer.from(JSON.stringify({ mode: "peer-first" }))]);
+  Object.assign(request, { method: "POST", headers: { origin: "https://demo.example", "content-type": "application/json", authorization: `Bearer ${token}` } });
+  await controls.handle(request, { writeHead(code) { assert.equal(code, 503); return this; }, end() {} }, "/operator/policy", "https://demo.example", {});
+  assert.deepEqual(controls.policy(), { v: 1, mode: "off", revision: Number.MAX_SAFE_INTEGER, telemetry: true });
+  assert.equal(await readFile(statePath, "utf8"), raw);
+});
+
+test("existing primitive and array operator state is never seeded over", { skip: process.platform === "win32" }, async (t) => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "relayswarm-policy-invalid-root-"))), statePath = join(directory, "operator.json");
+  let controls;
+  t.after(async () => { await controls?.close().catch(() => {}); await rm(directory, { recursive: true, force: true }); });
+  for (const value of [null, false, 0, "", []]) {
+    const raw = JSON.stringify(value); await writeFile(statePath, raw, { mode: 0o600 });
+    controls = createOperatorControls({ statePath, telemetry: true });
+    await assert.rejects(controls.ready(), /Invalid durable/u);
+    await assert.rejects(controls.close(), /Invalid durable/u);
+    assert.equal(await readFile(statePath, "utf8"), raw);
+  }
 });
 
 test("expired durable reports are erased during idle retention and malformed state is never overwritten", { skip: !["darwin", "linux"].includes(process.platform), timeout: 5000 }, async (t) => {

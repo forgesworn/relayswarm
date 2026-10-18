@@ -61,16 +61,27 @@ export function createOperatorControls({ token, telemetry = false, reportCapacit
       if (reports.some((entry) => now() - entry.at >= reportTtlMs)) mutate(() => { reports = reports.filter((entry) => now() - entry.at < reportTtlMs); }).catch(() => {});
     }, Math.min(reportTtlMs, 1000));
     retentionTimer.unref?.();
-    if (!saved) return;
-    if (saved.v !== 1 || ![null, "off", "shadow", "peer-first"].includes(saved.mode) || !Number.isSafeInteger(saved.revision) || saved.revision < 0
+    if (saved === null) {
+      try { await lstat(resolve(statePath)); }
+      catch (error) { if (error.code !== "ENOENT") throw error; await persist(); return; }
+    }
+    if (!saved || typeof saved !== "object" || Array.isArray(saved) || saved.v !== 1 || ![null, "off", "shadow", "peer-first"].includes(saved.mode) || !Number.isSafeInteger(saved.revision) || saved.revision < 0
+      || Object.hasOwn(saved, "telemetry") && typeof saved.telemetry !== "boolean"
       || !Array.isArray(saved.reports) || saved.reports.length > reportCapacity || !saved.origin || Object.keys(origin).some((name) => !Number.isSafeInteger(saved.origin[name]) || saved.origin[name] < 0)
       || saved.reports.some((entry) => !/^[a-f0-9]{32}$/u.test(entry.id) || !Number.isSafeInteger(entry.sequence) || entry.sequence < 1 || !Number.isSafeInteger(entry.at) || entry.at > now() || !valuesValid(entry.values))
       || new Set(saved.reports.map((entry) => entry.id)).size !== saved.reports.length) throw new Error("Invalid durable operator state.");
     mode = saved.mode; revision = saved.revision; Object.assign(origin, saved.origin);
     reports = saved.reports.filter((entry) => now() - entry.at < reportTtlMs);
+    // The startup reporting setting is part of the public policy shape. Older
+    // snapshots lack it, so migrate once before serving any policy response.
+    if (saved.telemetry !== Boolean(telemetry)) { advanceRevision(); await persist(); }
   })();
   readyPromise.catch(() => { clearInterval(retentionTimer); lease?.close(); });
-  async function persist() { if (store) await store.write({ v: 1, mode, revision, origin, reports }); }
+  async function persist() { if (store) await store.write({ v: 1, mode, revision, telemetry: Boolean(telemetry), origin, reports }); }
+  function advanceRevision() {
+    if (revision === Number.MAX_SAFE_INTEGER) throw fail("Policy revision exhausted.", 503);
+    revision++;
+  }
   function mutate(operation, { shutdown = false } = {}) {
     if (stopping && !shutdown) return Promise.reject(fail("Operator controls are closing.", 503));
     if (pendingMutations >= mutationCapacity) return Promise.reject(fail("Operator write queue capacity reached.", 503));
@@ -121,7 +132,7 @@ export function createOperatorControls({ token, telemetry = false, reportCapacit
       if (path === "/operator/policy") {
         const input = await json(request);
         if (Object.keys(input).length !== 1 || !Object.hasOwn(input, "mode") || ![null, "off", "shadow", "peer-first"].includes(input.mode)) throw fail("Supply only mode: null, off, shadow or peer-first.", 400);
-        result = await mutate(() => { mode = input.mode; revision++; return policy(); });
+        result = await mutate(() => { advanceRevision(); mode = input.mode; return policy(); });
       }
       if (path === "/operator/admission") {
         if (!admission) throw fail("Admission is unavailable.", 503);

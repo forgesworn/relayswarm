@@ -11,6 +11,47 @@ on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
 
+Checkpoint: 18 October 2026. The experimental pilot runs
+`a02d5ec4d5408c8c196e0c259d07c7fc68e965d6`. All nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39160708033),
+fresh consumption of 278 package members and guarded HTTPS deployment passed.
+The 773,458-byte browser client matched its image. Private state, permanent
+leases and the independent proxy were preserved. Nostr account allowances
+are enabled; the authenticated host-supplied account API is implemented.
+Reporting and forwarding remain off.
+
+**The short qualifier remains unproved.** R55 stopped during setup at its sixth
+browser navigation, before any measurement. Its six acquired contexts and
+owned source, processes and temporary files passed independent cleanup review.
+This supplies no fourteen-viewer or 300-second qualification. M4 subsequently
+became unreachable from this Mac, so distributed checks remain pending while
+other work continues.
+
+**Durable reporting acceptance also remains RED.** A later single-browser test
+ran for 85.580 s. Playback progressed and the server enabled reporting, but the
+browser refused the changed telemetry setting at the unchanged policy revision.
+The reporting opt-in control stayed disabled and no report request was sent.
+Restart durability and natural five-minute expiry were not reached. Reporting
+was restored to off; full browser and finite-source cleanup passed independent
+review. The server's persisted policy revision needs to include startup
+telemetry changes; the browser's conflict and consent checks remain required.
+
+The source correction persists the telemetry setting and advances its policy
+revision before serving a changed setting. Focused operator and bundled-client
+regressions pass, including migration, malformed-state preservation and consent
+([local results](../spikes/results/operator-policy-revision-20261018.json)).
+CI, deployment and the reporting acceptance rerun remain pending for that fix.
+
+P01–P12 source surfaces are implemented; production acceptance and release
+remain incomplete. Matching short qualification, two-hour/churn/natural expiry,
+both-quality account lifecycle, durable reports and crash recovery,
+browser/device/network breadth, matched wire/cost benefit and final
+release/download checks remain open. See the
+[checkpoint record](../spikes/results/a02d5ec-current-delivery-checkpoint-20261018.json)
+and [P01–P12 checklist](PRODUCTION-READINESS.md#delivery-checklist).
+
+## Historical 3515d5b delivery checkpoint
+
 Checkpoint: 18 October 2026. The experimental pilot runs exact
 `3515d5b0acad4d18811ed08e4d9f7648781e55cf`. All nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39157143848),

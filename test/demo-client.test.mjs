@@ -15,6 +15,7 @@ import { generateSecretKey, getPublicKey, finalizeEvent } from "nostr-tools/pure
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAccountBudgetControls } from "../demo/account-budget.mjs";
+import { createOperatorControls } from "../demo/operator.mjs";
 
 const bundle = await build({ entryPoints: ["demo/client.mjs"], bundle: true, write: false, format: "esm", plugins: [{ name: "fixture", setup(builder) {
   builder.onResolve({ filter: /^(hls\.js|\.\.\/src\/browser\/hls-swarm\.mjs)$/ }, (args) => ({ path: args.path, namespace: "fixture" }));
@@ -317,6 +318,32 @@ test("reporting availability explains operator OFF immediately and never restore
     p.fixture.policy = { mode: null, revision: 3, telemetry: true }; await p.poll(); await p.sendReport();
     assert.equal(p.element("telemetry").disabled, false); assert.equal(p.element("telemetry").checked, false); assert.equal(reports.length, 1);
   } finally { release?.(); p.close(); }
+});
+
+test("durable startup reporting changes recover policy availability without restoring consent", { skip: process.platform === "win32" }, async (t) => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "relayswarm-client-policy-restart-"))), statePath = join(directory, "operator.json");
+  let controls = createOperatorControls({ statePath, telemetry: false }), p;
+  t.after(async () => { p?.close(); await controls.close().catch(() => {}); await rm(directory, { recursive: true, force: true }); });
+  await controls.ready(); p = await page(new Map(), { inlinePolicySession: true }); await p.submit();
+  let unavailable = false, override, reports = 0;
+  p.fixture.fetch = url => {
+    if (url === "/reports") { reports++; return {}; }
+    if (unavailable) throw new Error("Publisher restarting");
+    return { ...(override ?? controls.policy()), session: p.fixture.session };
+  };
+  unavailable = true; assert.equal(await p.poll(), false); p.jumpWithoutTimers(5001);
+  assert.equal(p.context.window.relaySwarmDemo.report().deliveryPolicy.unavailable, true);
+  await controls.close(); controls = createOperatorControls({ statePath, telemetry: true }); await controls.ready(); unavailable = false;
+  assert.equal(await p.poll(), true); assert.equal(p.element("telemetry").disabled, false); assert.equal(p.element("telemetry").checked, false);
+  await p.sendReport(); assert.equal(reports, 0);
+  p.element("telemetry").checked = true; await p.sendReport(); assert.equal(reports, 1);
+  // The client still rejects a changed shape at the accepted revision.
+  override = { ...controls.policy(), telemetry: false }; assert.equal(await p.poll(), false);
+  assert.equal(p.context.window.relaySwarmDemo.report().deliveryPolicy.unavailable, true); assert.equal(p.element("telemetry").checked, false);
+  override = undefined; assert.equal(await p.poll(), true); assert.equal(p.element("telemetry").checked, false);
+  await controls.close(); controls = createOperatorControls({ statePath, telemetry: false }); await controls.ready();
+  assert.equal(await p.poll(), true); assert.equal(p.element("telemetry").disabled, true); assert.equal(p.element("telemetry").checked, false);
+  await p.sendReport(); assert.equal(reports, 1);
 });
 
 test("reporting-only OFF clears consent before a held session response without revoking peers", async () => {
