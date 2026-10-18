@@ -12,6 +12,61 @@ on `main` do not change that tag or its immutable downloaded assets.
 ## Current delivery checkpoint
 
 Checkpoint: 18 October 2026. The experimental pilot runs exact
+`c0f337d0fe0439c64b05aed847e9d49ee4350e15`. All nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39152159082),
+fresh consumption of 276 package members and guarded HTTPS deployment passed.
+The 772,551-byte client matched its image. The selected relay-only TLS/TCP
+TURN configuration and admission budgets remain unchanged. Nostr account
+allowances are enabled; the authenticated host-supplied account API is
+implemented. Reporting and forwarding remain off. Private state, permanent
+leases and the independent proxy were preserved.
+
+**Neither field run passed.** R52 stopped after 156.325 s when its resource
+monitor rejected a timestamp as future. All fourteen viewers had progressed
+video and audio; this partial run grants no full qualification. A separate
+controlled regression reproduced fractional-versus-integer millisecond
+comparison failure. The corrected monitor passes eight checks while retaining
+the original freshness limits; the failing R52 clock values were not retained,
+so this does not establish its exact cause.
+
+R53, with the corrected monitor, stopped after 17.135 s of measurement on
+admission refusal. Browser records contain twelve HTTP 429 responses, with
+no public-observer unknown or capacity overflow. Provider counters show 900
+accepted admission calls, then twelve refusals and a return to successful
+responses. This supports exhaustion of the configured 900-per-address
+60-second budget; the server error body and exact bucket state were not
+retained. Both runs passed independent finite-source and browser cleanup.
+The full short qualifier has not passed, so the two-hour run remains ineligible.
+
+R52's new diagnostics recorded partial bytes in 84 of 94 HIGH receiver
+timeouts. LOW requests completed more often. Transport assembly, verified
+playback acceptance and wire costs remain separate; these observations do
+not establish a network cause or a performance repair.
+
+The local candidate drops already-seen offers before redundant host admission
+work, while retaining the checks after pending admission completes. It adds
+eleven fixed local counters for actual host callback sites. The settled-replay
+regression fails before the correction and passes afterwards; sixteen focused
+and all 194 combined loader, discovery and receiver tests pass. This does not
+establish how often R53 replayed offers or demonstrate a field repair.
+
+The local candidate selects four demo neighbours rather than the SDK default
+six. This is an explicit configuration change awaiting CI, deployment and
+field checks. The same fourteen-viewer, eight-contributor, every-receiver
+both-quality and resource requirements remain in force. It does not establish
+six-neighbour capacity or guarantee an admission-rate reduction.
+
+P01–P12 source surfaces are implemented; production acceptance and release
+remain incomplete. Both-quality account lifecycle, durable reporting,
+crash recovery, natural expiry/churn, browser/device/network breadth,
+matched wire/cost benefit and final release/download checks remain open.
+Other work on the Macs must keep running. See the
+[checkpoint record](../spikes/results/c0f337d-current-delivery-checkpoint-20261018.json)
+and [P01–P12 checklist](PRODUCTION-READINESS.md#delivery-checklist).
+
+## Historical 2911ea5 delivery checkpoint
+
+Checkpoint: 18 October 2026. The experimental pilot runs exact
 `2911ea55f1bd21335a979df8a3fd38ed83cc6bee`. All nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39148186931),
 fresh consumption of 275 package members and guarded HTTPS deployment passed.

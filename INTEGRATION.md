@@ -83,7 +83,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `originFallbackMs` | `1500` | The in-time budget a peer delivery is measured against. |
 | `originReserveMs` | `2000` | Peer-first reserves this much buffered playback for the origin; an empty buffer goes directly to origin. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
-| `maxPeers` | `6` | Connections in and out. |
+| `maxPeers` | `6` | Connections in and out. The demo selects four explicitly. |
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
 | `maxUploadPeers` | `4` | Distinct peers served in any 30 s. |
 | `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. |
@@ -229,6 +229,16 @@ are local metrics, contain no media keys, URLs, peer identities or addresses,
 and are excluded from automatic numeric reporting. They add no network traffic,
 timers, retries, upload permission or deadline changes. Returned snapshots own
 their copies, and retained outcomes remain readable after stop.
+
+`admissionDiagnostics.calls` counts actual host `admit` callback invocations
+at the fixed sites `presence`, `dialStart`, `offerBeforeSend`, `offerIncoming`,
+`answerIncoming`, `glareBeforeRollback`, `glareAfterRollback`, `answerBeforeSend`,
+`upload`, `refresh` and `other`. Coalesced waiters and operations cancelled before
+the callback starts add no call. A callback that refuses or throws still counts.
+Counters saturate at `Number.MAX_SAFE_INTEGER`; snapshots own their copies.
+These local counters contain no credentials or identities, add no requests and
+are excluded from automatic reports. They do not cache admission or establish
+which server budget, network condition or peer caused a failed request.
 
 Deployed source `f393abf` includes `transportDiagnostics` within metrics version
 2. It contains fixed-enum

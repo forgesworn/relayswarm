@@ -121,7 +121,7 @@ function configure() {
       if (context.part) query.set("part", String(context.part.index));
       return fetchDiagnostics.json("commitment", `${session.commitmentEndpoint}?${query}`, { signal });
     },
-    secretKey: admissionKey,
+    secretKey: admissionKey, maxPeers: 4,
     ...(configuredSession.admission && configuredCredential ? { ticket: configuredCredential.ticket, admit: async (pubkey, ticket, { signal }) => {
       try {
         if (!peerAuthorityFresh(configuredSession) || signal.aborted) return false;

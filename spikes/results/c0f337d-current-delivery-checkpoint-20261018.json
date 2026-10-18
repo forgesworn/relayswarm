@@ -1,0 +1,259 @@
+{
+  "v": 1,
+  "checkpointDate": "2026-10-18",
+  "productionComplete": false,
+  "configuration": {
+    "iceTransportPolicy": "relay",
+    "turnUrlProjection": "tls-tcp",
+    "perAddressTickets": 32,
+    "perAddressRequests": 900,
+    "globalRequestCapacity": 2048,
+    "reporting": false,
+    "forwarding": false,
+    "accountMethods": [
+      "nostr"
+    ],
+    "hostSuppliedAccountAPIImplemented": true,
+    "websiteResolverConfigured": false,
+    "privateStateAndPermanentLeasesPreserved": true,
+    "independentProxyPreserved": true,
+    "sdkDefaultMaxPeers": 6,
+    "deployedDemoMaxPeers": 6
+  },
+  "release": {
+    "published": "v0.1.0",
+    "candidate": "0.2.0",
+    "pr": 8,
+    "merged": false,
+    "candidatePublished": false,
+    "npmPublished": false
+  },
+  "remaining": [
+    "matching successful300second qualifier",
+    "7200seconds and22churn with natural TURN expiry",
+    "both-quality cross-device upload-budget lifecycle",
+    "durable opt-in reports and parent-crash recovery acceptance",
+    "physical/browser breadth within available devices and Simulator scope",
+    "difficult networks and matched wire/cost benefit",
+    "final0.2release and downloaded-asset acceptance"
+  ],
+  "sourceSha": "c0f337d0fe0439c64b05aed847e9d49ee4350e15",
+  "scope": "Exact c0 CI, clean consumption and deployment pass; R52/R53 remain RED and independent finite cleanup passes. Local candidate profile and tests are separate from field acceptance.",
+  "ci": {
+    "run": 39152159082,
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/39152159082",
+    "requiredJobsPassed": 9
+  },
+  "consumer": {
+    "files": 276,
+    "elapsedMs": 8862,
+    "scope": "Exact committed source, not downloaded final release assets",
+    "semverDependencyDifferencesFromRootLock": 28
+  },
+  "deployed": {
+    "sourceSha": "c0f337d0fe0439c64b05aed847e9d49ee4350e15",
+    "appId": "52775fd7a9ef98c875d654cd4fcee0bf7a39bea3471de1732997a7f72d948d37",
+    "appStartedUTC": "2026-10-18T18:15:04.192231361Z",
+    "image": "sha256:910c74febab72f5a4285ea354873af0f1c4cb7121b57f5d603e091e8f9e99853",
+    "client": {
+      "bytes": 772551,
+      "sha256": "f200c039d5089898384cf455f5e5ab75a67665470bada07f0cdeb8d2e1e490d3"
+    },
+    "independentDeploymentReviewPassed": true
+  },
+  "r52": {
+    "verdict": "RED",
+    "measurementElapsedMs": 156325,
+    "elapsedMs": 201650,
+    "failure": "Resource timestamp is unknown/future; actual failed host/stamp/now not retained",
+    "computedGates": {
+      "admissionSemanticCoverage": true,
+      "admissionTerminalReconciliation": true,
+      "admissionCallerAbortRecovery": true
+    },
+    "uncomputedFullQualificationGates": "unknown; incomplete run is not pass",
+    "contextsAcquiredAndClosed": 14,
+    "completeObserverExport": true,
+    "independentFiniteCleanupPassed": true,
+    "cleanupReviewSHA256": "71fc73f246a0c3fdd40fa9d550c873e825af0ed8836c7b684c838846de7ffaef",
+    "sourceExitCode": 255,
+    "strict300Passed": false,
+    "longEligible": false
+  },
+  "r53": {
+    "verdict": "RED",
+    "measurementElapsedMs": 17135,
+    "elapsedMs": 67135,
+    "failure": "Admission refusal;12HTTP429, public unknown/overflow0",
+    "computedGates": {
+      "admissionSemanticCoverage": false,
+      "admissionTerminalReconciliation": false,
+      "admissionCallerAbortRecovery": false,
+      "admissionObservedWithoutRefusalOrUnknown": false
+    },
+    "uncomputedFullQualificationGates": "unknown; incomplete run is not pass",
+    "contextsAcquiredAndClosed": 14,
+    "completeObserverExport": true,
+    "independentFiniteCleanupPassed": true,
+    "cleanupReviewSHA256": "ffd7089ef75487280b207b3b761042f797fc5952a1c800f95dfd63bf6e578373",
+    "sourceExitCode": 255,
+    "strict300Passed": false,
+    "longEligible": false
+  },
+  "admissionDiagnosis": {
+    "acceptedBeforeRefusal": 900,
+    "http429": 12,
+    "returnTo200AfterRefusal": true,
+    "providerObservedTotalAdmissionCalls": 1040,
+    "globalRequestCapacity": 2048,
+    "perAddressRequests": 900,
+    "windowMs": 60000,
+    "addressBudgetCause": "source-backed inference from exact threshold/reset pattern; error body, address counter and windowAt not retained",
+    "observerUnknown": 0,
+    "observerOverflow": 0,
+    "callerAbortsDuringSetup": 8,
+    "r52LargestAligned60sCalls": 879,
+    "r52Admission4xx": 0
+  },
+  "requestOutcomesDiagnosis": {
+    "retainedDistinctReceiverTuples": 185,
+    "fullReceiverCounterReconciliation": true,
+    "highTimeouts": 94,
+    "highTimeoutsWithPositivePartialBytes": 84,
+    "highLifetimePayloadAssemblies": 2,
+    "lowLifetimePayloadAssemblies": 39,
+    "highUploaderRateLimitRefusals": 61,
+    "receiverUploaderWireJoinProved": false,
+    "transportPayloadIsVerifiedPlaybackAcceptance": false,
+    "specificNetworkOrCPUCauseProved": false,
+    "performanceRepairProved": false
+  },
+  "monitorRegression": {
+    "baselinePassed": false,
+    "correctedTestsPassed": 8,
+    "candidateElapsedMs": 82.11779198609293,
+    "sameHostM4StampFloored": true,
+    "m1OffsetConversionUnchanged": true,
+    "sampleFreshnessMs": 5000,
+    "pressureFreshnessMs": 15000,
+    "actualR52ClockCauseProved": false,
+    "r53StoppedOnClockFailure": false
+  },
+  "laterLocalWork": {
+    "state": "LOCAL_CANDIDATE_NOT_DEPLOYED",
+    "demoMaxPeers": 4,
+    "sdkDefaultMaxPeers": 6,
+    "sameFourteenRoleAcceptanceGatesRequired": true,
+    "resourceLimitsUnchanged": true,
+    "sixNeighbourCapacityProved": false,
+    "admissionRateReductionProved": false,
+    "newCIPassed": false,
+    "fieldQualified": false,
+    "earlySettledOfferReplayDrop": true,
+    "originalPostAwaitAdmissionAndSDPGuardsRetained": true,
+    "actualHostAdmissionCallsiteCounters": 11,
+    "automaticReportsUnchanged": true,
+    "baselineReplayRegressionPassed": false,
+    "focusedTestsPassed": 16,
+    "fullLocalTestsPassed": 194,
+    "fullLocalElapsedMs": 46037.55383286625,
+    "r53ReplayContributionProved": false,
+    "sourceFiles": {
+      "src/browser/hls-swarm.mjs": "e0ec8bfff02a4829e142684d36462124c113eb1fc929767657a55b857da8b4f3",
+      "demo/client.mjs": "f494cf395a78a5cbf06ae49e7d491056918a71109fb3fefe36eb374f4a890fca"
+    },
+    "firstFocusedCandidate": "15of16PASS; fixture read before hash-advertised HAVE; original RED retained, matching existing held-byte wait then16PASS; core unchanged"
+  },
+  "evidence": [
+    {
+      "path": "artifacts/ci-c0f337d-39152159082-20261018/ci-terminal-success.json",
+      "bytes": 22062,
+      "sha256": "a8e9ca75063d02713f861aa760d2d0a2546bea577f6e677f3456339a704c329c"
+    },
+    {
+      "path": "artifacts/clean-consumer-c0f337d-20261018/package-review.json",
+      "bytes": 6100,
+      "sha256": "e1d44adfd3c0b1fc6103fd13385975ce1f07259c680b64b4092133acb3d9d7b0"
+    },
+    {
+      "path": "artifacts/deployment-c0f337d-peer-outcomes-20261018/runtime-contract.json",
+      "bytes": 12217,
+      "sha256": "7af94618baba270e2e00038edf0222d51cef70325a2c9d0edca65f10750b1c1a"
+    },
+    {
+      "path": "artifacts/independent-deployment-c0f337d-review-20261018/review.json",
+      "bytes": 27481,
+      "sha256": "88feb766dfb25a22d5f849ac6f21a541b5a7e17320d51f44db5190c8093e7533"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-c0f337d-r52-run-20261018/browser/receipt.json",
+      "bytes": 2260657,
+      "sha256": "cf540caea4ece993aa003e0ae699ac4824a1c3b3726939b8bf25f365ec407aa6"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-c0f337d-r52-cleanup-review-20261018/review.json",
+      "bytes": 22060,
+      "sha256": "71fc73f246a0c3fdd40fa9d550c873e825af0ed8836c7b684c838846de7ffaef"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-c0f337d-r52-cleanup-review-20261018/EVIDENCE-MANIFEST.json",
+      "bytes": 3320,
+      "sha256": "01353cdbd3c6226df93c2c3bd9c954bbe77f07a3081c6035954828985853a68e"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-c0f337d-r53-run-20261018/browser/receipt.json",
+      "bytes": 1822743,
+      "sha256": "af681addcc439928883985d31bd971141a5a5faf0c43dc3e4fc7e7d56e9700da"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-c0f337d-r53-cleanup-review-20261018/review.json",
+      "bytes": 22345,
+      "sha256": "ffd7089ef75487280b207b3b761042f797fc5952a1c800f95dfd63bf6e578373"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-c0f337d-r53-cleanup-review-20261018/EVIDENCE-MANIFEST.json",
+      "bytes": 3321,
+      "sha256": "def852230825d79eb2787d828d6572cf5d4c4ea64b818771ccfca0da14e5dadc"
+    },
+    {
+      "path": "artifacts/peer-request-outcomes-c0f337d-r52-diagnosis-20261018/NUMERIC-FINDINGS.json",
+      "bytes": 29955,
+      "sha256": "8a83de1c1db4674db61ee96fce609c902351e952aa36e88d1040073f69328507"
+    },
+    {
+      "path": "artifacts/resource-age-millisecond-baseline-root-20261018/RESULTS.json",
+      "bytes": 2338,
+      "sha256": "8fdc2a57da3c2fa590f71ed5cc9813f570d0936d2cdbf501ab830d496324046a"
+    },
+    {
+      "path": "artifacts/resource-age-millisecond-candidate-root-20261018/RESULTS.json",
+      "bytes": 2242,
+      "sha256": "0ad44a4ced103ac5e8cf29c95ba9b8bd703afab45c78c4c70f5a6ef788458cc1"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-c0f337d-r53-run-20261018/controller-receipt.json",
+      "bytes": 7207,
+      "sha256": "94cf6c5f08515537b66ab9e7f2715999696c057d180087ee5219752dd2196643"
+    },
+    {
+      "path": "artifacts/admission-replay-baseline-root-20261018/RESULTS.json",
+      "bytes": 926,
+      "sha256": "d7a8a3bb1d35544947d80bb67f2d7207fbe73b00c5b8ece25dff820585fdb5a9"
+    },
+    {
+      "path": "artifacts/admission-replay-candidate-root-20261018/RESULTS.json",
+      "bytes": 1049,
+      "sha256": "9ad13f9c119f7ea7fadd89924d4b5613f0aca94a00e02dd840131ec2a1df4ed1"
+    },
+    {
+      "path": "artifacts/admission-replay-candidate-r2-root-20261018/RESULTS.json",
+      "bytes": 1055,
+      "sha256": "96b51b14d01563d33d509144f6aa8ff39c7f82aedc85cd0773429bf70a394a8d"
+    },
+    {
+      "path": "artifacts/admission-replay-outcomes-full-root-20261018/RESULTS.json",
+      "bytes": 1397,
+      "sha256": "0f2c2c578d295a2e50e133b5b8e27ecbeeee4f8780575837a316e8ec5a0cec8f"
+    }
+  ]
+}

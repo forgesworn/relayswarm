@@ -1742,7 +1742,7 @@ async function glareFixture(t, { polite = true, hold, gathering = false, rollbac
   peer.onSignal(({ payload }) => received.push(payload));
   const swarm = createHlsSwarm({ ...base, secretKey, WebSocketImpl: Socket, RTCPeerConnectionImpl: StatefulPC,
     relays: [relayURL], maxPeers: 1, maxDialsInFlight: 1, dialTimeoutMs: timeout, ticket: "local-ticket", maxRetriesPerPeer: 0,
-    admit(_pubkey, ticket) { state.checks.push(ticket); connections[0]?.trace.push(`admit:${ticket}`); return state.allow; } });
+    admit(_pubkey, ticket) { state.checks.push(ticket); connections[0]?.trace.push(`admit:${ticket}`); return state.admit ? state.admit(ticket) : state.allow; } });
   swarm.attach({ config: { loader: Loader } });
   await glareFlush(); assert.equal(swarm.metrics().pubkey, getPublicKey(secretKey));
   const signal = (type, requestId, sdp = `native-remote-${type}`, ticket = "remote-ticket") => peer.sendSignal(swarm.metrics().pubkey,
@@ -1824,6 +1824,103 @@ test("incoming distinct requests retain supersession while duplicate or supersed
   assert.equal(f.connections[0].closes, 1); assert.equal(f.connections[1].closes, 0);
   f.offer("first-incoming"); await glareFlush(); assert.equal(f.connections.length, 2);
   assert.equal(f.swarm.metrics().transportDiagnostics.counters["dial-end"].superseded, 1);
+});
+
+test("settled incoming offer replay avoids another admission callback or native mutation", async t => {
+  const f = await glareFixture(t);
+  f.offer("settled-private-request"); await glareFlush();
+  assert.equal(f.swarm.metrics().peers.offersAccepted, 1);
+  const checks = f.state.checks.length, trace = [...f.connections[0].trace], replies = [...f.received];
+  // A fresh encrypted event carrying the same request must be dropped even
+  // after its original admission promise has settled.
+  f.state.allow = false;
+  f.offer("settled-private-request"); await glareFlush();
+  assert.equal(f.state.checks.length, checks, "a settled replay must not call the host again");
+  assert.deepEqual(f.connections[0].trace, trace);
+  assert.deepEqual(f.received, replies);
+  assert.equal(f.connections.length, 1);
+  assert.equal(f.connections[0].closes, 0);
+});
+
+test("admission callsite diagnostics count coalesced callbacks and return copied redacted counters", async t => {
+  const f = await glareFixture(t), pending = glareDeferred();
+  f.state.admit = () => pending.promise;
+  t.after(() => pending.release(true));
+  f.offer("coalesced-private-request"); f.offer("coalesced-private-request"); await glareFlush();
+  assert.equal(f.state.checks.length, 1);
+  assert.equal(f.connections.length, 0);
+  assert.equal(f.swarm.metrics().admissionDiagnostics.calls.offerIncoming, 1);
+  pending.release(true); await glareFlush();
+  assert.equal(f.swarm.metrics().peers.offersAccepted, 1, "post-await replay guard must still select one offer");
+  assert.equal(f.connections.length, 1);
+  const calls = f.swarm.metrics().admissionDiagnostics.calls;
+  assert.equal(calls.offerIncoming, 1); assert.equal(calls.answerBeforeSend, 1);
+  assert.deepEqual(Object.keys(calls), ["presence", "dialStart", "offerBeforeSend", "offerIncoming", "answerIncoming", "glareBeforeRollback", "glareAfterRollback", "answerBeforeSend", "upload", "refresh", "other"]);
+  assert.equal(Object.values(calls).reduce((a, b) => a + b, 0), f.state.checks.length);
+  assert.ok(Object.values(calls).every(value => Number.isSafeInteger(value) && value >= 0));
+  for (const secret of [f.peer.pubkey, "coalesced-private-request", "remote-ticket", "local-ticket", "native-remote-offer"]) assert.ok(!JSON.stringify(calls).includes(secret));
+  calls.offerIncoming = Number.MAX_SAFE_INTEGER; calls.extra = "private";
+  assert.equal(f.swarm.metrics().admissionDiagnostics.calls.offerIncoming, 1);
+  assert.equal(Object.keys(f.swarm.metrics().admissionDiagnostics.calls).length, 11);
+});
+
+test("admission callsite diagnostics retain refusal and fresh admission for an unseen request", async t => {
+  const f = await glareFixture(t);
+  f.state.allow = false; f.offer("previously-refused"); await glareFlush();
+  assert.equal(f.state.checks.length, 1); assert.equal(f.connections.length, 0); assert.equal(f.received.length, 0);
+  assert.equal(f.swarm.metrics().admissionDiagnostics.calls.offerIncoming, 1);
+  f.state.allow = true; f.offer("previously-refused"); await glareFlush();
+  assert.equal(f.connections.length, 1); assert.equal(f.swarm.metrics().peers.offersAccepted, 1);
+  assert.equal(f.swarm.metrics().admissionDiagnostics.calls.offerIncoming, 2);
+  assert.equal(f.swarm.metrics().admissionDiagnostics.calls.answerBeforeSend, 1);
+});
+
+test("admission callsite diagnostics preserve stop and post-await replay guards", async t => {
+  const f = await glareFixture(t), pending = glareDeferred();
+  f.state.admit = () => pending.promise; t.after(() => pending.release(true));
+  f.offer("late-private-request"); f.offer("late-private-request"); await glareFlush();
+  assert.equal(f.state.checks.length, 1);
+  f.swarm.stop(); pending.release(true); await glareFlush();
+  assert.equal(f.connections.length, 0); assert.equal(f.received.length, 0);
+  const calls = f.swarm.metrics().admissionDiagnostics.calls;
+  assert.equal(calls.offerIncoming, 1); assert.equal(calls.answerBeforeSend, 0);
+  f.offer("after-stop"); await glareFlush();
+  assert.deepEqual(f.swarm.metrics().admissionDiagnostics.calls, calls);
+});
+
+test("admission callsite diagnostics distinguish each outgoing and glare authority boundary", async t => {
+  const f = await glareFixture(t); await f.start();
+  assert.deepEqual(Object.entries(f.swarm.metrics().admissionDiagnostics.calls).filter(([, count]) => count), [["presence", 1], ["dialStart", 1], ["offerBeforeSend", 1]]);
+  f.offer(); await glareFlush();
+  const calls = f.swarm.metrics().admissionDiagnostics.calls;
+  for (const site of ["presence", "dialStart", "offerBeforeSend", "offerIncoming", "glareBeforeRollback", "glareAfterRollback", "answerBeforeSend"]) assert.equal(calls[site], 1, site);
+  assert.equal(Object.values(calls).reduce((a, b) => a + b, 0), f.state.checks.length);
+  assert.equal(calls.answerIncoming, 0); assert.equal(calls.upload, 0);
+});
+
+test("admission callsite diagnostics count the incoming answer before native installation", async t => {
+  const f = await glareFixture(t, { polite: false }), pc = await f.start();
+  const outgoing = f.received.find(value => value.type === "offer");
+  f.state.allow = false; f.signal("answer", outgoing.requestId); await glareFlush();
+  assert.equal(f.swarm.metrics().admissionDiagnostics.calls.answerIncoming, 1);
+  assert.equal(pc.trace.includes("remote:answer"), false); assert.equal(pc.closes, 1);
+});
+
+test("admission callsite diagnostics count fresh upload checks without granting revoked bytes", async () => {
+  let allowed = true, checks = 0;
+  const f = await linkedFixture({ WebSocketImpl: memoryRelaySocket(), serve: true, admit: () => { checks++; return allowed; } });
+  try {
+    const channel = await f.addPeer(); await f.load();
+    await until(() => f.swarm.metrics().bytes.held === 32);
+    const key = channel.sent.find(frame => frame.t === "have" && frame.add?.length).add[0];
+    allowed = false; channel.receive(JSON.stringify({ t: "want", id: 1, k: key }));
+    await until(() => channel.readyState === "closed");
+    const calls = f.swarm.metrics().admissionDiagnostics.calls;
+    assert.equal(calls.upload, 1); assert.equal(calls.offerIncoming, 1); assert.equal(calls.answerBeforeSend, 1);
+    assert.equal(Object.values(calls).reduce((a, b) => a + b, 0), checks);
+    assert.equal(f.swarm.metrics().bytes.uploaded, 0);
+    assert.equal(channel.sent.filter(frame => frame.t === "meta" || frame.t === "eof").length, 0);
+  } finally { await f.close(); }
 });
 
 for (const phase of ["createOffer", "local:offer", "local:rollback", "remote:offer"]) test(`stop fences a late ${phase} completion after glare and closes its PC once`, async t => {

@@ -144,6 +144,7 @@ const PEER_ELIGIBILITY_REASONS = Object.freeze([
   "wait-no-longer-eligible", "wait-aborted", "wait-expired", "have-at-entry", "have-after-wait",
 ]);
 const PEER_REQUEST_OUTCOMES = Object.freeze(["payload", "none", "timeout", "abort", "closed", "busy", "send-error"]);
+const ADMISSION_CALL_SITES = Object.freeze(["presence", "dialStart", "offerBeforeSend", "offerIncoming", "answerIncoming", "glareBeforeRollback", "glareAfterRollback", "answerBeforeSend", "upload", "refresh", "other"]);
 const UPLOAD_REFUSAL_REASONS = Object.freeze([
   "admission", "not-held", "not-serving", "banned", "session-allowance", "peer-limit", "rate-limit",
   "reservation-refused", "reservation-inactive",
@@ -279,6 +280,7 @@ class HlsSwarm {
     this.peerRequestDropped = 0;
     this.peerRequestCounters = Object.fromEntries(PEER_REQUEST_OUTCOMES.map((outcome) => [outcome, 0]));
     this.uploadRefusalCounters = Object.fromEntries(UPLOAD_REFUSAL_REASONS.map((reason) => [reason, 0]));
+    this.admissionCallCounters = Object.fromEntries(ADMISSION_CALL_SITES.map((site) => [site, 0]));
     this.disabledReason = this.#validate();
     this.stopped = false;
     this.lifecycle = new AbortController();
@@ -525,6 +527,9 @@ class HlsSwarm {
         records: this.peerRequestRecords.map((record) => ({ ...record })),
       },
       uploadRefusalDiagnostics: { counters: { ...this.uploadRefusalCounters } },
+      // Actual host callbacks only, not coalesced waiters. Fixed local counters;
+      // no credentials, peer identities or automatic report fields.
+      admissionDiagnostics: { calls: { ...this.admissionCallCounters } },
       signalling: {
         samples: this.signallingSamples.length,
         medianMs: percentile(this.signallingSamples, 0.5),
@@ -1285,7 +1290,7 @@ class HlsSwarm {
   }
 
   async #serveRequest(link, key) {
-    if (this.options.admit && !(await this.#admits(link.pubkey, this.admitted.get(link.pubkey)?.ticket))) {
+    if (this.options.admit && !(await this.#admits(link.pubkey, this.admitted.get(link.pubkey)?.ticket, "upload"))) {
       this.#refuseUpload("admission");
       link.close("admission");
       return null;
@@ -1585,7 +1590,7 @@ class HlsSwarm {
 
   // Remember credentials for retries, but ask the host again before any SDP
   // is disclosed. An opaque ticket's expiry cannot be inferred by this module.
-  async #admits(pubkey, ticket) {
+  async #admits(pubkey, ticket, callsite = "other") {
     if (this.stopped) return false;
     if (!this.#gated()) return true;
     if (!validTicket(ticket)) { this.counters.admitRefused += 1; return false; }
@@ -1596,7 +1601,15 @@ class HlsSwarm {
     check.promise = (async () => {
       let ok = false;
       try {
-        ok = await boundedOperation((signal) => this.options.admit(pubkey, ticket, { signal }), this.lifecycle.signal, this.options.admissionTimeoutMs) === true;
+        ok = await boundedOperation((signal) => {
+          // Instrument only the callback that actually runs. Diagnostic failure
+          // must never alter the host's decision or cancellation ownership.
+          try {
+            const site = ADMISSION_CALL_SITES.includes(callsite) ? callsite : "other";
+            this.admissionCallCounters[site] = increment(this.admissionCallCounters[site]);
+          } catch { /* Local diagnostics are best effort. */ }
+          return this.options.admit(pubkey, ticket, { signal });
+        }, this.lifecycle.signal, this.options.admissionTimeoutMs) === true;
       } catch (error) { this.#noteError("admit", error); }
       if (this.stopped || this.admissionChecks.get(pubkey) !== check) return false;
       if (ok) {
@@ -1618,7 +1631,7 @@ class HlsSwarm {
       const latest = check.latestPresence;
       if (latest && !this.stopped && (this.links.has(pubkey) || this.dials.has(pubkey))) {
         this.#guard("admission-refresh", async () => {
-          if (await this.#admits(pubkey, latest.ticket)) {
+          if (await this.#admits(pubkey, latest.ticket, "refresh")) {
             if (latest.open !== null) this.#rememberOpen(pubkey, latest.open);
           }
         });
@@ -1656,7 +1669,7 @@ class HlsSwarm {
       if (validTicket(payload.ticket) && payload.ticket !== pending.ticket) pending.latestPresence = { ticket: payload.ticket, open: payload.open };
       return;
     }
-    if (!(await this.#admits(from, payload.ticket)) || this.stopped) return;
+    if (!(await this.#admits(from, payload.ticket, "presence")) || this.stopped) return;
     if (payload.open !== null) this.#rememberOpen(from, payload.open);
     if (this.links.has(from) || this.dials.has(from) || this.#coolingDown(from) || !this.#hasCapacity()) return;
     // The `open` hint is not a gate. Skipping peers that say they are full cost
@@ -1790,7 +1803,7 @@ class HlsSwarm {
     }
     this.dialChecks.add(pubkey);
     try {
-      if (!(await this.#admits(pubkey, discovery ? discovery.ticket : this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket))) {
+      if (!(await this.#admits(pubkey, discovery ? discovery.ticket : this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket, "dialStart"))) {
         if (discovery) { this.discovery.abandoned(discovery); this.cooldowns.set(pubkey, Date.now() + 60_000); }
         return;
       }
@@ -1826,7 +1839,7 @@ class HlsSwarm {
         if (!this.#currentNegotiation(dial, negotiation)) return;
         await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "offer", outcome); });
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket))) {
+        if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket, "offerBeforeSend"))) {
           if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
           return;
         }
@@ -1875,7 +1888,7 @@ class HlsSwarm {
       const negotiation = dial.negotiation;
       if (negotiation.answerPending) return;
       this.#transport(dial.pc, "answer-received", "authenticated");
-      if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) {
+      if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null, "answerIncoming"))) {
         if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
         return;
       }
@@ -1909,14 +1922,18 @@ class HlsSwarm {
     this.#expireDiscovery();
     if (this.discovery.suppresses(from)) return;
     if (this.banned.has(from) || this.links.has(from)) return;
+    const offerKey = `${from}:${payload.requestId}`;
+    const incoming = this.dials.get(from);
+    // A previously admitted request grants no new work. Drop it without a
+    // reply or host call, retaining the post-await check for simultaneous offers.
+    if ((incoming && !incoming.outgoing && incoming.requestId === payload.requestId) || this.receivedOffers.has(offerKey)) return;
     this.#transport(this.dials.get(from)?.pc, "offer-received", "authenticated");
     // Checked before anything is answered: the answer's SDP carries this
     // viewer's address. An unadmitted offer is dropped without a reply.
-    if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null)) || this.stopped || this.links.has(from)) return;
+    if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null, "offerIncoming")) || this.stopped || this.links.has(from)) return;
     this.#expireDiscovery();
     if (this.discovery.suppresses(from)) return;
     const existing = this.dials.get(from);
-    const offerKey = `${from}:${payload.requestId}`;
     if ((existing && !existing.outgoing && existing.requestId === payload.requestId) || this.receivedOffers.has(offerKey)) return;
     // Retain only admitted request IDs, never SDP. A replay cannot replace the
     // active dial or reset its timer. History is private to this swarm lifetime.
@@ -1959,7 +1976,7 @@ class HlsSwarm {
         if (reuse) {
           // Admission at receipt cannot authorise mutation after waiting for an
           // old native call. Keep the same deadline while checking again.
-          if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) {
+          if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null, "glareBeforeRollback"))) {
             if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
             return;
           }
@@ -1974,7 +1991,7 @@ class HlsSwarm {
             || !["new", "connecting"].includes(pc.connectionState) || !["new", "checking"].includes(pc.iceConnectionState)) throw new Error("Pending negotiation unavailable.");
           // Rollback is itself asynchronous: authority may expire or be revoked
           // while it runs. Recheck before installing the remote description.
-          if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) {
+          if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null, "glareAfterRollback"))) {
             if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
             return;
           }
@@ -1991,7 +2008,7 @@ class HlsSwarm {
         if (!this.#currentNegotiation(dial, negotiation)) return;
         await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "answer", outcome); });
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null))) {
+        if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null, "answerBeforeSend"))) {
           if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
           return;
         }

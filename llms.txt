@@ -43,7 +43,7 @@ provides authenticated operator policy, bounded admission and durable idempotent
 opt-in numeric reports. Upload budgets persist across reloads/tabs without consent.
 Optional Nostr or host website accounts share a private durable allowance across
 devices; account changes leave uploading off until fresh consent. The deployed
-44b21d6 pilot offers Nostr; integrating websites supply their own account resolver.
+c0f337d pilot offers Nostr; integrating websites supply their own account resolver.
 Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The example origin adds bounded blocking reload for compatible complete live
 playlists across all renditions, with 24 waiters inside 32 media requests.
@@ -65,7 +65,7 @@ Peer-first media loads/bytes avoided are not net connection-data savings, and
 upload counters measure committed media payload rather than acknowledged delivery.
 Pending durable reservations can consume quota without entering those counters.
 Documentation on main can include corrections after the immutable releases.
-Current deployed source `44b21d6`. Nine required CI jobs, fresh 273-member package
+Current deployed source `c0f337d`. Nine required CI jobs, fresh 276-member package
 consumption and guarded HTTPS deployment passed. Bounded rendition-neighbour
 discovery and cold-peer deadline allocation are deployed. Nostr and an
 authenticated host-supplied account API are implemented; integrating websites
@@ -73,10 +73,17 @@ supply their authentication. The pilot selects 900 address requests per minute;
 the default remains 600 and global capacity 2,048.
 
 The agreed feature surfaces are implemented, but production acceptance is
-incomplete. R30 measured 36.188 seconds with fourteen roles before a contributor recorded
-an 82 ms origin-only interval. Recovery does not satisfy uninterrupted authority;
-all owned cleanup passed independent review. Delayed session/renewal timings
-fit the gap, without proving exact request/clock joins or downstream cause.
+incomplete. R52 stopped after 156.325 seconds on a future resource timestamp;
+its exact failing clock values were not retained. A controlled millisecond-domain
+monitor regression and eight-check correction pass. R53 stopped after 17.135 seconds
+on admission refusal: twelve HTTP 429 and a 900-success/refusal/reset pattern
+support address-budget exhaustion; the server error body was not retained.
+Both owned cleanups passed independent review. The local candidate explicitly
+selects four demo neighbours; the SDK default stays six, and all original
+fourteen-viewer/eight-contributor/both-quality gates remain required. This
+profile is not yet deployed or field-qualified.
+Local settled-offer replay dropping and eleven admission callback-site counters
+pass sixteen focused and 194 combined tests; field-load improvement remains unproved.
 Matching capacity, two-hour/churn, natural expiry, physical/browser breadth,
 difficult networks, measured wire/cost benefit and final release/download
 acceptance remain open. v0.1.0 is published; 0.2.0 remains the source candidate.
