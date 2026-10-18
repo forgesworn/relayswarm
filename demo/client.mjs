@@ -129,7 +129,7 @@ function configure() {
         return peerAuthorityFresh(configuredSession) && !signal.aborted && result.admitted === true && result.epoch === configuredSession.admission.epoch;
       } catch { return false; }
     } } : {}),
-    reserveUploadBytes: async (amount, options) => peerAuthorityFresh(configuredSession) && accountBudget.snapshot().available && !options?.signal?.aborted && await uploadBudget.reserve(amount, options) && peerAuthorityFresh(configuredSession) && !options?.signal?.aborted && await accountBudget.reserve(amount, options) && peerAuthorityFresh(configuredSession) && !options?.signal?.aborted,
+    reserveUploadBytes: async (amount, options) => peerAuthorityFresh(configuredSession) && accountBudget.snapshot().available && !options?.signal?.aborted && await uploadBudget.reserve(amount, options) && peerAuthorityFresh(configuredSession) && !options?.signal?.aborted && await accountBudget.reserve(amount) && peerAuthorityFresh(configuredSession) && !options?.signal?.aborted,
     serve: activeConfig.upload, maxUploadBytesPerSession: remaining, maxUploadBytesPerSecond: activeConfig.uploadLimit, serveOnCellular: activeConfig.cellular,
     iceTransportPolicy: iceTransportPolicy(session), ...(iceServers ? { iceServers } : {}),
   });

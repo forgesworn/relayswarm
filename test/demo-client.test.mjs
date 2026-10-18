@@ -1,7 +1,7 @@
 import { createObservation, publicTimeline } from "./support/broadcast-availability-observer.mjs";
 import { transform } from "./support/broadcast-availability-transform.mjs";
 import { extractFinal } from "./support/broadcast-final-extraction.mjs";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, realpath, rm } from "node:fs/promises";
 import { installFmp4StartupObserver } from "./support/fmp4-startup-observer.mjs";
 import { observedFmp4Client } from "./support/fmp4-observed-demo.mjs";
 import test from "node:test";
@@ -12,10 +12,13 @@ import { webcrypto } from "node:crypto";
 import http from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { generateSecretKey, getPublicKey, finalizeEvent } from "nostr-tools/pure";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createAccountBudgetControls } from "../demo/account-budget.mjs";
 
 const bundle = await build({ entryPoints: ["demo/client.mjs"], bundle: true, write: false, format: "esm", plugins: [{ name: "fixture", setup(builder) {
   builder.onResolve({ filter: /^(hls\.js|\.\.\/src\/browser\/hls-swarm\.mjs)$/ }, (args) => ({ path: args.path, namespace: "fixture" }));
-  builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={MANIFEST_PARSED:'manifest',FRAG_LOADED:'fragment',LEVEL_SWITCHED:'level',LEVEL_UPDATED:'update',ERROR:'error'}; static isSupported(){return !globalThis.fixture.nativeHls;} constructor(){this.config={};this.callbacks=new Map();this.levels=[];this.id=globalThis.fixture.players.length;globalThis.fixture.players.push(this);} on(name,callback){this.callbacks.set(name,callback);} emit(name,data){this.callbacks.get(name)?.('',data);} loadSource(){globalThis.fixture.sourceLoads++;globalThis.fixture.playerOperations.push(['load-source',this.id]);} attachMedia(){} destroy(){this.destroyImpl?.();this.destroyed=true;globalThis.fixture.playerOperations.push(['destroy',this.id]);} stopLoad(){globalThis.fixture.playerOperations.push(['stop',this.id]);} startLoad(){globalThis.fixture.playerOperations.push(['start',this.id]);} recoverMediaError(){globalThis.fixture.playerOperations.push(['recover',this.id]);} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0, tickets:[]}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;}, updateTicket(ticket){if(record.stopped||globalThis.fixture.rejectTicketUpdates||globalThis.fixture.disabledSwarm)return false; options.ticket=ticket; record.tickets.push(ticket); return true;}, attach(hls){if(globalThis.fixture.disabledSwarm)return;hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, metrics(){return {mode:globalThis.fixture.disabledSwarm?'off':options.mode, disabledReason:globalThis.fixture.disabledSwarm?'no-webrtc':null, serving:!globalThis.fixture.disabledSwarm&&options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
+  builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={MANIFEST_PARSED:'manifest',FRAG_LOADED:'fragment',LEVEL_SWITCHED:'level',LEVEL_UPDATED:'update',ERROR:'error'}; static isSupported(){return !globalThis.fixture.nativeHls;} constructor(){this.config={};this.callbacks=new Map();this.levels=[];this.id=globalThis.fixture.players.length;globalThis.fixture.players.push(this);} on(name,callback){this.callbacks.set(name,callback);} emit(name,data){this.callbacks.get(name)?.('',data);} loadSource(){globalThis.fixture.sourceLoads++;globalThis.fixture.playerOperations.push(['load-source',this.id]);} attachMedia(){} destroy(){this.destroyImpl?.();this.destroyed=true;globalThis.fixture.playerOperations.push(['destroy',this.id]);} stopLoad(){globalThis.fixture.playerOperations.push(['stop',this.id]);} startLoad(){globalThis.fixture.playerOperations.push(['start',this.id]);} recoverMediaError(){globalThis.fixture.playerOperations.push(['recover',this.id]);} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0, tickets:[], lifecycle:new AbortController()}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;record.lifecycle.abort();}, updateTicket(ticket){if(record.stopped||globalThis.fixture.rejectTicketUpdates||globalThis.fixture.disabledSwarm)return false; options.ticket=ticket; record.tickets.push(ticket); return true;}, attach(hls){if(globalThis.fixture.disabledSwarm)return;hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, metrics(){return {mode:globalThis.fixture.disabledSwarm?'off':options.mode, disabledReason:globalThis.fixture.disabledSwarm?'no-webrtc':null, serving:!globalThis.fixture.disabledSwarm&&options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
 } }] });
 async function page(storage = new Map(), { realClock = false, fetchImpl, nativeHls = false, initialTurnCredentials, inlinePolicySession = false } = {}) {
   const elements = new Map(), intervals = [], timers = new Map(), windowEvents = new Map(), documentEvents = new Map();
@@ -1066,6 +1069,94 @@ test("TURN demo refresh recycles active peers while preserving consent, admissio
     assert.equal(p.fixture.sourceLoads, 1); assert.equal(p.turnCalls.length, 2);
   } finally { p.close(); }
 });
+
+// The account HTTP transport and durable charge are real; media and Swarm are
+// fixtures, including the same stop→lifecycle abort used by the maintained SDK.
+test("TURN refresh settles an already charged account reservation without granting an aborted upload", {
+  skip: !["darwin", "linux"].includes(process.platform) ? "Durable account state requires POSIX file permissions." : false,
+  timeout: 5000,
+}, async t => {
+  let p, controls, server, directory, held, release, charged;
+  const committed = new Promise(resolve => { charged = resolve; });
+  t.after(async () => {
+    const cleanup = await Promise.allSettled([
+      Promise.resolve().then(() => p?.close()),
+      Promise.resolve().then(async () => {
+        held?.destroy(); server?.closeAllConnections();
+        if (server?.listening) await new Promise(resolve => server.close(resolve));
+      }),
+      Promise.resolve().then(() => controls?.close()),
+    ]);
+    if (directory) await rm(directory, { recursive: true, force: true });
+    assert.ok(cleanup.every(row => row.status === "fulfilled"), "Every owned overlap fixture must close");
+  });
+  p = await page();
+  directory = await mkdtemp(join(await realpath(tmpdir()), "relayswarm-turn-account-overlap-"));
+  const statePath = join(directory, "account.json");
+  controls = createAccountBudgetControls({ statePath, now: () => p.context.Date.now() });
+  await controls.ready();
+  let holdNext = true;
+  server = http.createServer((request, response) => {
+    const path = new URL(request.url, "https://viewer.example").pathname;
+    if (path === "/account-budget/reserve" && holdNext) {
+      holdNext = false;
+      const end = response.end.bind(response);
+      response.end = (body, ...args) => {
+        held = response;
+        const value = JSON.parse(String(body));
+        release = () => { if (!response.destroyed) end(body, ...args); };
+        charged(value); return response;
+      };
+    }
+    // The VM's configured public origin is preserved; only its transport maps
+    // to this loopback listener. No origin/signature/ledger check is bypassed.
+    controls.handle(request, response, path, "https://viewer.example").then(handled => {
+      if (!handled) response.writeHead(404).end();
+    }).catch(() => response.destroy());
+  });
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const base = `http://127.0.0.1:${server.address().port}`, stable = generateSecretKey(); let signatures = 0;
+  p.fixture.session.accountBudget = controls.descriptor();
+  p.fixture.session.admission = { issuer: "issuer", epoch: "epoch", challengeEndpoint: "/admission-challenge", ticketEndpoint: "/admission-ticket", verifyEndpoint: "/admission-verify" };
+  p.fixture.fetch = url => url.startsWith("/admission-")
+    ? { ...p.fixture.session.admission, swarmId: p.fixture.session.swarmId, challenge: "challenge", ticket: "private-overlap-ticket", expiresAt: Math.floor(p.context.Date.now() / 1000) + 300 }
+    : url === "/session.json" ? p.fixture.session : p.fixture.policy;
+  p = await turnPage(p);
+  const turnResponse = p.fixture.response;
+  p.fixture.response = (url, init) => url.startsWith("/account-budget/")
+    ? fetch(new URL(url, base), { ...init, headers: { ...init.headers, origin: "https://viewer.example" } })
+    : turnResponse(url, init);
+  p.context.window.nostr = { getPublicKey: async () => getPublicKey(stable), signEvent: async event => {
+    signatures++; return finalizeEvent(JSON.parse(JSON.stringify(event)), stable);
+  } };
+  await p.element("account-connect").click();
+  p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
+  const first = p.fixture.swarms.at(-1), before = p.context.window.relaySwarmDemo.report();
+  assert.equal(first.options.serve, true); assert.equal(before.accountBudget.available, true);
+  const pending = first.options.reserveUploadBytes(77, { signal: first.lifecycle.signal });
+  const decision = await committed;
+  assert.equal(decision.accepted, true); assert.equal(decision.reservedBytes, 77);
+  assert.equal(decision.snapshot.spent, 77);
+  const durable = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(durable.accounts.reduce((sum, account) => sum + (account.spent ?? 0), 0), 77);
+  p.jumpWithoutTimers(4000); await p.poll();
+  p.fireTimer(ms => ms > 3000 && ms <= 4000); await settleTurn();
+  assert.equal(first.stopped, true); assert.equal(first.lifecycle.signal.aborted, true);
+  release();
+  assert.equal(await pending, false, "A committed account charge cannot authorise the stopped media operation");
+  const next = p.fixture.swarms.at(-1), report = p.context.window.relaySwarmDemo.report();
+  assert.equal(report.accountBudget.available, true, "Normal TURN refresh must not revoke the independent account grant");
+  assert.equal(report.accountBudget.spent, 77); assert.equal(report.uploadBudget.spent, 77);
+  assert.equal(report.accountBudget.generation, before.accountBudget.generation);
+  assert.equal(p.element("upload").checked, true); assert.equal(next.options.serve, true); assert.notEqual(next, first);
+  assert.equal(next.options.secretKey, first.options.secretKey); assert.equal(next.options.ticket, first.options.ticket);
+  assert.equal(report.turnCredentials.refreshes, 2); assert.equal(signatures, 1); assert.equal(report.totals.uploaded, 0);
+  assert.equal(await next.options.reserveUploadBytes(5, { signal: next.lifecycle.signal }), true);
+  const after = p.context.window.relaySwarmDemo.report();
+  assert.equal(after.accountBudget.spent, 82); assert.equal(after.uploadBudget.spent, 82);
+  assert.equal(JSON.parse(await readFile(statePath, "utf8")).accounts.reduce((sum, account) => sum + (account.spent ?? 0), 0), 82);
+});
+
 test("TURN demo expiry and page suspension stay fail-closed until fresh explicit Apply without restoring upload", async () => {
   const p = await turnPage();
   try {

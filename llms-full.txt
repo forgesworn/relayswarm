@@ -5391,6 +5391,13 @@ grant and remaining allowance, and durably commits the charge before returning
 acceptance. Repeating the exact same reservation operation does not charge it
 again; reusing its operation ID for a different amount is refused.
 
+The demo checks media-operation and account authority before submitting an
+account reservation. That request then uses the account client's own lifecycle
+and five-second deadline. A routine peer refresh can therefore settle the charge
+without revoking the account; the cancelled media operation cannot send bytes.
+Explicit account revocation still cancels the request, and an unknown or invalid
+result revokes account authority.
+
 An accepted or ambiguous reservation remains charged after cancellation,
 disconnect or crash. There are no automatic refunds, retries or allowance
 resets. A failure between the local and remote reservations can therefore
