@@ -2068,6 +2068,28 @@ test("full idle neighbourhood discovers an admitted requested-rendition seeder w
 
 test("saturated requested-rendition repair replaces one idle link at each admitted endpoint", { timeout: 5_000 }, async t => {
   const playback = peerPlaybackOptions(300), WebSocketImpl = memoryRelaySocket();
+  playback.bytes = new Uint8Array(210_000).fill(9);
+  const signed = signedFixture({ key: playback.key, size: playback.bytes.byteLength,
+    sha256: createHash("sha256").update(playback.bytes).digest("hex") });
+  Object.assign(playback.options, { streamEvent: signed.options.streamEvent, getCommitment: () => signed.event });
+  class PayloadLoader extends Loader {
+    load(context, _config, callbacks) { callbacks.onSuccess({ data: playback.bytes.slice().buffer }, this.stats, context, null); }
+  }
+  class PairedChannel extends RecordedChannel {
+    send(data) {
+      super.send(data);
+      const copy = typeof data === "string" ? data : data.slice().buffer;
+      queueMicrotask(() => { if (this.readyState === "open" && this.other.readyState === "open") this.other.receive(copy); });
+    }
+    close() { if (this.readyState === "closed") return; super.close(); this.other.close(); }
+  }
+  const requesterChannel = new PairedChannel(), targetChannel = new PairedChannel();
+  requesterChannel.other = targetChannel; targetChannel.other = requesterChannel;
+  let outgoingChannels = 0;
+  t.mock.method(PC.prototype, "createDataChannel", () => {
+    assert.equal(++outgoingChannels, 1, "only the actual repair creates an outgoing channel");
+    return requesterChannel;
+  });
   const requesterSecret = generateSecretKey(), targetSecret = generateSecretKey();
   const requesterKey = getPublicKey(requesterSecret), targetKey = getPublicKey(targetSecret);
   const realNow = Date.now; let age = 0, repair = false;
@@ -2076,10 +2098,10 @@ test("saturated requested-rendition repair replaces one idle link at each admitt
   try {
     requester = await linkedFixture({ ...playback.options, WebSocketImpl, maxPeers: 4,
       secretKey: requesterSecret, ticket: "requester-ticket",
-      admit: (key, ticket) => ticket === "fixture-ticket" || repair && key === targetKey && ticket === "target-ticket" });
+      admit: (key, ticket) => ticket === "fixture-ticket" || repair && key === targetKey && ticket === "target-ticket" }, PayloadLoader);
     target = await linkedFixture({ ...playback.options, WebSocketImpl, maxPeers: 4, serve: true,
       secretKey: targetSecret, ticket: "target-ticket",
-      admit: (key, ticket) => ticket === "fixture-ticket" || repair && key === requesterKey && ticket === "requester-ticket" });
+      admit: (key, ticket) => ticket === "fixture-ticket" || repair && key === requesterKey && ticket === "requester-ticket" }, PayloadLoader);
     const requesterChannels = [], targetChannels = [];
     for (let i = 0; i < 4; i++) {
       requesterChannels.push(await requester.addPeer());
@@ -2117,12 +2139,31 @@ test("saturated requested-rendition repair replaces one idle link at each admitt
     assert.equal(target.swarm.metrics().peers.evicted, 1,
       "a serving saturated target holding the exact requested key must permit the same bounded idle replacement");
     assert.equal(offers[0].payload.requestedKey, playback.key, "only this actual discovery key is advised");
-    const incoming = new Event("datachannel"); incoming.channel = new RecordedChannel();
+    const incoming = new Event("datachannel"); incoming.channel = targetChannel;
     target.connections[4].dispatchEvent(incoming);
     await until(() => requester.swarm.metrics().peers.connected === 4 && target.swarm.metrics().peers.connected === 4);
     assert.equal(targetChannels.filter(channel => channel.readyState === "closed").length, 1);
     assert.equal(requester.peakLiveConnections, 4); assert.equal(target.peakLiveConnections, 4);
     assert.equal(requester.swarm.metrics().segments.peerFirstLoaded, 0, "opening a link is not verified media delivery");
+    const beforeDelivery = requester.swarm.metrics(), beforeUpload = target.swarm.metrics();
+    const response = await requester.load();
+    assert.deepEqual(new Uint8Array(response.data), playback.bytes, "the real serving swarm supplies the signed object's bytes");
+    const delivered = requester.swarm.metrics(), uploaded = target.swarm.metrics();
+    assert.equal(delivered.segments.peerFirstLoaded - beforeDelivery.segments.peerFirstLoaded, 1);
+    assert.equal(delivered.segments.originFallbacks, beforeDelivery.segments.originFallbacks, "the repaired load adds no origin fallback");
+    assert.equal(delivered.bytes.fromPeers - beforeDelivery.bytes.fromPeers, playback.bytes.byteLength);
+    assert.equal(uploaded.bytes.uploaded - beforeUpload.bytes.uploaded, playback.bytes.byteLength);
+    assert.equal(uploaded.bytes.uploadsServed - beforeUpload.bytes.uploadsServed, 1);
+    assert.equal(uploaded.admissionDiagnostics.calls.upload - beforeUpload.admissionDiagnostics.calls.upload, 1);
+    assert.equal(delivered.serving, false); assert.equal(delivered.bytes.uploaded, 0, "receive-only consent remains unchanged");
+    assert.equal(delivered.peers.evicted, 1); assert.equal(uploaded.peers.evicted, 1);
+    assert.equal(requester.peakLiveConnections, 4); assert.equal(target.peakLiveConnections, 4);
+    assert.deepEqual(requesterChannel.sent.filter(frame => frame.t === "want").map(frame => frame.k), [playback.key]);
+    assert.equal(targetChannel.sent.filter(frame => frame.t === "meta").length, 1);
+    assert.equal(targetChannel.sent.filter(frame => frame.t === "eof").length, 1);
+    const payload = delivered.peerRequestDiagnostics.records.at(-1);
+    assert.equal(payload.outcome, "payload"); assert.equal(payload.receivedBytes, playback.bytes.byteLength);
+    assert.equal(payload.expectedBytes, playback.bytes.byteLength);
     const checks = target.swarm.metrics().admissionDiagnostics.calls.offerIncoming;
     requesterSignals = new RelaySwarmSession({ pool: requester.pool, swarmId: base.swarmId, secretKey: requesterSecret });
     requesterSignals.start(); requesterSignals.sendSignal(targetKey, offers[0]);

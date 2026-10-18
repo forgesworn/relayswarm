@@ -3,13 +3,58 @@
 [Documentation](README.md) · [Field-test guide](FIELD-TEST.md) ·
 [Changelog](../CHANGELOG.md)
 
-Checkpoint: 18 October 2026. The published experimental release is
+Checkpoint: 19 October 2026. The published experimental release is
 [v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0), which points to
 `3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. The 0.2.0 production feature
 candidate remains on PR 8 pending final checks and release. Later documentation corrections
 on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
+
+Checkpoint: 19 October 2026 (checked at 23:11 UTC on 18 October). The pilot
+runs `3f706a9bc4a895d17345be26b77006cf13093c46`. All nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39169937465),
+fresh consumption of 280 package members and guarded deployment passed.
+The 773,458-byte browser client is unchanged. Nostr allowances are enabled;
+the host-supplied account API is implemented, with no website resolver
+configured. Reporting and forwarding remain off.
+
+**Durable reporting acceptance passed.** A real browser remained silent before
+opt-in, sent an accepted report after trusted user input, and handled duplicate
+reports idempotently. A same-volume restart preserved the report and policy;
+the report then expired naturally after 304.105 seconds. No clock or retention
+override was used. Reporting was restored to off, and browser and finite-source
+cleanup passed independent review. This closes the current P05 reporting
+check; it does not qualify the remaining load or device requirements.
+
+**Crash-recovery acceptance remains RED.** The parent-only crash stopped the
+application as intended. The host audit then refused seven unrelated zombie
+processes and an order-only Docker mount-inventory difference, so the test did
+not reach restart or playback-recovery acceptance. A corrected strict audit
+passed regressions and actual read-only checks. Guarded marker recovery
+preserved publisher state and all four permanent lease identities.
+
+The original failed test window was not extended. A separate service
+restoration recreated the same image and restored its original restart policy.
+The public HTTPS page responds with 200; the application is waiting for encoder
+input and `/session.json` returns 503. This proves service availability in the
+waiting state, not fresh live playback. No temporary source remains running.
+
+The fourteen-viewer short qualifier has not passed. R55 stopped during setup;
+the earlier R54 both-quality peer-coverage failure remains unresolved on the
+current field configuration. The two-hour/churn/TURN-expiry run remains
+ineligible. After an earlier outage, a bounded M4 connection check at 23:15 UTC
+on 18 October succeeded. Fresh resource and runtime checks remain required;
+other work must keep running.
+
+P01–P12 source surfaces are implemented; production acceptance and release
+remain incomplete. The remaining work is crash/restart acceptance, matching
+short and sustained qualification, both-quality shared-budget lifecycle,
+browser/device/network coverage, matched bandwidth benefit and final release
+checks. See the [checkpoint record](../spikes/results/3f706a9-current-delivery-checkpoint-20261019.json)
+and [P01–P12 checklist](PRODUCTION-READINESS.md#delivery-checklist).
+
+## Historical a02d5ec checkpoint
 
 Checkpoint: 18 October 2026. The experimental pilot runs
 `a02d5ec4d5408c8c196e0c259d07c7fc68e965d6`. All nine required

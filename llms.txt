@@ -43,7 +43,7 @@ provides authenticated operator policy, bounded admission and durable idempotent
 opt-in numeric reports. Upload budgets persist across reloads/tabs without consent.
 Optional Nostr or host website accounts share a private durable allowance across
 devices; account changes leave uploading off until fresh consent. The deployed
-a02d5ec pilot offers Nostr; integrating websites supply their own account resolver.
+3f706a9 pilot offers Nostr; integrating websites supply their own account resolver.
 Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The example origin adds bounded blocking reload for compatible complete live
 playlists across all renditions, with 24 waiters inside 32 media requests.
@@ -65,7 +65,7 @@ Peer-first media loads/bytes avoided are not net connection-data savings, and
 upload counters measure committed media payload rather than acknowledged delivery.
 Pending durable reservations can consume quota without entering those counters.
 Documentation on main can include corrections after the immutable releases.
-Current deployed source `a02d5ec`. Nine required CI jobs, fresh 278-member
+Current deployed source `3f706a9`. Nine required CI jobs, fresh 280-member
 package consumption and guarded HTTPS deployment passed. The demo selects
 four neighbours; the SDK default stays six. Nostr and an authenticated
 host-supplied account API are implemented. The pilot selects 900 address
@@ -74,14 +74,16 @@ requests per minute; the default remains 600 and global capacity 2,048.
 The agreed feature surfaces are implemented, but production acceptance is
 incomplete. R55 stopped during its sixth browser setup with zero measurement;
 independent finite cleanup passed. Earlier R54's both-quality peer gate also
-remains failed. The two-hour run is ineligible. A single-browser reporting
-retry remained RED after 85.580 seconds: a startup telemetry change reused the
-same policy revision, so the browser correctly refused the conflicting policy
-and kept reporting disabled. Reporting was restored to off and full browser
-and finite-source cleanup passed. Restart durability and natural report expiry
-were not reached. The source durable-revision correction passes focused
-operator and bundled-client regressions; CI, deployment and acceptance remain
-pending for that correction. Client conflict and consent checks are unchanged.
+remains failed. The two-hour run is ineligible. Current durable reporting
+acceptance passes trusted opt-in, duplicate idempotence, same-volume restart
+persistence and natural expiry after 304.105 seconds. Reporting was restored
+to off, with full browser/source cleanup independently reviewed. Client
+conflict and consent checks remain in place. The current parent-crash test
+remains RED after its host audit failed before restart. A corrected strict
+audit and guarded marker recovery passed; a separate service restoration
+preserved state and restart policy without extending the failed test window.
+The HTTPS page responds with 200, while the application waits for encoder
+input and its session endpoint returns 503. This does not prove live playback.
 Matching capacity, two-hour/churn, natural expiry, physical/browser breadth,
 difficult networks, measured wire/cost benefit and final release/download
 acceptance remain open. v0.1.0 is published; 0.2.0 remains the source candidate.
