@@ -160,8 +160,11 @@ not an identity), `uptimeMs`, `serving`, plus:
   `commitmentUnavailable`, `peerFirstShare`, `peerFirstByteShare`, `peerLatencyMedianMs`,
   `peerLatencyP90Ms`, `originLatencyMedianMs`.
 - `bytes`: `fromOrigin`, `fromPeers`, `peerFirst`, `uploaded`, `uploadsServed`,
-  `uploadsRefused`, `held`, `uploadRemaining` (null when unlimited),
-  `uploadExhausted`.
+  `uploadsRefused`, `uploadsCancelled`, `uploadCancelledBytes`, `held`,
+  `uploadRemaining` (null when unlimited), `uploadExhausted`.
+  `uploadsCancelled` counts responses this viewer stopped early because the
+  receiver cancelled them; `uploadCancelledBytes` is the part of `uploaded` that
+  was therefore not sent. Upload allowance already charged is not refunded.
 - `peers.deliveryMeasurements`: bounded measurements for active links,
   including completion time, payload rate and failures.
 - `relays`: `connected`, `presenceSent`, `signalsSent`, `published`,
@@ -309,7 +312,9 @@ Attempts remain serial and capped by `maxPeers` and the original deadline.
 A timed-out or cancelled request resolves promptly for origin fallback. On a
 known ordered, fully reliable channel, the link stays busy while discarding
 that response up to a matching validated EOF, or a refusal before metadata.
-Only then can another request use the channel. The existing drain limit closes
+Only then can another request use the channel. The receiver also sends
+`cancel`; a holder that honours it stops at its next chunk and sends EOF early,
+or refuses before metadata. Holders without `cancel` send the response in full. The existing drain limit closes
 an incomplete response; host stop and admission withdrawal close immediately.
 Fresh-origin coordination is bounded by safe buffered playback and measured
 HTTP fallback time. hls.js owns quality selection. These mechanisms do not

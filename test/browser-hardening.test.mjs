@@ -154,6 +154,28 @@ test("concurrent accepted uploads reserve the full session allowance and withdra
   } finally { await fixture.close(); }
 });
 
+test("a cancelled upload stops before its next chunk and is counted without a refund", async () => {
+  const fixture = await linkedFixture({ serve: true, maxUploadBytesPerSession: 64 });
+  try {
+    const peer = await fixture.addPeer();
+    await fixture.load(); await until(() => fixture.swarm.metrics().bytes.held === 32);
+    const key = peer.sent.find((frame) => frame.t === "have" && frame.add?.length).add[0];
+    assert.equal(fixture.swarm.metrics().bytes.uploadsCancelled, 0);
+    peer.bufferedAmount = 2_000_000;
+    peer.receive(JSON.stringify({ t: "want", id: 1, k: key }));
+    await until(() => peer.sent.some((frame) => frame.t === "meta" && frame.id === 1));
+    peer.receive(JSON.stringify({ t: "cancel", id: 1 }));
+    peer.bufferedAmount = 0; peer.dispatchEvent(new Event("bufferedamountlow"));
+    await until(() => peer.sent.some((frame) => frame.t === "eof" && frame.id === 1));
+    const response = peer.sent.slice(peer.sent.findIndex((frame) => frame.t === "meta" && frame.id === 1));
+    assert.equal(response.filter((frame) => frame instanceof Uint8Array).length, 0, "no chunk follows the cancel");
+    const bytes = fixture.swarm.metrics().bytes;
+    assert.equal(bytes.uploadsCancelled, 1); assert.equal(bytes.uploadCancelledBytes, 32);
+    assert.equal(bytes.uploaded, 32); assert.equal(bytes.uploadRemaining, 32, "the charged allowance is not refunded");
+    assert.equal(fixture.swarm.metrics().peers.connected, 1);
+  } finally { await fixture.close(); }
+});
+
 test("an oversized next payload is refused and an interrupted reservation is never refunded", async () => {
   const fixture = await linkedFixture({ serve: true, maxUploadBytesPerSession: 48 });
   try {

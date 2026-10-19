@@ -342,6 +342,8 @@ class HlsSwarm {
       bytesUploaded: 0,
       uploadsServed: 0,
       uploadsRefused: 0,
+      uploadsCancelled: 0,
+      uploadCancelledBytes: 0,
       dialsStarted: 0,
       dialsAccepted: 0,
       dialsFailed: 0,
@@ -575,6 +577,8 @@ class HlsSwarm {
         uploaded: c.bytesUploaded,
         uploadsServed: c.uploadsServed,
         uploadsRefused: c.uploadsRefused,
+        uploadsCancelled: c.uploadsCancelled,
+        uploadCancelledBytes: c.uploadCancelledBytes,
         uploadRemaining: this.#uploadRemaining(),
         uploadExhausted: this.#uploadRemaining() === 0,
         held: this.heldBytes,
@@ -2065,6 +2069,10 @@ class HlsSwarm {
         for (const waiter of [...this.haveWaiters]) waiter(added);
       },
       onScheduleChange: () => { for (const waiter of [...this.haveWaiters]) waiter(); },
+      onUploadCancelled: (_link, unsentBytes) => {
+        this.counters.uploadsCancelled += 1;
+        this.counters.uploadCancelledBytes += unsentBytes;
+      },
       onClose: (closed) => {
         dial.pc.removeEventListener("datachannel", rejectExtraChannel);
         this.#endTransport(dial.pc, "link-close", closed.closeReason);

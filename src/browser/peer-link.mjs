@@ -10,6 +10,11 @@
 //   {"t":"meta","id":n,"size":bytes}      response header, chunks follow
 //   {"t":"eof","id":n}                    response complete
 //   {"t":"none","id":n}                   not held, or not serving now
+//   {"t":"cancel","id":n}                 receiver no longer wants response n
+//
+// A holder that honours `cancel` answers with `none` before `meta`, or stops
+// sending chunks and sends `eof` early. Peers without it ignore the message
+// and send the response in full.
 //
 // Integrity is not decided here: the caller hashes what arrives.
 
@@ -26,7 +31,7 @@ const CLOSE_REASONS = new Set([
 
 export class PeerLink {
   #uploadDrainTimedOut = false;
-  constructor({ pubkey, pc, channel, maxSegmentBytes, onRequest, onHaveChange, onScheduleChange, onClose, maxQueuedRequests = 4, drainTimeoutMs = 3_000 }) {
+  constructor({ pubkey, pc, channel, maxSegmentBytes, onRequest, onHaveChange, onScheduleChange, onClose, onUploadCancelled, maxQueuedRequests = 4, drainTimeoutMs = 3_000 }) {
     this.pubkey = pubkey;
     this.pc = pc;
     this.channel = channel;
@@ -38,6 +43,7 @@ export class PeerLink {
     this.fetching = new Map();
     this.renditions = new Map();
     this.onClose = onClose;
+    this.onUploadCancelled = onUploadCancelled;
     this.maxQueuedRequests = maxQueuedRequests;
     this.drainTimeoutMs = drainTimeoutMs;
     this.maxChunks = Math.max(1, Math.ceil(maxSegmentBytes / CHUNK_BYTES) * 4);
@@ -53,6 +59,8 @@ export class PeerLink {
     // recently is the one to drop when somebody new needs a slot.
     this.lastDeliveredAt = 0;
     this.outboundInFlight = 0;
+    // Responses queued or being sent, at most maxQueuedRequests.
+    this.uploads = new Set();
     this.bytesIn = 0;
     this.bytesOut = 0;
     channel.binaryType = "arraybuffer";
@@ -167,10 +175,12 @@ export class PeerLink {
           if (this.pending === pending && pending.draining) this.close(reason);
         }, this.drainTimeoutMs);
         report(outcome, pending);
+        // Ask the holder to stop. Only after this may its eof end early.
+        pending.cancelled = this.#sendText({ t: "cancel", id });
       };
       const cancel = () => abandon("request-abort");
       const timeout = () => abandon("request-timeout");
-      this.pending = { id, key, expectedSize, size: -1, parts: [], chunks: 0, received: 0, draining: false, finish, timer: setTimeout(timeout, Math.max(1, timeoutMs)) };
+      this.pending = { id, key, expectedSize, size: -1, parts: [], chunks: 0, received: 0, draining: false, cancelled: false, finish, timer: setTimeout(timeout, Math.max(1, timeoutMs)) };
       signal?.addEventListener("abort", cancel, { once: true });
       if (!this.#sendText({ t: "want", id, k: key })) finish(null, "send-error");
     });
@@ -239,6 +249,11 @@ export class PeerLink {
       }
       case "have": return this.#onHave(message);
       case "want": return this.#onWant(message);
+      case "cancel": {
+        if (!Number.isSafeInteger(message.id)) return;
+        for (const upload of this.uploads) if (upload.id === message.id) upload.cancelled = true;
+        return;
+      }
       case "meta": {
         const pending = this.pending;
         if (!pending) return;
@@ -253,6 +268,7 @@ export class PeerLink {
         const pending = this.pending;
         if (!pending) return;
         if (message.id !== pending.id) return pending.draining ? this.close("protocol") : undefined;
+        if (pending.cancelled && pending.size >= 0) return pending.finish(null);
         if (pending.received !== pending.size) return this.close("protocol");
         if (pending.draining) return pending.finish(null);
         const bytes = new Uint8Array(pending.size);
@@ -296,24 +312,44 @@ export class PeerLink {
     if (!Number.isSafeInteger(message.id) || typeof message.k !== "string" || !HEX64.test(message.k)) return;
     if (this.outboundInFlight >= this.maxQueuedRequests) return this.close("upload-queue");
     this.outboundInFlight += 1;
+    const upload = { id: message.id, cancelled: false };
+    this.uploads.add(upload);
     this.serving = this.serving
-      .then(() => this.#serve(message.id, message.k))
+      .then(() => this.#serve(upload, message.k))
       .catch(() => this.close(this.#uploadDrainTimedOut ? "upload-drain-timeout" : "serve-error"))
-      .finally(() => { this.outboundInFlight = Math.max(0, this.outboundInFlight - 1); });
+      .finally(() => {
+        this.uploads.delete(upload);
+        this.outboundInFlight = Math.max(0, this.outboundInFlight - 1);
+      });
   }
 
-  async #serve(id, key) {
+  async #serve(upload, key) {
+    const { id } = upload;
+    if (upload.cancelled) {
+      this.onUploadCancelled?.(this, 0);
+      return void this.#sendText({ t: "none", id });
+    }
     const bytes = this.closed ? null : await this.onRequest?.(this, key);
     if (!bytes) return void this.#sendText({ t: "none", id });
+    // Upload already charged for a cancelled response is not refunded.
+    if (upload.cancelled) {
+      this.onUploadCancelled?.(this, bytes.byteLength);
+      return void this.#sendText({ t: "none", id });
+    }
     if (!this.#sendText({ t: "meta", id, size: bytes.byteLength })) return;
-    for (let offset = 0; offset < bytes.byteLength; offset += CHUNK_BYTES) {
+    let sent = 0;
+    while (sent < bytes.byteLength) {
       if (this.closed) return;
       if (this.channel.bufferedAmount > HIGH_WATER_BYTES) await this.#drained();
       if (this.closed) return;
-      this.channel.send(bytes.subarray(offset, Math.min(offset + CHUNK_BYTES, bytes.byteLength)));
+      if (upload.cancelled) break;
+      const end = Math.min(sent + CHUNK_BYTES, bytes.byteLength);
+      this.channel.send(bytes.subarray(sent, end));
+      sent = end;
     }
-    this.bytesOut += bytes.byteLength;
+    this.bytesOut += sent;
     this.lastServedAt = Date.now();
+    if (sent < bytes.byteLength) this.onUploadCancelled?.(this, bytes.byteLength - sent);
     this.#sendText({ t: "eof", id });
   }
 

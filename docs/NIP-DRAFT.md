@@ -71,6 +71,7 @@ response is in flight in each direction. A binary chunk is at most 16 KiB.
 | Binary messages | Response bytes, serialised between `meta` and `eof` |
 | `{"t":"eof","id":1}` | Response complete |
 | `{"t":"none","id":1}` | Object unavailable or serving declined |
+| `{"t":"cancel","id":1}` | Receiver no longer wants the response |
 
 Control text is capped at 64 KiB. Object size is limited by the host's configured
 segment cap, at most 16 MiB. `meta` cannot override the independently verified
@@ -79,8 +80,13 @@ size overflow close the link. Timeout or cancellation resolves the request
 without extending its deadline. On a known ordered, fully reliable channel,
 the receiver may discard the remaining response while keeping the link busy
 until a matching, size-validated `eof`, or `none` before any metadata. No new
-request can reuse untagged chunks during that interval. The existing bounded
-drain timeout closes an incomplete response; unknown or partially reliable
+request can reuse untagged chunks during that interval. Such a receiver sends
+`cancel` for the request. A holder that honours it answers with `none` before
+`meta`, or stops sending chunks and sends `eof` early; only after sending
+`cancel` does a receiver accept an `eof` with fewer bytes than `meta` announced.
+A holder ignores `cancel` for a request it is not queuing or sending, and peers
+that do not implement it ignore the message and send the response in full.
+The existing bounded drain timeout closes an incomplete response; unknown or partially reliable
 channels close immediately. Host stop and admission withdrawal still close
 immediately. Upload queues and backpressure retain their original bounds.
 Optional `contribution` and `fetching` controls coordinate serving and short
