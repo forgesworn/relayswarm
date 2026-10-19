@@ -18,13 +18,15 @@ idempotence, same-volume restart persistence and natural expiry after
 304.105 seconds. Reporting-off restoration and full browser/source cleanup
 also passed independent review.
 
-P07 crash acceptance remains RED. The parent-only crash succeeded, but its
-host writer audit failed before restart. The strict audit correction and
-separate guarded marker recovery passed. The pilot was restored separately
-after the original test window expired; no acceptance window was extended.
-Its original restart policy and permanent leases are preserved. The public
-page responds with 200 and the application waits for encoder input; this is
-not fresh-playback acceptance. No temporary source remains running.
+P07 crash acceptance remains RED. The latest test passed the parent-only
+crash, strict writer audit, guarded marker recovery and server restart, while
+preserving the original restart policy and permanent leases. The browser
+exhausted its playlist retry budget on HTTP 502 responses before the server
+returned; post-restart playback was not proved. An unchanged-source browser
+regression also reproduces stopped playback after a 35-second HTTP 503 outage.
+Browser and finite-source cleanup passed, and the acceptance window was not
+extended. Retry and origin-only reconfiguration corrections are being verified;
+see the [recovery checkpoint](../spikes/results/3f706a9-parent-crash-recovery-checkpoint-20261019.json).
 
 The matching fourteen-viewer qualifier remains unproved, so the two-hour run
 is still ineligible. Both-quality shared-budget lifecycle, device/network
@@ -777,11 +779,11 @@ requirements for production acceptance.
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Exact3f selects four demo neighbours and address budget900, retaining SDKdefault6/default600/global2048. Historical R54 admission checks pass with0refusals/unknowns and provider peak731/alignedminute; full field capacity remains unqualified |
 | P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Current3f real-browser acceptance PASS: silent default, trusted opt-in, duplicate idempotence before/after same-volume restart, preserved report/policy and natural304.105s expiry. Reporting restored OFF and full browser/source cleanup independently reviewed. Other browser/load requirements remain under P12 |
 | P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Nostr and authenticated host-supplied account API supported; Nostr-only pilot valid, no named website/human wallet required. Public cross-Mac shared-cap API PASS and focused LOW lifecycle PASS (74.412 s/seven gates) cover low verified media/reservations, reload/new key/spend, reconnect OFF/fresh consent and state withdrawal. Original 3 MB both-quality/exhaustion trial remains RED with high delivery unverified. Complete shared-media/physical acceptance remains open |
-| P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Maintained parent-SIGKILL handoff regression passes required CI. Current3f actual test RED after successful parent-only crash because the host audit refused unrelated zombies/mount-order changes. Corrected strict audit, guarded marker recovery and separate waiting-service restoration pass; they do not supply restart/playback acceptance. Guardian/host catastrophe requires operator inspection |
+| P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Latest3f actual test passes parent-only crash, strict audit, guarded recovery and server restart with state/leases/policy preserved. Browser remains RED after live playlist502 retry exhaustion; no post-restart decoded progress. Unchanged-source35s browser outage regression also RED. Corrections are being verified; cleanup grants no playback acceptance. Guardian/host catastrophe requires operator inspection |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
 | P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact3f fresh280-member consumption/install/import/native/HTTP smoke checks pass. Consumer semver resolutions differ from root lock; standalone ESM is root-lock bound. Final0.2publication and downloaded-release acceptance remain open |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact3f nine-job CI,280-member consumption, guarded deployment/HTTPS and independent source cleanup pass. The restored same-image pilot waits for encoder input. Private state, permanent leases and proxy preserved. PR8/0.2publication, fresh playback and final acceptance remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact3f nine-job CI,280-member consumption, guarded deployment/HTTPS and independent source cleanup pass. Latest same-image crash test restarts the server; browser recovery remains RED. Private state, permanent leases and proxy preserved. PR8/0.2publication, fresh playback and final acceptance remain open |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Prior Simulator/account/LOW lifecycle/Internet TURN passes retain original scopes. Current R55 stopped during setup with zero measurement; historical R54 both-quality peer coverage remains RED. Independent finite cleanup passes. Full capacity, two-hour/churn, browser/device/network breadth, natural expiry and matched benefit remain open |
 
 ## Evidence rules

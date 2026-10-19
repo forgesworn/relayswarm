@@ -1,0 +1,73 @@
+{
+  "v": 1,
+  "checkpointDate": "2026-10-19",
+  "sourceSha": "3f706a9bc4a895d17345be26b77006cf13093c46",
+  "productionComplete": false,
+  "scope": "Latest actual server crash/restart and separate unchanged-source loopback outage regression. Neither supplies successful playback-recovery acceptance.",
+  "actualParentCrash": {
+    "verdict": "RED",
+    "browserElapsedMs": 83518,
+    "parentOnlyCrashPassed": true,
+    "strictWriterAuditPassed": true,
+    "guardedMarkerRecoveryPassed": true,
+    "serverRestartPassed": true,
+    "originalRestartPolicyRestored": true,
+    "permanentLeasesPreserved": true,
+    "fatalNetworkErrors": 1,
+    "nativeErrors": 0,
+    "postRestartDecodedProgressProved": false,
+    "ownedBrowserCleanupPassed": true,
+    "ownedSourceCleanupPassed": true,
+    "workerReaped": true,
+    "acceptanceWindowExtended": false,
+    "specificCurrentNullCauseProved": false
+  },
+  "unchangedSourceBrowserRegression": {
+    "verdict": "RED",
+    "sourceSha": "633527c751ebdb6b2724d94dd2b1c1da3cb4b9c5",
+    "browser": "155.0.8059.82",
+    "network": "loopback",
+    "outageMs": 35000,
+    "http503": 8,
+    "framesAtRestoration": 311,
+    "framesAfterWaiting": 311,
+    "newContinuityLoaded": false,
+    "fatalErrors": 1,
+    "browserAndFixturesClosed": true,
+    "scratchRemoved": true,
+    "remainingScratchProcessCount": 0,
+    "nodeReaped": true
+  },
+  "evidence": [
+    {
+      "path": "artifacts/p07-3f706a9-run-r4-20261019/receipt.json",
+      "bytes": 15330,
+      "sha256": "638f59652d34750cd5afaf6ae24d5ec21df8ea6801922b587fc115d6284a3068"
+    },
+    {
+      "path": "artifacts/p07-3f706a9-run-r4-20261019/root-worker.json",
+      "bytes": 25348,
+      "sha256": "64065412e61ef78d032e45db7220c84ce4a4dec7d1753d19bc8cb43d801159b4"
+    },
+    {
+      "path": "artifacts/p07-3f706a9-run-r4-20261019/host-06-restart.json",
+      "bytes": 894,
+      "sha256": "b0d020acdcd209b802435b6663fbdb559835636b6d42766290f02b956487a470"
+    },
+    {
+      "path": "artifacts/p07-3f706a9-run-r4-20261019/NATIVE-CLEANUP-CLOSURE.json",
+      "bytes": 17621,
+      "sha256": "0bd3a791db358b52b1c71ecf486d6a62e98ca76022ecb63205986a11c7a8816b"
+    },
+    {
+      "path": "artifacts/network-retry-real-browser-20261019/baseline/live-restart.json",
+      "bytes": 189556,
+      "sha256": "cc1897b8e2013d03b550e735bb05b5252c745eb24bedb8d6aaa412ea3f8af361"
+    },
+    {
+      "path": "artifacts/network-retry-real-browser-20261019/baseline/supervisor.json",
+      "bytes": 893,
+      "sha256": "377b71402f4a53d6e3e589cfc340bb473dc95fcd8d7c7caa8d7b0b3d3946c21f"
+    }
+  ]
+}

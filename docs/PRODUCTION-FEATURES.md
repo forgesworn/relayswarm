@@ -39,6 +39,16 @@ Actual rolling-playlist tests retain the failing control, recovered video,
 cancelled held requests and a ten-second no-progress failure. This does not
 establish the cause of the older hosted MSE append error.
 
+For an established live main playlist, the demo extends HTTP 502/503/504
+retries within one fixed 60-second window from the first eligible failure;
+the 32nd eligible failure refuses another retry. Quality changes do not renew the window;
+a successful playlist update does. Scheduled extended retries are checked
+again before dispatch, so hiding or replacing the player, or reaching the
+deadline, prevents new retry I/O. Startup, VOD, other HTTP errors, request
+timeouts, fragments and keys retain their original policies. Permanent
+outages can therefore take longer to become fatal. Fatal records, peer
+deadlines, account allowances and upload consent remain unchanged.
+
 The publisher supports exact local playlist identities for mixed codec and
 frame-rate variants, alternate audio, fMP4 maps, complete low-latency parts and
 warm delta playlists. Schema 1 remains valid for its original contexts.

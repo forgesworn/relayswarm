@@ -8,6 +8,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 import vm from "node:vm";
+import { EventEmitter } from "node:events";
+import ActualHls from "hls.js";
 import { webcrypto } from "node:crypto";
 import http from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
@@ -19,9 +21,9 @@ import { createOperatorControls } from "../demo/operator.mjs";
 
 const bundle = await build({ entryPoints: ["demo/client.mjs"], bundle: true, write: false, format: "esm", plugins: [{ name: "fixture", setup(builder) {
   builder.onResolve({ filter: /^(hls\.js|\.\.\/src\/browser\/hls-swarm\.mjs)$/ }, (args) => ({ path: args.path, namespace: "fixture" }));
-  builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={MANIFEST_PARSED:'manifest',FRAG_LOADED:'fragment',LEVEL_SWITCHED:'level',LEVEL_UPDATED:'update',ERROR:'error'}; static isSupported(){return !globalThis.fixture.nativeHls;} constructor(){this.config={};this.callbacks=new Map();this.levels=[];this.id=globalThis.fixture.players.length;globalThis.fixture.players.push(this);} on(name,callback){this.callbacks.set(name,callback);} emit(name,data){this.callbacks.get(name)?.('',data);} loadSource(){globalThis.fixture.sourceLoads++;globalThis.fixture.playerOperations.push(['load-source',this.id]);} attachMedia(){} destroy(){this.destroyImpl?.();this.destroyed=true;globalThis.fixture.playerOperations.push(['destroy',this.id]);} stopLoad(){globalThis.fixture.playerOperations.push(['stop',this.id]);} startLoad(){globalThis.fixture.playerOperations.push(['start',this.id]);} recoverMediaError(){globalThis.fixture.playerOperations.push(['recover',this.id]);} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0, tickets:[], lifecycle:new AbortController()}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;record.lifecycle.abort();}, updateTicket(ticket){if(record.stopped||globalThis.fixture.rejectTicketUpdates||globalThis.fixture.disabledSwarm)return false; options.ticket=ticket; record.tickets.push(ticket); return true;}, attach(hls){if(globalThis.fixture.disabledSwarm)return;hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, metrics(){return {mode:globalThis.fixture.disabledSwarm?'off':options.mode, disabledReason:globalThis.fixture.disabledSwarm?'no-webrtc':null, serving:!globalThis.fixture.disabledSwarm&&options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
+  builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={MANIFEST_PARSED:'manifest',FRAG_LOADED:'fragment',LEVEL_SWITCHED:'level',LEVEL_UPDATED:'update',ERROR:globalThis.fixture.hlsErrorEvent}; static DefaultConfig=globalThis.fixture.hlsDefaults; static isSupported(){return !globalThis.fixture.nativeHls;} constructor(config){this.config={...Hls.DefaultConfig,...config};this.callbacks=new Map();this.levels=[];this.id=globalThis.fixture.players.length;globalThis.fixture.players.push(this);} on(name,callback){this.callbacks.set(name,callback);} emit(name,data){this.callbacks.get(name==='error'?Hls.Events.ERROR:name)?.('',data);} loadSource(){globalThis.fixture.sourceLoads++;globalThis.fixture.playerOperations.push(['load-source',this.id]);} attachMedia(){} destroy(){this.destroyImpl?.();this.destroyed=true;globalThis.fixture.playerOperations.push(['destroy',this.id]);} stopLoad(){globalThis.fixture.playerOperations.push(['stop',this.id]);} startLoad(){globalThis.fixture.playerOperations.push(['start',this.id]);} recoverMediaError(){globalThis.fixture.playerOperations.push(['recover',this.id]);} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0, tickets:[], lifecycle:new AbortController()}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;record.lifecycle.abort();}, updateTicket(ticket){if(record.stopped||globalThis.fixture.rejectTicketUpdates||globalThis.fixture.disabledSwarm)return false; options.ticket=ticket; record.tickets.push(ticket); return true;}, attach(hls){if(globalThis.fixture.disabledSwarm)return;hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, metrics(){return {mode:globalThis.fixture.disabledSwarm?'off':options.mode, disabledReason:globalThis.fixture.disabledSwarm?'no-webrtc':null, serving:!globalThis.fixture.disabledSwarm&&options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
 } }] });
-async function page(storage = new Map(), { realClock = false, fetchImpl, nativeHls = false, initialTurnCredentials, inlinePolicySession = false } = {}) {
+async function page(storage = new Map(), { realClock = false, fetchImpl, nativeHls = false, initialTurnCredentials, inlinePolicySession = false, hlsDefaults = ActualHls.DefaultConfig } = {}) {
   const elements = new Map(), intervals = [], timers = new Map(), windowEvents = new Map(), documentEvents = new Map();
   let clock = 0; const wallStart = Date.now(), performanceStart = performance.now();
   const now = () => realClock ? performance.now() - performanceStart : clock;
@@ -36,7 +38,7 @@ async function page(storage = new Map(), { realClock = false, fetchImpl, nativeH
     play() { fixture.playCalls++; video.paused = false; return fixture.playImpl ? fixture.playImpl() : Promise.resolve(); },
     pause() { fixture.pauseCalls++; video.paused = true; }, load() { fixture.nativeLoads++; video.error = null; video.readyState = 0; },
     canPlayType: () => nativeHls };
-  const fixture = { nativeHls, swarms: [], players: [], playerOperations: [], playCalls: 0, pauseCalls: 0, nativeLoads: 0, sourceLoads: 0, policy: { mode: null, revision: 0, telemetry: false }, session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment", ...(initialTurnCredentials === undefined ? {} : { turnCredentials: initialTurnCredentials }) } };
+  const fixture = { nativeHls, hlsDefaults, hlsErrorEvent: ActualHls.Events.ERROR, swarms: [], players: [], playerOperations: [], playCalls: 0, pauseCalls: 0, nativeLoads: 0, sourceLoads: 0, policy: { mode: null, revision: 0, telemetry: false }, session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment", ...(initialTurnCredentials === undefined ? {} : { turnCredentials: initialTurnCredentials }) } };
   if (inlinePolicySession) Object.assign(fixture.session, { deliveryPolicyEndpoint: "/delivery-policy.json?session=1", deliveryPolicySession: "inline-v1" });
   fixture.requests = [];
   const context = { Date: ClockDate, fixture, location: { origin: "https://viewer.example" }, document: { visibilityState: "visible", createElement: () => ({}), addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, structuredClone, TextDecoder, TextEncoder, queueMicrotask, console,
@@ -46,6 +48,168 @@ async function page(storage = new Map(), { realClock = false, fetchImpl, nativeH
   await vm.runInNewContext(`(async()=>{${bundle.outputFiles[0].text}})()`, context);
   return { fixture, element, context, video, videoEvent: name => videoEvents.get(name)?.(), sendReport: () => intervals.find(entry => entry.ms === 15000).callback(), fireTimer(matches) { const entries = [...timers].filter(([, row]) => matches(row.ms)); assert.equal(entries.length, 1); const [id, row] = entries[0]; timers.delete(id); row.callback(); }, close() { windowEvents.get("pagehide")?.(); if (realClock) for (const id of timers.keys()) clearTimeout(id); timers.clear(); }, jumpWithoutTimers(ms) { clock += ms; }, windowEvent: (name) => windowEvents.get(name)?.(), visibility(state) { context.document.visibilityState = state; documentEvents.get("visibilitychange")?.(); }, submit: () => element("settings").submit({ preventDefault() {} }), poll: () => intervals.find((entry) => entry.ms === 2000).callback() };
 }
+
+async function playlistRetryFixture(t, { live = true, errorRetry = ActualHls.DefaultConfig.playlistLoadPolicy.default.errorRetry, defaults = false } = {}) {
+  const loads = [];
+  class Transport {
+    constructor() { this.stats = { loading: { start: 0, first: 0, end: 0 }, retry: 0, loaded: 0 }; }
+    load(context, config, callbacks) { Object.assign(this, { context, config, callbacks }); loads.push(this); }
+    abort() { this.aborted = true; }
+    destroy() { this.destroyed = true; }
+  }
+  const p = await page(new Map(), { hlsDefaults: { ...ActualHls.DefaultConfig, loader: Transport,
+    playlistLoadPolicy: { default: { ...ActualHls.DefaultConfig.playlistLoadPolicy.default, errorRetry } } } });
+  await p.submit(); const mounted = p.fixture.players[0]; mounted.latestLevelDetails = { live };
+  const timers = new Map();
+  const scope = { performance: p.context.performance, URL, console,
+    setTimeout(callback, delay) { const id = Symbol(); timers.set(id, { callback, delay }); return id; }, clearTimeout(id) { timers.delete(id); } };
+  const inScope = callback => {
+    const previous = globalThis.self; globalThis.self = scope;
+    try { return callback(); } finally { if (previous === undefined) delete globalThis.self; else globalThis.self = previous; }
+  };
+  // Obtain the installed, compiled LevelController without loading a source,
+  // attaching media or starting any I/O. It is not an emulated retry method.
+  const probe = inScope(() => new ActualHls({ autoStartLoad: false, enableWorker: false }));
+  const LevelController = probe.levelController.constructor; inScope(() => probe.destroy());
+  const events = new EventEmitter(), bindings = new Map(); let stops = 0;
+  const host = {
+    logger: Object.fromEntries(["debug", "log", "warn", "info", "error"].map(name => [name, () => {}])),
+    config: { ...mounted.config, ...(defaults ? { playlistLoadPolicy: p.fixture.hlsDefaults.playlistLoadPolicy, errorController: ActualHls.DefaultConfig.errorController } : {}), preserveManualLevelOnError: true },
+    levels: [{ url: ["https://viewer.example/media/high/index.m3u8"], uri: "https://viewer.example/media/high/index.m3u8", loadError: 0, fragmentError: 0, details: { live, requestScheduled: 0 }, attrs: {} }],
+    loadLevel: 0, currentLevel: 0, minAutoLevel: 0, maxAutoLevel: 0, autoLevelEnabled: false,
+    on(name, callback, owner) { const bound = owner ? callback.bind(owner) : callback; bindings.set(callback, bound); events.on(name, bound); },
+    off(name, callback) { events.off(name, bindings.get(callback) ?? callback); },
+    trigger(name, data) { inScope(() => events.emit(name, name, data)); },
+    stopLoad() { stops++; controller.stopLoad(); level.stopLoad(); },
+  };
+  const controller = new host.config.errorController(host), level = new LevelController(host, null);
+  level.currentLevelIndex = 0; level.currentLevel = host.levels[0]; level._levels = host.levels; level.canLoad = true;
+  host.on(ActualHls.Events.ERROR, controller.onErrorOut, controller);
+  t.after(() => { inScope(() => { level.destroy(); controller.destroy(); }); p.close(); });
+  function failure(code = 502, type = "level", url = "https://viewer.example/media/high/index.m3u8", details = ActualHls.ErrorDetails.LEVEL_LOAD_ERROR) {
+    const context = { type, level: 0, url }; let result;
+    const Loader = mounted.config.pLoader ?? mounted.config.loader, loader = new Loader(mounted.config);
+    loader.load(context, { loadPolicy: host.config.playlistLoadPolicy.default }, {
+      onError(response, actualContext) {
+        result = { type: ActualHls.ErrorTypes.NETWORK_ERROR, details, fatal: false, context: actualContext, response: { url, ...response } };
+        host.trigger(ActualHls.Events.ERROR, result); mounted.emit("error", result);
+      },
+    });
+    if (!result) loader.callbacks.onError({ code, text: "Fixture response" }, context, null, loader.stats);
+    return result;
+  }
+  let timedResult;
+  host.on(ActualHls.Events.LEVEL_LOADING, (_event, data) => { timedResult = failure(502, "level", data.url); });
+  return { p, mounted, host, controller, level, timers, loads, failure, inScope, stops: () => stops,
+    fireRetry() { assert.equal(timers.size, 1); const { callback } = [...timers.values()][0]; inScope(callback); return timedResult; },
+    updated() { const details = { live }; mounted.latestLevelDetails = details; host.trigger(ActualHls.Events.LEVEL_UPDATED, { details }); mounted.emit("update", { details }); },
+  };
+}
+
+test("established live playlist retries survive transient restart responses through the real HLS error controller", async (t) => {
+  const f = await playlistRetryFixture(t); f.updated();
+  for (let second = 0; second <= 40; second += 5) {
+    if (second) f.p.jumpWithoutTimers(5000);
+    const error = f.failure(second % 10 ? 503 : 502);
+    assert.equal(error.fatal, false, "a bounded established-live outage must not exhaust the default two retries");
+    assert.equal(error.errorAction.action, 5, "the real controller must choose RetryRequest");
+  }
+  f.updated();
+  assert.equal(f.stops(), 0); assert.equal(f.p.context.window.relaySwarmDemo.report().player.fatalErrors, 0);
+  assert.equal(f.p.context.window.relaySwarmDemo.report().player.errorRecords.length, 9, "real nonfatal network errors remain recorded");
+  assert.equal(f.failure(504).errorAction.retryCount, 0, "successful LEVEL_UPDATED starts a new episode");
+  f.p.jumpWithoutTimers(50000); assert.equal(f.failure(503).fatal, false, "the new episode is independent of the old sixty-second end");
+});
+
+test("live playlist original full-chain control exhausts its two retries", async (t) => {
+  const f = await playlistRetryFixture(t, { defaults: true }); f.updated();
+  assert.equal(f.failure().fatal, false); assert.equal(f.failure().fatal, false); assert.equal(f.failure().fatal, true);
+  assert.equal(f.stops(), 1); assert.equal(f.timers.size, 0);
+});
+
+test("live playlist retry horizon survives quality-counter resets and still records exhaustion as fatal", async (t) => {
+  const f = await playlistRetryFixture(t); f.updated();
+  f.failure(); f.p.jumpWithoutTimers(1000); f.failure(); f.p.jumpWithoutTimers(2000); f.failure();
+  f.controller.stopLoad(); // hls.js also resets its retry count when changing level.
+  f.p.jumpWithoutTimers(50000); assert.equal(f.failure().fatal, false);
+  f.p.jumpWithoutTimers(5000); assert.equal(f.failure().fatal, true, "the next two-second delay cannot equal the first failure's60s end");
+  assert.equal(f.p.context.window.relaySwarmDemo.report().player.fatalErrors, 1);
+  const before = f.loads.length; assert.equal(f.failure().fatal, true);
+  assert.equal(f.loads.length, before, "exhaustion cannot restart underlying I/O");
+});
+
+test("live playlist retries cap eligible attempts even when HLS resets its counter", async (t) => {
+  const f = await playlistRetryFixture(t); f.updated();
+  for (let attempt = 1; attempt < 32; attempt++) {
+    f.controller.stopLoad(); assert.equal(f.failure().fatal, false);
+  }
+  f.controller.stopLoad(); assert.equal(f.failure().fatal, true);
+  const before = f.loads.length; f.failure(); assert.equal(f.loads.length, before);
+});
+
+test("live playlist hidden before extension and original timeout exhaustion remain terminal", async (t) => {
+  await t.test("hidden before third failure", async t => {
+    const f = await playlistRetryFixture(t); f.updated(); f.failure(); f.failure(); f.p.visibility("hidden");
+    assert.equal(f.failure().fatal, true); assert.equal(f.stops(), 1);
+    f.p.visibility("visible"); assert.equal(f.failure().fatal, true, "visibility cannot renew the outage horizon");
+  });
+  await t.test("original timeout policy", async t => {
+    const f = await playlistRetryFixture(t); f.updated();
+    const fail = () => f.failure(503, "level", undefined, ActualHls.ErrorDetails.LEVEL_LOAD_TIMEOUT);
+    assert.equal(fail().fatal, false); assert.equal(fail().fatal, false); assert.equal(fail().fatal, true);
+  });
+  for (const errorRetry of [null, { ...ActualHls.DefaultConfig.playlistLoadPolicy.default.errorRetry, shouldRetry: () => false }]) {
+    await t.test(errorRetry ? "custom policy refusal" : "disabled error retries", async t => {
+      const baseline = await playlistRetryFixture(t, { errorRetry, defaults: true }); baseline.updated();
+      const expected = Array.from({ length: 3 }, () => baseline.failure().fatal);
+      const f = await playlistRetryFixture(t, { errorRetry }); f.updated();
+      assert.deepEqual(Array.from({ length: 3 }, () => f.failure().fatal), expected);
+    });
+  }
+});
+
+test("live playlist extended dispatch refuses late, hidden and retired work without hanging a load", async (t) => {
+  for (const reason of ["late", "hidden", "retired"]) {
+    await t.test(reason, async t => {
+      const f = await playlistRetryFixture(t); f.updated(); f.failure(); f.failure(); f.failure();
+      if (reason === "late") f.p.jumpWithoutTimers(60000);
+      if (reason === "hidden") f.p.visibility("hidden");
+      if (reason === "retired") f.p.element("resume").click();
+      const before = f.loads.length, error = f.fireRetry();
+      assert.equal(f.loads.length, before, "a delayed HLS retry must be fenced before transport.load");
+      assert.equal(error.fatal, true, "the real controller receives a terminal completion, not an unresolved load");
+      assert.equal(f.timers.size, 0, "terminal dispatch cannot schedule fallback retries");
+      if (reason === "hidden") { f.p.visibility("visible"); f.failure(); assert.equal(f.loads.length, before, "visibility alone cannot reopen the closed episode"); }
+      if (reason === "retired") assert.equal(f.p.context.window.relaySwarmDemo.report().player.fatalErrors, 0, "retired callbacks cannot corrupt the new player's receipt");
+      const Loader = f.mounted.config.pLoader;
+      new Loader(f.mounted.config).load({ type: "manifest", url: "https://viewer.example/manifest.m3u8" }, {}, { onError() { assert.fail("ordinary manifest dispatch was intercepted"); } });
+      assert.equal(f.loads.length, before + 1, "manifest requests keep the original loader path");
+    });
+  }
+});
+
+test("live playlist retry policy preserves startup, VOD, other statuses and unrelated load policies", async (t) => {
+  for (const scenario of ["startup", "vod", 400, 401, 403, 404, 500]) {
+    await t.test(String(scenario), async t => {
+      const f = await playlistRetryFixture(t, { live: scenario !== "vod" });
+      if (scenario === "startup") f.mounted.latestLevelDetails = undefined;
+      const status = typeof scenario === "number" ? scenario : 503;
+      const baseline = await playlistRetryFixture(t, { live: scenario !== "vod", defaults: true });
+      if (scenario === "startup") baseline.mounted.latestLevelDetails = undefined;
+      const trace = value => Array.from({ length: 3 }, () => {
+        const error = value.failure(status);
+        return { fatal: error.fatal, action: error.errorAction.action, resolved: error.errorAction.resolved === true, retries: error.errorAction.retryCount, maximum: error.errorAction.retryConfig?.maxNumRetry, delays: [...value.timers.values()].map(row => row.delay) };
+      });
+      assert.deepEqual(trace(f), trace(baseline), "ordinary decisions and real LevelController schedules match unmodified HLS");
+      const defaults = ActualHls.DefaultConfig;
+      assert.equal(f.mounted.config.playlistLoadPolicy.default.timeoutRetry, defaults.playlistLoadPolicy.default.timeoutRetry);
+      for (const name of ["manifestLoadPolicy", "fragLoadPolicy", "keyLoadPolicy"]) assert.equal(f.mounted.config[name], defaults[name]);
+      assert.equal(f.mounted.config.playlistLoadPolicy.default.maxLoadTimeMs, defaults.playlistLoadPolicy.default.maxLoadTimeMs);
+      assert.equal(f.mounted.config.playlistLoadPolicy.default.maxTimeToFirstByteMs, defaults.playlistLoadPolicy.default.maxTimeToFirstByteMs);
+      assert.equal(defaults.playlistLoadPolicy.default.errorRetry.maxNumRetry, 2, "global HLS defaults stay immutable");
+    });
+  }
+});
 
 test("inline policy snapshots use one renewal GET without changing the authority bounds", async () => {
   const p = await page(new Map(), { inlinePolicySession: true });
@@ -1094,6 +1258,41 @@ test("TURN demo refresh recycles active peers while preserving consent, admissio
     assert.equal(next.options.iceTransportPolicy, "relay");
     assert.equal(report.uploadBudget.spent, 77); assert.equal(report.accountBudget.spent, 277); assert.equal(p.fixture.accountSignatures, 1);
     assert.equal(p.fixture.sourceLoads, 1); assert.equal(p.turnCalls.length, 2);
+  } finally { p.close(); }
+});
+
+test("origin-only playback survives a same-publisher admission epoch change without peer authority", async () => {
+  const p = await turnPage();
+  try {
+    p.fixture.session.streamEvent.pubkey = "fixed-publisher";
+    p.fixture.session.admission = { issuer: "issuer", epoch: "epoch-a", challengeEndpoint: "/origin-challenge", ticketEndpoint: "/origin-ticket", verifyEndpoint: "/origin-verify" };
+    p.fixture.fetch = url => url === "/session.json" ? p.fixture.session : url === "/delivery-policy.json" ? p.fixture.policy
+      : { ...p.fixture.session.admission, swarmId: p.fixture.session.swarmId, challenge: "challenge", ticket: "fresh-ticket", expiresAt: Math.ceil(p.context.Date.now() / 1000) + 120 };
+    await p.poll(); await p.submit();
+    const player = p.fixture.players.at(-1), off = p.fixture.swarms.at(-1);
+    assert.equal(off.options.mode, "off"); assert.equal(p.turnCalls.length, 0);
+    assert.equal(p.fixture.sourceLoads, 1); assert.equal(p.video.paused, false);
+
+    p.fixture.session = { ...p.fixture.session, admission: { ...p.fixture.session.admission, epoch: "epoch-b" } };
+    await p.poll();
+    const report = p.context.window.relaySwarmDemo.report();
+    assert.equal(report.current?.mode, "off", "An irrelevant peer epoch must not remove the active OriginOnly configuration");
+    assert.equal(report.current.upload, false); assert.equal(report.current.metrics.serving, false);
+    assert.equal(report.current.metrics.peers.connected, 0); assert.equal(report.loaderRestored, true);
+    assert.equal(report.totals.peerFirstBytes, 0); assert.equal(report.totals.uploaded, 0);
+    assert.equal(p.element("upload").checked, false); assert.equal(p.element("telemetry").checked, false);
+    assert.equal(p.fixture.players.at(-1), player); assert.equal(player.destroyed, undefined);
+    assert.equal(p.fixture.sourceLoads, 1); assert.equal(p.video.paused, false); assert.equal(p.turnCalls.length, 0);
+    assert.equal(off.stopped, true, "The stale peer configuration is still retired");
+
+    p.element("mode").value = "peer-first";
+    await p.poll();
+    assert.equal(p.context.window.relaySwarmDemo.report().current.mode, "off", "A policy poll cannot substitute for Apply");
+    assert.equal(p.turnCalls.length, 0);
+    await p.submit();
+    assert.equal(p.fixture.swarms.at(-1).options.mode, "peer-first");
+    assert.equal(p.fixture.swarms.at(-1).options.serve, false); assert.equal(p.turnCalls.length, 1);
+    assert.equal(p.fixture.sourceLoads, 1, "Explicit peer Apply keeps the original playback instance");
   } finally { p.close(); }
 });
 

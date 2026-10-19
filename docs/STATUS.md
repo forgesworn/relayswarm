@@ -11,7 +11,7 @@ on `main` do not change that tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
 
-Checkpoint: 19 October 2026 (checked at 23:11 UTC on 18 October). The pilot
+Checkpoint: 19 October 2026. The pilot
 runs `3f706a9bc4a895d17345be26b77006cf13093c46`. All nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39169937465),
 fresh consumption of 280 package members and guarded deployment passed.
@@ -27,18 +27,21 @@ override was used. Reporting was restored to off, and browser and finite-source
 cleanup passed independent review. This closes the current P05 reporting
 check; it does not qualify the remaining load or device requirements.
 
-**Crash-recovery acceptance remains RED.** The parent-only crash stopped the
-application as intended. The host audit then refused seven unrelated zombie
-processes and an order-only Docker mount-inventory difference, so the test did
-not reach restart or playback-recovery acceptance. A corrected strict audit
-passed regressions and actual read-only checks. Guarded marker recovery
-preserved publisher state and all four permanent lease identities.
+**Crash-recovery acceptance remains RED.** The latest test passed the
+parent-only crash, strict writer audit, guarded marker recovery and server
+restart. Publisher state, all four permanent leases and the original restart
+policy were preserved. Browser playback did not recover: six playlist HTTP 502
+responses exhausted hls.js's retry budget before the server became healthy.
+The fatal network error remains in the receipt. No post-restart decoded
+progress was proved. Owned browser and verification-source cleanup passed;
+the failed acceptance window was not extended.
 
-The original failed test window was not extended. A separate service
-restoration recreated the same image and restored its original restart policy.
-The public HTTPS page responds with 200; the application is waiting for encoder
-input and `/session.json` returns 503. This proves service availability in the
-waiting state, not fresh live playback. No temporary source remains running.
+An existing browser regression also reproduces the failure against the
+unchanged source with a 35-second HTTP 503 outage: playback stays at the same
+frame count after service returns. The retry correction and a separately
+reproduced origin-only admission-epoch correction are being verified. The
+specific reason the actual crash test lost its current swarm report remains
+unproved. See the [latest recovery checkpoint](../spikes/results/3f706a9-parent-crash-recovery-checkpoint-20261019.json).
 
 The fourteen-viewer short qualifier has not passed. R55 stopped during setup;
 the earlier R54 both-quality peer-coverage failure remains unresolved on the

@@ -2,6 +2,7 @@ import Hls from "hls.js";
 import { generateSecretKey, getPublicKey, finalizeEvent } from "nostr-tools/pure";
 import { createPersistentUploadBudget } from "./upload-budget.mjs";
 import { createMediaRecovery } from "./media-recovery.mjs";
+import { createLivePlaylistRetry } from "./live-playlist-retry.mjs";
 import { segmentMediaContext } from "../src/browser/segment-commitment.mjs";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 import { createFetchDiagnostics } from "./fetch-diagnostics.mjs";
@@ -216,8 +217,12 @@ function mountPlayer({ reloadNative = false } = {}) {
     if (Hls.isSupported()) {
       byId("mode").disabled = false; byId("upload").disabled = false;
       player.engine = `hls.js ${Hls.version}`;
-      hls = new Hls({ ...(session.mediaCapabilities?.parts === true ? {} : { liveSyncDurationCount: 4 }), maxBufferLength: 20, maxMaxBufferLength: 30 });
-      const mountedHls = hls;
+      let mountedHls;
+      const playlistRetry = createLivePlaylistRetry({ loadPolicy: Hls.DefaultConfig.playlistLoadPolicy, Loader: Hls.DefaultConfig.pLoader ?? Hls.DefaultConfig.loader,
+        ErrorController: Hls.DefaultConfig.errorController, errorEvent: Hls.Events.ERROR,
+        current: () => hls === mountedHls && document.visibilityState === "visible", live: () => mountedHls?.latestLevelDetails?.live === true });
+      hls = mountedHls = new Hls({ ...(session.mediaCapabilities?.parts === true ? {} : { liveSyncDurationCount: 4 }), maxBufferLength: 20, maxMaxBufferLength: 30,
+        playlistLoadPolicy: playlistRetry.loadPolicy, pLoader: playlistRetry.Loader, errorController: playlistRetry.ErrorController });
       initialLoader = hls.config.fLoader;
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (hls !== mountedHls) return;
@@ -239,6 +244,7 @@ function mountPlayer({ reloadNative = false } = {}) {
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => { if (hls === mountedHls) push(player.levelChanges, { atMs: elapsed(), level: data.level }); });
       hls.on(Hls.Events.LEVEL_UPDATED, (_event, { details }) => {
         if (hls !== mountedHls || document.visibilityState !== "visible") return;
+        playlistRetry.loaded();
         mediaRecovery.observeLive(details, { lastFragmentCC: player.fragments.at(-1)?.discontinuity, fatalErrors: player.fatalErrors });
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -432,6 +438,7 @@ const policyRenewal = createPolicyRenewal({
   },
   eligible: ({ base, current }) => sameIdentity(base, session) || sameIdentity(current, session),
   commit({ next, current, candidateCredential, priorCredential, renewAdmission }) {
+    const keepOriginOnly = Boolean(swarm && activeConfig.mode === "off" && session.swarmId === current.swarmId && session.streamEvent.id === current.streamEvent.id && session.streamEvent.pubkey === current.streamEvent.pubkey && session.manifest === current.manifest);
     const identityChanged = !sameIdentity(current, session);
     const configurationChanged = !samePeerConfiguration(current, session);
     const transportPolicyChanged = iceTransportPolicy(current) !== iceTransportPolicy(session);
@@ -447,7 +454,8 @@ const policyRenewal = createPolicyRenewal({
     deliveryPolicy = next; policyUnavailable = false;
     if (next.mode === "off") byId("upload").checked = false;
     reportingAvailability(next.telemetry, next.telemetry ? "Reporting is available. Tick the checkbox to share measurements." : "This service has reporting switched off. No numeric measurements will be sent.", !next.telemetry);
-    if (changed && (swarm || startRequestedAt !== null && !needsViewerApply)) configure();
+    // Revocation still requires Apply for peers; an existing origin player can retain a real off configuration.
+    if (changed && (swarm || startRequestedAt !== null && (!needsViewerApply || keepOriginOnly))) configure();
     else if (renewAdmission && credentialInstalled && swarm && !needsViewerApply) {
       if (!peerAuthorityFresh(session)) throw new Error("Peer admission renewal unavailable.");
       // A disabled peer implementation is a supported origin fallback. It has
