@@ -274,6 +274,25 @@ test("peer selection ranks measured completion and payload rate, penalises failu
   assert.equal(policy.summary(fast).attempts, 32, "measurements retain bounded scalar state");
 });
 
+test("peer selection reports the time the fastest recent completion at least as large needs, across links", () => {
+  const policy = new PeerSelection();
+  const first = { pubkey: "first", have: new Set([KEY]) }, second = { pubkey: "second", have: new Set([KEY]) };
+  assert.equal(policy.minimumMs(100_000), 0, "no completed transfer gives no floor");
+  policy.record(first, 900);
+  assert.equal(policy.minimumMs(100_000), 0, "a failure is not a completion");
+  policy.record(first, 100, 10_000);
+  assert.equal(policy.minimumMs(100_000), 0, "a smaller completion never constrains a larger request");
+  assert.equal(policy.minimumMs(10_000), 100);
+  policy.record(first, 400, 100_000);
+  policy.record(second, 200, 100_000);
+  assert.equal(policy.minimumMs(100_000), 200, "the fastest large completion on any link sets the floor");
+  assert.equal(policy.minimumMs(10_000), 20, "a larger completion's rate also bounds a smaller request");
+  assert.equal(policy.minimumMs(100_001), 0);
+  assert.equal(policy.minimumMs(0), 0);
+  for (let i = 0; i < 16; i++) policy.record(first, 1000, 100_000);
+  assert.equal(policy.minimumMs(100_000), 1000, "only the last 16 completions count");
+});
+
 test("instant failures cannot make a previously quick peer outrank a healthy measured peer", () => {
   const policy = new PeerSelection();
   const failed = { pubkey: "failed", have: new Set([KEY]) }, healthy = { pubkey: "healthy", have: new Set([KEY]) };

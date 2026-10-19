@@ -156,7 +156,7 @@ not an identity), `uptimeMs`, `serving`, plus:
   `aborted`, `peerInTime`, `peerLate`, `peerMiss`, `peerCorrupt`,
   `peerUnverified`, `inTimeShare`, `sampledInTimeShare`, `observedInTimeShare`,
   `sampledInTimeByteShare`, `observedInTimeByteShare`, `peerFirstLoaded`,
-  `originFallbacks`, `commitmentRequests`, `commitmentRejected`,
+  `originFallbacks`, `peerSkippedLate`, `commitmentRequests`, `commitmentRejected`,
   `commitmentUnavailable`, `peerFirstShare`, `peerFirstByteShare`, `peerLatencyMedianMs`,
   `peerLatencyP90Ms`, `originLatencyMedianMs`.
 - `bytes`: `fromOrigin`, `fromPeers`, `peerFirst`, `uploaded`, `uploadsServed`,
@@ -412,7 +412,11 @@ Signature validation, peer discovery, transfer and SHA-256 verification must
 all finish within `originFallbackMs`. With a thin playback buffer the wait is
 shortened to reserve `originReserveMs` for origin loading. Startup, an empty
 buffer, or a fragment with neither advertised availability nor an eligible
-contributor goes directly to origin.
+contributor goes directly to origin. The loader also goes to origin without
+asking a peer when the time left is less than the fastest of its last 16
+completed peer transfers at least as large as the segment would need for the
+segment's committed size; `peerSkippedLate` counts these. Without such a
+completion there is no limit.
 
 When an eligible same-rendition contributor is fetching a new segment, the
 loader requests its signed commitment while waiting for availability. It

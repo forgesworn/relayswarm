@@ -656,6 +656,28 @@ class ServingChannel extends RecordedChannel {
   }
 }
 
+test("a peer request is skipped for origin when the time left is below the fastest completed transfer", async () => {
+  const playback = peerPlaybackOptions(1000);
+  const requested = [];
+  const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket() });
+  try {
+    const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 250, requested, "holder"));
+    channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+    assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 1);
+    assert.equal(fixture.swarm.metrics().segments.peerSkippedLate, 0, "no completed transfer gives no floor");
+    // 2.15 s buffered less the 2 s origin reserve leaves 150 ms; the only
+    // completion took at least 250 ms for this size.
+    fixture.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 12.15 } };
+    assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+    const segments = fixture.swarm.metrics().segments;
+    assert.deepEqual(requested, ["holder"], "the holder is not asked for a segment it could not deliver in time");
+    assert.equal(segments.peerSkippedLate, 1);
+    assert.equal(segments.peerFirstLoaded, 1);
+    assert.equal(segments.originLoaded, 1);
+  } finally { await fixture.close(); }
+});
+
 test("peer eligibility distinguishes zero budget with HAVE from positive budget without HAVE, without extra work", async () => {
   const playback = peerPlaybackOptions(120);
   let keyCalls = 0, commitments = 0, admissions = 0, deliveries = 0;

@@ -323,6 +323,7 @@ class HlsSwarm {
       originFallbacks: 0,
       coordinatedWaits: 0,
       coordinatedPeerLoads: 0,
+      peerSkippedLate: 0,
       commitmentRequests: 0,
       commitmentRejected: 0,
       commitmentUnavailable: 0,
@@ -558,6 +559,7 @@ class HlsSwarm {
         originFallbacks: c.originFallbacks,
         coordinatedWaits: c.coordinatedWaits,
         coordinatedPeerLoads: c.coordinatedPeerLoads,
+        peerSkippedLate: c.peerSkippedLate,
         commitmentRequests: c.commitmentRequests,
         commitmentRejected: c.commitmentRejected,
         commitmentUnavailable: c.commitmentUnavailable,
@@ -954,6 +956,12 @@ class HlsSwarm {
     if (signal.aborted || this.stopped) return null;
     const tried = new Set();
     while (!signal.aborted && !this.stopped && now() < deadline && tried.size < this.options.maxPeers) {
+      // Go to origin now, keeping the buffer, rather than ask a holder for a
+      // segment no recent transfer could have delivered in the time left.
+      if (this.peerSelection.minimumMs(commitment.size) > deadline - now()) {
+        this.counters.peerSkippedLate += 1;
+        return null;
+      }
       const link = this.peerSelection.select(this.links.values(), key, tried, commitment.size, deadline - now());
       if (!link) {
         if (![...this.links.values()].some((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key)

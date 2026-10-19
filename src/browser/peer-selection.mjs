@@ -1,10 +1,26 @@
 // Recent observations only: link measurements disappear with the link. These
 // are completion times and payload rates, not network RTT or ABR estimates.
+const RECENT_COMPLETIONS = 16;
+
 export class PeerSelection {
   constructor() {
     this.observations = new WeakMap();
     this.turn = 0;
     this.order = 0;
+    // Sizes and payload rates of recent completed transfers on any link.
+    // Links are often replaced after a timeout, so this survives turnover.
+    this.recentCompletions = [];
+  }
+
+  // Time the fastest recent completion at least this large would need for
+  // this size; 0 without one. Smaller transfers carry more fixed overhead per
+  // byte, so they never constrain a larger request. A request with less time
+  // left cannot be expected to finish, yet a holder still sends it in full.
+  minimumMs(size) {
+    if (!size) return 0;
+    let fastest = 0;
+    for (const { bytes, rate } of this.recentCompletions) if (bytes >= size && rate > fastest) fastest = rate;
+    return fastest ? size / fastest : 0;
   }
 
   summary(link) {
@@ -55,6 +71,8 @@ export class PeerSelection {
     if (bytes) {
       value.latencyMs = blend(value.latencyMs, elapsed);
       value.throughputBytesPerSecond = blend(value.throughputBytesPerSecond, Math.min(1_000_000_000, bytes * 1000 / elapsed));
+      this.recentCompletions.push({ bytes, rate: Math.min(1_000_000, bytes / elapsed) });
+      if (this.recentCompletions.length > RECENT_COMPLETIONS) this.recentCompletions.shift();
     }
     this.observations.set(link, value);
   }
