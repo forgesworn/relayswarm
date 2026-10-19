@@ -472,3 +472,18 @@ test("paired links end a cancelled response early and then serve the next reques
   const second = receiver.request(KEY, 1500, { expectedSize: payload.byteLength }); await turn();
   assert.deepEqual(await second, payload); assert.equal(served.bytesOut, 16_384 + 40_000);
 });
+
+test("a holder queues at most about 128 KiB of a response before waiting, so a cancel stops the rest", async (t) => {
+  clock(t);
+  const size = 300_000, { channel, cancelled } = holder(t, new Uint8Array(size));
+  const send = channel.send.bind(channel);
+  // Nothing drains: every chunk stays queued until the test lowers it.
+  channel.send = (data) => { send(data); if (typeof data !== "string") channel.bufferedAmount += data.byteLength; };
+  channel.receive(JSON.stringify({ t: "want", id: 1, k: KEY })); await turn();
+  const chunks = () => channel.sent.filter((frame) => frame.bytes).length;
+  assert.equal(chunks(), 9, "eight full chunks reach 128 KiB; the ninth crosses it");
+  channel.receive(JSON.stringify({ t: "cancel", id: 1 }));
+  channel.bufferedAmount = 0; channel.dispatchEvent(new Event("bufferedamountlow")); await turn();
+  assert.equal(chunks(), 9); assert.deepEqual(channel.sent.at(-1), { t: "eof", id: 1 });
+  assert.deepEqual(cancelled, [size - 9 * 16_384]);
+});

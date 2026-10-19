@@ -314,7 +314,9 @@ known ordered, fully reliable channel, the link stays busy while discarding
 that response up to a matching validated EOF, or a refusal before metadata.
 Only then can another request use the channel. The receiver also sends
 `cancel`; a holder that honours it stops at its next chunk and sends EOF early,
-or refuses before metadata. Holders without `cancel` send the response in full. The existing drain limit closes
+or refuses before metadata. Holders without `cancel` send the response in full.
+A holder queues more of a response only while at most 128 KiB is waiting to
+be sent on the channel, so chunks queued before a cancel arrives still flow. The existing drain limit closes
 an incomplete response; host stop and admission withdrawal close immediately.
 Fresh-origin coordination is bounded by safe buffered playback and measured
 HTTP fallback time. hls.js owns quality selection. These mechanisms do not

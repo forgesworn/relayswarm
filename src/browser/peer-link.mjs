@@ -20,8 +20,10 @@
 
 const HEX64 = /^[0-9a-f]{64}$/u;
 const CHUNK_BYTES = 16 * 1024;
-const HIGH_WATER_BYTES = 1024 * 1024;
-const LOW_WATER_BYTES = 256 * 1024;
+// A response is handed to the channel only while little is queued, so a
+// cancel can stop most of the rest; bytes already queued cannot be recalled.
+const HIGH_WATER_BYTES = 128 * 1024;
+const LOW_WATER_BYTES = 32 * 1024;
 const MAX_HAVE_KEYS = 256;
 const CLOSE_REASONS = new Set([
   "host", "host-stop", "admission", "rotation", "integrity", "request-timeout", "request-abort",
