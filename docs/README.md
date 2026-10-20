@@ -15,6 +15,7 @@ its measured scope and acceptance gaps in [Status](STATUS.md).
 | Attach the loader, configure consent/admission, read metrics | [hls.js integration](../INTEGRATION.md) |
 | Find module exports and publisher/session methods | [API reference](API.md) |
 | Review current production implementation and acceptance | [Production features](PRODUCTION-FEATURES.md), [delivery checklist](PRODUCTION-READINESS.md) |
+| Continue the agreed production work as another agent | [Goals and agent handover](AGENT-GOALS.md) |
 | Implement compatible session and commitment messages | [Protocol draft](NIP-DRAFT.md) |
 | Run a trial on separate devices and interpret receipts | [Publisher/player field test](FIELD-TEST.md) |
 | Ingest a live broadcast or add optional RTMPS forwarding | [Broadcasting](BROADCASTING.md) |
