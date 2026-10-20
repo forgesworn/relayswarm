@@ -1102,7 +1102,9 @@ test("a projection that cannot fit the buffer goes to origin before any wait or 
     assert.equal(row.reason, "projected-late");
     // A single-chunk 600 ms completion: its first byte alone overruns 500 ms.
     assert.equal(row.projection.stage, "entry"); assert.equal(row.projection.holderWaitMs, 0);
-    assert.ok(row.projection.firstByteMs >= 600 && row.projection.roomMs <= 500);
+    // A 600 ms timer can measure a fraction under 600; the skip rests on the
+    // first byte exceeding the room, which is what is asserted.
+    assert.ok(row.projection.roomMs <= 500 && row.projection.firstByteMs > row.projection.roomMs, JSON.stringify(row.projection));
     assert.deepEqual(Object.keys(row.projection).sort(), ["firstByteMs", "holderWaitMs", "rateBytesPerSecond", "roomMs", "stage", "transferMs"]);
     assert.equal(metrics.segments.originFallbacks, 1);
   } finally { await fixture.close(); }
