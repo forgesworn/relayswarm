@@ -991,6 +991,10 @@ class HlsSwarm {
   }
 
   async #peerFirst(context, signal, plan, budgetMs, budgetGeometry) {
+    // The initial deadline; plan.deadline may grow from it. Test availability
+    // instrumentation (test/support/broadcast-availability-transform.mjs)
+    // reads this binding by name.
+    const deadline = plan.deadline;
     const discoveryContext = this.discovery.contexts.get(context.frag.type || "main");
     const key = await this.#segmentKey(context);
     if (signal.aborted || this.stopped) {
