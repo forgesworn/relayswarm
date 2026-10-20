@@ -1,0 +1,158 @@
+{
+  "v": 1,
+  "checkpointDate": "2026-10-18",
+  "sourceSha": "a02d5ec4d5408c8c196e0c259d07c7fc68e965d6",
+  "productionComplete": false,
+  "scope": "a02d5ec CI, source consumption and guarded deployment passed. R55 setup RED; reporting retry RED on unchanged policy revision after telemetry restart. Independent finite cleanup passed; no long or final-release credit.",
+  "configuration": {
+    "iceTransportPolicy": "relay",
+    "turnUrlProjection": "tls-tcp",
+    "perAddressTickets": 32,
+    "perAddressRequests": 900,
+    "globalRequestCapacity": 2048,
+    "reporting": false,
+    "forwarding": false,
+    "accountMethods": [
+      "nostr"
+    ],
+    "hostSuppliedAccountAPIImplemented": true,
+    "websiteResolverConfigured": false,
+    "privateStateAndPermanentLeasesPreserved": true,
+    "independentProxyPreserved": true,
+    "sdkDefaultMaxPeers": 6,
+    "deployedDemoMaxPeers": 4
+  },
+  "release": {
+    "published": "v0.1.0",
+    "candidate": "0.2.0",
+    "pr": 8,
+    "merged": false,
+    "candidatePublished": false,
+    "npmPublished": false
+  },
+  "remaining": [
+    "matching successful300second qualifier",
+    "7200seconds and22churn with natural TURN expiry",
+    "both-quality cross-device upload-budget lifecycle",
+    "durable opt-in reports and parent-crash recovery acceptance",
+    "physical/browser breadth within available devices and Simulator scope",
+    "difficult networks and matched wire/cost benefit",
+    "final0.2release and downloaded-asset acceptance"
+  ],
+  "ci": {
+    "run": 39160708033,
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/39160708033",
+    "requiredJobsPassed": 9
+  },
+  "consumer": {
+    "files": 278,
+    "elapsedMs": 9555,
+    "scope": "Exact committed source, not downloaded final release assets"
+  },
+  "deployed": {
+    "sourceSha": "a02d5ec4d5408c8c196e0c259d07c7fc68e965d6",
+    "appId": "9cb1ddbfe860cf8f91dd4e8e898f1e38acddb13cebb5da0a3532af193f70a7af",
+    "image": "sha256:459f22a803c432c82dfb3da1352452a43eaa9d677590d8304f57e89b3ce07d13",
+    "appStartedUTC": "2026-10-18T21:46:28.240932139Z",
+    "client": {
+      "file": "candidate-client.mjs",
+      "bytes": 773458,
+      "sha256": "dafef937bef7f92915ce3345a47977d402e2ffece50b115f95f9f0967e8ea425"
+    }
+  },
+  "r55": {
+    "verdict": "RED",
+    "stage": "setup",
+    "browserElapsedMs": 48897,
+    "measurementElapsedMs": 0,
+    "contextsAcquired": 6,
+    "allActuallyAcquiredContextsClosed": true,
+    "completeExpectedCohort": false,
+    "browserContextAPIClosureProved": false,
+    "independentFiniteCleanupPassed": true,
+    "strict300Passed": false,
+    "longEligible": false,
+    "specificNavigationFailureCauseProved": false
+  },
+  "reportingRetry": {
+    "verdict": "RED",
+    "rootElapsedMs": 85580.19762509502,
+    "defaultReportingSilentMs": 16000,
+    "serverEnableSucceeded": true,
+    "playbackProgressed": true,
+    "clientUnavailableAfterTelemetryChangedAtUnchangedRevision": true,
+    "observedReportRequests": 0,
+    "optInReached": false,
+    "restartDurabilityReached": false,
+    "naturalExpiryReached": false,
+    "telemetryFalseRestored": true,
+    "fullLocalBrowserCleanup": true,
+    "sourceRemoved": true,
+    "independentFiniteCleanupPassed": true,
+    "p05AcceptancePassed": false,
+    "p07Eligible": false
+  },
+  "policyDefect": {
+    "serverPersistedTelemetryInPolicyRevision": false,
+    "clientEqualRevisionConflictRefusalPreserved": true,
+    "fieldRepairProved": false
+  },
+  "otherWorkPreserved": true,
+  "evidence": [
+    {
+      "path": "artifacts/ci-a02d5ec-39160708033-20261018/ci-terminal-success.json",
+      "bytes": 22062,
+      "sha256": "b0e1cb93b9ad877a16bbd5119891dba3cea7ae5ed0cfab497b36398c3fdaee8b"
+    },
+    {
+      "path": "artifacts/clean-consumer-a02d5ec-20261018/package-review.json",
+      "bytes": 6106,
+      "sha256": "bdec23a56bd7cb94dafbcd9e6c52c9f60da15d2fa4fa8391a7d030a9030567ad"
+    },
+    {
+      "path": "artifacts/deployment-a02d5ec-saturated-repair-20261018/runtime-contract.json",
+      "bytes": 12212,
+      "sha256": "a4eb79b93c7c105c21005c317a83dff322b71f109801244c5187edca516d84ee"
+    },
+    {
+      "path": "artifacts/independent-deployment-a02d5ec-review-20261018/review.json",
+      "bytes": 27711,
+      "sha256": "4798f5e3c8fc9b4a892d006a85fa46225f4b52533fe8d9e6671e6e23ca5d435d"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-a02d5ec-r55-run-20261018/browser/receipt.json",
+      "bytes": 400349,
+      "sha256": "0609abc91111be31bbc598065747d9cb411c070ef0166d56d85db17a639d4196"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-a02d5ec-r55-cleanup-review-20261018/review.json",
+      "bytes": 22169,
+      "sha256": "c2916fae6ad468c905c88e9eccf0bf7aaec5feef3d8c6ca85ff69e97124bea26"
+    },
+    {
+      "path": "artifacts/p05-a02d5ec-run-r3-20261018/receipt.json",
+      "bytes": 46508,
+      "sha256": "fdb353f31835e57cd29d709022314e790076b152ec9a50e3bf8be236ec6f656d"
+    },
+    {
+      "path": "artifacts/p05-a02d5ec-run-r3-20261018/root-worker.json",
+      "bytes": 3951,
+      "sha256": "579f905bc378f8b03b3af16c694cb7b646290beeffd3da5925f7d26807d0994a"
+    },
+    {
+      "path": "artifacts/p05-a02d5ec-run-r3-20261018/outer-guardian.json",
+      "bytes": 437,
+      "sha256": "915ec5da6b2b6dd9120b9a5f7f385e9bf987dea40b6fa406f9cafc014e153c3b"
+    },
+    {
+      "path": "artifacts/independent-p05-a02d5ec-post-retry-cleanup-review-20261018/review.json",
+      "bytes": 8395,
+      "sha256": "3dbc276431537f499b407c3ca6e7e8369e78855225cb62e5c7d80f7b3db96e85"
+    },
+    {
+      "path": "artifacts/p05-a02d5ec-post-retry-root-audit-20261018.json",
+      "bytes": 651,
+      "sha256": "9a8aeba4c317fddb61a829af755ba28d65de7651837b29d2b21d6cbd54c24117"
+    }
+  ]
+}

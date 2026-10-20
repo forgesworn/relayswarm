@@ -105,17 +105,23 @@ export class NativeDhtTransport {
     if (this.closed) throw new Error("Native transport is closed.");
     const socket = this.dht.connect(Buffer.from(remotePublicKey, "hex"), { keyPair: this.keyPair });
     socket.on("error", () => {});
-    await withTimeout(new Promise((resolve, reject) => {
+    const started = performance.now();
+    const opened = new Promise((resolve, reject) => {
       socket.once("open", resolve);
       socket.once("error", reject);
-    }), this.connectionTimeoutMs, "Native peer connection timed out.").catch((error) => {
+    });
+    await withTimeout((async () => {
+      await opened;
+      if (hex(socket.remotePublicKey) !== remotePublicKey) throw new Error("Native peer authenticated a different transport key.");
+      // Noise open can precede the server's UDX connection handoff. Require
+      // acknowledged handshake writes before sending the object request.
+      if (await socket.flush() !== true) throw new Error("Native peer did not acknowledge connection readiness.");
+      if (this.closed || socket.destroyed || socket.destroying) throw new Error("Native peer closed before connection readiness.");
+      if (performance.now() - started >= this.connectionTimeoutMs) throw new Error("Native peer connection timed out.");
+    })(), this.connectionTimeoutMs, "Native peer connection timed out.").catch((error) => {
       socket.destroy();
       throw error;
     });
-    if (hex(socket.remotePublicKey) !== remotePublicKey) {
-      socket.destroy();
-      throw new Error("Native peer authenticated a different transport key.");
-    }
     return socket;
   }
 

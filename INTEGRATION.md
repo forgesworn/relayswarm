@@ -9,10 +9,13 @@ comes from the origin, and the swarm only measures what peer delivery would
 have achieved. That is the mode to deploy first.
 
 The module is browser ESM with a direct runtime dependency on `nostr-tools`.
-The [v0.1.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0)
+The published [v0.2.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0)
 supplies an installable tarball and a standalone bundle containing the browser
 runtime dependencies. The host supplies hls.js. The npm registry is unpublished;
 [Getting started](docs/GETTING-STARTED.md) gives exact asset and pinned-Git commands.
+v0.2.0 adds the
+[production feature work](docs/PRODUCTION-FEATURES.md); those additions are
+absent from v0.1.0 assets and retain separate delivery/acceptance gates.
 
 The host selects a trusted stream event, shared swarm id, relay policy and ICE
 servers. This module does not perform Nostr stream discovery or automatically
@@ -59,6 +62,16 @@ was configured, and `stop()` puts the original back, closes every peer
 connection and relay socket, drops held segments and emits one final
 `onMetrics`. Requires a secure context (https, or localhost) for WebCrypto.
 
+For a same-identity admission renewal, `updateTicket(ticket)` replaces only this
+viewer's opaque ticket and schedules a bounded presence announcement. Established
+links, the loader, held segments, counters and upload reservations remain intact.
+It returns `true` for an accepted ticket (including an unchanged one), or `false`
+for an invalid ticket or stopped, disabled or ungated swarm. The host must validate
+its own credential's issuer, swarm, epoch and expiry before calling it, and retain
+expiry checks around asynchronous admission and upload reservations. It does not
+validate an opaque credential, extend policy authority or restore upload consent.
+Publisher, policy or peer-configuration changes still require reconfiguration.
+
 ## Options
 
 | Option | Default | What it does |
@@ -67,19 +80,23 @@ connection and relay socket, drops held segments and emits one final
 | `relays` | required | 1-8 relay URLs (`wss://`, or `ws://` on loopback). |
 | `mode` | `"shadow"` | `"off"` disables; `"peer-first"` requires a signed stream authorisation and commitment provider. |
 | `secretKey` | fresh per viewer | Ephemeral signing key for presence and signalling. Never the viewer's own identity. |
-| `originFallbackMs` | `1500` | The in-time budget a peer delivery is measured against. |
+| `originFallbackMs` | `1500` | The in-time budget a peer delivery is measured against, and peer-first's ordinary wait. |
+| `maxPeerWaitMs` | `5000` | Peer-first may wait past `originFallbackMs`, up to this, only while recent peer timing projects the segment needs it and the playback buffer covers the wait with `originReserveMs` to spare. |
 | `originReserveMs` | `2000` | Peer-first reserves this much buffered playback for the origin; an empty buffer goes directly to origin. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
-| `maxPeers` | `6` | Connections in and out. |
+| `maxPeers` | `6` | Connections in and out. The demo selects four explicitly. |
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
 | `maxUploadPeers` | `4` | Distinct peers served in any 30 s. |
-| `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. |
+| `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. Bytes a receiver's cancel kept from being sent return to it. |
+| `maxUploadBytesPerSession` | unlimited | Optional non-negative safe integer, including zero. Reserves full accepted media payloads; interrupted transfers do not refund the allowance. |
+| `reserveUploadBytes` | none | Optional async `(bytes, {signal}) => boolean` host reservation before serving; refusal/error/timeout stops the send. Use for persistent cross-tab budgets. |
 | `serveOnCellular` | `false` | With `false`, detected cellular or `saveData` connections neither upload nor fetch peer media. Detection is advisory and does not identify every metered connection. |
 | `serve` | `false` | Set `true` only after the viewer opts into uploading. With `false`, the viewer is receive-only: it takes from peers but never uploads or advertises what it holds. Use it where the connection type cannot be read (Safari), so a phone on cellular is never asked to upload. |
 | `ticket` | none | An opaque string (up to 2 KB) this viewer presents in its presence and in every offer and answer, typically a short-lived credential the origin signed for this viewer's swarm key. |
-| `admit` | none | `(pubkey, ticket) => boolean \| Promise<boolean>`. With it set, a viewer never dials, answers or follows a referral to a peer it has not admitted, so its address (carried in the SDP) only reaches ticket holders. The host is called again before each dial and SDP publication, including retries and referrals; it must check expiry. A third argument provides an abort `signal`. At most 16 checks run concurrently and each has a 3 s deadline. |
+| `admit` | none | `(pubkey, ticket) => boolean \| Promise<boolean>`. With it set, a viewer never dials, answers or follows a referral to a peer it has not admitted, so its address (carried in the SDP) only reaches ticket holders. The host is called again before each dial and SDP publication, including retries and referrals; it must check expiry. A third argument provides an operation-specific abort `signal`, cancelled on its deadline or swarm stop. At most 16 checks run concurrently and each has a 3 s deadline. |
 | `shadowSampleRate` | `0.25` | Share of fragments raced. |
 | `streamEvent` / `getCommitment` | required for peer-first | Signed kind-30311 stream event and `(context, { signal }) => signedCommitment`. See below. |
+| `delegation` / `revokedDelegationIds` / `delegationRevocations` | none / empty | Explicit author-signed scope and current host revocation view for delegated commitments. |
 | `maxConcurrentRaces` | `24` | Maximum retained shadow races. |
 | `admissionTimeoutMs` | `3000` | Deadline for a host admission check. |
 | `swarmParts` | `false` | Include low-latency HLS parts. Parts are small; leave off. |
@@ -91,9 +108,26 @@ connection and relay socket, drops held segments and emits one final
 | `reannounceDebounceMs` / `minReannounceGapMs` | `4000` / `12000` | Bound capacity-change presence announcements. |
 | `presenceIntervalMs` | `20000` | Presence heartbeat, jittered 30%. |
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
-| `iceServers` | one public STUN | Pass the deployment's own STUN. |
+| `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
+| `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
+
+The pending glare-reuse correction keeps the existing lower-public-key offer
+when both peers dial simultaneously. The yielding peer may adopt only its
+still-pending outgoing connection for the winning admitted offer. Native
+operations are serialised and old negotiation/channel callbacks are fenced;
+the same capacity slot and original absolute `dialTimeoutMs` deadline remain.
+The host admission check runs again before rollback, after asynchronous rollback
+immediately before remote SDP, and before answer publication. These checks share
+the existing dial deadline and bounded admission policy. Established, failed or
+unsupported native states are not reused; failure retains normal origin fallback.
+Recent admitted offer IDs are retained privately up to 256 entries per swarm;
+active incoming duplicates do not allocate or restart a timer. Incoming distinct
+requests still supersede pending incoming connections. Wire version, public
+options and existing limits stay unchanged. The correction has passed 121 unit
+tests; native rollback/SCTP and Internet renewal remain unproved. See the
+[current checkpoint](docs/STATUS.md#current-delivery-checkpoint).
 
 ## Cost, and what to tell viewers
 
@@ -119,23 +153,152 @@ not an identity), `uptimeMs`, `serving`, plus:
   `candidatePairs` (counts keyed `local/remote` candidate type, the NAT
   outcome: `host/host`, `srflx/srflx`, `relay/...`, `unknown`).
 - `signalling`: `samples`, `medianMs`, `p90Ms` from offer sent to channel open.
+  `signalling.clock` holds local age-window counts: `aheadRejected` (swarm
+  events dated more than 30 s ahead), `staleRejected` (older than the 60 s
+  window, including relay history), `maxAheadSeconds`, and `signalSamples` with
+  `signalAgeMedianSeconds` from at most 64 recent live signals that decrypted
+  and validated. A median far from zero suggests this device's clock differs from its peers'; it is relay
+  delay plus skew in whole seconds, not a clock measurement. No identities.
+  `signalling.clock.origin` is `{ samples, offsetSeconds }` from the HTTP `Date`
+  (plus `Age`, when present) of up to 16 recent origin fragment loads, timed
+  at first byte, as origin minus this device; positive means the origin is ahead. It needs a
+  readable `Date`: same-origin, or `Access-Control-Expose-Headers: Date`;
+  otherwise `samples` stays 0 and `offsetSeconds` is null. `Date` has one-second
+  resolution and delay only lowers a sample, so `offsetSeconds` is the largest
+  recent sample, rounded. It is a diagnostic, not a clock correction. Without a
+  session the session fields are null and `origin` is still reported.
 - `segments`: `originLoaded`, `raced`, `noPeers`, `sampledOut`, `skipped`,
   `aborted`, `peerInTime`, `peerLate`, `peerMiss`, `peerCorrupt`,
   `peerUnverified`, `inTimeShare`, `sampledInTimeShare`, `observedInTimeShare`,
   `sampledInTimeByteShare`, `observedInTimeByteShare`, `peerFirstLoaded`,
-  `originFallbacks`, `commitmentRequests`, `commitmentRejected`,
+  `originFallbacks`, `peerSkippedLate`, `peerProjectedLate`, `peerWaitExtended`,
+  `peerAbandoned`, `peerNoFit`, `commitmentRequests`, `commitmentRejected`,
   `commitmentUnavailable`, `peerFirstShare`, `peerFirstByteShare`, `peerLatencyMedianMs`,
   `peerLatencyP90Ms`, `originLatencyMedianMs`.
 - `bytes`: `fromOrigin`, `fromPeers`, `peerFirst`, `uploaded`, `uploadsServed`,
-  `uploadsRefused`, `held`.
+  `uploadsRefused`, `uploadsCancelled`, `uploadCancelledBytes`, `held`,
+  `uploadRemaining` (null when unlimited), `uploadExhausted`.
+  `uploadsCancelled` counts responses this viewer stopped early because the
+  receiver cancelled them; `uploadCancelledBytes` is the part of `uploaded` that
+  was therefore not sent. Those bytes return to the per-second upload rate; the
+  session allowance and any host reservation already charged are not refunded.
+- `peers.deliveryMeasurements`: bounded measurements for active links,
+  including completion time, payload rate and failures.
 - `relays`: `connected`, `presenceSent`, `signalsSent`, `published`,
-  `rejected`, `publishErrors`.
+  `rejected`, `rejectedTimestamp` (the `rejected` frames whose message mentions
+  a timestamp), `sinceDropped` (events dropped only by the subscription `since`
+  filter, unverified and so unauthenticated; a device clock ahead of its peers
+  raises it), `publishErrors`.
 - `errors`: `total` and `byStage`.
 - `config`: the effective settings, so a receipt says what produced it.
 
 Snapshots contain no IP addresses, user agent or long-term key, but the
-ephemeral public key can correlate a receipt with public swarm activity. Post it to the host's own endpoint on an interval and once
-more on `stop()`, and keep the payload small enough for `sendBeacon`.
+ephemeral public key can correlate a receipt with public swarm activity.
+Keep receipts local unless the viewer explicitly agrees to reporting. The
+current demo's optional reporting endpoint accepts a numeric summary rather
+than this full snapshot; see [operations](docs/OPERATIONS.md).
+
+`peerEligibilityDiagnostics` is an additive local version-2 snapshot field in
+the current source. Its fixed reason `counters` survive eviction from the
+64-record ring; `capacity` and `dropped` describe that ring. Each row contains
+elapsed `atMs`, numeric `cc` and `level` (null when unavailable), the already
+computed initial `budgetMs`, `reason` and `matchingHave` (boolean or null).
+`no-budget` records HAVE as **null/unobserved**: the loader does not compute a
+segment key or inspect peer availability to populate this diagnostic. The
+original origin fallback may still compute its normal key afterwards.
+Positive-budget reasons distinguish `no-have-no-wait`, `no-have-wait`,
+`wait-no-longer-eligible`, `wait-aborted`, `wait-expired`, `have-at-entry` and
+`have-after-wait`; `aborted-before-eligibility` means cancellation after the
+existing key computation, before the HAVE decision. `projected-late` means
+recent peer timing projected that the delivery could not fit before the buffer
+limit (see [peer-first loading](#authenticated-peer-first-loading)); such a row adds `projection`:
+`stage` (`entry`, before availability, or `commitment`, after), `transferMs`,
+`holderWaitMs`, `roomMs`, `firstByteMs` and `rateBytesPerSecond`, each a
+number or null. Wait expiry/cancellation
+also leaves HAVE null rather than claiming it was still absent. One load can
+produce both a wait-entry and a wait-outcome row: counters count decisions,
+not distinct segments. Budget is the initial allowance, not remaining request
+time. Rows contain no segment keys, hashes, URLs, peer identities or addresses.
+Each row also carries `budgetGeometry`: the calculation's final `currentTime`,
+`bufferedEnd`, `playableEnd`, `fragmentStart` (seconds), computed
+`originReserveMs`, and `uncappedMs`, the buffered playback less that reserve
+before `originFallbackMs` caps it. These are the values consumed by the original calculation,
+without additional media or context getter reads. Finite signed values are
+retained; unavailable or nonfinite values are null. The fixed `source` is
+`buffer`, `no-media`, `no-buffer`, `error` or `unobserved`; `positionSource` is
+`part`, `fragment` or null. Non-buffer sources leave the numeric fields null.
+Wait outcomes retain their original geometry, rather than sampling the later
+buffer. Each row and returned snapshot owns a copy. These values explain the
+initial budget calculation, not donor availability or remaining request time.
+They remain readable after stop and use the existing local/reporting-consent
+boundary; they add no requests, authority checks or deadline changes. These
+observations do not establish the cause of a failed peer transfer.
+
+`peerRequestDiagnostics` records the outcome of each peer-first transport
+request, after peer selection. Its fixed counters distinguish `payload`, `none`,
+`timeout`, `abort`, `abandoned`, `closed`, `busy` and `send-error`. At most 64 rows are retained;
+`dropped` counts evicted rows. Rows contain elapsed `atMs`, the same page-local
+connection `id` as transport diagnostics, numeric `cc` and `level`, the
+deadline's `remainingMs` at selection (after any extension), the actual request
+`timeoutMs`, request `elapsedMs`, `expectedBytes`, `receivedBytes`,
+`firstByteMs` (request to first payload chunk), `metadataReceived`, `draining`
+and a fixed `closeReason` or null. `abandoned` is a request the loader gave up
+as unable to finish in time. Unavailable numeric values are null. A
+`payload` means the transport assembled bytes; signature, size, hash, expiry
+and final loader-deadline checks still decide whether playback accepts them.
+Each logical request contributes one outcome. A timeout or abort may leave an
+ordered reliable channel draining late bytes; those bytes and its later EOF do
+not contribute another outcome or turn that request into a delivered segment.
+This field does not count eligibility decisions or commitment failures before
+selection, and shadow-mode requests are outside its scope.
+
+`uploadRefusalDiagnostics.counters` classifies the existing upload refusal
+branches: `admission`, `not-held`, `not-serving`, `banned`, `session-allowance`,
+`peer-limit`, `rate-limit`, `reservation-refused` and `reservation-inactive`.
+These count local decisions, not wire delivery or remote receipt. Both fields
+are local metrics, contain no media keys, URLs, peer identities or addresses,
+and are excluded from automatic numeric reporting. They add no network traffic,
+timers, retries, upload permission or deadline changes. Returned snapshots own
+their copies, and retained outcomes remain readable after stop.
+
+`admissionDiagnostics.calls` counts actual host `admit` callback invocations
+at the fixed sites `presence`, `dialStart`, `offerBeforeSend`, `offerIncoming`,
+`answerIncoming`, `glareBeforeRollback`, `glareAfterRollback`, `answerBeforeSend`,
+`upload`, `refresh` and `other`. Coalesced waiters and operations cancelled before
+the callback starts add no call. A callback that refuses or throws still counts.
+Counters saturate at `Number.MAX_SAFE_INTEGER`; snapshots own their copies.
+These local counters contain no credentials or identities, add no requests and
+are excluded from automatic reports. They do not cache admission or establish
+which server budget, network condition or peer caused a failed request.
+
+Deployed source `f393abf` includes `transportDiagnostics` within metrics version
+2. It contains fixed-enum
+`counters`, a ring of at most 64 `records`, `capacity` and an eviction `dropped`
+count. Records contain a page-local, per-swarm numeric connection `id` (0 when
+no PC is allocated/correlated), elapsed milliseconds in `atMs`, and fixed `event`/
+`detail` values for gathering, native states, signalling stages and close reasons.
+Unreadable native state uses the fixed `unknown` classification.
+Local-description records may add `candidates` (count only, capped at 256) and
+`candidatesCapped`; they contain no addresses, SDP, peer keys or request IDs.
+`signal-send` means local signalling acceptance, not relay delivery or remote
+receipt. The ring and counters remain readable after `stop()`; native listeners
+are detached when their dial/link ends. No automatic reporting, signalling change
+or connectivity fix is implied. Keep this diagnostic receipt local under the same
+reporting-consent boundary as other metrics. The two ordinary cross-machine
+short checks retained actual supersession, post-SDP dial timeout and established-
+link request-timeout stages; their [public summary](spikes/results/f393abf-ordinary-cross-machine-20261014.json)
+is evidence of observation, not a connectivity repair. Numeric IDs do not identify
+the remote role. Union sampled records by `(id, atMs, event, detail)` within each
+swarm instance; never sum repeated ring snapshots as new events. A request-timeout
+close identifies the branch, not the request start, available budget or reason
+bytes missed it.
+
+The pending correction adds fixed `negotiation` / `glare-yield` observations
+for adoption of a pending outgoing connection. Its numeric connection ID remains
+the same: this is neither a new native construction nor a completed link.
+Superseded negotiation callbacks cannot label the adopted connection's later
+description as an earlier offer. Existing close reasons and reporting consent
+remain unchanged; this event does not prove successful native rollback or media.
 
 `inTimeShare` remains conditional on having peers. `sampledInTimeShare`
 includes sampled fragments with no peers; its byte equivalent weights by
@@ -147,10 +310,82 @@ actually delivered to hls.js instead of starting an origin fragment request;
 `originFallbacks` counts loads delegated to the original loader. Shadow
 coverage fields are null in peer-first mode.
 
-`bytes.uploaded` counts media payloads accepted against the upload token bucket.
-An interrupted transfer can send less than this amount; signalling and protocol
-overhead are excluded. Treat it as quota consumption, not a measurement of total
-connection data or acknowledged delivery.
+`bytes.uploaded` counts payloads accepted for serving after the upload token
+bucket, any host reservation callback, and the subsequent live-state checks.
+Pending or refused host reservations never increment it. Session capacity is
+reserved internally before awaiting that callback, so concurrent requests cannot
+overspend; an accepted reservation remains charged if the link closes before
+serving. Consequently `uploadRemaining` can include charges absent from
+`uploaded`. An interrupted accepted transfer can send less than its counted
+payload; signalling and protocol overhead are excluded. These counters are not
+wire metering or acknowledged delivery, and durable host-ledger spend may exceed
+accepted serving totals.
+
+The session allowance is additive within metrics version 2. Exhaustion
+withdraws media availability and stops serving while receiving remains
+available. The library counts one swarm instance; a host recreating instances
+must retain accepted totals. The demo uses an origin-wide Web Lock and
+storage reservation across Apply, rejoin, publisher refresh, reloads and tabs.
+Consent is never persisted. Storage failure disables uploading; an explicit
+viewer reset or increase can change the quota.
+
+Peer-first ranks eligible advertised media by measured completion time,
+payload rate and failure history. Healthy measured peers take priority over
+fast refusals. A cold route gets the remaining time minus 25 ms for each of
+up to two alternatives that also pass the selector's measured deadline-fit
+check; excluded alternatives reserve no time. This reserves quick retries while allowing an unknown
+route to complete and acquire a measurement. A known delivery gets headroom
+within the original peer deadline, rather than an equal share of it.
+Attempts remain serial and capped by `maxPeers` and the original deadline.
+A timed-out or cancelled request resolves promptly for origin fallback. On a
+known ordered, fully reliable channel, the link stays busy while discarding
+that response up to a matching validated EOF, or a refusal before metadata.
+Only then can another request use the channel. The receiver also sends
+`cancel`; a holder that honours it stops at its next chunk and sends EOF early,
+or refuses before metadata. Holders without `cancel` send the response in full.
+A holder queues more of a response only while at most 128 KiB is waiting to
+be sent on the channel, so chunks queued before a cancel arrives still flow. The existing drain limit closes
+an incomplete response; host stop and admission withdrawal close immediately.
+Fresh-origin coordination is bounded by safe buffered playback and measured
+HTTP fallback time. hls.js owns quality selection. These mechanisms do not
+prove optimal internet scheduling or net savings.
+
+When a peer-first viewer's current rendition has no linked serving neighbour
+or matching HAVE, bounded local discovery can replace one old idle unsuitable
+link to seek an admitted peer advertising an exact requested key. Signed
+presence HAVE and serving hints remain untrusted; the existing fresh admission
+checks precede SDP, and commitments and payload hashes still authenticate media.
+The existing peer, outgoing-dial and admission-check limits remain unchanged.
+Victim selection protects active receiving, draining and queued/active uploads,
+minimum link life, bidirectional idle time, the shared rotation cooldown and
+useful sibling audio/video neighbours. At least one established link remains.
+
+Discovery retains at most two requested keys for each selected `main` and
+`audio` context, 64 candidate hints of at most eight hashes, and one opportunity
+with an absolute maximum of 15 seconds. Quality changes invalidate only that
+media type, including zero-budget loads; those loads add no key hashing or HAVE
+lookup. A refused attempt may reuse its single vacancy before that same deadline.
+The reservation and scoped victim reconnect suppression then expire even if
+loads continue. Only an accepted commitment/hash-verified delivery for the exact
+selected context generation renews its one-replacement allowance; PC-open,
+HAVE, sibling progress and inactivity do not. Per-piece origin fallback remains
+unchanged.
+
+A still-current discovery offer can include the exact demanded `requestedKey`
+inside its existing pairwise NIP-44 payload, alongside the truthful peer count.
+After fresh incoming admission, a full recipient may apply the existing idle
+rotation policy when it currently holds that exact key and serving is allowed.
+The same cooldown, link lifetime, idle, transfer, reserved-slot and keep-one
+guards apply. The digest is untrusted advice, not upload or media authority;
+it is not echoed in presence or rejections. Older peers ignore this optional
+wire-version-3 field and retain their existing full-recipient behaviour.
+
+This offers a bounded chance to reach a peer during that interval.
+A permanently full or misleading remote can still refuse; after expiry and
+refill the unchanged unmet episode cannot force another eviction. It does not
+guarantee all-rendition connectivity or establish the cause of previously missed
+field delivery. `neighbourDiscovery` metrics contain bounded counts and remaining time,
+not keys, tickets or remote identities, under the existing reporting consent.
 
 ## Authenticated peer-first loading
 
@@ -180,7 +415,7 @@ redistribution. These assignments are a RelaySwarm contract, not an accepted
 NIP or an interoperability claim.
 
 The commitment is a Nostr event of experimental kind 24172, signed by the
-same author, tagged `x` with the swarm id and `e` with the exact stream event
+same author or a trusted scoped delegate, tagged `x` with the swarm id and `e` with the exact stream event
 id. Its content is the exact output of `commitmentContent(fields)` exported
 by `relayswarm/segment-commitment`. Fixed field order and the
 `relayswarm-segment-v1` domain bind the signature to this use:
@@ -204,15 +439,53 @@ The default segment key is the URL pathname; a byte-range request adds
 `#start-end`, matching the loader context. Publisher and viewer must agree
 on this mapping. A commitment older than two minutes, a different stream,
 rendition, discontinuity, sequence or part, an expired commitment, or a
-signature from another key is rejected. Delegated commitment keys are not
-implemented.
+signature from an unauthorised key is rejected. Author-scoped delegation and
+the host's current revocation view are supported; see
+[delegated signing](docs/PRODUCTION-FEATURES.md#signing-and-discovery).
 
 Signature validation, peer discovery, transfer and SHA-256 verification must
-all finish within `originFallbackMs`. With a thin playback buffer the wait is
-shortened to reserve `originReserveMs` for origin loading; startup, an
-empty buffer or a fragment no peer advertises goes directly to origin.
-Otherwise the original loader starts
-and owns its usual HTTP retries and errors. Invalid peer bytes are discarded
+all finish within the loader's wait. The ordinary wait is `originFallbackMs`,
+shortened with a thin playback buffer so that `originReserveMs` of playback
+remains for origin loading. Startup, an empty buffer, or a fragment with
+neither advertised availability nor an eligible contributor goes directly to
+origin.
+
+The loader projects each delivery from recent peer timing on any link: the
+median time to first byte, the upper-quartile payload rate after first byte
+measured over the latest part of recent transfers (completed, timed out or
+abandoned; flows of at least three first-byte times decide once two exist),
+and, when no holder has the segment yet, this viewer's median origin time for
+the rendition less however long an announced origin fetch has run. The buffer
+limit is the buffered playback less the origin reserve, at most
+`maxPeerWaitMs`, and the wait never passes it. A projection that fits may
+extend the wait to cover it with a quarter to spare; one that overruns the room
+by no more than a quarter, or rests on evidence older than 15 s, waits to the
+limit; one that overruns by more, or whose holder wait leaves no time for a
+first byte, goes to origin at once (`peerProjectedLate`). `peerWaitExtended`
+counts extensions. Without evidence the ordinary wait applies.
+
+The loader also goes to origin without asking a peer when the time left to the
+limit is less than the fastest of its last 16 completed transfers at least as
+large as the segment would need, or less than a recent first byte
+(`peerSkippedLate`), and when no link with the segment could fit (`peerNoFit`).
+Once a link is chosen, the wait may grow to cover that link's own estimate,
+within the limit. A request is abandoned, and the load goes to origin, when it
+can no longer finish by the deadline on generous assumptions: without a first
+byte, after three recent first-byte times (at least 250 ms) and once even an
+immediate first byte at the best recent rate would be late; with data flowing,
+from two first-byte times in, when neither double its latest rate nor the best
+recent rate would finish in time. `peerAbandoned` counts these. The holder is
+asked to stop and returns the unsent bytes to its per-second rate.
+
+When an eligible same-rendition contributor is fetching a new segment, the
+loader requests its signed commitment while waiting for availability. It
+verifies the commitment after availability arrives, before requesting peer
+bytes. Both operations share the loader's deadline. An eligible wait may make
+one commitment request even if availability never arrives. A failed commitment
+request still falls back to origin, without a commitment retry.
+
+If peer work fails or exceeds its budget, the original loader starts and owns
+its usual HTTP retries and errors. Invalid peer bytes are discarded
 and the peer is banned. Init segments and, by default, low-latency parts use
 the original loader directly. `abort()`, `destroy()` and `stop()` cancel
 pending peer work; stopping also immediately releases a waiting load to its
@@ -236,9 +509,9 @@ decide its own mode.
 - **Limited peer-first scheduling.** Each load asks one available peer at a
   time within a fixed deadline. Origin seeders can contribute substantially
   without receiving any peer-first segments themselves; per-viewer benefits
-  are uneven. Advanced ABR-aware scheduling, delegated
-  signing, independent-client interop and real mobile/NAT measurements remain
-  outstanding. There is no production-readiness claim.
+  are uneven. Fresh media coordination and measured deadlines are implemented;
+  internet-scale scheduling, released independent-client interop and physical
+  mobile/NAT measurements remain open. See the production delivery checklist.
 - **Bounded peer resources.** A link queues at most four uploads, rejects
   empty or excessive chunks and has a 3 s backpressure deadline. These bounds
   limit particular attacks; they do not prove resistance to every Sybil or
@@ -255,8 +528,9 @@ decide its own mode.
   is happening, and `segments.firstPeerSegmentAtMs` says how long a viewer
   waited before the swarm was any use to it.
 - **Hard NATs.** Symmetric NAT and some VPN egresses will not connect with
-  STUN alone, and no TURN or super-peer path exists yet. Those viewers simply
-  play from the origin.
+  STUN alone. A host can supply TURN credentials through `iceServers`; no
+  managed TURN or super-peer service is supplied. When peer connection fails,
+  viewers play from the origin.
 - **Relays.** Presence is one event per viewer per 20 s plus two events per
   connection. Point at a relay you control; a public relay may rate-limit.
   Sessions subscribe to swarm-wide presence and only their own recipient-tagged

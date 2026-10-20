@@ -1,0 +1,278 @@
+{
+  "v": 1,
+  "date": "2026-10-14",
+  "kind": "relayswarm-complete-playlist-blocking-reload-paired-browser-check",
+  "source": "dd953eeffb36f16674b8afaa01d29cbe2a7f0deb",
+  "profiles": {
+    "candidate": {
+      "ok": true,
+      "elapsedMs": 29285,
+      "receiptSHA256": "ee3f13f9d8de737e4c75d658c9718fb841c70ad6955a6c5bb1ac1dafc79a7057",
+      "checkpoints": [
+        "real-time-low-rendition-peer-playback",
+        "real-time-high-rendition-peer-playback",
+        "before-producer-restart",
+        "producer-reconnect-stable-manifest-and-identity"
+      ],
+      "peerLoads": 6,
+      "peerBytes": 3245444,
+      "peerDeadlineMargins": [
+        {
+          "level": 0,
+          "sequence": 6,
+          "discontinuity": 0,
+          "budgetMs": 1500,
+          "spareMs": 1442.5
+        },
+        {
+          "level": 1,
+          "sequence": 4,
+          "discontinuity": 0,
+          "budgetMs": 211.26600000000008,
+          "spareMs": 153.666
+        },
+        {
+          "level": 1,
+          "sequence": 5,
+          "discontinuity": 0,
+          "budgetMs": 1500,
+          "spareMs": 1424.8
+        },
+        {
+          "level": 1,
+          "sequence": 6,
+          "discontinuity": 0,
+          "budgetMs": 1500,
+          "spareMs": 1459.4
+        },
+        {
+          "level": 1,
+          "sequence": 7,
+          "discontinuity": 0,
+          "budgetMs": 1500,
+          "spareMs": 1466.5
+        },
+        {
+          "level": 1,
+          "sequence": 8,
+          "discontinuity": 1,
+          "budgetMs": 228.77100000000019,
+          "spareMs": 149.371
+        }
+      ],
+      "reloadMetricsAfterClose": {
+        "enabled": true,
+        "blockedLimit": 24,
+        "activeBlocked": 0,
+        "started": 27,
+        "released": 17,
+        "aborted": 7,
+        "timedOut": 0,
+        "watchers": 0,
+        "watchErrors": 0,
+        "rejected": 0
+      },
+      "workerCleanup": {
+        "browserClosed": true,
+        "chromeServerClosed": true,
+        "demoClosed": true,
+        "pipelineClosed": true,
+        "producerClosed": true,
+        "routerClosed": true,
+        "fixtureRemoved": true
+      },
+      "supervisorCleanup": {
+        "resourceWatcherReaped": true,
+        "resourceWatcherGroupAbsent": true,
+        "workerGroupAbsent": true,
+        "workerReaped": true,
+        "chromeGroupAbsent": true,
+        "ownedScratchRemoved": true
+      },
+      "resourcePeakBytes": 2388066304,
+      "resourcePeakProcesses": 24,
+      "minimumFreePercent": 34,
+      "players": [
+        {
+          "role": "contributor-low",
+          "stalls": 1,
+          "fatalErrors": 0,
+          "nativeErrors": 0,
+          "errors": {
+            "levelLoadError": 1,
+            "bufferStalledError": 1
+          }
+        },
+        {
+          "role": "contributor-high",
+          "stalls": 1,
+          "fatalErrors": 0,
+          "nativeErrors": 0,
+          "errors": {
+            "levelLoadError": 1,
+            "bufferStalledError": 1
+          }
+        },
+        {
+          "role": "baseline",
+          "stalls": 0,
+          "fatalErrors": 0,
+          "nativeErrors": 0,
+          "errors": {
+            "levelLoadError": 1
+          }
+        },
+        {
+          "role": "consumer",
+          "stalls": 0,
+          "fatalErrors": 0,
+          "nativeErrors": 0,
+          "errors": {
+            "levelLoadError": 1
+          }
+        }
+      ],
+      "availabilityRows": 236,
+      "availabilityDropsUnknownUnlabelled": 0,
+      "injectedBundleSHA256": "609c40c554a0b52ee62d56e8c898314559385b0bd43d23293f8aa5dfb48a029b",
+      "ordinaryQualificationEvidence": false,
+      "physicalDevices": false,
+      "TURNEnabled": false
+    },
+    "control": {
+      "ok": true,
+      "elapsedMs": 28715,
+      "receiptSHA256": "827ce603fb91f6dbd6f9da28b3f143e4aab97b6f164f245f6dea7fa0989d0a23",
+      "checkpoints": [
+        "real-time-low-rendition-peer-playback",
+        "real-time-high-rendition-peer-playback",
+        "before-producer-restart",
+        "producer-reconnect-stable-manifest-and-identity"
+      ],
+      "peerLoads": 6,
+      "peerBytes": 3079252,
+      "peerDeadlineMargins": [
+        {
+          "level": 0,
+          "sequence": 5,
+          "discontinuity": 0,
+          "budgetMs": 1500,
+          "spareMs": 1432.0
+        },
+        {
+          "level": 1,
+          "sequence": 4,
+          "discontinuity": 0,
+          "budgetMs": 1500,
+          "spareMs": 1436.8
+        },
+        {
+          "level": 1,
+          "sequence": 5,
+          "discontinuity": 0,
+          "budgetMs": 1500,
+          "spareMs": 1445.1
+        },
+        {
+          "level": 1,
+          "sequence": 6,
+          "discontinuity": 0,
+          "budgetMs": 1500,
+          "spareMs": 1462.8
+        },
+        {
+          "level": 1,
+          "sequence": 7,
+          "discontinuity": 0,
+          "budgetMs": 1500,
+          "spareMs": 1486.8
+        },
+        {
+          "level": 1,
+          "sequence": 8,
+          "discontinuity": 1,
+          "budgetMs": 1171.0680000000002,
+          "spareMs": 980.368
+        }
+      ],
+      "reloadMetricsAfterClose": {
+        "enabled": false,
+        "blockedLimit": 24,
+        "activeBlocked": 0,
+        "started": 0,
+        "released": 0,
+        "aborted": 0,
+        "timedOut": 0,
+        "watchers": 0,
+        "watchErrors": 0,
+        "rejected": 0
+      },
+      "workerCleanup": {
+        "browserClosed": true,
+        "chromeServerClosed": true,
+        "demoClosed": true,
+        "pipelineClosed": true,
+        "producerClosed": true,
+        "routerClosed": true,
+        "fixtureRemoved": true
+      },
+      "supervisorCleanup": {
+        "resourceWatcherReaped": true,
+        "resourceWatcherGroupAbsent": true,
+        "workerGroupAbsent": true,
+        "workerReaped": true,
+        "chromeGroupAbsent": true,
+        "ownedScratchRemoved": true
+      },
+      "resourcePeakBytes": 2501705728,
+      "resourcePeakProcesses": 25,
+      "minimumFreePercent": 35,
+      "players": [
+        {
+          "role": "contributor-low",
+          "stalls": 1,
+          "fatalErrors": 0,
+          "nativeErrors": 0,
+          "errors": {
+            "bufferStalledError": 1
+          }
+        },
+        {
+          "role": "contributor-high",
+          "stalls": 1,
+          "fatalErrors": 0,
+          "nativeErrors": 0,
+          "errors": {
+            "bufferStalledError": 1
+          }
+        },
+        {
+          "role": "baseline",
+          "stalls": 0,
+          "fatalErrors": 0,
+          "nativeErrors": 0,
+          "errors": {}
+        },
+        {
+          "role": "consumer",
+          "stalls": 0,
+          "fatalErrors": 0,
+          "nativeErrors": 0,
+          "errors": {}
+        }
+      ],
+      "availabilityRows": 238,
+      "availabilityDropsUnknownUnlabelled": 0,
+      "injectedBundleSHA256": "609c40c554a0b52ee62d56e8c898314559385b0bd43d23293f8aa5dfb48a029b",
+      "ordinaryQualificationEvidence": false,
+      "physicalDevices": false,
+      "TURNEnabled": false
+    }
+  },
+  "interpretation": "Both serial profiles pass one short injected headless Chrome loopback journey. No causality, reliability improvement, sustained benefit, Internet/NAT, wire savings or physical acceptance is established.",
+  "observedDifference": "Candidate has one recovered HTTP503 levelLoadError per player; control has none. Cause is unproved. Both donors stall once in both profiles; baseline and consumer have zero stalls.",
+  "releaseOrDeployment": false,
+  "olderFailuresPreserved": true,
+  "independentAuditManifestSHA256": "7022f0b4b57ce9bcd0cd077b20af7f31e5e056e59c4c05c0bf8bbc0b5bfe0491",
+  "additionalObservedConsoleErrors": "One HTTP404 console error in each profile; zero-error operation is not claimed."
+}

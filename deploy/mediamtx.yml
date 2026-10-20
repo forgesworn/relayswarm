@@ -1,0 +1,24 @@
+# Private Docker bridge only; host RTMP mapping is bound to loopback.
+logLevel: warn
+rtmp: true
+rtmpAddress: :1935
+rtsp: true
+rtspAddress: :8554
+rtspTransports: [tcp]
+hls: false
+webrtc: false
+moq: false
+srt: false
+api: false
+metrics: false
+authInternalUsers:
+  - user: any
+    permissions:
+      - action: publish
+        path: live
+      - action: read
+        path: live
+paths:
+  live:
+    source: publisher
+    overridePublisher: false

@@ -1,0 +1,76 @@
+{
+  "v": 1,
+  "date": "2026-10-15",
+  "sourceBase": "b9a9be4fbf94f3cf395480db7fd7c225f5c5ee60",
+  "runtimeSHA256": "bf729d7fcc08d3d1e599053e5eff789e98195878130c037ad24cb2fa08d49004",
+  "runtimeUnchangedSinceBase": true,
+  "source": [
+    {
+      "path": "test/browser-hardening.test.mjs",
+      "sha256": "e078c7086056ed466bf1fda245df85a4b96221458408813707a18f7c59052785"
+    },
+    {
+      "path": "test/support/native-glare-browser-worker.mjs",
+      "sha256": "1d32965bbc30d64e284aafe64d1eab460a4cd8b79cf99c8eba6571d366c2a9cd"
+    },
+    {
+      "path": "test/support/native-glare-page.mjs",
+      "sha256": "b4cdc29bc128fa2d3c549d43e0c79497433a518131aa654fa6c341efcadc130a"
+    }
+  ],
+  "originalNative": {
+    "verdict": "RED",
+    "sourceSha": "b9a9be4fbf94f3cf395480db7fd7c225f5c5ee60",
+    "browser": "155.0.8059.41",
+    "checkpoint": "two-native-local-offers",
+    "failureStage": "native-rollback-link",
+    "cause": "unknown; missing failure-state snapshot",
+    "outerMs": 16972,
+    "workerCleanupFlagsAll6": true,
+    "supervisorCleanupFlagsAll6": true,
+    "sampledRSSMaximum": 1565917184,
+    "sampledProcessMaximum": 14,
+    "minimumFreePercent": 42,
+    "auditManifestSHA256": "7e905aa102cf9fe39d18a662dcd5b6ea5d6e02a647f828dec0aae0c9a27b60dd"
+  },
+  "windowsCI": {
+    "runId": 38655586566,
+    "jobId": 116164441137,
+    "swarmPassed": 120,
+    "swarmFailed": 1,
+    "failure": "own-ticket renewal second-upload EOF wait",
+    "cause": "unproved; test previously waited for HTTP request receipt",
+    "rawLogSHA256": "948ca25b2e16b7d533fc6266fa0e7f4981ba12aabef6aa78c5f4a72990566c2b"
+  },
+  "fixtureCorrection": "hold first renewed-ticket response; acceptance marker within original5s; original assertions retained",
+  "localFollowup": {
+    "v": 1,
+    "verdict": "PASS_SYNTAX_AND_SWARM_ONLY",
+    "baseHead": "b9a9be4fbf94f3cf395480db7fd7c225f5c5ee60",
+    "uncommittedFixtureCorrection": true,
+    "syntaxModules": 141,
+    "tests": 121,
+    "pass": 121,
+    "fail": 0,
+    "skip": 0,
+    "elapsedMs": 20962,
+    "sampledRSSMaximum": 541179904,
+    "sampledProcessMaximum": 6,
+    "minimumFreePercent": 49,
+    "cleanup": {
+      "workerReaped": true,
+      "groupAbsent": true,
+      "leaderBirthAbsent": true,
+      "allAttemptedResourceProbeChildrenReaped": true,
+      "allAcceptedResourceProbeChildrenReaped": true
+    },
+    "bindingSHA256": "173196a7617980b785dd77ec389f36f7f571daca24e9c2553b5e887d6db69721",
+    "scope": "Full maintained swarm unit suite; native diagnostics syntax only; no native browser execution"
+  },
+  "unitManifestSHA256": "d5704e72774267bb510d0ddbe149d369febd2988f330907b00a4ff2a87d2ebce",
+  "nativeDiagnosticPreparationSHA256": "97c34e440fb51c74dbb5c0a906bee01bb3fb687d79eedd0d36965cd87e383b32",
+  "diagnosticSuccessorNativeExecuted": false,
+  "internetRenewal": "R3/R4 RED unchanged; no new attempt",
+  "published": false,
+  "deployed": false
+}

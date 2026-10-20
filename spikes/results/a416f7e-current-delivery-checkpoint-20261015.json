@@ -1,0 +1,242 @@
+{
+  "v": 1,
+  "checkpointDate": "2026-10-15",
+  "sourceSha": "a416f7e1ee2d73acc6535b313baac018f2baab8a",
+  "productionComplete": false,
+  "release": {
+    "published": "v0.1.0",
+    "candidate": "0.2.0",
+    "pr": 8,
+    "candidatePublished": false
+  },
+  "deployed": {
+    "requiredCIJobsPassed": 9,
+    "ciRun": 38775128822,
+    "packageMembers": 269,
+    "consumerDependencyScope": "Production semver ranges:106 root matches/28 differences; separate standalone6source/20deps/root lock proof",
+    "image": "sha256:cf44c19870338976f0a0bfd6e1bc22ca177f54ca6b6d4418bbafc5755349bcda",
+    "clientBytes": 761854,
+    "clientSHA256": "570f12f862e9d8609c8d8f207abbc5a22346f4ed7fde0d099fc256244507d671",
+    "normalHTTPS": true,
+    "icePolicy": "relay",
+    "turnProjection": "tls-tcp",
+    "admissionPerAddress": 32,
+    "reporting": false,
+    "forwarding": false,
+    "privateStatePermanentLeasesEEPreserved": true,
+    "verificationSourceCleanup": "all5/removed/actual255"
+  },
+  "accountScope": "Nostr plus authenticated host-supplied resolver API; Nostr-only pilot valid; no named website/human-wallet feature required",
+  "accountAPI": {
+    "verdict": "PASS_API_ONLY",
+    "disposableOwner": true,
+    "overlappingClient70Plus70AcceptedOne": true,
+    "simultaneousServerArrivalProved": false,
+    "remaining30Filled": true,
+    "replayConflictReopenGrantFencing": true,
+    "finalLimit": 0,
+    "finalSpent": 100,
+    "disposableRowRetained": true,
+    "ownedCleanup": true
+  },
+  "focusedLowBrowser": {
+    "verdict": "PASS_COMPONENT_ONLY",
+    "protocol": "public-browser-account-lifecycle-low-v1",
+    "elapsedMs": 74412,
+    "gatesPassed": 7,
+    "initialVerifiedLowFragments": 1,
+    "initialVerifiedLowBytes": 213756,
+    "actualReloadNewPageKey": true,
+    "localSharedSpendRetained": 1260916,
+    "reconnectUploadOFF": true,
+    "freshTrustedApplyAndNewReserveBytes": 206424,
+    "M4Disconnect": "available/uploadON/serving-state\u2192logout/withdrawal;0highpayload/no identified in-flight cancellation",
+    "lastSettings": "actual UI10MB/resetfalse; uploadOFF/no subsequent fixture resume",
+    "all4ContextsExchangesCDPEndpointSourceCleanup": true,
+    "finalLimit": 0,
+    "finalSpent": 1901244,
+    "ownedKeysCleared": true,
+    "originalR3HighExhaustionOrP01Acceptance": false
+  },
+  "original3MBBrowserTrial": {
+    "verdict": "RED_HIGH_VERIFIED_MEDIA",
+    "donorAcceptedServingMetricsPositive": true,
+    "receiverLowBytes": 215448,
+    "receiverLowFragments": 1,
+    "receiverHighVerified": 0,
+    "naturalHighBackendRefusalAndWithdrawalObserved": true,
+    "laterLifecycleGates": "unmeasured",
+    "causeOrWireCompletionInferred": false
+  },
+  "nativeSafariSimulator": {
+    "verdict": "PASS_NATIVE_SIMULATOR_HOME_RETURN_TRUSTED_RESUME",
+    "runtime": "iOS26.5/23F77",
+    "frameDeltas": [
+      59,
+      61
+    ],
+    "clockNativeCropPixelsAdvanced": true,
+    "fatalNativePageErrors": 0,
+    "uploadReportConsents": false,
+    "returnedPaused": false,
+    "physicalStoppedFaultReproduced": false,
+    "preexisting38StatesPreserved": true,
+    "ownedCleanup": true,
+    "physicalAudiblePublicNATOrEnabledUploadWithdrawalProved": false
+  },
+  "capacity": {
+    "original4Plus10R10": "RED33>32 before measurement; originalM4readRED/laterfencedrecovery separate",
+    "newTopology": "3M1+11M4/profiles3+6+5",
+    "latestR12": "RED_RUNTIME_ADMISSION_REFUSAL",
+    "all14Started": true,
+    "measurementMs": 97691,
+    "resourceAndSharedReaderGatesHealthy": true,
+    "allOwnedCleanup": true,
+    "causeProved": false,
+    "matching300": false,
+    "long7200And22Churn": false
+  },
+  "remaining": [
+    "Original complete both-quality/shared-budget browser acceptance",
+    "Physical/browser breadth, difficult networks and natural expiry",
+    "Matching300-second capacity and7200-second22-churn operation",
+    "Matched wire/cost benefit and server-quota evidence",
+    "FullP01-P12/37-review scope; final immutable release/download acceptance"
+  ],
+  "historical": "All earlier REDs remain RED. Historical533 short public/forced-early Internet passes remain exact533, not newa416 cohorts.",
+  "evidence": [
+    {
+      "path": "artifacts/deployment-a416f7e-runtime-bound-20261015/runtime-contract.json",
+      "bytes": 11678,
+      "sha256": "631e23e84b794daa93c6292fcb8b8918ccf5b8df0c0e4d60c8166b3cd7388c00"
+    },
+    {
+      "path": "artifacts/deployment-a416f7e-runtime-bound-20261015/ci-exact-head.json",
+      "bytes": 31995,
+      "sha256": "71dfd5f9c870eae73f296cb3d964cbf662cf8d03d169d00c8dfc9f041ae5becd"
+    },
+    {
+      "path": "artifacts/clean-consumer-a416f7e-r2-20261015/EVIDENCE-MANIFEST.json",
+      "bytes": 4108,
+      "sha256": "84a9c05b651cbd3a8f7ef89f5272c446527b531e7558efc3c313045e49e34a5b"
+    },
+    {
+      "path": "artifacts/independent-clean-consumer-a416f7e-review-20261015/review.json",
+      "bytes": 17480,
+      "sha256": "1c68d385d9a4bfaaa564e91c69a1ab4b6d624a113e2182bbd212ad4de418294d"
+    },
+    {
+      "path": "artifacts/public-account-budget-cross-host-r4-actual-a416f7e-20261015/SUMMARY.json",
+      "bytes": 2187,
+      "sha256": "b863a9a6c4bcc6645a05a9e899fff5a2c1075d5ea32689e909168ea4240ec8ac"
+    },
+    {
+      "path": "artifacts/independent-public-account-budget-cross-host-r4-actual-review-a416f7e-20261015/review.json",
+      "bytes": 3328,
+      "sha256": "1bcc33a6e8a3e9136c1efd54a39f21fa48fa28412001837fd267c96b4926e474"
+    },
+    {
+      "path": "artifacts/ios-simulator-safari-resume-anchor-r3-a416f7e-root-20261015/EVIDENCE-MANIFEST.json",
+      "bytes": 8829,
+      "sha256": "69a6efd59876a46c53340ed7c6948d0478218a86ed29698d21ec802898a6e74b"
+    },
+    {
+      "path": "artifacts/independent-ios-simulator-safari-resume-anchor-r3-a416f7e-review-20261015/review.json",
+      "bytes": 3538,
+      "sha256": "5a9420d9ed4343c027b423b25a869c5f07443c1b7b2630a218ecea00668ffeba"
+    },
+    {
+      "path": "artifacts/public-account-browser-lifecycle-low-a416f7e-fourth-root-20261015/EVIDENCE-MANIFEST.json",
+      "bytes": 48599,
+      "sha256": "f9a0667ac48c56126feac2eccd0088e06fe93ddecbc3ab6aea08fe149c0e7faf"
+    },
+    {
+      "path": "artifacts/independent-public-account-browser-lifecycle-low-a416f7e-fourth-actual-review-20261015/review.json",
+      "bytes": 16273,
+      "sha256": "099c9c92cbbd8aa4ddc9e838b5b3601dc7f1aa772311ff2af43c2099b69aec64"
+    },
+    {
+      "path": "artifacts/public-account-browser-two-host-a416f7e-third-root-20261015/EVIDENCE-MANIFEST.json",
+      "bytes": 45974,
+      "sha256": "904fe7fe26a4a01f7855ad9589e7e4f8f0e18675b3ee60347f324d4d9a62ea72"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-a416f7e-r12-root-20261015/EVIDENCE-MANIFEST.json",
+      "bytes": 30189,
+      "sha256": "7799424b31f946b066b71d1722828f63de6bc522acbdd481d16d3416de8b0ed2"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-a416f7e-r10-root-20261015/EVIDENCE-MANIFEST.json",
+      "bytes": 32331,
+      "sha256": "64a55523c9846e7cfc7786d4cee8250c6efd25a0e11672d637d8b695c142a1c7"
+    },
+    {
+      "path": "artifacts/remembered-admission-candidate-a416f7e-preparation-20261015/PREPARATION-MANIFEST.json",
+      "bytes": 1333,
+      "sha256": "4f5791c9063b710980b639fb3368e079c3825fdad7c495b0d751ad9ce42aad9f"
+    },
+    {
+      "path": "artifacts/remembered-admission-maintained-original-red-20261015/EVIDENCE-MANIFEST.json",
+      "bytes": 1722,
+      "sha256": "c8a8787c0cb078b496cdc48d83a43a277465d5a2462b36384e576e898d905e7a"
+    },
+    {
+      "path": "artifacts/remembered-admission-maintained-original-red-20261015/SUMMARY.json",
+      "bytes": 434,
+      "sha256": "a5c5065b9fec0f75ec9eb51da2f2750141f7f93440b1739b6619b20c74f9ea2e"
+    },
+    {
+      "path": "artifacts/ticket-renewal-fix-20261015/focused.json",
+      "bytes": 458,
+      "sha256": "6c41f67ba3bfdad07c0bca80e7e8140b2cd0b98d6ad1b2b33d79c884d36b4f24"
+    },
+    {
+      "path": "artifacts/ticket-renewal-fix-20261015/focused.tap",
+      "bytes": 2758,
+      "sha256": "6562260bcc860f9b50463a61f559d5f60bf3a8990f3acf2508f6931f6cdfd4e1"
+    },
+    {
+      "path": "artifacts/ticket-renewal-fix-20261015/focused-r2.json",
+      "bytes": 458,
+      "sha256": "87c83d994e3cc90b95b4874a1d2442ffd33cde953c9f1b4975ea71714e06be85"
+    },
+    {
+      "path": "artifacts/ticket-renewal-fix-20261015/focused-r2.tap",
+      "bytes": 2100,
+      "sha256": "2c6612469567faf6fb198dca9152331ada21c567b2804e6c4ef3373702b99567"
+    },
+    {
+      "path": "artifacts/ticket-renewal-fix-20261015/swarm.json",
+      "bytes": 486,
+      "sha256": "ea3020961c5d522a160fbf83716d9e75ee519b2d9ebbb04e685b6fd4ca4a374b"
+    },
+    {
+      "path": "artifacts/ticket-renewal-fix-20261015/swarm.tap",
+      "bytes": 31347,
+      "sha256": "109ae331a1efc06a5cf64030fb429d946e441191b6f69fa1b36e646ba047d805"
+    }
+  ],
+  "rememberedAdmissionCorrection": {
+    "state": "SOURCE_CORRECTION_LOCAL_TESTS_PASS",
+    "sourceSHA256": "bad412f1ecfa7bfd3fa7d74089e4f6840812b0afa7ff46487578f8a360909980",
+    "testSHA256": "01ab5c3f41f5210f97b0958c089ba2694beab2eb8c3a6e1a57e10359f61dd330",
+    "originalMaintainedRegression": "RED_EXPECTED; original source failed cooldown-renewal regression",
+    "focused": {
+      "tests": 12,
+      "passed": 12,
+      "failed": 0,
+      "exitCode": 0,
+      "durationMs": 11605
+    },
+    "fullSwarm": {
+      "tests": 137,
+      "passed": 137,
+      "failed": 0,
+      "exitCode": 0,
+      "durationMs": 18938
+    },
+    "initialAddedCandidateFixtureRED": "retained; explicit 1000 ms retry-floor configuration corrected before final focused/full runs",
+    "R12CauseEstablished": false,
+    "newCIOrDeploymentProof": null
+  }
+}

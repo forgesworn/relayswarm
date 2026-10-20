@@ -1,0 +1,205 @@
+{
+  "v": 1,
+  "at": "2026-10-13T08:50:30.002Z",
+  "scope": "SDK publication and real loopback recovery evidence; production readiness and historical MSE cause remain separate",
+  "evidence": [
+    {
+      "file": "artifacts/relayswarm-kit-v0.5.0-evidence.json",
+      "sha256": "f905316bfd7a3fef72664a3ab3408cdcc9e4dcbfbf3d5998d13fdbf676ec3a87",
+      "release": "https://github.com/forgesworn/relayswarm-kit/releases/tag/v0.5.0",
+      "source": {
+        "testedCommit": "9604ec6c5396050f50b91f69699b3a2b13a36801",
+        "mergeCommit": "2f0b26ace4096a5dca87baf715274f91c331ac3a",
+        "tree": "dd7d36e78ae463a175e769410f4ef5beb4170854",
+        "sameTestedAndMergedTree": true
+      },
+      "ci": [
+        {
+          "conclusion": "success",
+          "headSha": "9604ec6c5396050f50b91f69699b3a2b13a36801",
+          "status": "completed",
+          "url": "https://github.com/forgesworn/relayswarm-kit/actions/runs/38368745958"
+        },
+        {
+          "conclusion": "success",
+          "headSha": "2f0b26ace4096a5dca87baf715274f91c331ac3a",
+          "status": "completed",
+          "url": "https://github.com/forgesworn/relayswarm-kit/actions/runs/38369361446"
+        }
+      ],
+      "interop": {
+        "javascriptCommit": "c3dabf64e794ca8e86364f03ab21a2c6a21008e5",
+        "bytes": 108950,
+        "currentSDKAPIs": true,
+        "wireAdapter": false,
+        "loopbackOnly": true,
+        "runnerSHA256": "9db043aaf08ed33865ce41cfcc2cf6e0077dd7410a0c0e0d5c99eaf7f2c1fa96",
+        "outcomes": [
+          {
+            "scenario": "author",
+            "ok": true,
+            "deliveredBytes": 108950,
+            "uploadedBytes": 108950
+          },
+          {
+            "scenario": "delegate",
+            "ok": true,
+            "deliveredBytes": 108950,
+            "uploadedBytes": 108950
+          },
+          {
+            "scenario": "corrupt",
+            "ok": false,
+            "error": "integrity",
+            "deliveredBytes": 0,
+            "uploadedBytes": 108950
+          },
+          {
+            "scenario": "tampered",
+            "ok": false,
+            "error": "invalidCommitment",
+            "deliveredBytes": 0,
+            "uploadedBytes": 0
+          },
+          {
+            "scenario": "revoked",
+            "ok": false,
+            "error": "revoked",
+            "deliveredBytes": 0,
+            "uploadedBytes": 0
+          },
+          {
+            "scenario": "revoke-during",
+            "ok": false,
+            "error": "revoked",
+            "deliveredBytes": 0,
+            "uploadedBytes": 108950
+          }
+        ]
+      }
+    },
+    {
+      "file": "artifacts/relayswarm-kit-v0.5.0-public-verification.json",
+      "sha256": "b1df82fbf6644af8d8fdecaee4af35466e8272723e50c5705aaeac157d4739dd",
+      "release": "https://github.com/forgesworn/relayswarm-kit/releases/tag/v0.5.0"
+    },
+    {
+      "file": "artifacts/media-recovery-verified/media-recovery.json",
+      "sha256": "f0abe3e101e68bc6be78251b15ee8d9c1ab93672cbe61216585d3c9736bbc1bb",
+      "ok": true,
+      "scope": {
+        "network": "loopback HTTP",
+        "corruption": "fMP4 tfhd references undeclared track ID",
+        "historicalCauseEstablished": false,
+        "physicalDevices": false
+      },
+      "journeys": [
+        {
+          "name": "vod-repaired",
+          "ok": true,
+          "fatal": 1,
+          "recovery": {
+            "attempted": 1,
+            "outcome": "recovered",
+            "records": [
+              {
+                "attemptedAtMs": 495,
+                "outcome": "recovered",
+                "live": false,
+                "requestedPosition": 0,
+                "details": "mediaSourceRequiresReset",
+                "reason": "playback-advanced",
+                "endedAtMs": 1096
+              }
+            ]
+          },
+          "budgetSpent": 1234
+        },
+        {
+          "name": "live-repaired",
+          "ok": true,
+          "fatal": 1,
+          "recovery": {
+            "attempted": 1,
+            "outcome": "recovered",
+            "records": [
+              {
+                "attemptedAtMs": 513,
+                "outcome": "recovered",
+                "live": true,
+                "requestedPosition": 16.12933333333333,
+                "details": "mediaSourceRequiresReset",
+                "reason": "playback-advanced",
+                "endedAtMs": 2915
+              }
+            ]
+          },
+          "budgetSpent": 1234
+        },
+        {
+          "name": "repeated-corruption",
+          "ok": true,
+          "fatal": 2,
+          "recovery": {
+            "attempted": 1,
+            "outcome": "failed",
+            "records": [
+              {
+                "attemptedAtMs": 376,
+                "outcome": "failed",
+                "live": false,
+                "requestedPosition": 0,
+                "details": "mediaSourceRequiresReset",
+                "reason": "another-fatal-error",
+                "endedAtMs": 487
+              }
+            ]
+          },
+          "budgetSpent": 1234
+        },
+        {
+          "name": "cancel-recovery",
+          "ok": true,
+          "fatal": 1,
+          "recovery": {
+            "attempted": 1,
+            "outcome": "cancelled",
+            "records": [
+              {
+                "attemptedAtMs": 391,
+                "outcome": "cancelled",
+                "live": false,
+                "requestedPosition": 0,
+                "details": "mediaSourceRequiresReset",
+                "reason": "viewer-cancelled",
+                "endedAtMs": 536
+              }
+            ]
+          },
+          "budgetSpent": 1234
+        },
+        {
+          "name": "progress-timeout",
+          "ok": true,
+          "fatal": 1,
+          "recovery": {
+            "attempted": 1,
+            "outcome": "failed",
+            "records": [
+              {
+                "attemptedAtMs": 404,
+                "outcome": "failed",
+                "live": false,
+                "requestedPosition": 0,
+                "details": "mediaSourceRequiresReset",
+                "reason": "progress-timeout",
+                "endedAtMs": 10406
+              }
+            ]
+          },
+          "budgetSpent": 1234
+        }
+      ]
+    }
+  ]
+}

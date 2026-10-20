@@ -1,0 +1,84 @@
+{
+  "v": 1,
+  "date": "2026-10-15",
+  "baseHead": "cf479ebd7bd42df3a08a0fba6bc2ed0fb6f42b44",
+  "kind": "pending-glare-reuse-source-checks",
+  "source": [
+    {
+      "path": "src/browser/hls-swarm.mjs",
+      "sha256": "bf729d7fcc08d3d1e599053e5eff789e98195878130c037ad24cb2fa08d49004"
+    },
+    {
+      "path": "test/browser-hardening.test.mjs",
+      "sha256": "71187521d2d50738577c59c82419c06bb3a133ff6f84e35039bf0f0d9d7f9188"
+    },
+    {
+      "path": "test/native-glare-browser.mjs",
+      "sha256": "393b5357c75035490aaf0b6fd253bd39da8d9b54d18bc025635b54f630058e5f"
+    },
+    {
+      "path": "test/native-glare-relay.test.mjs",
+      "sha256": "e45aa83f7d0ba89e35e72650c85f9324dea9e926e8fcdad297ade39d5e4e603d"
+    },
+    {
+      "path": "test/support/native-glare-browser-worker.mjs",
+      "sha256": "79b2b2a3e3d6ae42f61286a2ae6f1e68ef02ec2415a4862ea57e0e767ddd5e05"
+    },
+    {
+      "path": "test/support/native-glare-page.mjs",
+      "sha256": "8f7dc03f1e3abdf99ffb3443a5c2358a48bc31cc1faa8ac5491d7ee7711b31df"
+    },
+    {
+      "path": "test/support/native-glare-relay.mjs",
+      "sha256": "6f8066e84ae31442ab6ff823d6ffeb0ac1259831504c48e4411b229b379d586a"
+    }
+  ],
+  "swarmUnit": {
+    "tests": 121,
+    "pass": 121,
+    "failed": 0,
+    "skipped": 0,
+    "outerMs": 19781,
+    "scope": "Stateful fake RTC; original full maintained test:swarm",
+    "evidence": "artifacts/glare-reuse-r2-unit-validation-20261015/analysis",
+    "manifestSHA256": "fd6f45a2bbebeb58ca76732b183c3fa0e482efb0faeb9a458aa33bc01d410a64"
+  },
+  "fixturePure": {
+    "v": 1,
+    "verdict": "PASS_PURE_FIXTURE_ONLY",
+    "syntaxModules": 141,
+    "tests": 6,
+    "passed": 6,
+    "failed": 0,
+    "elapsedMs": 4367,
+    "earlierREDRetained": "artifacts/native-chrome-glare-pure-validation-20261015",
+    "preparationManifestSHA256": "09b69a15605768f819021d6e52b2b8834783096bd853c0f971d1ff14dddae920",
+    "noBrowserLaunched": true,
+    "cleanup": {
+      "workerReaped": true,
+      "groupAbsent": true,
+      "leaderBirthAbsent": true,
+      "allAttemptedResourceProbeChildrenReaped": true,
+      "allAcceptedResourceProbeChildrenReaped": true
+    },
+    "manifestSHA256": "b38906ee28f8c59889bccf94507a2185281b844aade3863ae29541c40bf39513"
+  },
+  "observerPure": {
+    "tests": 30,
+    "pass": 30,
+    "outerMs": 355,
+    "scope": "Actual observer VM projection and strict selected TLS predicate; no browser/network",
+    "evidence": "artifacts/turn-selected-pair-observation-r2-pure-validation-20261015",
+    "manifestSHA256": "56f932eae4cc568c99afe717a1899771bafffbc033e7298a5d396e9207da02b0"
+  },
+  "docs": {
+    "authoredFiles": 23,
+    "repositoryLinks": 319,
+    "generatedContextFresh": true
+  },
+  "boundsUnchanged": true,
+  "nativeChrome": "NOT_RUN",
+  "internetRenewal": "NOT_RUN; historical R3/R4 RED unchanged",
+  "published": false,
+  "deployed": false
+}

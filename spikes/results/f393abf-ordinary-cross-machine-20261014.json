@@ -1,0 +1,445 @@
+{
+  "v": 1,
+  "kind": "ordinary-cross-machine-two-direction-short-checks",
+  "sourceSha": "f393abf3d55215bdf58241a4a2af74245d646117",
+  "proxySourceSha": "ee1510d429ac85f3738c03f10a09b753ec4eb037",
+  "client": {
+    "sha256": "4fdb2861b08f42e4c82788a5940e0b2b436be52af84bc264998d41cf81938fcb",
+    "bytes": 734441
+  },
+  "ci": {
+    "run": 38511479806,
+    "attempt": 1,
+    "requiredJobsPassed": 9,
+    "optionalTwelveViewerSoak": "skipped"
+  },
+  "runs": [
+    {
+      "direction": "forward",
+      "contributorMachine": "M1",
+      "receiverAndBaselineMachine": "M4",
+      "measurementMs": 60050,
+      "measurementStartedUTC": "2026-10-14T04:40:46.765Z",
+      "gates": {
+        "playback": "green",
+        "contribution": "green",
+        "verifiedPeerPayload": "green"
+      },
+      "verifiedPeerLoads": 28,
+      "verifiedPeerBytes": 12763132,
+      "byLevel": {
+        "0": {
+          "loads": 13,
+          "bytes": 2732956
+        },
+        "1": {
+          "loads": 15,
+          "bytes": 10030176
+        }
+      },
+      "roles": [
+        {
+          "machine": "M1",
+          "browserVersion": "155.0.8059.41",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 2732956,
+            "peerFirstLoads": 0
+          },
+          "fatal": 0,
+          "nativeErrors": 0,
+          "stalls": 0,
+          "zeroFrameIntervals": 0,
+          "pageErrorCount": 0,
+          "contributionWithdrawn": false,
+          "transportUniqueEvents": 32,
+          "transportCounterEquality": true,
+          "transportDropped": 0,
+          "uploadsRefused": 0,
+          "role": "contributor-low"
+        },
+        {
+          "machine": "M1",
+          "browserVersion": "155.0.8059.41",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 10030176,
+            "peerFirstLoads": 0
+          },
+          "fatal": 0,
+          "nativeErrors": 0,
+          "stalls": 0,
+          "zeroFrameIntervals": 0,
+          "pageErrorCount": 0,
+          "contributionWithdrawn": false,
+          "transportUniqueEvents": 41,
+          "transportCounterEquality": true,
+          "transportDropped": 0,
+          "uploadsRefused": 0,
+          "role": "contributor-high"
+        },
+        {
+          "machine": "M4",
+          "browserVersion": "155.0.8059.40",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 0,
+            "peerFirstLoads": 0
+          },
+          "fatal": 0,
+          "nativeErrors": 0,
+          "stalls": 0,
+          "zeroFrameIntervals": 0,
+          "pageErrorCount": 0,
+          "contributionWithdrawn": false,
+          "transportUniqueEvents": 0,
+          "transportCounterEquality": true,
+          "transportDropped": 0,
+          "uploadsRefused": 0,
+          "role": "origin-baseline-low"
+        },
+        {
+          "machine": "M4",
+          "browserVersion": "155.0.8059.40",
+          "totals": {
+            "peerFirstBytes": 12763132,
+            "uploaded": 0,
+            "peerFirstLoads": 28
+          },
+          "fatal": 0,
+          "nativeErrors": 0,
+          "stalls": 0,
+          "zeroFrameIntervals": 0,
+          "pageErrorCount": 0,
+          "contributionWithdrawn": false,
+          "transportUniqueEvents": 33,
+          "transportCounterEquality": true,
+          "transportDropped": 0,
+          "uploadsRefused": 0,
+          "role": "receive-only"
+        }
+      ],
+      "terminalEvents": [
+        {
+          "role": "contributor-high",
+          "id": 2,
+          "atMs": 20396,
+          "event": "dial-end",
+          "detail": "superseded"
+        }
+      ],
+      "controls": [
+        {
+          "role": "contributor-low",
+          "count": 105,
+          "finished": 105,
+          "failed": 0
+        },
+        {
+          "role": "contributor-high",
+          "count": 107,
+          "finished": 107,
+          "failed": 0
+        },
+        {
+          "role": "origin-baseline-low",
+          "count": 65,
+          "finished": 65,
+          "failed": 0
+        },
+        {
+          "role": "receive-only",
+          "count": 106,
+          "finished": 105,
+          "failed": 1
+        }
+      ],
+      "protocolCounts": {
+        "http/1.1": 383
+      },
+      "failedOrUnfinishedControls": [
+        {
+          "role": "receive-only",
+          "route": "commitment",
+          "status": 200,
+          "outcome": "failed",
+          "requestAtMs": 1791952854882,
+          "headersAtMs": 1791952855340,
+          "terminalAtMs": 1791952856378,
+          "headerMs": 458,
+          "durationMs": 1496,
+          "bodyMs": 1038,
+          "failureCode": "net::ERR_ABORTED"
+        },
+        {
+          "role": "receive-only",
+          "route": "commitment",
+          "cdpCancelled": true,
+          "cdpFailureCode": "net::ERR_ABORTED",
+          "cdpDurationMs": 1434.103,
+          "headersAfterRequestMs": 86.185
+        }
+      ],
+      "vpnFiniteSnapshots": [
+        {
+          "state": "Connected",
+          "atUTC": "2026-10-14T04:38:44.165525+00:00"
+        },
+        {
+          "state": "Connected",
+          "atUTC": "2026-10-14T04:42:58.651877+00:00"
+        }
+      ],
+      "allActorCleanupPassed": true,
+      "sourceCleanupV2Matched": true,
+      "analysisManifestSHA256": "20aba7c37cfe061dab9c09f8e6edb5d5c692bfd7980a5d465efeb1bf11e43cb8"
+    },
+    {
+      "direction": "reverse",
+      "contributorMachine": "M4",
+      "receiverAndBaselineMachine": "M1",
+      "measurementMs": 60023,
+      "measurementStartedUTC": "2026-10-14T04:50:28.491Z",
+      "gates": {
+        "playback": "green",
+        "contribution": "green",
+        "verifiedPeerPayload": "green"
+      },
+      "verifiedPeerLoads": 17,
+      "verifiedPeerBytes": 8179316,
+      "byLevel": {
+        "0": {
+          "loads": 7,
+          "bytes": 1476364
+        },
+        "1": {
+          "loads": 10,
+          "bytes": 6702952
+        }
+      },
+      "roles": [
+        {
+          "machine": "M4",
+          "browserVersion": "155.0.8059.40",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 1686736,
+            "peerFirstLoads": 0
+          },
+          "fatal": 0,
+          "nativeErrors": 0,
+          "stalls": 0,
+          "zeroFrameIntervals": 0,
+          "pageErrorCount": 0,
+          "contributionWithdrawn": false,
+          "transportUniqueEvents": 48,
+          "transportCounterEquality": true,
+          "transportDropped": 0,
+          "uploadsRefused": 1,
+          "role": "contributor-low"
+        },
+        {
+          "machine": "M4",
+          "browserVersion": "155.0.8059.40",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 7385016,
+            "peerFirstLoads": 0
+          },
+          "fatal": 0,
+          "nativeErrors": 0,
+          "stalls": 0,
+          "zeroFrameIntervals": 0,
+          "pageErrorCount": 0,
+          "contributionWithdrawn": false,
+          "transportUniqueEvents": 48,
+          "transportCounterEquality": true,
+          "transportDropped": 0,
+          "uploadsRefused": 1,
+          "role": "contributor-high"
+        },
+        {
+          "machine": "M1",
+          "browserVersion": "155.0.8059.41",
+          "totals": {
+            "peerFirstBytes": 0,
+            "uploaded": 0,
+            "peerFirstLoads": 0
+          },
+          "fatal": 0,
+          "nativeErrors": 0,
+          "stalls": 0,
+          "zeroFrameIntervals": 0,
+          "pageErrorCount": 0,
+          "contributionWithdrawn": false,
+          "transportUniqueEvents": 0,
+          "transportCounterEquality": true,
+          "transportDropped": 0,
+          "uploadsRefused": 0,
+          "role": "origin-baseline-low"
+        },
+        {
+          "machine": "M1",
+          "browserVersion": "155.0.8059.41",
+          "totals": {
+            "peerFirstBytes": 8179316,
+            "uploaded": 0,
+            "peerFirstLoads": 17
+          },
+          "fatal": 0,
+          "nativeErrors": 0,
+          "stalls": 0,
+          "zeroFrameIntervals": 0,
+          "pageErrorCount": 0,
+          "contributionWithdrawn": false,
+          "transportUniqueEvents": 84,
+          "transportCounterEquality": true,
+          "transportDropped": 20,
+          "uploadsRefused": 0,
+          "role": "receive-only"
+        }
+      ],
+      "terminalEvents": [
+        {
+          "role": "contributor-low",
+          "id": 1,
+          "atMs": 13415,
+          "event": "dial-end",
+          "detail": "timeout"
+        },
+        {
+          "role": "contributor-low",
+          "id": 2,
+          "atMs": 28637,
+          "event": "link-close",
+          "detail": "channel-error"
+        },
+        {
+          "role": "contributor-high",
+          "id": 1,
+          "atMs": 13939,
+          "event": "dial-end",
+          "detail": "timeout"
+        },
+        {
+          "role": "contributor-high",
+          "id": 2,
+          "atMs": 53318,
+          "event": "link-close",
+          "detail": "channel-error"
+        },
+        {
+          "role": "receive-only",
+          "id": 1,
+          "atMs": 2456,
+          "event": "dial-end",
+          "detail": "superseded"
+        },
+        {
+          "role": "receive-only",
+          "id": 2,
+          "atMs": 2831,
+          "event": "dial-end",
+          "detail": "superseded"
+        },
+        {
+          "role": "receive-only",
+          "id": 4,
+          "atMs": 9734,
+          "event": "link-close",
+          "detail": "request-timeout"
+        },
+        {
+          "role": "receive-only",
+          "id": 3,
+          "atMs": 34448,
+          "event": "link-close",
+          "detail": "request-timeout"
+        }
+      ],
+      "controls": [
+        {
+          "role": "contributor-low",
+          "count": 110,
+          "pending": 1,
+          "finished": 109,
+          "failed": 0
+        },
+        {
+          "role": "contributor-high",
+          "count": 110,
+          "pending": 0,
+          "finished": 110,
+          "failed": 0
+        },
+        {
+          "role": "origin-baseline-low",
+          "count": 65,
+          "pending": 0,
+          "finished": 65,
+          "failed": 0
+        },
+        {
+          "role": "receive-only",
+          "count": 102,
+          "pending": 0,
+          "finished": 102,
+          "failed": 0
+        }
+      ],
+      "protocolCounts": {
+        "http/1.1": 387
+      },
+      "failedOrUnfinishedControls": [
+        {
+          "role": "contributor-low",
+          "route": "admissionVerify",
+          "status": 200,
+          "outcome": "pending",
+          "requestAtMs": 1791953489904,
+          "headersAtMs": 1791953490057,
+          "headerMs": 153
+        }
+      ],
+      "vpnFiniteSnapshots": [
+        {
+          "state": "Connected",
+          "atUTC": "2026-10-14T04:48:37.818771+00:00"
+        },
+        {
+          "state": "Connected",
+          "atUTC": "2026-10-14T04:52:27.205311+00:00"
+        }
+      ],
+      "allActorCleanupPassed": true,
+      "sourceCleanupV2Matched": true,
+      "analysisManifestSHA256": "28be76761377c84c1ce5346e5926580732dbd8d968cc784dee6a3aa27c0b1945"
+    }
+  ],
+  "scope": {
+    "ordinaryTLS": true,
+    "extraRTCFlags": false,
+    "heapInspection": false,
+    "nativeStartUploadConsent": true,
+    "programmaticDropdownSelection": true,
+    "nativeDropdownInteractionProved": false,
+    "allowanceBytesPerContributor": 100000000,
+    "rateBytesPerSecond": 512000,
+    "reconsent": false,
+    "quotaReset": false,
+    "physicalAcceptance": false,
+    "sustainedAcceptance": false,
+    "connectivityFixClaim": false,
+    "uploadCounterMeaning": "Accepted/reserved accounting before transfer, not measured wire or receiver delivery; verifiedPeerBytes is the independent receiver result."
+  },
+  "limitations": [
+    "Previous ordinary REDs remain unexplained.",
+    "Per-page numeric PC IDs do not identify counterpart roles.",
+    "Signal-send does not acknowledge relay delivery.",
+    "HTTP200 does not establish admitted response-body value.",
+    "Request start/budget/progress are not captured; timeout cause beyond fixed closure branch is unknown.",
+    "Finite VPN status snapshots are not continuous route proof.",
+    "Cleanup v2 links start/cleanup identity, helper/input pins and journal receipt hashes; raw remote journal was not independently reread for the reverse audit.",
+    "Full P01-P12 and all 37 review-item boundaries remain;14-role preparation is unlaunched and unqualified."
+  ]
+}

@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-14",
+  "baseHead": "4aa87c76e6dde08ab7a2f14a6ac23625a59a6edc",
+  "scope": "Reviewed source correction; exact source file hashes below, prior evidence retained separately. No release or deployment.",
+  "changes": [
+    "Canonical real-filesystem fixture paths and readiness from actual blocked-wait registration.",
+    "Windows shallow parent watchers filtered to authorised child-directory names; unsupported coverage returns original HTTP bytes.",
+    "EPERM-only atomic file rename retry inside the original fixture deadline; cause of hosted EPERM unproved.",
+    "Actual multiline fixture teardown extraction and unavailable/private metrics projection checks.",
+    "First observed guardian failure retained as fixed sanitised stage/reason; no raw error details or lifecycle recovery.",
+    "Descendant fixture retained if original or replacement verified control closure is unproved."
+  ],
+  "unchangedBounds": {
+    "peerWaitMs": 1500,
+    "originReserveMs": 2000,
+    "activeMediaRequests": 32,
+    "blockedPlaylistRequests": 24,
+    "playlistDeadline": "3 times initial target duration, at most 9 seconds",
+    "guardianForceMs": 1500,
+    "guardianReapMs": 5000,
+    "guardianStartupMs": 7000,
+    "publisherWorkSeconds": 40,
+    "publisherWholeSeconds": 60,
+    "publisherCleanupReserveSeconds": 20,
+    "aggregateRssBytes": 3221225472,
+    "processes": 64,
+    "minimumFreePercent": 25
+  },
+  "hostedBase": {
+    "run": "https://github.com/forgesworn/relayswarm/actions/runs/38646569729",
+    "conclusion": "failure",
+    "requiredPassed": 5,
+    "publisherMatrixFailures": 3,
+    "dependentLiveRelaySkipped": true,
+    "optionalSoakSkipped": true,
+    "mediaJob": "success",
+    "correctionVerifiedByThisRun": false
+  },
+  "runs": [
+    {
+      "kind": "initial local full publisher correction",
+      "conclusion": "failure",
+      "elapsedMs": 11992,
+      "tests": 263,
+      "pass": 260,
+      "fail": 1,
+      "skipped": 2,
+      "cancelled": 0,
+      "failure": "Guardian descendant cleanup lacked verified clean shutdown; source cause remains unproved.",
+      "manifestSHA256": "40d7e730923e5a297a978c37bfe46486598425eed688c6c48634f2f1029e288e",
+      "resourceLimitsHeld": true,
+      "outerWorkerGroupReaped": true
+    },
+    {
+      "kind": "focused guardian with safe diagnostics",
+      "conclusion": "success",
+      "elapsedMs": 3942,
+      "tests": 5,
+      "pass": 5,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "manifestSHA256": "b4313d9e6386f8a48e5e723592fe0532ab3e12484e20e07dff353b9b9ee5e87f",
+      "resourceLimitsHeld": true,
+      "outerWorkerGroupReaped": true
+    },
+    {
+      "kind": "full publisher with safe diagnostics and maintained concurrency",
+      "conclusion": "success",
+      "elapsedMs": 10643,
+      "tests": 265,
+      "pass": 263,
+      "fail": 0,
+      "skipped": 2,
+      "cancelled": 0,
+      "manifestSHA256": "9bd5a5022655faed21b87710fd4c5d2006478af7aafb889a30438edc200b324e",
+      "peakSampledRssBytes": 1391198208,
+      "peakSampledProcesses": 23,
+      "minimumSampledFreePercent": 48,
+      "resourceLimitsHeld": true,
+      "outerWorkerGroupReaped": true,
+      "attemptedAndAcceptedResourceProbeChildrenReaped": true
+    }
+  ],
+  "limitations": [
+    "The earlier guardian failure did not recur; its cause is not established and no lifecycle repair is claimed.",
+    "Outer group absence does not prove detached test-group or historical scratch absence. An older unproved scratch candidate was left untouched.",
+    "Windows behaviour requires exact corrected-source hosted CI; local injected-platform checks are not Windows OS execution.",
+    "Earlier paired loopback browser and 245-member clean consumer passes belong to dd953ee/4aa source, not this correction.",
+    "Internet renewal, Safari/physical, ordinary public sharing, sustained load/churn, matched wire/cost, immutable release and deployment acceptance remain open."
+  ],
+  "production": {
+    "lastAttestedPilot": "8f482b4",
+    "reporting": "off",
+    "forwarding": "off",
+    "hostOrSharedTurnSettingsChanged": false,
+    "publishedRelease": "v0.1.0",
+    "candidateAssetsPublished": false
+  },
+  "sourceAtInitialCorrection": [
+    {
+      "path": "demo/blocking-playlist-reload.mjs",
+      "bytes": 13852,
+      "sha256": "8dd15f0acfbf0194e89c9dc64324e10336e3058a7ccb4e22a86e80df1101a3ff"
+    },
+    {
+      "path": "test/blocking-playlist-reload.test.mjs",
+      "bytes": 25733,
+      "sha256": "1ff4384c720868a019ea6e071b817d3b2851f716ae008068edc2739d86ddd82f"
+    },
+    {
+      "path": "test/blocking-playlist-http.test.mjs",
+      "bytes": 8004,
+      "sha256": "fda705e0d03d1232b9133599b08ded11cc315ed5eb66701496fa1e9d917fcc99"
+    },
+    {
+      "path": "test/broadcast-request-timings.test.mjs",
+      "bytes": 13754,
+      "sha256": "9b1245561f3ee846698f0a09ad870654b16724e8410f343f160af53ab9daea3a"
+    },
+    {
+      "path": "src/broadcast-worker-diagnostics.mjs",
+      "bytes": 1180,
+      "sha256": "944e6e05ef7641928fa945f43125c18cfc12ed30ba3271295f099cd70d742474"
+    },
+    {
+      "path": "src/broadcast-worker-control.mjs",
+      "bytes": 4655,
+      "sha256": "f4907d6cda0768a105c2beae4d519acfdd79a55c9cacae2a416e21545474e6f1"
+    },
+    {
+      "path": "src/broadcast-worker-guardian.mjs",
+      "bytes": 8156,
+      "sha256": "5480d7f1731a6737d92a08c5c65dfceb563f659f1381feeccea5eff47dee979d"
+    },
+    {
+      "path": "test/exclusive-state-lease.test.mjs",
+      "bytes": 7008,
+      "sha256": "9aa9006d6697151546173a5a42ed5fdc4fc8fef0ef2b3cbf1f75cc8add2adfaf"
+    }
+  ],
+  "windowsFollowUp": {
+    "baseHead": "83f72de4752ad284e9482eba7ba92f0920595930",
+    "source": [
+      {
+        "path": "demo/blocking-playlist-reload.mjs",
+        "bytes": 14152,
+        "sha256": "cf35c4a41269496bdc87ad9aef0e4d10935652eecd28699e76f9d3fe3f55d568"
+      },
+      {
+        "path": "test/blocking-playlist-reload.test.mjs",
+        "bytes": 26763,
+        "sha256": "ac984b1abbc5c192d5945252a1ab31437055ad3c896f1aa660050aa640c3d13e"
+      }
+    ],
+    "hostedRun": "https://github.com/forgesworn/relayswarm/actions/runs/38650769463",
+    "hostedWindowsFailure": {
+      "job": 116148703787,
+      "step": "publisher suite",
+      "nativeAndSwarmSteps": "passed",
+      "failures": [
+        "Real directory replacement exhausted the unchanged three-change revalidation budget.",
+        "Mock master-removal callback selected the parent-only watcher with no filename, producing503 instead of404."
+      ]
+    },
+    "changes": [
+      "Parent-only subscriptions validate filenames, ignore known metadata change events and retain matching-child rename observations. Direct-watch behaviour is unchanged.",
+      "Missing/null/empty filenames and unknown event types still fail closed, including overflow-shaped notifications.",
+      "The master-removal mock selects the canonical direct callback and sends a real event shape; expected404 and original assertions remain."
+    ],
+    "primarySources": [
+      "https://raw.githubusercontent.com/nodejs/node/v24.21.0/deps/uv/src/win/fs-event.c",
+      "https://raw.githubusercontent.com/nodejs/node/v24.21.0/src/fs_event_wrap.cc"
+    ],
+    "causalLimit": "Exact native event chronology at the fourth-pass refusal was not retained. Upstream mapping supports an unnecessary metadata wake source, not its exact causal sequence.",
+    "review": "Independent source review found no blockers; no Windows execution by the local injected-platform cases.",
+    "localFullSuite": {
+      "tests": 266,
+      "pass": 264,
+      "fail": 0,
+      "skipped": 2,
+      "cancelled": 0,
+      "elapsedMs": 15954,
+      "manifestSHA256": "44b46d6f3e8d1ac1c3ef28d982ff7822e719fe1134a350cad1503d33f1f89b12",
+      "peakSampledRssBytes": 1436172288,
+      "peakSampledProcesses": 21,
+      "minimumSampledFreePercent": 43,
+      "resourceLimitsHeld": true,
+      "outerWorkerGroupReaped": true,
+      "attemptedAndAcceptedResourceProbeChildrenReaped": true
+    },
+    "boundsAndRealFilesystemSequenceChanged": false,
+    "exactCorrectedSourceHostedCI": "pending",
+    "releaseAndDeployment": "pending"
+  }
+}

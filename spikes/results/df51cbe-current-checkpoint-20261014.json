@@ -1,0 +1,477 @@
+{
+  "v": 1,
+  "checkpointDate": "2026-10-14",
+  "runtimeSourceSha": "df51cbed1ebb3bd09ef1b521c451d6b47989a664",
+  "documentationCommitIsNotRuntimeSource": true,
+  "accountImplementation": {
+    "nostrIdentity": true,
+    "websiteAuthenticatedAccountResolver": true,
+    "sharedPrivateDurableLedger": true,
+    "freshUploadConsentAfterAccountChanges": true,
+    "reservedMediaPayloadNotTotalWireBilling": true
+  },
+  "accountControlledAcceptance": {
+    "seconds": 55.78,
+    "matchedCommittedReceiverAndLinkedSpendBytes": 6337480,
+    "bothMethods": true,
+    "physicalOwnerAuthenticationProved": false
+  },
+  "ci": {
+    "databaseId": 38554223220,
+    "attempt": 1,
+    "requiredJobsSuccessful": 9,
+    "optionalSoak": "SKIPPED"
+  },
+  "deployment": {
+    "image": "sha256:bec569791de3ed2b077a83a79eb26d6a3741d051fda265336e97919b17f191c1",
+    "client": {
+      "sha256": "875d1a24c90cac5ea0df5b9a1dd2557df606aa0c5ba75ff1a60216ad12b0c6dc",
+      "bytes": 746356
+    },
+    "independentProxySourceSha": "ee1510d429ac85f3738c03f10a09b753ec4eb037",
+    "normalTLSClientAndFreshPlaylistsAttested": true,
+    "publisherIdentityAndPrivateStatePreserved": true,
+    "nostrOffered": true,
+    "websiteHostResolverConfigured": false,
+    "reportingEnabled": false,
+    "ongoingLiveIngestClaimed": false
+  },
+  "localUnpublishedAssets": {
+    "package": {
+      "bytes": 993652,
+      "files": 212,
+      "sha256": "ad57ea048ba9f098aec5ecd9028f9b5a5c7d1168b21a9957ee1b53d4b3fc9db4"
+    },
+    "archive": {
+      "bytes": 3645440,
+      "sha256": "b3607b6fc069a14330c75fd1426205f8e3c76df0f848af4d93df7e0f1c5880de"
+    },
+    "standaloneESM": {
+      "bytes": 120957,
+      "sha256": "50647647b96a0ce4a89fdfb0a42b053601d2cd5b10c2525cc57e283af2900c63"
+    },
+    "documentedImports": 11,
+    "productionOnlyConsumer": true,
+    "separateProcessNativeAndHTTPFallback": true,
+    "published": false
+  },
+  "ordinaryFourRoleShort": {
+    "outcome": "red",
+    "measurementMs": 60110,
+    "gates": {
+      "playback": "green",
+      "contribution": "red",
+      "verifiedPeerPayload": "red"
+    },
+    "transportCoverage": {
+      "retainedEvents": 130,
+      "dropped": 0,
+      "dialTimeouts": 6,
+      "timeoutFromCreationRangeMs": [
+        12001,
+        12007
+      ],
+      "timeoutFromRemoteInstalledRangeMs": [
+        10540,
+        12006
+      ],
+      "pageLocalIdsOnly": true,
+      "remotePeerAssociationsKnown": false,
+      "nativePostListenerRemovalEventsUnobserved": true
+    },
+    "scope": {
+      "ordinaryDefaultTransport": true,
+      "nativeStartUpload": true,
+      "programmaticDropdowns": true,
+      "accountAuthenticationTested": false,
+      "reporting": false,
+      "eligibilityExtraPolling": false,
+      "resourceSamplingOverheadQuantified": false,
+      "VPNStateInferred": false,
+      "physicalNATBillingOrLongProof": false
+    },
+    "conclusion": "Positive safe budgets and absent matching advisory HAVE were observed while no RTC channel opened. This does not identify why ICE failed to connect, nor prove a cache defect; no runtime fix or deadline extension is justified.",
+    "cleanup": {
+      "contextsClosed": true,
+      "cdpDetached": true,
+      "M1EndpointStageCleanup": true,
+      "M1OuterWorkerGroupAbsent": true,
+      "M4EndpointStageCleanup": "unknown-original-TimeoutExpired",
+      "source": {
+        "separatelyVerifiedV2": true,
+        "removed": true,
+        "observedExitCode": 255
+      }
+    },
+    "M1Resource": {
+      "samples": 127,
+      "summedRSSHighwaterBytes": 2135261184,
+      "processHighwater": 37,
+      "minimumFreePercent": 31
+    },
+    "laterM4Recovery": {
+      "recordedPIDsAndGroupsAbsent": true,
+      "profileAndTmpAbsent": true,
+      "ownedStageRemoved": true,
+      "noSignalsSent": true,
+      "originalParentReapingProved": false,
+      "originalCleanupResultUnchanged": true
+    },
+    "M4ResourceFromRecoveredEndpointScenario": {
+      "samples": 123,
+      "summedRSSHighwaterBytes": 2534408192,
+      "processHighwater": 21,
+      "minimumFreePercent": 77,
+      "scenarioResourcesOK": true,
+      "originalWatcherCleanupOK": false
+    },
+    "M4ResourceFromLaterWatcherHealth": {
+      "samples": 213,
+      "summedRSSHighwaterBytes": 2534408192,
+      "processHighwater": 21,
+      "minimumFreePercent": 74,
+      "originalParentReapingProved": false
+    },
+    "controls": {
+      "requests": 335,
+      "allFinished200H1": true,
+      "maximumObservedDurationMs": 541,
+      "HTTP200DoesNotProveAdmittedBody": true
+    },
+    "eligibility": {
+      "measuredNoHaveNoWait": 91,
+      "measuredNoBudget": 0,
+      "positiveBudgetMs": 1500,
+      "noHaveDoesNotProveMissingRemoteCacheBytes": true
+    },
+    "peerActors": {
+      "contributor-low": {
+        "verifiedPeerBytes": 0,
+        "committedUploadedBytes": 0,
+        "linksOpened": 0
+      },
+      "contributor-high": {
+        "verifiedPeerBytes": 0,
+        "committedUploadedBytes": 0,
+        "linksOpened": 0
+      },
+      "receive-only": {
+        "verifiedPeerBytes": 0,
+        "committedUploadedBytes": 0,
+        "linksOpened": 0
+      }
+    }
+  },
+  "separateNativeICEDiagnostic": {
+    "diagnosticOnly": true,
+    "heapInspection": true,
+    "nativeStatsInspection": true,
+    "ordinaryQualificationEvidence": false,
+    "ordinaryDefaultTransportEvidence": false,
+    "defaultRTCConfigurationUnchanged": true,
+    "measurementMs": 60027,
+    "gates": {
+      "playback": "green",
+      "contribution": "red",
+      "verifiedPeerPayload": "red"
+    },
+    "nativeCoverage": {
+      "issuedBatches": 50,
+      "retainedDistinctBatches": 42,
+      "missingCompletedLatestSnapshots": 8,
+      "pairObservations": 12,
+      "pairObservationsAreNotUniquePairIdentities": true,
+      "pairStateObservations": {
+        "in-progress": 12
+      },
+      "nominatedTrueObservations": 0,
+      "nominatedFalseObservations": 12,
+      "nominatedNullObservations": 0,
+      "selectedTrueObservations": 0,
+      "selectedNullObservations": 12,
+      "protocolPairObservations": {
+        "udp/udp": 12
+      },
+      "candidateTypePairObservations": {
+        "host/host": 6,
+        "host/srflx": 6
+      },
+      "retainedBatchElapsedRangeMs": [
+        51,
+        119
+      ],
+      "numericCounterRanges": {
+        "requestsSent": {
+          "availableObservations": 12,
+          "nullObservations": 0,
+          "minimum": 22,
+          "maximum": 80,
+          "summedAsTraffic": false
+        },
+        "requestsReceived": {
+          "availableObservations": 12,
+          "nullObservations": 0,
+          "minimum": 0,
+          "maximum": 0,
+          "summedAsTraffic": false
+        },
+        "responsesSent": {
+          "availableObservations": 12,
+          "nullObservations": 0,
+          "minimum": 0,
+          "maximum": 0,
+          "summedAsTraffic": false
+        },
+        "responsesReceived": {
+          "availableObservations": 12,
+          "nullObservations": 0,
+          "minimum": 0,
+          "maximum": 0,
+          "summedAsTraffic": false
+        },
+        "consentRequestsSent": {
+          "availableObservations": 12,
+          "nullObservations": 0,
+          "minimum": 0,
+          "maximum": 0,
+          "summedAsTraffic": false
+        },
+        "bytesSent": {
+          "availableObservations": 12,
+          "nullObservations": 0,
+          "minimum": 0,
+          "maximum": 0,
+          "summedAsTraffic": false
+        },
+        "bytesReceived": {
+          "availableObservations": 12,
+          "nullObservations": 0,
+          "minimum": 0,
+          "maximum": 0,
+          "summedAsTraffic": false
+        },
+        "packetsSent": {
+          "availableObservations": 12,
+          "nullObservations": 0,
+          "minimum": 0,
+          "maximum": 0,
+          "summedAsTraffic": false
+        },
+        "packetsReceived": {
+          "availableObservations": 12,
+          "nullObservations": 0,
+          "minimum": 0,
+          "maximum": 0,
+          "summedAsTraffic": false
+        }
+      },
+      "engineIdsAndNativeLabelsNotJoined": true,
+      "remoteCounterpartUnknown": true,
+      "unobservedIntervalsUnknown": true,
+      "pageLocalPCLabels": 4,
+      "allFinalCollectorsSettledReleasedAndContextsClosed": true
+    },
+    "transportCoverage": {
+      "retainedDeduplicatedEvents": 94,
+      "timeoutCount": 6,
+      "allTimeoutsAfterRemoteInstalled": true,
+      "allTimeoutsAfterICEChecking": true,
+      "creationToTimeoutRangeMs": [
+        12000,
+        12010
+      ]
+    },
+    "conclusion": "Observed admitted post-SDP PCs had in-progress UDP candidate pairs with positive request counters but zero observed response counters. This narrows the observed ICE phase, not the network cause; no code fix, timer extension or HAVE/budget change is justified. Missing native snapshots and absent remote identity prevent an exact bilateral network-path diagnosis.",
+    "originalCleanup": {
+      "browser": {
+        "contextCleanup": [
+          {
+            "role": "contributor-low",
+            "machine": "M1",
+            "closed": true
+          },
+          {
+            "role": "contributor-high",
+            "machine": "M1",
+            "closed": true
+          },
+          {
+            "role": "origin-baseline-low",
+            "machine": "M4",
+            "closed": true
+          },
+          {
+            "role": "receive-only",
+            "machine": "M4",
+            "closed": true
+          }
+        ],
+        "cdpCleanup": [
+          {
+            "machine": "M1",
+            "detached": true
+          },
+          {
+            "machine": "M4",
+            "detached": true
+          }
+        ],
+        "contextsClosed": true,
+        "cdpDetached": true,
+        "endpointProcessCleanupOwner": "controller and independent guardians; see endpoint receipts",
+        "sourceCleanupPerformedByObserver": false
+      },
+      "controller": {
+        "diagnosticReaped": true,
+        "providerReaped": true,
+        "providerProved": true,
+        "M1": {
+          "ok": true,
+          "runnerReaped": true,
+          "scenarioResourcesOK": true,
+          "stageRemoved": true
+        },
+        "M4": {
+          "ok": false,
+          "failureClass": "TimeoutExpired"
+        },
+        "forwardReaped": true
+      },
+      "outerWorkerReaped": true,
+      "outerGroupAbsent": true,
+      "M4Original": "UNKNOWN TimeoutExpired; no parent-reaping claim",
+      "source": "Root-owned separate cleanup; not inferred from observer"
+    },
+    "M1CompleteOwnedTree": {
+      "samples": 128,
+      "rssHighwater": 1929396224,
+      "processHighwater": 26,
+      "minimumFreePercent": 34
+    },
+    "laterM4Recovery": {
+      "ok": true,
+      "recordedUTC": "2026-10-14T12:37:46.129670+00:00",
+      "stageIdentityMatched": true,
+      "exactRecordedPIDsAbsent": true,
+      "recordedGroupsAbsent": true,
+      "ownedProfileAndTmpAbsent": true,
+      "commandReferencesAbsent": true,
+      "openReferencesAbsent": true,
+      "stageRemoved": true,
+      "noSignalsSent": true,
+      "originalEndpointCleanupOK": false,
+      "originalEndpointCleanupUnchanged": true,
+      "originalParentReapingClaimed": false
+    },
+    "M4EndpointScenarioResource": {
+      "samples": 120,
+      "rssHighwater": 2586722304,
+      "processHighwater": 28,
+      "minimumFreePercent": 78
+    },
+    "M4LaterWatcherHealthResource": {
+      "samples": 211,
+      "rssHighwater": 2586722304,
+      "processHighwater": 28,
+      "minimumFreePercent": 75
+    },
+    "M4OriginalEndpointCleanup": {
+      "resourceWatchReaped": false,
+      "resourceWatchGroupGone": false,
+      "httpClosed": true,
+      "guardianReaped": true,
+      "chromeGroupGone": true,
+      "chromeLeaderStopped": true,
+      "identityGuarded": true,
+      "profileRemoved": true,
+      "childTmpRemoved": true,
+      "profileTmpRemoved": true
+    },
+    "M4WatcherGuardFailure": {
+      "phase": "identity-before-term",
+      "errorClass": "AssertionError",
+      "identity": {
+        "ownerPresent": true,
+        "birthEqual": true,
+        "pgidEqual": true,
+        "commandEqual": false
+      }
+    },
+    "separateSourceCleanup": {
+      "ok": true,
+      "version": 2,
+      "removed": true,
+      "observedExitCode": 255,
+      "stableSourceTupleMatched": true,
+      "executionProvenanceMatched": true,
+      "originalJournalMatched": true,
+      "helperPinsByteVerified": true,
+      "reviewedInputsByteVerified": true,
+      "guards": {
+        "inspectedBeforeRemoval": true,
+        "journalOwnedSourceMatched": true,
+        "createdSourceMatched": true,
+        "appAndProxyGuardMatched": true,
+        "birthImageMountsMatched": true
+      },
+      "notEndpointReapingProof": true
+    },
+    "controls": {
+      "requests": 327,
+      "allFinished200H1": true,
+      "maximumObservedDurationMs": 598,
+      "HTTP200DoesNotProveAdmittedBody": true
+    },
+    "eligibility": {
+      "measuredNoHaveNoWait": 95,
+      "measuredNoBudget": 0,
+      "receiverPositiveBudgetRangeMs": [
+        1134.5400000000013,
+        1500
+      ]
+    }
+  },
+  "originalFailurePreservation": {
+    "previous2ddAndF393ResultsUnchanged": true,
+    "passingWatcherMicrocaseDidNotExplainHistoricalFailure": true,
+    "newCommandMismatchCauseProved": false,
+    "productionRepairClaimed": false
+  },
+  "cleanup": {
+    "allCompletedTestActorsAndSourcesAbsent": true,
+    "originalM4ParentReapingNotClaimed": true,
+    "testSourcesObservedExit255": true,
+    "privateDuplicateArchivesRemoved": true,
+    "originalNamedArchiveAndReviewEvidenceRetained": true,
+    "installedPilotAndSharedServicesIntentionallyRunning": true,
+    "phonePrivacyAndVPNSettingsUnchanged": true
+  },
+  "openScope": {
+    "allP01toP12Retained": true,
+    "separate37RowLedgerLocated": false,
+    "sameSourceTopology300sQualification": true,
+    "7200sAnd22Churn": true,
+    "completePhysicalAndroidIPhoneAndSafari": true,
+    "ownerAccountAuthenticationAndWebsiteIntegration": true,
+    "hardNATAndSeparateNetworks": true,
+    "matchedTotalWireAndActualCost": true,
+    "immutableReleasePublicationAndDownloadAcceptance": true,
+    "productionReady": false
+  },
+  "evidenceSHA256": {
+    "artifacts/account-budget-df51cbe-handover-20261014.json": "6882b2b5c3e7c213490c67e60b9b69b3094df792701770d1f451c2321e95e995",
+    "artifacts/clean-consumer-df51cbe-20261014/receipt.json": "98e50c779cf034df552c1a22d2dada6f99799656fc1e449767838338dda54e9b",
+    "artifacts/standalone-esm-df51cbe-20261014/validation.json": "74cfce01d9cb4fbe6b8ce8bc460b7965fcb94ac6a78748a182cbb78260b35472",
+    "artifacts/deployment-df51cbe-bound-20261014/runtime-contract.json": "983610ce83ae4d5b95f22ca8511002cd6fb309d84ba1e634854dea7e4777a6a4",
+    "artifacts/independent-deployment-df51cbe-actual-final-review-20261014/review.json": "6bc1a6b134300e35f9589b6bd18c8eb9bc12ad0b8e590acc280f96ee26ba5dbd",
+    "artifacts/candidate-df51cbe-ci-20261014/all-nine-green.json": "51a65598d561900590830977a2718e3cb5d44375371397aad7c84f2c94ab726c",
+    "artifacts/public-cross-hls-eligibility-df51cbe-analysis-r2-20261014/EVIDENCE-MANIFEST.json": "65da4629c334876663202b45686802716980d525a847033ca59561585b8e9aa4",
+    "artifacts/independent-ordinary-eligibility-df51cbe-actual-review-20261014/review.json": "22e0ce5a9abeaef599a69337b04c6d3519dce7076cb5948b0dc5d344802ebaa8",
+    "artifacts/native-ice-df51cbe-analysis-20261014/EVIDENCE-MANIFEST.json": "c2a1e0f018a3b81d567284df86148c53f26211c8ebdc8a93f32af9dd19f2312d",
+    "artifacts/native-ice-df51cbe-analysis-20261014/analysis.json": "bb5679e8200ec33bde09c781784f42df45532ab110949144b1cb2a2e2f32f9e1",
+    "artifacts/native-ice-df51cbe-run-20261014/M4-later-recovery.private.json": "4f7842b1ce70b5a338c8977078ef43c5f14770b5949d94ee2e895af1e589e01f",
+    "artifacts/native-ice-source-df51cbe-bound-20261014/host-cleanup.json": "086c7a3acacd79815b1ce3e40a9109315c4146d242b36ce8754d0cace5ca4b09",
+    "artifacts/native-ice-source-df51cbe-bound-20261014/duplicate-archive-cleanup.json": "601e3f819058216db198a7b46e2ba848546c92bdb3015add6ada5b6de0ec1eaa",
+    "artifacts/m4-resource-watcher-command-drift-analysis-df51cbe-20261014/MANIFEST.json": "ac9174d32a35fde34009541e0043526ec8107d4593da622151be3007d000d570"
+  }
+}

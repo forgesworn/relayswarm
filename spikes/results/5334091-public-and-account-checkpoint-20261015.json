@@ -1,0 +1,162 @@
+{
+  "atUTC": "2026-10-15T16:58:24.741810+00:00",
+  "deployedSource": "53340911d3bb973fb392c1bad1f8f72aec2aa8bd",
+  "release": "v0.1.0 remains published; v0.2.0 candidate unreleased",
+  "requiredCI": {
+    "passed": 9,
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/38741613596"
+  },
+  "ordinaryPublic": {
+    "verdict": "PASS_THREE_ORIGINAL_SHORT_APPLICATION_GATES",
+    "measurementMs": 60034,
+    "gates": {
+      "playback": true,
+      "contribution": true,
+      "verifiedPeerPayload": true
+    },
+    "verifiedFragments": 2,
+    "verifiedBytes": 868936,
+    "measuredReceiverMediaShare": 0.0588962371140589,
+    "acceptedPeerRequests": 12,
+    "otherRequestCauses": "unknown; accepted serving is not verified completion",
+    "scope": "Four isolated desktop Chrome players/two Macs/ordinary public HTTPS with relay-only ICE; no sustained, physical, matched baseline, wire or cash savings claim"
+  },
+  "fourteenRole": {
+    "verdict": "RED_PROCESS_LIMIT_BEFORE_MEASUREMENT",
+    "elapsedSeconds": 24.521942875,
+    "minimumObservedProcesses": 33,
+    "processCap": 32,
+    "completedStarts": 3,
+    "measurementStarted": false,
+    "originalM4ReceiptRead": "RED",
+    "separateFencedM4Recovery": "PASS with archive before removal and fresh owned absences",
+    "browserContextClosure": "UNKNOWN",
+    "scope": "No300-second qualifier/two-hour22-churn acceptance; original failure not relabelled"
+  },
+  "accountAPI": {
+    "verdict": "RED_CHALLENGE_CLOCK_WINDOW",
+    "challengeHTTP": 200,
+    "remainingClientClockMs": 30016,
+    "clientUpperBoundMs": 30000,
+    "reservations": 0,
+    "observedFinalLimit": 0,
+    "observedFinalSpent": 0,
+    "grantRevocation": "missing token check UNKNOWN, preserved",
+    "actorCleanup": "terminal erase ACK/foreground remote exit1; local guard cleanup and fresh owned PID/group absence PASS",
+    "correction": "Unreleased source uses original signed issuer anchor, original TTLs/conservative elapsed, coherent single server issue time; before-client regression fails, corrected42PASS/1platformSKIP/0FAIL; field rerun pending"
+  },
+  "remaining": [
+    "sustained sharing and matched benefit",
+    "300-second14-role capacity",
+    "two-hour22-churn/naturalTURNexpiry",
+    "physicalSafari/background/touch acceptance",
+    "sharedaccount/realowner/website integration and upload enforcement",
+    "hardNAT/serverquotas/matchedwirecost",
+    "finalCI/deploy/merge/immutable-release-download acceptance"
+  ],
+  "evidence": [
+    {
+      "path": "artifacts/independent-ordinary-5334091-first-actual-review-20261015/APPLICATION-REPLAY.json",
+      "sha256": "00282ed0c8d2a3efbf72176e88f5dab79aaa05af7bcdb99a3eedf175487e6674"
+    },
+    {
+      "path": "artifacts/independent-ordinary-5334091-first-actual-review-20261015/REQUEST-AND-SHARE.json",
+      "sha256": "3e8bf0c1e632804469fe2a05069b2a1244fa18b1c1a89384ebb68f2628ad8e5d"
+    },
+    {
+      "path": "artifacts/independent-ordinary-5334091-first-actual-review-20261015/EVIDENCE-MANIFEST.json",
+      "sha256": "75e3aef07c57ac6c0e65c8d4254c110fc1cc7be537dcf0dc4f17f2d6f9fb1611"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-5334091-r5-root-20261015/ROOT-ACTUAL-SUMMARY.json",
+      "sha256": "86b036e418e593e96b5ab6024e0b0d5b4910e25a5dabd45765ad02696c2ce9b5"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-5334091-r5-root-20261015/EVIDENCE-MANIFEST.json",
+      "sha256": "964c2e50a3ad9d294af1269fe41c564346759110aa5b4bf09d1f98955c03bb8d"
+    },
+    {
+      "path": "artifacts/public-account-budget-cross-host-r3-actual-5334091-20261015/ROOT-ACTUAL-SUMMARY.json",
+      "sha256": "10a26359d246477ac9ca041a0526f8c22fbc5fefaadbe7704df72bef7e0ae0c7"
+    },
+    {
+      "path": "artifacts/public-account-budget-cross-host-r3-actual-5334091-20261015/EVIDENCE-MANIFEST.json",
+      "sha256": "181b2aed684030f5fa175392e0f09e1999124ee04fa5c06a01aea25133bcb97a"
+    },
+    {
+      "path": "artifacts/account-clock-regression-20261015/before.log",
+      "sha256": "765793a6d211b3ff09507505abd6286632802185691ec3e31c0d89d01fb0ad50"
+    },
+    {
+      "path": "artifacts/account-clock-regression-20261015/after.log",
+      "sha256": "3821244a9ed2b302c41ca3da635f8c9be92205a5aacf961ff66579237c0e1257"
+    },
+    {
+      "path": "artifacts/independent-account-clock-source-review-20261015/review.json",
+      "sha256": "c5ba57afb65115f6cbe826e0c2b0dffbf9f790f9e3095020871c49c1d4b2dba3"
+    },
+    {
+      "path": "artifacts/account-clock-regression-20261015/VALIDATION.json",
+      "sha256": "dde48f83699ebd146e3015ece37c3596a886f9006b837f37c04da04523018c70"
+    },
+    {
+      "path": "artifacts/playback-resume-trusted-browser-r2-20261015/REVIEW.json",
+      "sha256": "989cda669bf7fde08cfeace66303b35d2aecfafae564737fafdfb539575cbca3"
+    },
+    {
+      "path": "artifacts/playback-resume-trusted-browser-r2-20261015/EVIDENCE-MANIFEST.json",
+      "sha256": "b222dc279f9a43e6e007859e210df420e882735d50b3709bd518f9e5fe649ab2"
+    }
+  ],
+  "unreleasedSourceChecks": {
+    "publisherFamily": {
+      "tests": 349,
+      "passed": 347,
+      "platformSkipped": 2,
+      "failed": 0,
+      "concurrency": 2,
+      "durationMs": 21275.295291
+    },
+    "mobileUnit": {
+      "tests": 71,
+      "passed": 71,
+      "failed": 0,
+      "scope": "VM lifecycle/consent/retired callbacks; physical and browser control acceptance separate"
+    },
+    "browserJourney": {
+      "verdict": "PASS",
+      "scope": {
+        "network": "loopback",
+        "contexts": 1,
+        "media": "original two-rendition byte-range fixture",
+        "autoplayOverride": false,
+        "syntheticPause": true,
+        "physicalSafari": false,
+        "audio": "decoded bytes, not audible output",
+        "browserVersion": "155.0.8059.41"
+      },
+      "observations": {
+        "receiptSHA256": "8eee80b14f3e71c09b6a45e2d12a17146b0f70f1dcd24db75943ff6de3d25bad",
+        "trustedActiveClicks": 1,
+        "synchronousTrustedMainVideoPlayCalls": 1,
+        "totalNativePlayCalls": 4,
+        "resumedVideoFrames": 21,
+        "resumedDecodedAudioBytes": 6923,
+        "appliedVideoFrames": 24,
+        "appliedDecodedAudioBytes": 7636,
+        "masterRequests": 2,
+        "reportRequests": 0,
+        "resumeOriginOnly": true,
+        "explicitApplyReceiveOnly": true,
+        "retainedErrors": {
+          "bufferSeekOverHole": 1
+        },
+        "fatalErrors": 0,
+        "nativeErrors": 0
+      },
+      "cleanup": "All4actor/all5guardflagsPASS; no owned actors left",
+      "physicalAcceptance": false,
+      "previousWitnessFailure": "Retained separately; corrected DOM-listener boundary/nativeplay attribution, no product behavior or autoplay override change"
+    }
+  }
+}

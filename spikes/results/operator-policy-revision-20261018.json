@@ -1,0 +1,46 @@
+{
+  "v": 1,
+  "date": "2026-10-18",
+  "scope": "Local durable policy revision correction only; no candidate CI, deployment or reporting acceptance credit.",
+  "deployedFailure": "a02d5ec restart changed telemetry at unchanged revision; browser refused conflict, no report requests.",
+  "fix": {
+    "startupTelemetryPersisted": true,
+    "changedTelemetryAdvancesRevisionBeforeReadiness": true,
+    "legacySnapshotMigratesOnce": true,
+    "sameConfigurationRevisionStable": true,
+    "freshStateSeededBeforeReady": true,
+    "existingMalformedStateNotOverwritten": true,
+    "revisionOverflowFailsBeforeMutation": true,
+    "clientProductionCodeChanged": false,
+    "consentRestoredAutomatically": false
+  },
+  "validation": {
+    "firstSerialClientAndOperatorRun": {
+      "passed": 80,
+      "runtimeBeforeAdditionalMalformedSeedGuard": true
+    },
+    "finalOperatorRun": {
+      "passed": 11,
+      "clientTestUnchanged": true
+    },
+    "independentCodeReview": "No blocker",
+    "scratchAndChildProcessesRemoved": true
+  },
+  "sourceFiles": {
+    "demo/operator.mjs": "57205e1c9434972b2bfae4c96bcbca2edb890044320213a6eff6b9334d1d4e8e",
+    "test/demo-operator.test.mjs": "c5c50c8cbd1f1192b90031c190dbb357740f369456fd855047690bc55193cf01",
+    "test/demo-client.test.mjs": "ffa0d72e11076aaa29a37f988dae7519708209de8a0623d0ac46d08c1a6629f2"
+  },
+  "evidence": [
+    {
+      "path": "artifacts/operator-policy-revision-focused-20261018/RESULTS.json",
+      "bytes": 1619,
+      "sha256": "e298650c23966f54b3e23859b8e7ca56ba11746f076fccb026b3232882d11c63"
+    },
+    {
+      "path": "artifacts/operator-policy-revision-focused-r2-20261018/RESULTS.json",
+      "bytes": 1622,
+      "sha256": "e7e17573e6ca3cbd47f619d1c5770d755a5647b28b03fe96d6e8fff1906858e6"
+    }
+  ]
+}

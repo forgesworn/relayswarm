@@ -34,6 +34,7 @@ const mode = params.get("mode") || "shadow";
 const streamEvent = mode === "peer-first" ? await fetch("/authorisation.json").then((response) => response.json()) : undefined;
 let commitmentRequests = 0;
 const resourceSamples = [];
+const resourceHighWater = { samples: 0, firstAtMs: null, lastAtMs: null, activePeers: 0, heldBytes: 0, relays: 0, jsHeapBytes: 0 };
 
 const swarm = useSwarm
   ? createHlsSwarm({
@@ -56,9 +57,17 @@ const swarm = useSwarm
       originFallbackMs: Number(params.get("fallbackMs") || 1500),
       metricsIntervalMs: 5000,
       onMetrics: (metrics) => {
-        resourceSamples.push({ atMs: Math.round(performance.now()), connected: metrics.peers.connected, dialling: metrics.peers.dialling,
+        const atMs = Math.round(performance.now());
+        resourceSamples.push({ atMs, connected: metrics.peers.connected, dialling: metrics.peers.dialling,
           heldBytes: metrics.bytes.held, uploadedBytes: metrics.bytes.uploaded, relays: metrics.relays.connected });
         if (resourceSamples.length > 120) resourceSamples.shift();
+        resourceHighWater.samples++;
+        resourceHighWater.firstAtMs ??= atMs;
+        resourceHighWater.lastAtMs = atMs;
+        resourceHighWater.activePeers = Math.max(resourceHighWater.activePeers, metrics.peers.connected + metrics.peers.dialling);
+        resourceHighWater.heldBytes = Math.max(resourceHighWater.heldBytes, metrics.bytes.held);
+        resourceHighWater.relays = Math.max(resourceHighWater.relays, metrics.relays.connected);
+        resourceHighWater.jsHeapBytes = Math.max(resourceHighWater.jsHeapBytes, performance.memory?.usedJSHeapSize ?? 0);
       },
       ...(params.get("maxPeers") ? { maxPeers: Number(params.get("maxPeers")), maxUploadPeers: Number(params.get("maxPeers")) } : {}),
       testHooks: { corruptUploads: params.get("corrupt") === "1" },
@@ -90,7 +99,7 @@ video.play().catch(() => {});
 window.__viewer = {
   viewer,
   useSwarm,
-  report: () => ({ viewer, useSwarm, player: { ...player, currentTime: video.currentTime }, swarm: swarm?.metrics() ?? null, resourceSamples: [...resourceSamples] }),
+  report: () => ({ viewer, useSwarm, player: { ...player, currentTime: video.currentTime }, swarm: swarm?.metrics() ?? null, resourceSamples: [...resourceSamples], resourceHighWater: { ...resourceHighWater } }),
   stop: () => swarm?.stop(),
   loaderRestored: () => !hls.config.fLoader,
   stoppedMetrics: () => swarm?.metrics(),

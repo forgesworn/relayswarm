@@ -1,0 +1,218 @@
+{
+  "v": 1,
+  "kind": "permanent-proxy-and-exact-app-short-acceptance",
+  "sourceSha": "ee1510d429ac85f3738c03f10a09b753ec4eb037",
+  "ci": {
+    "runId": 38492003110,
+    "requiredJobs": 9,
+    "conclusion": "success",
+    "singleFailedJobRetry": true,
+    "originalStartupFailureRetained": true
+  },
+  "image": "sha256:b42b383fbd95bcf6628ade7d0e0acc803b1bb393e210b4c3b9b900f7737b4275",
+  "client": {
+    "bytes": 728315,
+    "sha256": "c264287acad81090c8952f99946f75f844e8f5fa718e907899dc77cacf04ef59"
+  },
+  "permanentProxy": {
+    "fileSHA256": "a3a14482c367123c4182188d36f7932033d73ea2a68378e10693c0b194a52f4a",
+    "runtimeProtocols": {
+      "srv0": [
+        "h1"
+      ]
+    },
+    "version": "v2.11.7"
+  },
+  "measurementElapsedMs": 60014,
+  "browserVersion": "155.0.8059.41",
+  "gates": {
+    "playback": {
+      "status": "green",
+      "scope": "Actual frame/time plus native audio decoded-byte progress at each requested quality; zero fatal/native/page errors. Decode does not prove audible output."
+    },
+    "contribution": {
+      "status": "green",
+      "scope": "Both explicitly consented contributors remain serving and send media within100MB each; no reconsent/reset."
+    },
+    "verifiedPeerPayload": {
+      "status": "green",
+      "scope": "Receive-only actor records verified peer bytes/fragments at low and high qualities during the measured window; links alone do not pass."
+    }
+  },
+  "roles": [
+    {
+      "name": "contributor-low",
+      "totals": {
+        "peerFirstBytes": 0,
+        "uploaded": 3151256,
+        "peerFirstLoads": 0
+      },
+      "peerPayloadByLevel": {
+        "0": {
+          "loads": 0,
+          "bytes": 0
+        },
+        "1": {
+          "loads": 0,
+          "bytes": 0
+        }
+      },
+      "fatalErrors": 0,
+      "nativeErrors": 0,
+      "pageErrors": 0,
+      "stallsHighwater": 0,
+      "zeroFrameIntervals": 0,
+      "contributionWithdrawn": false
+    },
+    {
+      "name": "contributor-high",
+      "totals": {
+        "peerFirstBytes": 0,
+        "uploaded": 10036944,
+        "peerFirstLoads": 0
+      },
+      "peerPayloadByLevel": {
+        "0": {
+          "loads": 0,
+          "bytes": 0
+        },
+        "1": {
+          "loads": 0,
+          "bytes": 0
+        }
+      },
+      "fatalErrors": 0,
+      "nativeErrors": 0,
+      "pageErrors": 0,
+      "stallsHighwater": 1,
+      "zeroFrameIntervals": 0,
+      "contributionWithdrawn": false
+    },
+    {
+      "name": "origin-baseline-low",
+      "totals": {
+        "peerFirstBytes": 0,
+        "uploaded": 0,
+        "peerFirstLoads": 0
+      },
+      "peerPayloadByLevel": {
+        "0": {
+          "loads": 0,
+          "bytes": 0
+        },
+        "1": {
+          "loads": 0,
+          "bytes": 0
+        }
+      },
+      "fatalErrors": 0,
+      "nativeErrors": 0,
+      "pageErrors": 0,
+      "stallsHighwater": 0,
+      "zeroFrameIntervals": 0,
+      "contributionWithdrawn": false
+    },
+    {
+      "name": "receive-only",
+      "totals": {
+        "peerFirstBytes": 13188200,
+        "uploaded": 0,
+        "peerFirstLoads": 30
+      },
+      "peerPayloadByLevel": {
+        "0": {
+          "loads": 15,
+          "bytes": 3151256
+        },
+        "1": {
+          "loads": 15,
+          "bytes": 10036944
+        }
+      },
+      "fatalErrors": 0,
+      "nativeErrors": 0,
+      "pageErrors": 0,
+      "stallsHighwater": 0,
+      "zeroFrameIntervals": 0,
+      "contributionWithdrawn": false
+    }
+  ],
+  "controls": {
+    "completed": 405,
+    "protocolCounts": {
+      "http/1.1": 405
+    }
+  },
+  "scope": {
+    "programmaticDropdownSelection": true,
+    "nativeDropdownInteractionProved": false,
+    "metricsProjection": {
+      "version": 1,
+      "maxDeliveryMeasurements": 6,
+      "maxBufferedRanges": 4,
+      "perLoadBudgetObserved": false,
+      "remoteHaveObserved": false
+    },
+    "diagnosticOnly": false,
+    "serverProtocolTrial": false,
+    "permanentDeployedProtocolEvidence": true,
+    "ordinaryDefaultTransportEvidence": true,
+    "networkTransportOverride": false,
+    "automatedHeadlessChrome": true,
+    "ordinaryTLS": true,
+    "additionalRTCOrMediaFlags": false,
+    "fakeMedia": false,
+    "getUserMedia": false,
+    "permissionGrants": false,
+    "mdnsOverride": false,
+    "personalProfiles": false,
+    "reporting": false,
+    "contributorAllowanceBytes": 100000000,
+    "contributorRateBytesPerSecond": 512000,
+    "noQuotaReset": true,
+    "noAutomaticReconsent": true,
+    "contributorWarmupMs": 15000,
+    "plannedMeasurementMs": 60000,
+    "maxOwnedBrowserLifetimeMs": 150000,
+    "physicalDevice": false,
+    "NATClassProved": false,
+    "financialSavingsProved": false,
+    "chromeFlags": [
+      "--user-data-dir=<owned-private-temporary-profile>",
+      "--headless=new",
+      "--remote-debugging-address=127.0.0.1",
+      "--remote-debugging-port=0",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "about:blank"
+    ]
+  },
+  "cleanup": {
+    "browserProviderWrapper": true,
+    "ownedSourceRemoved": true,
+    "sourceExtended": false
+  },
+  "evidence": [
+    {
+      "path": "artifacts/public-cdp-permanent-ee1510d-run-r2-20261014/browser/receipt.json",
+      "sha256": "29f9c5b09422c6c52c7593928de2f547e2d0f1c36f946f7770bf2e6a04973fde"
+    },
+    {
+      "path": "artifacts/public-cdp-permanent-ee1510d-run-r2-20261014/wrapper-receipt.json",
+      "sha256": "92f47d203a7b12502017b108a0a647d5de3dbeabf2eb843682a9840abc20eecf"
+    },
+    {
+      "path": "artifacts/deployment-ee1510d-preparation-20261014/host-cleanup-verification-source.json",
+      "sha256": "c121ebd99d71b1b80c3c8f574bf9df4ade7a13f3aacd5d5c7359e1c2de702a20"
+    },
+    {
+      "path": "artifacts/caddy-permanent-http1-preparation-20261014/root-audit.json",
+      "sha256": "2690d33289db0f7086bb72b5973191d4bb143009a90c338144d144ab15c7bfb2"
+    }
+  ],
+  "limits": [
+    "Sixty-second desktop check does not prove two-hour stability, physical/NAT diversity or billed savings.",
+    "Dropdowns were programmatic; Start/upload consent had trusted input witnesses.",
+    "The high contributor retained one stall; gates retain their exact original definitions."
+  ]
+}

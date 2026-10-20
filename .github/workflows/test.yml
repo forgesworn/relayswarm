@@ -10,6 +10,11 @@ on:
         description: Run a longer, twelve-viewer peer-first test
         type: boolean
         default: false
+      soak_duration:
+        description: Measurement window in seconds (7200 includes repeated departures and rejoins)
+        type: choice
+        options: ['180', '7200']
+        default: '180'
 
 permissions:
   contents: read
@@ -29,7 +34,7 @@ jobs:
   hls-playback:
     name: hls.js playback and field-test demo
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -40,17 +45,60 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npx playwright-core install --with-deps chrome
       - run: npm run test:playback -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
+      - run: npm run test:playback:resume -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
+      - run: npm run test:operator -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
+      - run: CHROME_PATH=/opt/google/chrome/chrome npm run test:media-browser
+      - run: CHROME_PATH=/opt/google/chrome/chrome npm run test:media-recovery
+      - run: CHROME_PATH=/opt/google/chrome/chrome npm run test:live-recovery
+      - run: npm run test:broadcast
+      - run: npm run test:broadcast:browser -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: hls-playback-receipts
-          path: playback-receipts/*.json
+          path: |
+            playback-receipts/*.json
+            artifacts/broadcast/integration.json
+            artifacts/browser-production-*/*.json
+            artifacts/fmp4-browser/*.json
+            artifacts/media-browser/*.json
+            artifacts/ll-browser/*.json
+            artifacts/media-recovery-browser/*.json
+            artifacts/sparse-aac-recovery-browser/*.json
+            artifacts/live-restart-browser/**/*.json
+
+  swift-interop:
+    name: current Swift SDK and browser interoperability
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: forgesworn/relayswarm-kit
+          ref: 2f0b26ace4096a5dca87baf715274f91c331ac3a
+          path: .interop-sdk
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: brew list ffmpeg >/dev/null || brew install ffmpeg
+      - run: npx playwright-core install chrome
+      - run: npm run test:interop:kit -- --evidence artifacts/current-sdk-browser-ci.json
+        env:
+          RELAYSWARM_KIT_DIR: .interop-sdk
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: current-sdk-browser-interop
+          path: artifacts/current-sdk-browser-ci.json
 
   hls-soak:
     name: hls.js optional twelve-viewer soak
     if: github.event_name == 'workflow_dispatch' && inputs.soak
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -60,7 +108,7 @@ jobs:
       - run: npm ci
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npx playwright-core install --with-deps chrome
-      - run: npm run test:browser -- --chrome /opt/google/chrome/chrome --mode peer-first --viewers 12 --duration 180 --stagger 1000 --waves 3 --waveGap 30000 --maxPeers 4 --resultsDir soak-receipts
+      - run: npm run test:browser -- --chrome /opt/google/chrome/chrome --mode peer-first --viewers 12 --duration "${{ inputs.soak_duration }}" --churnEvery 600 --churnCount 2 --stagger 1000 --waves 3 --waveGap 30000 --maxPeers 4 --resultsDir soak-receipts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

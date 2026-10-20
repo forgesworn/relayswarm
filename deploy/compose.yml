@@ -1,0 +1,66 @@
+name: relayswarm-pilot
+services:
+  router:
+    image: bluenviron/mediamtx:1.21.2@sha256:c7540465f868a02652118bea5a0daab12a29ac0f6cb8485abd535939ecddf886
+    user: "1000:1000"
+    command: ["/mediamtx.yml"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${INGEST_PORT:-1935}:1935"
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+    networks: [ingest, ingress]
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.50
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+  app:
+    image: relayswarm-pilot:${APP_TAG:-local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        SOURCE_REVISION: ${SOURCE_REVISION:-unreleased}
+    init: true
+    restart: unless-stopped
+    depends_on: [router]
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL:?Set PUBLIC_URL to your HTTPS origin}
+      RELAYS: ${RELAYS:-}
+      STUN_URL: ${STUN_URL:-}
+      ACCOUNT_BUDGET_ENABLED: ${ACCOUNT_BUDGET_ENABLED:-1}
+    ports:
+      - "127.0.0.1:${APP_PORT:-8787}:8787"
+    volumes:
+      - state:/state
+    networks: [ingest, egress]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 128
+    mem_limit: 1536m
+    cpus: 2.0
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "node", "deploy/healthcheck.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+networks:
+  ingest:
+    internal: true
+  ingress: {}
+  egress: {}
+volumes:
+  state: {}

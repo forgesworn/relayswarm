@@ -1,0 +1,69 @@
+{
+  "v": 1,
+  "verdict": "PASS_LOCAL_WATCHER_AND_NATIVE_FIXTURE_ONLY",
+  "sourceBase": "1b096a060abf5bc9bdadb320fa32243048522985",
+  "expectedBaselineRegression": {
+    "tests": 1,
+    "pass": 0,
+    "fail": 1,
+    "cancelled": 0,
+    "skipped": 0,
+    "error": "Playlist reload unavailable",
+    "oldHelperSHA256": "cf35c4a41269496bdc87ad9aef0e4d10935652eecd28699e76f9d3fe3f55d568"
+  },
+  "syntaxModules": 141,
+  "native": {
+    "tests": 29,
+    "pass": 29,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0
+  },
+  "publisher": {
+    "tests": 271,
+    "pass": 269,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 2
+  },
+  "outerElapsedMs": 27375,
+  "resourceSampleCount": 26,
+  "sampledRSSMaximum": 1368113152,
+  "sampledProcessMaximum": 20,
+  "minimumFreePercent": 47,
+  "cleanup": {
+    "workerReaped": true,
+    "groupAbsent": true,
+    "leaderBirthAbsent": true,
+    "allAttemptedResourceProbeChildrenReaped": true,
+    "allAcceptedResourceProbeChildrenReaped": true
+  },
+  "sourcePinsSHA256": "0241fa1be5c6b3fbbbb145643e7927fa0258c8eb16107b0130c7e0b7fd3d4a83",
+  "sourcePinsRecords": 214,
+  "guardWorkSeconds": 40,
+  "guardWholeSeconds": 60,
+  "scope": "Controlled regression plus full maintained native/publisher suites. No Windows native chronology, physical devices, Internet renewal, release or deployment acceptance. Group/birth proof does not establish detached test groups or scratch absence.",
+  "uncommittedDuringExecution": true,
+  "evidenceManifestSHA256": "fe66f27bcae815ca3f1c26263c7349adabbd25793c40d154f23473c4c8d74a5a",
+  "source": [
+    {
+      "path": "demo/blocking-playlist-reload.mjs",
+      "sha256": "a287f6cfb777dafa1bf4d828cbe0305b6664217caba243690b8a946310265638"
+    },
+    {
+      "path": "test/blocking-playlist-reload.test.mjs",
+      "sha256": "207cc0b0a49b8ffcd176685be203dd890eaccd760047c289201504d941187437"
+    },
+    {
+      "path": "test/native-client.test.mjs",
+      "sha256": "87ff98ea01be193aa482589049fcccca672875492390636c1eb6d1c24ee2cd1a"
+    },
+    {
+      "path": "package.json",
+      "sha256": "b8ebeacafa093ed57112634aa29c5f892f32024c0591b0254a30a4204a3b3144"
+    }
+  ],
+  "hostedQualification": "pending",
+  "published": false,
+  "deployed": false
+}

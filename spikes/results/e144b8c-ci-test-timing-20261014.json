@@ -1,0 +1,81 @@
+{
+  "v": 1,
+  "kind": "CI-test-timing-correction",
+  "applicationSourceSha": "df51cbed1ebb3bd09ef1b521c451d6b47989a664",
+  "firstAttempt": {
+    "v": 1,
+    "kind": "retained-CI-macOS-eligibility-test-failure",
+    "observedUTC": "2026-10-14T12:55:02.901483+00:00",
+    "headSha": "e144b8c0a4183bf799c5268250445ebf97ba6abb",
+    "runId": 38566727967,
+    "jobId": 115861185371,
+    "attempt": 1,
+    "jobConclusion": "failure",
+    "failedCommand": "npm run test:swarm",
+    "passedCases": 91,
+    "failedCases": 1,
+    "testFile": "test/browser-hardening.test.mjs",
+    "testLine": 708,
+    "assertionLine": 731,
+    "case": "peer eligibility observes existing coordination outcomes and matching HAVE without extra requests",
+    "elapsedMs": 405.668833,
+    "actualRequestTrace": [
+      "existing-peer"
+    ],
+    "expectedRequestTrace": [
+      "existing-peer",
+      "existing-peer"
+    ],
+    "exactCILocalReproductionClaimed": false,
+    "deployedRuntimeSourceSha": "df51cbed1ebb3bd09ef1b521c451d6b47989a664",
+    "deploymentUnchanged": true,
+    "rawLogSHA256": "19a3ba7858011004a3fba5aa4bedb847546e03a0783f7ed4d54abba678166d16",
+    "cleanLogSHA256": "faaf521d97ade04b2db143d0244e0cb088c726ee422528112e39555857399868",
+    "otherCIJobsNotInferredFromThisReceipt": true
+  },
+  "testAmbiguity": {
+    "realPlaybackBudgetMs": 60,
+    "realCryptoCompetedWithHostTime": true,
+    "identicalPeerAndOriginBytesDidNotProvePeerSuccess": true,
+    "exactCILocalReproductionClaimed": false,
+    "originalFocusedLocalBaselinePassed": true
+  },
+  "correction": {
+    "productionSourceUnchanged": true,
+    "testBudgetRemainsMs": 60,
+    "realSignaturesAndHashesRetained": true,
+    "scopedVirtualSetTimeoutAndMonotonicClock": true,
+    "phasesObservedBeforeAdvancing": true,
+    "virtualAdvancesMs": [
+      60,
+      10,
+      1
+    ],
+    "requiredPeerFirstLoads": 2,
+    "requiredOriginFallbacks": 1,
+    "requiredRequestTrace": [
+      "existing-peer",
+      "existing-peer"
+    ],
+    "realTimerFunctionsRestoredBeforeClosingFixture": true,
+    "earlierPatchedDelayedExitMs": 22839.3275,
+    "earlierPatchedTerminalExitCode": 0,
+    "earlierPatchedDelayCauseNotExactCICause": true
+  },
+  "validation": {
+    "finalInMemoryEligibilityTestsPassed": 4,
+    "focusedDurationMs": 247.881,
+    "rootFullSwarmTestsPassed": 92,
+    "rootFullSwarmDurationMs": 16814.252166,
+    "terminalExitCode": 0,
+    "syntax": "PASS",
+    "gitDiffCheck": "PASS",
+    "noBrowserExternalHostOrPublicNetworkActors": true
+  },
+  "evidenceSHA256": {
+    "artifacts/peer-eligibility-ci-timing-20261014/EVIDENCE-MANIFEST.json": "f85169eafaf5bc243962a18919ff159bf923c8d25dc3c7194d16d7ad7ce57191",
+    "artifacts/peer-eligibility-ci-timing-20261014/root-full-swarm.log": "6c84d7119e5185f685708e1797163c6eb6d632622ead6cad98827b9b9c662b8f",
+    "artifacts/df51cbe-checkpoint-docs-20261014/macos-first-failure.json": "529a861c41a9cb83e014bd64342acafc3b02c2a4a3fd9ad93a0682a8f96a9211"
+  },
+  "scope": "Test determinism correction only; original CI failure remains retained and is not a production connectivity repair. New-head hosted CI is separate."
+}

@@ -1,0 +1,105 @@
+{
+  "v": 1,
+  "date": "2026-10-15",
+  "sourceSha": "3e52294c2e1f44ab9cbed13adf43e94e995f1e2d",
+  "kind": "ordinary-deployed-public-four-role-measured-result",
+  "verdict": "RED",
+  "measurementMs": 60038,
+  "topology": {
+    "M1": [
+      "contributor-low",
+      "contributor-high"
+    ],
+    "M4": [
+      "origin-baseline-low",
+      "receive-only"
+    ],
+    "control": "SSH only; peer media uses ordinary configured relay/TLS-TCP WebRTC",
+    "browser": "isolated headless Chrome; no injected ICE or media flags"
+  },
+  "gates": {
+    "playback": "PASS",
+    "contribution": "PASS",
+    "bothQualityVerifiedPeerPayload": "FAIL"
+  },
+  "receiver": {
+    "decodedVideoAndAudioQualities": [
+      "low",
+      "high"
+    ],
+    "completeVerifiedPeerFragments": 0,
+    "verifiedPeerBytes": 0,
+    "uploadedBytes": 0
+  },
+  "contributors": {
+    "lowAcceptedServeBytes": 633184,
+    "highAcceptedServeBytes": 2685768,
+    "acceptedServeBytesAreNotWireDelivery": true,
+    "consentRetained": true,
+    "eachAllowanceBytes": 100000000,
+    "eachRateLimitBytesPerSecond": 512000,
+    "resetOrReconsent": false
+  },
+  "allFourPlayers": {
+    "fatalMediaErrors": 0,
+    "nativeMediaErrors": 0,
+    "stalls": 0
+  },
+  "requestEvidence": {
+    "matchingHaveOpportunities": 7,
+    "low": 3,
+    "high": 4,
+    "initialPeerBudgetsMs": [
+      1500
+    ],
+    "nativeMatchedRequestCloseSnapshots": 7,
+    "matchingMetadataAndPartialPayload": 7,
+    "matchingEof": 0,
+    "nativeTransportAndChannelConnectedAtClose": 7,
+    "productRequestTimeoutClosures": 6,
+    "productRequestAbortClosures": 1,
+    "nativeToProductReasonCorrelation": "unmatched",
+    "commitmentRejected": 0,
+    "commitmentUnavailable": 0,
+    "underlyingSendQueueOrNetworkCause": "unproved"
+  },
+  "cleanup": {
+    "allFourBrowserContextsClosed": true,
+    "bothCdpConnectionsDetached": true,
+    "workerReaped": true,
+    "ownedWorkerGroupAbsent": true,
+    "metadataHelperReapedAndGroupAbsent": true,
+    "allTenEndpointFlagsBothMachines": true,
+    "endpointRunnersReapedAndStagesRemoved": true,
+    "providerDiagnosticForwardReaped": true,
+    "freshM1M4StageAbsence": true,
+    "allFiveSourceGuards": true,
+    "ownedSourceRemoved": true,
+    "sourceActualExitCode": 255
+  },
+  "resources": {
+    "M1": {
+      "rssHighwaterBytes": 2053210112,
+      "processHighwater": 39,
+      "minimumFreePercent": 31
+    },
+    "M4": {
+      "rssHighwaterBytes": 2594570240,
+      "processHighwater": 27,
+      "minimumFreePercent": 78
+    },
+    "limitsPerMachine": {
+      "rssBytes": 3221225472,
+      "processes": 64,
+      "minimumFreePercent": 25
+    },
+    "long32ProcessQualification": false
+  },
+  "retainedEvidence": {
+    "rootManifestSHA256": "42cd62ed193411fa7fcce8e5af6c0638389bb46bcfd14487f9ea34bdb0cd3977",
+    "sourceCleanupSHA256": "c4cb87aa212733efb1792c2d8ef3a337857dfd47362e0bc94459c842a22d1bdf",
+    "rootDirectory": "artifacts/public-cross-hls-eligibility-3e52294-seventh-root-20261015",
+    "resultsDirectory": "artifacts/public-cross-hls-eligibility-3e52294-seventh-run-20261015"
+  },
+  "scope": "One ordinary public short check, not physical, hard-NAT, fourteen-role, sustained/churn, natural TURN expiry, server quotas, matched cost or release acceptance. Earlier failed/pre-browser attempts retain their original verdicts."
+}

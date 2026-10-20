@@ -13,13 +13,21 @@ async function availableUdpPort() {
 }
 
 export async function startLocalDht() {
-  const port = await availableUdpPort();
-  const node = DHT.bootstrapper(port, "127.0.0.1");
-  await node.ready();
+  const nodes = [], bootstrap = [];
+  try {
+    // Model a populated isolated DHT: NAT analysis needs several independent
+    // responders. One bootstrapper can abort before the LAN stream arrives.
+    for (let i = 0; i < 4; i++) {
+      const port = await availableUdpPort(), node = DHT.bootstrapper(port, "127.0.0.1");
+      nodes.push(node);
+      await node.ready();
+      bootstrap.push(`127.0.0.1:${port}`);
+    }
+  } catch (error) { await Promise.allSettled(nodes.map((node) => node.destroy())); throw error; }
   return {
-    bootstrap: [`127.0.0.1:${port}`],
+    bootstrap,
     async close() {
-      await node.destroy();
+      await Promise.all(nodes.map((node) => node.destroy()));
     },
   };
 }

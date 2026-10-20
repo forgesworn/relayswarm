@@ -1,0 +1,52 @@
+{
+  "v": 1,
+  "date": "2026-10-14",
+  "sourceSha": "f393abf3d55215bdf58241a4a2af74245d646117",
+  "scope": "Installed desktop Safari26.6.2 onM4, two planned M1Chrome contributors; failed before application navigation or observation",
+  "result": "RED",
+  "outerElapsedSeconds": 18.8096301248,
+  "sessionCreation": {
+    "GETStatusCompletedMs": 121.6,
+    "readyFieldRetainedOrAsserted": false,
+    "POSTSessionDeadlineIncludingReapMs": 14506.5,
+    "HTTPWorkersStarted": 2,
+    "HTTPWorkersReaped": 2,
+    "activeHTTPWorkersFinal": 0,
+    "stdioClosed": true,
+    "creationWorkerExitSignal": 15,
+    "driverExitCode": 0,
+    "sessionIDReturned": false,
+    "sessionAllocationKnown": false,
+    "sessionDeleteIssued": false,
+    "sessionDeletionProved": false
+  },
+  "created": {
+    "observer": false,
+    "provider": false,
+    "applicationNavigation": false,
+    "playback": false
+  },
+  "cleanup": {
+    "originalM4CleanupREDPreserved": true,
+    "M1AllOwnedCleanupPassed": true,
+    "exactMainAndDriverBirthsLaterAbsent": true,
+    "priorDriverPortLaterRefused": true,
+    "stageOpenFileAbsenceVerified": true,
+    "nineFileOwnedScratchStageRemovedAfterArchivingAndHashVerification": true,
+    "sharedSafariSignalled": false,
+    "sessionDeletionProved": false,
+    "actualSourceCleanupV2Removed": true,
+    "sourceExitCode": 255
+  },
+  "singleScopedDriverLogRead": {
+    "wholeElapsedMs": 1748.019,
+    "matchingEvents": 0,
+    "rawBytes": 25,
+    "commandAndSSHReaped": true,
+    "rawMessagesRetained": false,
+    "ownLogChildTerminationAttemptAfterEOF": true,
+    "causeEstablished": false
+  },
+  "playbackRTCCodecAudioPhysicalAcceptanceProved": false,
+  "releaseReadiness": false
+}

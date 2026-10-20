@@ -1,0 +1,204 @@
+{
+  "v": 1,
+  "checkpointDate": "2026-10-18",
+  "sourceSha": "3515d5b0acad4d18811ed08e4d9f7648781e55cf",
+  "productionComplete": false,
+  "scope": "Exact3515 CI/consumer/deployment PASS; R54 full measurement RED on both-quality peer coverage, independent finite cleanup PASS. No long or final-release credit.",
+  "configuration": {
+    "iceTransportPolicy": "relay",
+    "turnUrlProjection": "tls-tcp",
+    "perAddressTickets": 32,
+    "perAddressRequests": 900,
+    "globalRequestCapacity": 2048,
+    "reporting": false,
+    "forwarding": false,
+    "accountMethods": [
+      "nostr"
+    ],
+    "hostSuppliedAccountAPIImplemented": true,
+    "websiteResolverConfigured": false,
+    "privateStateAndPermanentLeasesPreserved": true,
+    "independentProxyPreserved": true,
+    "sdkDefaultMaxPeers": 6,
+    "deployedDemoMaxPeers": 4
+  },
+  "release": {
+    "published": "v0.1.0",
+    "candidate": "0.2.0",
+    "pr": 8,
+    "merged": false,
+    "candidatePublished": false,
+    "npmPublished": false
+  },
+  "remaining": [
+    "matching successful300second qualifier",
+    "7200seconds and22churn with natural TURN expiry",
+    "both-quality cross-device upload-budget lifecycle",
+    "durable opt-in reports and parent-crash recovery acceptance",
+    "physical/browser breadth within available devices and Simulator scope",
+    "difficult networks and matched wire/cost benefit",
+    "final0.2release and downloaded-asset acceptance"
+  ],
+  "ci": {
+    "run": 39157143848,
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/39157143848",
+    "requiredJobsPassed": 9
+  },
+  "consumer": {
+    "files": 277,
+    "elapsedMs": 8890,
+    "semverDependencyDifferencesFromRootLock": 28,
+    "scope": "Exact committed source, not downloaded final release assets"
+  },
+  "deployed": {
+    "sourceSha": "3515d5b0acad4d18811ed08e4d9f7648781e55cf",
+    "appId": "2d91794b9b4351dc89eca98e8f6607434905ba764ef1320a3bc1516f50a71820",
+    "appStartedUTC": "2026-10-18T19:19:35.433875907Z",
+    "image": "sha256:2730faaac7b0bd52efb003c3e48299e789dbc4466dff769a16347301afc508fc",
+    "client": {
+      "sha256": "0f4b4f0fb22c3de7e4fdc7184016ab39897e5f960ead47737484ed85b3860c55",
+      "bytes": 773254
+    }
+  },
+  "r54": {
+    "verdict": "RED",
+    "measurementElapsedMs": 303647,
+    "elapsedMs": 349364,
+    "gates": {
+      "complete300": true,
+      "all14": true,
+      "all8ActuallyUploaded": true,
+      "each4BothQualityPeer": false,
+      "fourteenFrameAudioProgress": true,
+      "steadyNoChurn": true,
+      "contributorConsent": true,
+      "bothQualityDecode": true,
+      "rssWithinBound": true,
+      "actualPeerReadiness": true,
+      "observedInPlaceRenewal": true,
+      "admissionObservedWithoutRefusalOrUnknown": true,
+      "inputProvenance": true,
+      "admissionSemanticCoverage": true,
+      "admissionTerminalReconciliation": true,
+      "admissionCallerAbortRecovery": true
+    },
+    "missingReceiverQualityCells": [
+      "receiver-2 LOW",
+      "receiver-3 HIGH"
+    ],
+    "receiptPeerTraffic": {
+      "loadsObservedInLastFragments": 15,
+      "verifiedPeerBytes": 34263188,
+      "uploadedBytes": 220057948,
+      "requiredForCapacityGate": true
+    },
+    "uploadCountersAreAcknowledgedWireBytes": false,
+    "contextsAcquiredAndClosed": 14,
+    "observerExports": 5,
+    "optionalFirstErrorAbsent": true,
+    "independentFiniteCleanupPassed": true,
+    "cleanupReviewSHA256": "f547ea661233c418214fecce517abf7394b7fe56ff5533f2d2f3211ef50f9907",
+    "sourceExitCode": 255,
+    "strict300Passed": false,
+    "longEligible": false
+  },
+  "diagnosis": {
+    "receiverRequestCounterReconciliation": true,
+    "distinctRequestTuples": 224,
+    "receiver2LowRequests": 0,
+    "receiver2LowNoHaveNoWait": 88,
+    "receiver3HighTimeouts": 34,
+    "receiver3HighPartialTimeouts": 27,
+    "receiver3OnlyHighPayloadBeforeMeasurement": true,
+    "uploaderRateLimitRefusalsLifetime": 43,
+    "otherUploaderRefusalReasons": 0,
+    "providerPeakAligned60sAdmissionCalls": 731,
+    "providerAdmissionRefusals": 0,
+    "publicRefusals": 0,
+    "publicUnknowns": 0,
+    "specificNetworkQueueOrCPUCauseProved": false,
+    "receiverUploaderWireJoinProved": false
+  },
+  "evidence": [
+    {
+      "path": "artifacts/ci-3515d5b-39157143848-20261018/ci-terminal-success.json",
+      "bytes": 32073,
+      "sha256": "8ec6e1aeb5f246bdb719d1ef1fbed3de3a4aaa7d8243a678068d3298cd1a77ac"
+    },
+    {
+      "path": "artifacts/clean-consumer-3515d5b-20261018/package-review.json",
+      "bytes": 6106,
+      "sha256": "54e73db41b7390cb724355a937143db891e12b529dcdff4d465a10416ec724a8"
+    },
+    {
+      "path": "artifacts/deployment-3515d5b-admission-profile-20261018/runtime-contract.json",
+      "bytes": 12233,
+      "sha256": "1c96ba2c2f081f8ccd04eab6762dc03acc0c7e7cab079837e106701efa62b648"
+    },
+    {
+      "path": "artifacts/independent-deployment-3515d5b-review-20261018/review.json",
+      "bytes": 27792,
+      "sha256": "a98311cbaf0ef5c337784f56081d2e54998478c7171bc8f4308577b746c15d84"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-3515d5b-r54-run-20261018/browser/receipt.json",
+      "bytes": 2245565,
+      "sha256": "186b811f4bf39e8592b711819f0a939f0cad2b210760c94ed5d6c45e0f607651"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-3515d5b-r54-cleanup-review-20261018/review.json",
+      "bytes": 21794,
+      "sha256": "f547ea661233c418214fecce517abf7394b7fe56ff5533f2d2f3211ef50f9907"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-3515d5b-r54-cleanup-review-20261018/EVIDENCE-MANIFEST.json",
+      "bytes": 3320,
+      "sha256": "46dd68d44fe49b229e2c70b5ac0e6a171e983e2ae7f7a277276a29ddd55f9cb5"
+    },
+    {
+      "path": "artifacts/peer-request-outcomes-3515d5b-r54-diagnosis-20261018/NUMERIC-FINDINGS.json",
+      "bytes": 40958,
+      "sha256": "6ae439c92a9db2694456097e0aa715fa3fe4cdf23150d58b5f812651eff7c5cb"
+    },
+    {
+      "path": "artifacts/saturated-repair-baseline-root-20261018/RESULTS.json",
+      "bytes": 1357,
+      "sha256": "666bf0fc32e3fa2af64d44307536e0629f3ddcea6e717954e5acd18206b44556"
+    },
+    {
+      "path": "artifacts/saturated-repair-candidate-root-20261018/RESULTS.json",
+      "bytes": 1356,
+      "sha256": "cfa62872f1b5a86510a194e33e594823c51f670598d76a5249d6adc06d17a0f9"
+    },
+    {
+      "path": "artifacts/saturated-repair-candidate-r2-root-20261018/RESULTS.json",
+      "bytes": 1355,
+      "sha256": "81fe9481279b87b96ac8786b4fd39b63000d24a3bca707a3992083276fc2ee98"
+    },
+    {
+      "path": "artifacts/saturated-repair-full-root-20261018/RESULTS.json",
+      "bytes": 1397,
+      "sha256": "fe5a38bc6cc13dff56931c85751dfaa459b4b95e24f5e0b5f20b927c140d30d6"
+    }
+  ],
+  "laterLocalWork": {
+    "state": "LOCAL_CANDIDATE_NOT_DEPLOYED",
+    "optionalEncryptedRequestedKeyAdvice": true,
+    "onlyCurrentExactDiscoveryEmitsAdvice": true,
+    "heldKeyAndServingRequiredAfterIncomingAdmission": true,
+    "originalAdmissionConsentRotationAndCapacityBoundsRetained": true,
+    "legacyPeerlessBehaviourRetained": true,
+    "baselineCentralRegressionPassed": false,
+    "focusedGroupsPassed": 2,
+    "fullLocalTestsPassed": 196,
+    "fullLocalElapsedMs": 43875.30845799483,
+    "r54SpecificCauseProved": false,
+    "fieldRepairProved": false,
+    "newCIPassed": false,
+    "deployed": false,
+    "sourceFiles": {
+      "src/browser/hls-swarm.mjs": "2cdaa403ff5eef6672e0501f29ff0677ebab4357b16dab3217864b7dd3cbb115",
+      "test/browser-hardening.test.mjs": "b8024bd795e0b6216eba2326d6631904e990431120a06eb6d92be7eb587881b4"
+    }
+  }
+}

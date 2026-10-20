@@ -1,0 +1,11 @@
+# Optional. Contains a pathname only; the RTMPS URL is never an environment value.
+services:
+  app:
+    command: ["--youtube-url-file", "/run/relayswarm-secrets/youtube-url"]
+    volumes:
+      - type: bind
+        source: ${YOUTUBE_SECRET_DIR:?Set YOUTUBE_SECRET_DIR to an absolute private directory}
+        target: /run/relayswarm-secrets
+        read_only: true
+        bind:
+          create_host_path: false

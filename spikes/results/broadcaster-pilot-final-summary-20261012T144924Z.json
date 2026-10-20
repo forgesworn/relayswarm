@@ -1,0 +1,248 @@
+{
+  "v": 1,
+  "kind": "relayswarm-broadcaster-pilot-checkpoint",
+  "at": "2026-10-12T14:49:24.055Z",
+  "sourceRevision": "0d8ebd20ca8942723db405f3c4b251ce1488191b",
+  "ci": {
+    "runId": 38264629670,
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/38264629670",
+    "conclusion": "success",
+    "requiredJobsPassed": 8,
+    "optionalSoak": "skipped",
+    "broadcastReceiptSha256": "fb4d6ab36ae5bbc6149870cd0a318b2c5b735bdeeccf11f2347fff333720d550",
+    "broadcast": {
+      "ok": true,
+      "checkpoints": [
+        "real-time-low-rendition-peer-playback",
+        "real-time-high-rendition-peer-playback",
+        "producer-reconnect-stable-manifest-and-identity"
+      ],
+      "viewers": [
+        {
+          "name": "contributor-low",
+          "peerFirstLoads": 0,
+          "peerFirstBytes": 0,
+          "uploaded": 441424,
+          "fatalErrors": 0,
+          "stalls": 1,
+          "stallMs": 0,
+          "activeStallMs": 2857
+        },
+        {
+          "name": "contributor-high",
+          "peerFirstLoads": 0,
+          "peerFirstBytes": 0,
+          "uploaded": 3432880,
+          "fatalErrors": 0,
+          "stalls": 1,
+          "stallMs": 1978,
+          "activeStallMs": 0
+        },
+        {
+          "name": "baseline",
+          "peerFirstLoads": 0,
+          "peerFirstBytes": 0,
+          "uploaded": 0,
+          "fatalErrors": 0,
+          "stalls": 0,
+          "stallMs": 0,
+          "activeStallMs": 0
+        },
+        {
+          "name": "consumer",
+          "peerFirstLoads": 6,
+          "peerFirstBytes": 3651712,
+          "uploaded": 0,
+          "fatalErrors": 0,
+          "stalls": 0,
+          "stallMs": 0,
+          "activeStallMs": 0
+        }
+      ],
+      "consumerPlaylistReadiness": "unchanged live snapshot released after its last four segment keys arrive in real peer HAVE frames"
+    }
+  },
+  "deployment": {
+    "target": "https://relayswarm.forgesworn.dev",
+    "host": "Till",
+    "image": "relayswarm-pilot:pilot-0d8ebd2",
+    "imageRevisionVerifiedOverSSH": "0d8ebd20ca8942723db405f3c4b251ce1488191b",
+    "imageManifestList": "sha256:80bbc1038d2a6a9cd0632202cc3c2cc9e5a60fd83110eed398ea78d52c9a5b44",
+    "stagedImageSourceFilesMatched": 33,
+    "stateVolume": "relayswarm-pilot_state",
+    "privateHostBindings": [
+      "127.0.0.1:1935",
+      "127.0.0.1:8787"
+    ],
+    "publicIdentityMatchesEarlierPilot": true,
+    "finalState": "synthetic source and own SSH tunnel stopped; same image restarted orderly to waiting page",
+    "waitingHTTPStatus": 200,
+    "waitingTLSVerifyResult": 0,
+    "absentIngestHealth": "unready until fresh media; not healthy live playback"
+  },
+  "external": {
+    "ok": true,
+    "receiptSha256": "7e4e461a63948e8e4dae46f257686d8d478b97ff676393c5b50ea325ad42ecf7",
+    "probeSha256": "ec2a328f4dc3261c8858c1ada303618cb609e9000823a2f873a99aa789ece79d",
+    "scope": {
+      "target": "https://relayswarm.forgesworn.dev",
+      "image": "pilot-0d8ebd2 (operator activation; not independently attested by HTTP)",
+      "browser": "four independent contexts on one Mac Chrome host",
+      "source": "operator-provided synthetic source",
+      "NATDiversity": false,
+      "physicalDevices": false,
+      "OBS": false,
+      "YouTube": false,
+      "playlistTimingChanged": false,
+      "mediaCopies": false,
+      "maxJourneyMs": 50000,
+      "cleanupBudgetMs": 8000,
+      "earlierMSEFailure": "unresolved; a passing sample does not explain it"
+    },
+    "elapsedMs": 51646,
+    "checks": {
+      "allFourReadable": true,
+      "noFatal": true,
+      "secure": true,
+      "progress": true,
+      "originBaselineBothQualities": true,
+      "consumerBothQualities": true,
+      "consumerPeerBothQualities": true,
+      "receiveOnly": true,
+      "contributorsServing": true,
+      "WSS": true,
+      "stableIdentity": true
+    },
+    "identity": {
+      "at": "2026-10-12T14:49:25.739Z",
+      "publisher": "f1422f27f503e1c9ff1338a5ebd5f47f31274180be69768179befd7cb0715ca4",
+      "eventId": "05ce10f55bf82901ecf53c5c81de79ddba8eaf1360bb1f218cdeb7a780a9dc04",
+      "swarmId": "publisher-05ce10f55bf82901ecf53c5c81de79dd",
+      "manifest": "https://relayswarm.forgesworn.dev/media/master.m3u8",
+      "relays": [
+        "wss://relayswarm.forgesworn.dev/relay"
+      ]
+    },
+    "viewers": [
+      {
+        "name": "contributor-low",
+        "currentTime": 48.79037,
+        "loaded": 19,
+        "qualities": [
+          0
+        ],
+        "peerQualities": [],
+        "peerLoads": 0,
+        "peerBytes": 0,
+        "uploaded": 217516,
+        "stalls": 0,
+        "stallMs": 0,
+        "activeStallMs": 0,
+        "fatal": 0,
+        "nativeErrors": {
+          "append": 0,
+          "buffer": 0,
+          "media": 0,
+          "hls": 0
+        }
+      },
+      {
+        "name": "contributor-high",
+        "currentTime": 43.714352,
+        "loaded": 17,
+        "qualities": [
+          1
+        ],
+        "peerQualities": [],
+        "peerLoads": 0,
+        "peerBytes": 0,
+        "uploaded": 2738032,
+        "stalls": 0,
+        "stallMs": 0,
+        "activeStallMs": 0,
+        "fatal": 0,
+        "nativeErrors": {
+          "append": 0,
+          "buffer": 0,
+          "media": 0,
+          "hls": 0
+        }
+      },
+      {
+        "name": "origin-baseline",
+        "currentTime": 40.100563,
+        "loaded": 16,
+        "qualities": [
+          0,
+          1
+        ],
+        "peerQualities": [],
+        "peerLoads": 0,
+        "peerBytes": 0,
+        "uploaded": 0,
+        "stalls": 0,
+        "stallMs": 0,
+        "activeStallMs": 0,
+        "fatal": 0,
+        "nativeErrors": {
+          "append": 0,
+          "buffer": 0,
+          "media": 0,
+          "hls": 0
+        }
+      },
+      {
+        "name": "receive-only",
+        "currentTime": 35.138479,
+        "loaded": 15,
+        "qualities": [
+          0,
+          1
+        ],
+        "peerQualities": [
+          0,
+          1
+        ],
+        "peerLoads": 5,
+        "peerBytes": 2955548,
+        "uploaded": 0,
+        "stalls": 0,
+        "stallMs": 0,
+        "activeStallMs": 0,
+        "fatal": 0,
+        "nativeErrors": {
+          "append": 0,
+          "buffer": 0,
+          "media": 0,
+          "hls": 0
+        }
+      }
+    ],
+    "errorEvents": 0,
+    "networkErrors": 0,
+    "WSS": [
+      {
+        "viewer": "contributor-low",
+        "receivedFrames": 15,
+        "socketErrors": 0
+      },
+      {
+        "viewer": "contributor-high",
+        "receivedFrames": 13,
+        "socketErrors": 0
+      },
+      {
+        "viewer": "receive-only",
+        "receivedFrames": 11,
+        "socketErrors": 0
+      }
+    ]
+  },
+  "limits": [
+    "This passing final-image sample does not explain or close the earlier hosted fatal MSE append failure.",
+    "All Chrome contexts ran on one Mac; physical devices, separate networks, hard NAT and sustained capacity remain unverified.",
+    "Actual OBS and YouTube account ingest/playback are untested.",
+    "Raw peer payload and request totals do not establish matched-interval or net bandwidth savings.",
+    "This is an unreleased pilot; the v0.1.0 release assets and unpublished npm registry status are unchanged."
+  ]
+}

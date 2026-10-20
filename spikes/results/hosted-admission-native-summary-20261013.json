@@ -1,0 +1,567 @@
+{
+  "v": 1,
+  "scope": "Retained public pilot and working-source callback/discovery evidence; not a final release, physical acceptance or historical MSE diagnosis",
+  "evidence": [
+    {
+      "file": "artifacts/browser-admission-deadline/summary.json",
+      "sha256": "6ed0a23de3fc4a308b48f59f5f3270372e7d9babc1657eb208917a41c661e791",
+      "summary": {
+        "v": 1,
+        "at": "2026-10-13T09:57:48.596Z",
+        "baseCommit": "4bffa96e4507ea43398573ee6f35431831f6c8fa",
+        "changesCommitted": false,
+        "files": {
+          "src/browser/bounded-operation.mjs": "6511f559842f1755c116f0c6c195835f7aa7b8d2ddcda87cfd727d8ea7b1467f",
+          "src/browser/hls-swarm.mjs": "575419943c4a59f10688ce680533e061f2ae4a168e3221a6f98f502021e190c6",
+          "test/browser-hardening.test.mjs": "8927f8ae5571575e182688c4e187c04f3b46400dc7cdb47d322b05126105fdf9"
+        },
+        "candidateClient": {
+          "sha256": "ca7c2708572dc098c30debb0b18925eefde2167bbdd7a3be095148b8d0187b90",
+          "bytes": 718555
+        },
+        "scope": "Owned operation deadline cancellation; no timeout, policy, consent or production host changes.",
+        "before": {
+          "actualWithheldHttp": true,
+          "callerDeadlineRejected": true,
+          "hostSignalAbortedAtDeadline": false,
+          "httpResponseStillOpenAfterDeadline": true,
+          "httpClosedAfterLifecycleAbort": true
+        },
+        "after": {
+          "targetedTests": 3,
+          "normalBrowserSwarmClientTests": 52,
+          "failures": 0,
+          "command": "node --test test/browser-hardening.test.mjs test/hls-swarm.test.mjs test/demo-client.test.mjs",
+          "actualHttpAdmissionRegression": {
+            "configuredDeadlineMs": 150,
+            "sequentialExpiredRequests": 3,
+            "peakHeldRequests": 1,
+            "requestsRemainingAfterEachDeadline": 0,
+            "explicitFalsePreserved": true,
+            "laterSuccessfulAdmission": true,
+            "callerStopAbortsHeldRequest": true,
+            "distinctOperationSignals": true,
+            "settledSignalsUnaffectedByLaterLifecycleStop": true
+          }
+        },
+        "initialHostedPolicyCause": "Unproved; receipt establishes fail-closed upload revocation, but lacks request failure timing needed to identify the initial policy/session exception.",
+        "cleanup": {
+          "localHttpAndRelayServersClosed": true,
+          "ownedProcessesRemaining": 0,
+          "browserStarted": false,
+          "productionHostMutated": false
+        }
+      }
+    },
+    {
+      "file": "artifacts/native-wan-4bffa96/native-discovery-implementation.json",
+      "sha256": "27a3d58af69cc5e989e224faf4ac841284b21da5a0c0aec7db96a44a259da0ea",
+      "summary": {
+        "v": 1,
+        "at": "2026-10-13T10:05:11.472Z",
+        "sourceState": "Reviewed working-tree native discovery change; root owns commit and exact-head CI",
+        "sourceSHA256": {
+          "src/native-client.mjs": "b962b52bc1269a606bb5144e28ab67355d907b7890edb1c1ea8dc1582d99a99b",
+          "test/native-client.test.mjs": "04d4b4399ec9348e66a990ba0ce1974822b906ab2642ad886be33b6ead586bc7",
+          "test/support/local-relay.mjs": "444a33c47a9891aa7ce4565e3a04d5122de4f8a49d967c6dce6fb2e83d60ad1e"
+        },
+        "checks": {
+          "targetedNativeClient": {
+            "passed": 10,
+            "failed": 0
+          },
+          "allNative": {
+            "passed": 17,
+            "failed": 0
+          },
+          "nonCachingSeparateProcessCLI": {
+            "verifiedBytes": 131097,
+            "ephemeralHistoryReplays": 0,
+            "httpRequests": 0
+          },
+          "signedPresenceFlood": {
+            "identitiesPerBurst": 32,
+            "bursts": 2,
+            "coalescedReplyCount": 1,
+            "minimumPublicationSpacingMs": 1000,
+            "authorizationCalls": 0,
+            "noPublicationAfterClose": true
+          },
+          "invalidInputsIgnored": [
+            "wrong-role",
+            "wrong-transport",
+            "wrong-swarm",
+            "invalid-signature"
+          ]
+        },
+        "policy": {
+          "defaultPeerDeadlineMs": 10000,
+          "defaultTotalDeadlineMs": 30000,
+          "heartbeatIntervalMs": 20000,
+          "maximumCoalescingTimers": 1,
+          "requesterMap": false,
+          "presenceAuthorizesDial": false,
+          "receiverPresence": {
+            "role": "leecher",
+            "open": false,
+            "have": [],
+            "transport": "hyperdht-v1"
+          }
+        },
+        "wanEvidenceRemainsAt": "4bffa96e4507ea43398573ee6f35431831f6c8fa",
+        "wanDataPathReliabilityFixed": false,
+        "additionalWANAttemptsAfterBudget": false,
+        "ownedResourcesClosed": true
+      }
+    },
+    {
+      "file": "artifacts/native-wan-4bffa96/phase-assessment.json",
+      "sha256": "072ae2f1f6f9bd5e5130cc2c1a406ee6485578aabdf92bf092cbaf4f7c7a9077",
+      "summary": {
+        "v": 1,
+        "recordedAt": "2026-10-13T10:01:20.445Z",
+        "source": "4bffa96e4507ea43398573ee6f35431831f6c8fa",
+        "sourceSHA256": {
+          "src/native-client.mjs": "249e24aaa9ff87e87e23d692ae6e4aec24109e3878064fcab7a57dd9a2eb2717",
+          "src/native-dht-transport.mjs": "4b521de9e3dce16a82a6e99b65830fa3ec63996dc7bea1df3c0f1b6294b6e585",
+          "src/relay-session.mjs": "d6c260458a14918560259d1835b49a8b7e2ed13bf2bdb05ca765ef5f23832aed",
+          "src/object-transfer.mjs": "18de634bf040af92c16785169614e3547979d47242efd2c8351c747d97b3aadf"
+        },
+        "originalReceiptSHA256": "5204bd44737545e4c6ec348cc4069f395b5a5f910aa401b9036d1716e1813736",
+        "furtherWANAttempts": 2,
+        "noFurtherWANAttempts": true,
+        "unchangedBudgets": {
+          "peerTimeoutMs": 10000,
+          "totalTimeoutMs": 30000
+        },
+        "outcomes": [
+          {
+            "record": "receipt.json",
+            "status": "original-uninstrumented-timeout",
+            "ok": false,
+            "phaseDetermined": false
+          },
+          {
+            "record": "phase-attempt-immediate.json",
+            "status": "instrumented-success",
+            "ok": true,
+            "acceptedBytes": 131097,
+            "elapsedMs": 8873
+          },
+          {
+            "record": "phase-attempt-repeat-immediate.json",
+            "status": "instrumented-pre-data-peer-timeout",
+            "ok": false,
+            "acceptedBytes": 0,
+            "elapsedMs": 10006
+          }
+        ],
+        "diagnosis": {
+          "firstRetry": "All phases succeeded, including cached presence, signed readiness, authenticated peer connection, server handoff, live UDP ACKs and exact verified object.",
+          "secondRetry": "Relay/bootstrap/cached presence/signed readiness and server handshake admission succeeded; no UDP route, Noise open, handoff or data/ACK before the peer deadline.",
+          "original": "No phase trace exists; its timeout cannot be retroactively attributed.",
+          "ephemeralDiscovery": "Both retries received presence before any natural20s heartbeat. These trials therefore do not demonstrate a non-caching discovery failure; NIP01 still requires avoiding reliance on ephemeral history."
+        },
+        "cleanup": {
+          "first": {
+            "remoteContainerRemoved": true,
+            "localNativeCallsSettled": true
+          },
+          "second": {
+            "remoteContainerRemoved": true,
+            "localNativeCallsSettled": true
+          }
+        },
+        "scope": {
+          "separateWANHosts": true,
+          "direction": "remote Docker seeder to local macOS client",
+          "syntheticBytes": 131097,
+          "originConfigured": false,
+          "browserWebRTC": false,
+          "physicalAndroid": false,
+          "hardNATClassification": "not inferred",
+          "sustainedWANReliabilityEstablished": false
+        },
+        "proposalReview": {
+          "discoveryFixJustified": true,
+          "relianceOnEphemeralHistoryRemoved": "Receiver advertises native leecher after subscribing; seeder emits globally coalesced live presence.",
+          "authorizationBoundary": "Presence never creates a grant; exact signed dial/ready object and transport identity remain required.",
+          "bounds": "One coalescing timer, no requester identity map, monotonic shared publication budget and close cancellation.",
+          "metadata": "Public leecher capability links its ephemeral Nostr and DHT identities; open:false/have:[] describes receive-only intent.",
+          "WANUDPFailureFixedByDiscoveryChange": false
+        },
+        "noAddressesOrKeysRecorded": true
+      }
+    },
+    {
+      "file": "artifacts/public-diagnostic-4bffa96/summary.json",
+      "sha256": "c6c2c9182dcb988f3ed0e513539797c5de4cdf833ab600b5330ce2cbdd3db16f",
+      "summary": {
+        "kind": "relayswarm-fifteen-minute-public-diagnostic",
+        "source": "4bffa96e4507ea43398573ee6f35431831f6c8fa",
+        "startedPlaybackAt": "2026-10-13T09:55:29.477Z",
+        "recordedAt": "2026-10-13T10:10:32.855Z",
+        "elapsedPlaybackMs": 902803,
+        "clientSHA256": "315e8f0f5b871d4db87e6cd4561b9dbc8d43795b7b645a053f78e63e3f519815",
+        "ok": true,
+        "completed": true,
+        "preflight": {
+          "ok": true,
+          "missing": []
+        },
+        "progress": {
+          "samples": 94,
+          "intervals": 372,
+          "intervalsWithoutFrameProgress": 0
+        },
+        "scope": {
+          "publicHTTPS": true,
+          "publicWSS": true,
+          "headless": true,
+          "fakeMicrophone": true,
+          "fakePermissionUI": true,
+          "productMicrophoneRequest": false,
+          "hostPlatform": "darwin",
+          "fourContextsOnSameMac": true,
+          "physicalDevices": false,
+          "NATDiversity": false,
+          "unmodifiedPlaylists": true,
+          "automaticBudgetResets": false,
+          "explicitContributionAllowance": 1000000000,
+          "numericReporting": false,
+          "plannedDurationMs": 900000,
+          "appStatsScope": "app container only; Docker internal bridge traffic totals, not external billing/net bandwidth savings",
+          "ownedChromeProfile": true,
+          "browserVersion": "155.0.8059.40"
+        },
+        "highwaters": {
+          "chromeRSSKiB": 2140256,
+          "chromeProcesses": 18,
+          "nodeRSSBytes": 395313152,
+          "appCPUPercent": 132.76,
+          "appMemoryBytes": 234042163.2,
+          "appPIDs": 46
+        },
+        "cleanup": {
+          "chromeLeaderStopped": true,
+          "chromeGroupStopped": true,
+          "profileRemoved": true
+        },
+        "viewers": [
+          {
+            "name": "contributor-low",
+            "uploadedBytes": 28639356,
+            "peerBytes": 0,
+            "peerQualities": [],
+            "fatal": 0,
+            "native": 0,
+            "stalls": 0,
+            "stallMs": 0,
+            "seeks": 1,
+            "seekRecoveryMs": [
+              67
+            ],
+            "decodedFrames": 27538,
+            "quotaExhaustedAt": null,
+            "remaining": 971360644,
+            "serving": true,
+            "consent": true,
+            "mediaRecovery": {
+              "attempted": 0,
+              "outcome": "idle",
+              "records": []
+            },
+            "highwaterJSHeapBytes": 17257325,
+            "highwaterHeldBytes": 2672232
+          },
+          {
+            "name": "contributor-high",
+            "uploadedBytes": 118617284,
+            "peerBytes": 0,
+            "peerQualities": [],
+            "fatal": 0,
+            "native": 0,
+            "stalls": 1,
+            "stallMs": 582,
+            "seeks": 1,
+            "seekRecoveryMs": [
+              15
+            ],
+            "decodedFrames": 27449,
+            "quotaExhaustedAt": null,
+            "remaining": 881382716,
+            "serving": true,
+            "consent": true,
+            "mediaRecovery": {
+              "attempted": 0,
+              "outcome": "idle",
+              "records": []
+            },
+            "highwaterJSHeapBytes": 31075184,
+            "highwaterHeldBytes": 8199432
+          },
+          {
+            "name": "origin-baseline",
+            "uploadedBytes": 0,
+            "peerBytes": 0,
+            "peerQualities": [],
+            "fatal": 0,
+            "native": 0,
+            "stalls": 2,
+            "stallMs": 4923,
+            "seeks": 5,
+            "seekRecoveryMs": [
+              9,
+              1853,
+              78,
+              486,
+              3229
+            ],
+            "decodedFrames": 26255,
+            "quotaExhaustedAt": null,
+            "remaining": 1000000000,
+            "serving": false,
+            "consent": false,
+            "mediaRecovery": {
+              "attempted": 0,
+              "outcome": "idle",
+              "records": []
+            },
+            "highwaterJSHeapBytes": 14545483,
+            "highwaterHeldBytes": 0
+          },
+          {
+            "name": "receive-only",
+            "uploadedBytes": 0,
+            "peerBytes": 145183188,
+            "peerQualities": [
+              0,
+              1
+            ],
+            "fatal": 0,
+            "native": 0,
+            "stalls": 1,
+            "stallMs": 1202,
+            "seeks": 4,
+            "seekRecoveryMs": [
+              13,
+              5,
+              7,
+              5706
+            ],
+            "decodedFrames": 26817,
+            "quotaExhaustedAt": null,
+            "remaining": 1000000000,
+            "serving": false,
+            "consent": false,
+            "mediaRecovery": {
+              "attempted": 0,
+              "outcome": "idle",
+              "records": []
+            },
+            "highwaterJSHeapBytes": 22697319,
+            "highwaterHeldBytes": 0
+          }
+        ],
+        "controlRequestFailures": [
+          {
+            "viewer": "contributor-high",
+            "at": "2026-10-13T09:55:25.181Z",
+            "path": "/delivery-policy.json",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "contributor-high",
+            "at": "2026-10-13T09:55:25.181Z",
+            "path": "/admission/verify",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "contributor-high",
+            "at": "2026-10-13T09:55:25.181Z",
+            "path": "/admission/verify",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "origin-baseline",
+            "at": "2026-10-13T09:55:25.264Z",
+            "path": "/session.json",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "contributor-high",
+            "at": "2026-10-13T09:58:38.777Z",
+            "path": "/admission/verify",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "contributor-high",
+            "at": "2026-10-13T10:00:18.688Z",
+            "path": "/admission/verify",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:00:27.463Z",
+            "path": "/admission/verify",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:02:14.954Z",
+            "path": "/commitment",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:03:25.448Z",
+            "path": "/commitment",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:03:47.388Z",
+            "path": "/admission/verify",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:06:13.073Z",
+            "path": "/commitment",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:06:33.087Z",
+            "path": "/commitment",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "contributor-low",
+            "at": "2026-10-13T10:07:06.555Z",
+            "path": "/admission/verify",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:07:06.683Z",
+            "path": "/commitment",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:07:09.487Z",
+            "path": "/admission/verify",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:07:57.055Z",
+            "path": "/commitment",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:08:09.250Z",
+            "path": "/commitment",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:08:48.816Z",
+            "path": "/commitment",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:09:05.403Z",
+            "path": "/commitment",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "receive-only",
+            "at": "2026-10-13T10:09:41.901Z",
+            "path": "/commitment",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "viewer": "contributor-high",
+            "at": "2026-10-13T10:10:32.304Z",
+            "path": "/admission/verify",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "notes": [
+          "No deadline extension occurred. No controller was suspended.",
+          "High contributor consent was cleared after a failed policy request; one explicitly recorded fixture reconsent restored contribution.",
+          "Four same-Mac headless contexts with fake microphone fixture permissions; not physical-device or NAT-diversity evidence.",
+          "This fifteen-minute diagnostic is not the formal two-hour gate. No quota resets or exhaustion occurred.",
+          "Docker stats include all app audiences during this interval and internal bridge traffic; no billing or bandwidth saving conclusion."
+        ]
+      }
+    },
+    {
+      "file": "artifacts/deployment-4bffa96/initial-deployment.json",
+      "sha256": "eb196140e90fa17fbd8f78dd1e8be2f8cbcc4939f84afdb86bcb3a4256484fe7",
+      "summary": {
+        "v": 1,
+        "at": "2026-10-13T09:37:40.286Z",
+        "source": "4bffa96e4507ea43398573ee6f35431831f6c8fa",
+        "imageId": "sha256:4bfc28c62180a91f6154738f83dba35fedad86096bc9fb1c4c658b945ed460fe",
+        "sourceArchiveSHA256": "9ac40a3dbfb008f83d8d8732195413a76de8bd4a7f31bd3a5031cc633ba31bf7",
+        "ci": "https://github.com/forgesworn/relayswarm/actions/runs/38375824009",
+        "oldAppStoppedCleanly": true,
+        "encryptedBackup": true,
+        "restoreRehearsal": true,
+        "backupPrivateFileModesVerified": true,
+        "identityStable": true,
+        "publisher": "f1422f27f503e1c9ff1338a5ebd5f47f31274180be69768179befd7cb0715ca4",
+        "eventId": "05ce10f55bf82901ecf53c5c81de79ddba8eaf1360bb1f218cdeb7a780a9dc04",
+        "swarmId": "publisher-05ce10f55bf82901ecf53c5c81de79dd",
+        "clientSHA256": "315e8f0f5b871d4db87e6cd4561b9dbc8d43795b7b645a053f78e63e3f519815",
+        "expectedClientHashVerified": true,
+        "levels": [
+          {
+            "name": "low",
+            "sequence": 2373,
+            "discontinuity": 5,
+            "segments": [
+              "../run-1791884188291-59f6c9f80542/low/segment-0000000000000002373.ts",
+              "../run-1791884188291-59f6c9f80542/low/segment-0000000000000002374.ts",
+              "../run-1791884188291-59f6c9f80542/low/segment-0000000000000002375.ts",
+              "../run-1791884188291-59f6c9f80542/low/segment-0000000000000002376.ts",
+              "../run-1791884188291-59f6c9f80542/low/segment-0000000000000002377.ts",
+              "../run-1791884188291-59f6c9f80542/low/segment-0000000000000002378.ts",
+              "../run-1791884188291-59f6c9f80542/low/segment-0000000000000002379.ts",
+              "../run-1791884188291-59f6c9f80542/low/segment-0000000000000002380.ts",
+              "../run-1791884188291-59f6c9f80542/low/segment-0000000000000002381.ts",
+              "../run-1791884188291-59f6c9f80542/low/segment-0000000000000002382.ts",
+              "../run-1791884188291-59f6c9f80542/low/segment-0000000000000002383.ts",
+              "../run-1791884188291-59f6c9f80542/low/segment-0000000000000002384.ts"
+            ]
+          },
+          {
+            "name": "high",
+            "sequence": 2373,
+            "discontinuity": 5,
+            "segments": [
+              "../run-1791884188291-59f6c9f80542/high/segment-0000000000000002373.ts",
+              "../run-1791884188291-59f6c9f80542/high/segment-0000000000000002374.ts",
+              "../run-1791884188291-59f6c9f80542/high/segment-0000000000000002375.ts",
+              "../run-1791884188291-59f6c9f80542/high/segment-0000000000000002376.ts",
+              "../run-1791884188291-59f6c9f80542/high/segment-0000000000000002377.ts",
+              "../run-1791884188291-59f6c9f80542/high/segment-0000000000000002378.ts",
+              "../run-1791884188291-59f6c9f80542/high/segment-0000000000000002379.ts",
+              "../run-1791884188291-59f6c9f80542/high/segment-0000000000000002380.ts",
+              "../run-1791884188291-59f6c9f80542/high/segment-0000000000000002381.ts",
+              "../run-1791884188291-59f6c9f80542/high/segment-0000000000000002382.ts",
+              "../run-1791884188291-59f6c9f80542/high/segment-0000000000000002383.ts",
+              "../run-1791884188291-59f6c9f80542/high/segment-0000000000000002384.ts"
+            ]
+          }
+        ],
+        "scope": "fresh two-rendition synthetic source; playback/restart/rollback and physical acceptance not inferred"
+      }
+    }
+  ]
+}

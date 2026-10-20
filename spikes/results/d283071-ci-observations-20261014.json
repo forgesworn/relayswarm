@@ -1,0 +1,345 @@
+{
+  "v": 1,
+  "kind": "relayswarm-instrumented-restart-observation",
+  "date": "2026-10-14",
+  "sourceHead": "d283071c2109ca91dac86f57df0ddb3ffcd858be",
+  "scope": {
+    "network": "loopback",
+    "producer": "FFmpeg synthetic real-time H.264/AAC",
+    "router": "MediaMTX",
+    "ingress": "RTMP",
+    "pipelineInput": "RTSP over TCP",
+    "output": "two-rendition live HLS",
+    "browser": "Chrome",
+    "OBS": false,
+    "YouTube": false,
+    "physicalDevices": false,
+    "automatedHeadlessChrome": true,
+    "autoplayUserGestureOverride": true,
+    "fakeMediaDeviceAndPermissionUI": true,
+    "getUserMediaWarmup": true,
+    "mdnsHidingDisabled": true,
+    "ordinaryDefaultTransportEvidence": false,
+    "requestTimingMetadataOnly": true,
+    "additionalMediaRequestsOrBodyReads": false,
+    "routerBinarySha256": "0ffb7f18210d08ee38cb16668c4f3a2c96622e69d401119c0026d078a2b89523",
+    "routerArchiveSha256": "121be6e00397e473a95d83c75f4fcd3819a6af3b0e1a50889cba43ab4fab6a27",
+    "routerVerification": "owner-controlled installer cache receipt",
+    "browserVersion": "155.0.8059.79"
+  },
+  "originalResult": false,
+  "ci": {
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/38575462650",
+    "runId": 38575462650,
+    "attempt": 1,
+    "status": "completed",
+    "conclusion": "failure",
+    "requiredPassed": 6,
+    "requiredFailed": 2,
+    "requiredSkipped": 1,
+    "optionalSoakSkipped": true,
+    "jobs": [
+      {
+        "name": "hls.js (shadow)",
+        "conclusion": "success"
+      },
+      {
+        "name": "hls.js (peer-first)",
+        "conclusion": "success"
+      },
+      {
+        "name": "documentation and AI context",
+        "conclusion": "success"
+      },
+      {
+        "name": "current Swift SDK and browser interoperability",
+        "conclusion": "success"
+      },
+      {
+        "name": "hls.js playback and field-test demo",
+        "conclusion": "failure"
+      },
+      {
+        "name": "native (windows-latest)",
+        "conclusion": "success"
+      },
+      {
+        "name": "native (macos-latest)",
+        "conclusion": "failure"
+      },
+      {
+        "name": "native (ubuntu-latest)",
+        "conclusion": "success"
+      },
+      {
+        "name": "hls.js optional twelve-viewer soak",
+        "conclusion": "skipped"
+      },
+      {
+        "name": "browser transport against live relays",
+        "conclusion": "skipped"
+      }
+    ]
+  },
+  "inputs": {
+    "receiptBytes": 2744092,
+    "receiptSHA256": "7b0f4cb6ca4f6a4b7ad33f0d2726f3ca046d01765f2b396f2d9d96244cde24c9",
+    "terminalCISHA256": "d34cd6e0808b42282a2233ac0f500ff1ea5ed43ef7f7dee58fe5988219da8bf2"
+  },
+  "originalFailures": [
+    "Unchanged60000ms new-discontinuity peer fragment assertion",
+    "macOS real HTTP post-ingress cancellation fixture assertion"
+  ],
+  "roles": {
+    "contributor-low": {
+      "currentTime": 73.857536,
+      "fragmentsLoaded": 38,
+      "fragmentCounts": {
+        "cc0/level0/origin": 7,
+        "cc1/level0/origin": 31
+      },
+      "stalls": 1,
+      "fatalErrors": 0,
+      "nativeErrors": 0,
+      "appendFailures": 0,
+      "serving": true,
+      "peerFirstBytes": 0,
+      "eligibilityCounters": {
+        "no-budget": 38,
+        "aborted-before-eligibility": 0,
+        "no-have-no-wait": 0,
+        "no-have-wait": 0,
+        "wait-no-longer-eligible": 0,
+        "wait-aborted": 0,
+        "wait-expired": 0,
+        "have-at-entry": 0,
+        "have-after-wait": 0
+      },
+      "eligibilityDropped": 0
+    },
+    "contributor-high": {
+      "currentTime": 73.360307,
+      "fragmentsLoaded": 37,
+      "fragmentCounts": {
+        "cc0/level1/origin": 7,
+        "cc1/level1/origin": 30
+      },
+      "stalls": 1,
+      "fatalErrors": 0,
+      "nativeErrors": 0,
+      "appendFailures": 0,
+      "serving": true,
+      "peerFirstBytes": 0,
+      "eligibilityCounters": {
+        "no-budget": 36,
+        "aborted-before-eligibility": 0,
+        "no-have-no-wait": 1,
+        "no-have-wait": 0,
+        "wait-no-longer-eligible": 0,
+        "wait-aborted": 0,
+        "wait-expired": 0,
+        "have-at-entry": 0,
+        "have-after-wait": 0
+      },
+      "eligibilityDropped": 0
+    },
+    "baseline": {
+      "currentTime": 71.962136,
+      "fragmentsLoaded": 39,
+      "fragmentCounts": {
+        "cc0/level0/origin": 5,
+        "cc0/level1/origin": 3,
+        "cc1/level1/origin": 31
+      },
+      "stalls": 0,
+      "fatalErrors": 0,
+      "nativeErrors": 0,
+      "appendFailures": 0,
+      "serving": false,
+      "peerFirstBytes": 0,
+      "eligibilityCounters": {
+        "no-budget": 0,
+        "aborted-before-eligibility": 0,
+        "no-have-no-wait": 0,
+        "no-have-wait": 0,
+        "wait-no-longer-eligible": 0,
+        "wait-aborted": 0,
+        "wait-expired": 0,
+        "have-at-entry": 0,
+        "have-after-wait": 0
+      },
+      "eligibilityDropped": 0
+    },
+    "consumer": {
+      "currentTime": 71.502467,
+      "fragmentsLoaded": 38,
+      "fragmentCounts": {
+        "cc0/level0/origin": 4,
+        "cc0/level0/peer": 1,
+        "cc0/level1/peer": 3,
+        "cc1/level1/origin": 30
+      },
+      "stalls": 0,
+      "fatalErrors": 0,
+      "nativeErrors": 0,
+      "appendFailures": 0,
+      "serving": false,
+      "peerFirstBytes": 2113684,
+      "eligibilityCounters": {
+        "no-budget": 2,
+        "aborted-before-eligibility": 0,
+        "no-have-no-wait": 2,
+        "no-have-wait": 33,
+        "wait-no-longer-eligible": 0,
+        "wait-aborted": 17,
+        "wait-expired": 13,
+        "have-at-entry": 2,
+        "have-after-wait": 2
+      },
+      "eligibilityDropped": 7
+    }
+  },
+  "geometry": {
+    "cc1WaitEntries": 31,
+    "initialBudgetMs": [
+      268.463,
+      329.467
+    ],
+    "playableAheadMs": [
+      2268.463,
+      2329.467
+    ],
+    "originReserveMs": 2000,
+    "fallbackCapMs": 1500,
+    "formulaMismatches": 0,
+    "waitAborted": 17,
+    "waitExpired": 13,
+    "pendingWait": 1
+  },
+  "nativeRequestTimings": {
+    "sharedHighObjectsWithOneFinished200RequestEach": 30,
+    "intervalOverlaps": 0,
+    "ranges": {
+      "donorStartAfterConsumerStartMs": [
+        57.264,
+        106.001
+      ],
+      "donorStartAfterConsumerEndMs": [
+        46.694,
+        102.418
+      ],
+      "donorEndAfterConsumerEndMs": [
+        50.391,
+        105.362
+      ]
+    },
+    "clock": "Cached Playwright epoch startTime plus relative requestStart/responseEnd; not derived from rounded page fragment callbacks",
+    "supportedBoundary": "Every matched high donor origin request began after the receiver origin request had completed. Newly loaded donor bytes cannot satisfy that earlier peer window. This does not establish the exact independent playlist reload phase or a lost notification."
+  },
+  "requestObservation": {
+    "starts": 311,
+    "finished": 310,
+    "failed": 1,
+    "pending": 0,
+    "labels": 79,
+    "unlabelled": 0,
+    "retainedDetailEvictions": 0,
+    "activeOverflow": 0,
+    "prePostClosePageObservationsIdentical": true,
+    "unknownTerminalStatus": 1,
+    "unknownTerminalEndTime": 1,
+    "failedRequestScope": "One high donor low-playlist request; no response status or terminal native end time observed. Error text was not collected.",
+    "recorderCleanup": {
+      "listenersDetached": true,
+      "retainedRequestHandles": 0,
+      "objectLookupReleased": true
+    }
+  },
+  "actorCleanup": {
+    "awaitedOriginalClosesCompletedBeforeReceiptWriting": true,
+    "childExitRecords": [
+      {
+        "code": 0,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 255,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 1,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 1,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 1,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 1,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 0,
+        "signal": null,
+        "error": null
+      },
+      {
+        "code": 255,
+        "signal": null,
+        "error": null
+      }
+    ],
+    "independentProcessGroupProfileAbsenceProof": false
+  },
+  "testOnlyCorrection": {
+    "file": "test/demo-client.test.mjs",
+    "sha256": "f832e8c5dfc63aceda3771c77dbffe433df0606cb9dfdf9d4a6639d10a565c36",
+    "rationale": "Both fetch calls start before awaiting policy; invalid policy immediately invalidates authority and aborts owned session in finally. Fetch invocation does not guarantee HTTP server ingress before cancellation, so immediate invalid-policy response may legally prevent session arrival. Test must establish ingress for its specific post-ingress cancellation assertion. No production defect evidenced.",
+    "preserved": [
+      "original real HTTP session ingress and cancellation assertions",
+      "hidden-page pair cancellation assertions",
+      "6000ms case deadline and 1500ms HTTP wait bound",
+      "original production attempt signals and timeouts",
+      "no extra HTTP requests, sleeps or production changes"
+    ],
+    "focusedValidation": {
+      "command": "node --test --test-name-pattern=real HTTP test/demo-client.test.mjs",
+      "passed": 4,
+      "failed": 0,
+      "cancelled": 0,
+      "durationMs": 6155.096209,
+      "exitCode": 0,
+      "processTerminal": true,
+      "logSHA256": "a4f5c1ceff12b0849d42a83cd6fa0cbb11e45e3f3ea356836ae9eff9ae196988"
+    },
+    "review": "Independent static review passed; no production changes or historical exact-scheduling trace claim"
+  },
+  "limitations": [
+    "Loopback Chrome with existing RTC/fake-media flags; no ordinary WAN/physical qualification.",
+    "Object labels correlate pathname/range within this run; no parsed per-object continuity/sequence or exact eligibility-request ID join is exported.",
+    "No HAVE send/receive timestamp or playlist response body was added.",
+    "Native timing observations are not packet-level wire/cost measurements.",
+    "Recorder release is separate from actor cleanup; awaited closes/child exits do not prove independent kernel/group/profile absence."
+  ],
+  "production": "df51 pilot unchanged. Originala2 and d283 failures remain separate. No reserve/cap/latency changes, CI retry, merge or new release.",
+  "nativeEpochPlaceholderCorrection": {
+    "observedRawFailedRequestEpochPlaceholder": 0,
+    "interpretation": "Unknown, not a1970epoch. Matched finished requests used positive native epoch timestamps.",
+    "successorChange": "Recorder projects unpopulated startTime0 as null; relative timing0 remains valid. Raw d283 receipt is preserved.",
+    "pureTestsPassed": 10
+  },
+  "independentAnalysis": {
+    "manifestSHA256": "8aabf6ed0d83175a2ae5d49aabe19683777bb339dba98e3b7614c52f0f63b4f2",
+    "analysisSHA256": "ae2b55cd0b445de882f103756850331e64d4e5ef86b1ffc5c5e4fcaaceb7d481"
+  }
+}

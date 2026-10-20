@@ -1,0 +1,56 @@
+{
+  "v": 1,
+  "scope": "Explicit ICE candidate policy, focused local validation only. No public repair or final acceptance claim.",
+  "baseHead": "91423b2e7eb1576f67265b64208023d565f8c5f8",
+  "evidenceManifest": "artifacts/ice-transport-policy-focused-validation-20261015/EVIDENCE-MANIFEST.json",
+  "evidenceManifestSHA256": "9d404923e547222032a53491d2ec5469c78fd46c6452cf43c6359b41f5790941",
+  "independentlyVerifiedRecords": {
+    "evidence": 9,
+    "source": 385
+  },
+  "syntaxModules": 142,
+  "tests": {
+    "pass": 14,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0,
+    "pattern": "ICE|TURN demo refresh|demo serves exact HTTP ranges",
+    "files": [
+      "test/broadcast-guards.test.mjs",
+      "test/browser-hardening.test.mjs",
+      "test/demo-client.test.mjs",
+      "test/demo-server.test.mjs"
+    ]
+  },
+  "docs": {
+    "authoredFiles": 23,
+    "repositoryLinks": 325,
+    "apiExportsAndGeneratedContext": "PASS"
+  },
+  "elapsedMs": 7219,
+  "resourceLimits": {
+    "rssBytes": 3221225472,
+    "processes": 64,
+    "minFreePercent": 25,
+    "probeSeconds": 2
+  },
+  "resources": {
+    "samples": 7,
+    "peakRSSBytes": 325206016,
+    "peakProcesses": 5,
+    "minObservedFreePercent": 31
+  },
+  "cleanup": {
+    "workerReaped": true,
+    "groupAbsent": true,
+    "leaderBirthAbsent": true,
+    "allAttemptedResourceProbeChildrenReaped": true,
+    "allAcceptedResourceProbeChildrenReaped": true
+  },
+  "signalsSent": {
+    "term": false,
+    "kill": false
+  },
+  "remaining": "Exact-head CI/package, deployment and public/physical/sustained acceptance remain separate. Pilot remains54."
+}

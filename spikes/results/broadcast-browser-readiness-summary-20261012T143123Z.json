@@ -1,0 +1,143 @@
+{
+  "v": 1,
+  "kind": "relayswarm-broadcast-browser-readiness-summary",
+  "at": "2026-10-12T14:31:23.698Z",
+  "ok": true,
+  "sourceParent": "0a03c605f4922c2b376e37af3996f306a452da89",
+  "fixtureSha256": "549858c5fe29c0511680a191aab44346c8a73b36c96782973100bfcac8562d3f",
+  "receiptSha256": "3a6b87e2a9042e3a6bb9cd7cb48a051470d92a966605983c307b8f0816526132",
+  "scope": {
+    "network": "loopback",
+    "producer": "FFmpeg synthetic real-time H.264/AAC",
+    "router": "MediaMTX",
+    "ingress": "RTMP",
+    "pipelineInput": "RTSP over TCP",
+    "output": "two-rendition live HLS",
+    "browser": "Chrome",
+    "OBS": false,
+    "YouTube": false,
+    "physicalDevices": false,
+    "routerBinarySha256": "72f67f718cfe5f75f081db5b2f31d1664008b6b8ff8627cb2a8acf5d7e5e61be",
+    "routerArchiveSha256": "7d0d0c5c11527cbd10bde1c3d728864eb0334a9b653566cd73c0259750cbf093",
+    "routerVerification": "owner-controlled installer cache receipt",
+    "browserVersion": "154.0.8037.98",
+    "consumerPlaylistReadiness": "unchanged live snapshot released after its last four segment keys arrive in real peer HAVE frames"
+  },
+  "checkpoints": [
+    "real-time-low-rendition-peer-playback",
+    "real-time-high-rendition-peer-playback",
+    "producer-reconnect-stable-manifest-and-identity"
+  ],
+  "viewers": [
+    {
+      "name": "contributor-low",
+      "network": {
+        "mediaRequests": 16,
+        "failedMediaRequests": 0
+      },
+      "peerFirstLoads": 0,
+      "peerFirstBytes": 0,
+      "uploaded": 219960,
+      "stalls": 0,
+      "stallMs": 0,
+      "fatalErrors": 0,
+      "nativeAppendFailures": 0,
+      "peerFragments": []
+    },
+    {
+      "name": "contributor-high",
+      "network": {
+        "mediaRequests": 15,
+        "failedMediaRequests": 0
+      },
+      "peerFirstLoads": 0,
+      "peerFirstBytes": 0,
+      "uploaded": 3669572,
+      "stalls": 0,
+      "stallMs": 0,
+      "fatalErrors": 0,
+      "nativeAppendFailures": 0,
+      "peerFragments": []
+    },
+    {
+      "name": "baseline",
+      "network": {
+        "mediaRequests": 14,
+        "failedMediaRequests": 0
+      },
+      "peerFirstLoads": 0,
+      "peerFirstBytes": 0,
+      "uploaded": 0,
+      "stalls": 0,
+      "stallMs": 0,
+      "fatalErrors": 0,
+      "nativeAppendFailures": 0,
+      "peerFragments": []
+    },
+    {
+      "name": "consumer",
+      "network": {
+        "mediaRequests": 5,
+        "failedMediaRequests": 0
+      },
+      "peerFirstLoads": 6,
+      "peerFirstBytes": 3065716,
+      "uploaded": 0,
+      "stalls": 1,
+      "stallMs": 799,
+      "fatalErrors": 0,
+      "nativeAppendFailures": 0,
+      "peerFragments": [
+        {
+          "level": 0,
+          "sequence": 8,
+          "discontinuity": 0,
+          "size": 219960
+        },
+        {
+          "level": 1,
+          "sequence": 8,
+          "discontinuity": 0,
+          "size": 664204
+        },
+        {
+          "level": 1,
+          "sequence": 9,
+          "discontinuity": 0,
+          "size": 692592
+        },
+        {
+          "level": 1,
+          "sequence": 10,
+          "discontinuity": 0,
+          "size": 692404
+        },
+        {
+          "level": 1,
+          "sequence": 11,
+          "discontinuity": 0,
+          "size": 150776
+        },
+        {
+          "level": 1,
+          "sequence": 15,
+          "discontinuity": 1,
+          "size": 645780
+        }
+      ]
+    }
+  ],
+  "availability": {
+    "timeoutMs": 10000,
+    "checks": 11,
+    "allReady": true,
+    "maxWaitMs": 2691
+  },
+  "failures": [],
+  "limits": [
+    "Synthetic producer and loopback Chrome contexts; no OBS, physical-device, separate-network or YouTube acceptance.",
+    "Consumer playlist snapshots wait for real peer advertisements; synchronised live-edge coverage is not measured.",
+    "One consumer restart stall remains; raw HTTP totals are not matched-interval or net savings evidence.",
+    "The earlier hosted MSE failure remains unresolved."
+  ]
+}

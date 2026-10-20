@@ -40,8 +40,9 @@ when updating them, rather than trusting an old comparison date.
 
 ## Release versus current documentation
 
-The immutable v0.1.0 tag and downloadable assets contain release-time
-documentation. Main-branch guides can correct examples and claims afterwards.
+Each immutable release tag (v0.1.0, v0.2.0) and its downloadable assets contain
+release-time documentation.
+Main-branch guides can correct examples and claims after a release.
 Use [Getting started](GETTING-STARTED.md) for pinned installation and
 [Status](STATUS.md) for the release checkpoint. Never retag or silently replace
 release assets to make a documentation correction.

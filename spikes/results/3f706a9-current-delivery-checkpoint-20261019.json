@@ -1,0 +1,159 @@
+{
+  "v": 1,
+  "checkpointDate": "2026-10-19",
+  "observedUTC": "2026-10-18T23:11:00Z",
+  "sourceSha": "3f706a9bc4a895d17345be26b77006cf13093c46",
+  "productionComplete": false,
+  "scope": "Current-source CI, clean consumption, deployment and durable reporting pass. Actual parent-crash test remains RED. The service was restored separately and is waiting for encoder input; this supplies no fresh-playback or crash-acceptance credit.",
+  "configuration": {
+    "iceTransportPolicy": "relay",
+    "turnUrlProjection": "tls-tcp",
+    "perAddressTickets": 32,
+    "perAddressRequests": 900,
+    "globalRequestCapacity": 2048,
+    "reporting": false,
+    "forwarding": false,
+    "accountMethods": [
+      "nostr"
+    ],
+    "hostSuppliedAccountAPIImplemented": true,
+    "websiteResolverConfigured": false,
+    "privateStateAndPermanentLeasesPreserved": true,
+    "independentProxyPreserved": true,
+    "sdkDefaultMaxPeers": 6,
+    "deployedDemoMaxPeers": 4
+  },
+  "release": {
+    "published": "v0.1.0",
+    "candidate": "0.2.0",
+    "pr": 8,
+    "merged": false,
+    "candidatePublished": false,
+    "npmPublished": false
+  },
+  "ci": {
+    "run": 39169937465,
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/39169937465",
+    "requiredJobsPassed": 9
+  },
+  "consumer": {
+    "files": 280,
+    "elapsedMs": 18846,
+    "scope": "Exact committed source, not downloaded final release assets"
+  },
+  "deployed": {
+    "sourceSha": "3f706a9bc4a895d17345be26b77006cf13093c46",
+    "appId": "c8ee6413c2ba60faca40eb95f58a30010c4edf483488245bd038b8ce433a05b7",
+    "image": "sha256:99b507337b5028de8ae0a059ffc1aca09c9aa7da0f602ace56c5079e6927e4c5",
+    "appStartedUTC": "2026-10-18T23:09:35.154284956Z",
+    "client": {
+      "bytes": 773458,
+      "sha256": "dafef937bef7f92915ce3345a47977d402e2ffece50b115f95f9f0967e8ea425"
+    },
+    "running": true,
+    "publicHTTPSPageStatus": 200,
+    "sessionStatus": 503,
+    "publicationState": "waiting for encoder input",
+    "originalRestartPolicyRestored": true
+  },
+  "reporting": {
+    "verdict": "PASS",
+    "scope": "Historical successful P05 run on the same3f source/image; its final app tuple predates the later crash and separate restoration.",
+    "silentDefault": true,
+    "trustedOptIn": true,
+    "duplicateIdempotenceBeforeAndAfterRestart": true,
+    "sameVolumeRestartPersistence": true,
+    "naturalExpiryMs": 304105,
+    "noClockOrTimestampMutation": true,
+    "telemetryFalseRestored": true,
+    "fullBrowserAndSourceCleanupIndependentlyReviewed": true
+  },
+  "parentCrash": {
+    "verdict": "RED",
+    "parentOnlyCrashPassed": true,
+    "writerAuditPassed": false,
+    "restartAcceptanceReached": false,
+    "sourceCleanupPassed": true,
+    "auditDiagnosis": "Unrelated stable zombies caused mountinfo EINVAL; Docker mount array order also changed.",
+    "strictAuditCorrectionPassed": true,
+    "separateGuardedMarkerRecoveryPassed": true,
+    "separateWaitingServiceRestorationPassed": true,
+    "originalAcceptanceWindowExtended": false,
+    "freshPlaybackProvedByRestoration": false
+  },
+  "remaining": [
+    "matching successful fourteen-viewer300second both-quality qualifier",
+    "7200seconds and22churn with natural TURN expiry",
+    "both-quality cross-device upload-budget lifecycle",
+    "current-platform parent-crash/restart and playback recovery acceptance",
+    "remaining physical/browser coverage within device and Simulator scopes",
+    "difficult networks and matched bandwidth benefit; wire and bill savings remain unproved",
+    "final0.2release and downloaded-asset acceptance"
+  ],
+  "otherWorkPreserved": true,
+  "ownedTemporarySourceRunning": false,
+  "evidence": [
+    {
+      "path": "artifacts/ci-3f706a9-39169937465-20261018/ci-terminal-success.json",
+      "bytes": 22062,
+      "sha256": "7d0c8335d9056867efeb3c2f07cf54d4c3ce077b656a9c1c3b1967900069d197"
+    },
+    {
+      "path": "artifacts/clean-consumer-3f706a9-20261018/package-review.json",
+      "bytes": 6952,
+      "sha256": "98e05eff5a1a6071f32f0dda802f3baeda71092a3271113a6f7d50ab1a29bae7"
+    },
+    {
+      "path": "artifacts/deployment-3f706a9-policy-revision-r2-20261018/runtime-contract.json",
+      "bytes": 12208,
+      "sha256": "795346348b8cf7df5ed96907574618270a567cb352a4ba7ca6ce827453057e7a"
+    },
+    {
+      "path": "artifacts/independent-deployment-3f706a9-review-20261018/review.json",
+      "bytes": 22961,
+      "sha256": "fe6f136f5feb5b5b6f7c3cf1577a609e5b580b78adcdad7d0aa7ec1b28aca15c"
+    },
+    {
+      "path": "artifacts/p05-3f706a9-run-20261018/receipt.json",
+      "bytes": 85851,
+      "sha256": "216ad66cf4cf92fc57268551aece7f653a9ddc7abee4ca16c4bf2cbc7abc2690"
+    },
+    {
+      "path": "artifacts/p05-3f706a9-run-20261018/root-worker.json",
+      "bytes": 23344,
+      "sha256": "a59016ebdf3ae9ad1aa76b12fa423c988f33a47d588571d2798b36abc287273d"
+    },
+    {
+      "path": "artifacts/independent-p05-3f706a9-positive-own-review-20261018/review.json",
+      "bytes": 8356,
+      "sha256": "215b70b31d3900018a6f9092fc8bc4015559d68578f89df237341116f35627fc"
+    },
+    {
+      "path": "artifacts/p07-3f706a9-run-20261018/root-worker.json",
+      "bytes": 19581,
+      "sha256": "b0e7b056a46815e67a544afd0793551afe9f1605115a0d0a0631b625814c7234"
+    },
+    {
+      "path": "artifacts/p07-3f706a9-recovery-20261018/RESTORE-recover-markers.json",
+      "bytes": 6870,
+      "sha256": "dceb3433f29f4682fe68468f88757797e155b269226d7a1502c9a34d5dc5b8d6"
+    },
+    {
+      "path": "artifacts/p07-3f706a9-recovery-20261018/SERVICE-RESTORATION-CLOSURE.json",
+      "bytes": 1905,
+      "sha256": "f72ee857a5da0ff4fd250865b5610f9d52127d6d5d7a1d77f836e118c9ece51f"
+    },
+    {
+      "path": "artifacts/m4-readiness-20261019-2318.json",
+      "bytes": 235,
+      "sha256": "51e63507bd1a4a085cf6d333733b1e1e137204700249e01259ea80f9f53ef556"
+    }
+  ],
+  "m4Readiness": {
+    "reachable": true,
+    "observedUTC": "2026-10-18T23:15:54.973355+00:00",
+    "scope": "A bounded SSH connection check only; full cohort resource/runtime checks remain required.",
+    "networkSettingsChanged": false,
+    "actorsCreated": false
+  }
+}

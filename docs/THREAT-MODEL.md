@@ -4,7 +4,7 @@
 [Integration](../INTEGRATION.md)
 
 This describes the implemented experimental boundaries and the remaining
-adversarial work at v0.1.0. Passing named regression cases does not establish
+adversarial work at v0.2.0. Passing named regression cases does not establish
 production security or completion of the threat model. The original CLI,
 browser loader and native path have different trust assumptions.
 
@@ -13,7 +13,8 @@ browser loader and native path have different trust assumptions.
 The browser peer-first loader verifies an author-signed, canonical and
 expiring segment commitment, including stream/rendition/sequence/discontinuity/
 part and object identity. It checks the experimental publisher redistribution
-tag; delegated signers are not supported. The original CLI PoC is unchanged.
+tag; current source also permits explicitly author-scoped delegated signers.
+The original CLI PoC is unchanged.
 
 Regression tests cover request floods, empty/excessive chunks, upload stalls,
 expired admission on retries, delayed admission during shutdown, relay startup
@@ -25,11 +26,50 @@ Native nodes bound pending authorisations and active transfers.
 The example Node publisher signs only a full-segment context present in its
 local playlists, including the exact byte range and discontinuity. It serves
 listed media rather than arbitrary directory files and rejects symlink escapes.
-Its ephemeral private key stays in the process. This is an example publisher,
+Its key stays on the server; current source can persist a private identity
+in an owner-controlled 0600 file. This is an example publisher,
 not a trusted-stream discovery service: a real host must still establish which
-stream author it trusts. The demo's in-memory relay and HTTP signing endpoint
-have resource bounds, but no participant admission or Sybil defence. Receipts
-stay in the browser until downloaded.
+stream author it trusts. The demo's relay and HTTP endpoints have resource bounds. Current source
+adds key-possession tickets and live revocation; open issuance does not prove
+unique participants or complete Sybil resistance. Receipts
+stay in the browser until downloaded; optional reporting requires viewer
+opt-in and accepts only bounded numeric summaries, without a swarm public key.
+These controls do not establish unique participants or net cost.
+
+The example origin's [complete-playlist blocking reload](API.md#example-origin-http-playlists)
+uses the current authorised catalogue and a fixed deadline of three initial
+target durations. At most 24 requests may wait inside the existing 32-media
+request limit. Disconnect/shutdown releases waiters and shared directory
+watchers; media bytes, signing scope and peer deadlines are unchanged. Required
+coverage is limited to 41 directories per request, including shallow Windows
+parent watches; excess coverage retains ordinary HTTP without added capability.
+Direct watches cover all authorised playlist basenames and directory renames;
+unrelated named media/temporary-file events are ignored. Filename coverage changes
+consume the existing bounded revalidation budget. Parent-only watches ignore
+unrelated siblings and named metadata events; missing filenames or unknown
+event types fail closed. These limits do not
+establish Internet capacity or hard cancellation of kernel I/O.
+
+Broadcaster workers use a detached wrapper that remains their process-group
+leader until draining finishes. Only that executing wrapper signals its own
+group; the guardian sends commands over the original private IPC channel and
+uses numeric group IDs only for absence probes. Clean shutdown requires a drain
+witness, closed output pipes, settled IPC sends and observed group absence within
+the existing deadline. Missing evidence retains the dirty recovery fence.
+Guardian death and whole-host loss still require operator recovery. There are
+four logical worker slots and one additional Node wrapper per occupied slot;
+local sampled resource checks do not establish production capacity.
+
+The optional [account allowance](ACCOUNT-UPLOAD-BUDGET.md) introduces a separate
+private trust boundary: its service learns a stable Nostr identity or the host's
+authenticated website subject and can correlate participating devices. Explicit
+linking reveals the association between those identities. The private ledger
+stores service-scoped pseudonyms and durable cumulative reservations; its
+secret and grant records require protection as account data. Stable identities
+and grants are excluded from swarm events, SDP, peer messages and downloaded or
+submitted reports. Host authentication, HTTPS and ledger preservation remain
+required. An open Nostr account service cannot establish unique humans or
+prevent someone deliberately using unrelated identities.
 
 These are specific tested boundaries, not completion of the adversarial suite
 below. Sybil resistance, broad NAT/mobile coverage and independent-client
@@ -68,7 +108,9 @@ The verifier requires fixed field order and exact canonical JSON with the
 `relayswarm-segment-v1` domain and schema version 1. It rejects altered fields,
 other signers, expired/stale events and substituted media contexts. The precise
 contract is in [INTEGRATION.md](../INTEGRATION.md#authenticated-peer-first-loading).
-Delegated commitment keys are a possible future design, not implemented here.
+Current source implements author-scoped expiring commitment keys and a
+host-supplied revocation view; [production features](PRODUCTION-FEATURES.md)
+describes the trust and availability boundary.
 The host still establishes which publisher it trusts. A malicious authorised
 publisher can sign harmful bytes; cryptographic integrity is not moderation.
 
