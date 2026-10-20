@@ -1,6 +1,15 @@
 // Recent observations only: link measurements disappear with the link. These
 // are completion times and payload rates, not network RTT or ABR estimates.
 const RECENT_COMPLETIONS = 16;
+const MIN_RATE_BYTES = 32 * 1024;
+const MIN_RATE_FLOW_MS = 300;
+
+function quantile(values, fraction) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
+}
+const median = (values) => quantile(values, 0.5);
 
 export class PeerSelection {
   constructor() {
@@ -10,6 +19,60 @@ export class PeerSelection {
     // Sizes and payload rates of recent completed transfers on any link.
     // Links are often replaced after a timeout, so this survives turnover.
     this.recentCompletions = [];
+    // Time to first byte and payload rate after it, from any attempt that
+    // received data, completed or not. Most large transfers on a slow path
+    // never complete, so completions alone would never inform a projection.
+    this.recentFirstBytes = [];
+    this.recentRates = [];
+    // When the latest rate evidence arrived (Date.now()), 0 before any.
+    this.lastObservedAt = 0;
+  }
+
+  /**
+   * One attempt's timing: first byte (ms), then a rate as bytes over ms from
+   * the latest part of its flow, and how long the whole flow ran.
+   */
+  observe({ firstByteMs = null, bytes = 0, flowMs = 0, totalFlowMs = flowMs } = {}) {
+    if (Number.isFinite(firstByteMs) && firstByteMs >= 0) {
+      this.recentFirstBytes.push(Math.min(60_000, firstByteMs));
+      if (this.recentFirstBytes.length > RECENT_COMPLETIONS) this.recentFirstBytes.shift();
+    }
+    // A short flow mostly measures the first round trip, not the path.
+    if (bytes >= MIN_RATE_BYTES && flowMs >= MIN_RATE_FLOW_MS) {
+      this.recentRates.push({ rate: Math.min(1_000_000, bytes / flowMs), flowMs: Math.max(flowMs, totalFlowMs || 0) });
+      if (this.recentRates.length > RECENT_COMPLETIONS) this.recentRates.shift();
+      this.lastObservedAt = Date.now();
+    }
+  }
+
+  /** Median recent time to first byte, or null before any data arrived. */
+  firstByteMs() {
+    return median(this.recentFirstBytes);
+  }
+
+  /**
+   * Upper-quartile recent payload rate after first byte (bytes per ms), or
+   * null. Rates come from the latest part of each flow. A short flow ends in
+   * slow start and reports low, so flows of at least three first-byte times
+   * decide when there are two or more of them.
+   */
+  rate() {
+    const firstByte = this.firstByteMs();
+    const long = firstByte === null ? [] : this.recentRates.filter(({ flowMs }) => flowMs >= firstByte * 3);
+    return quantile((long.length >= 2 ? long : this.recentRates).map(({ rate }) => rate), 0.75);
+  }
+
+  /**
+   * Projected time for a whole transfer of this size, first byte included,
+   * or null without evidence: the sooner of the fastest completion at least
+   * as large (its time includes its first byte) and the recent first byte
+   * plus the size at the upper-quartile rate.
+   */
+  projectMs(size) {
+    if (!size) return null;
+    const firstByte = this.firstByteMs(), rate = this.rate();
+    const projections = [this.minimumMs(size), firstByte !== null && rate ? firstByte + size / rate : 0].filter(Boolean);
+    return projections.length ? Math.min(...projections) : null;
   }
 
   // Time the fastest recent completion at least this large would need for
@@ -72,6 +135,7 @@ export class PeerSelection {
       value.latencyMs = blend(value.latencyMs, elapsed);
       value.throughputBytesPerSecond = blend(value.throughputBytesPerSecond, Math.min(1_000_000_000, bytes * 1000 / elapsed));
       this.recentCompletions.push({ bytes, rate: Math.min(1_000_000, bytes / elapsed) });
+      this.lastObservedAt = Date.now();
       if (this.recentCompletions.length > RECENT_COMPLETIONS) this.recentCompletions.shift();
     }
     this.observations.set(link, value);

@@ -40,6 +40,10 @@ const TRANSPORT = "webrtc";
 const DEFAULTS = Object.freeze({
   mode: "shadow",
   originFallbackMs: 1_500,
+  // Peer-first may wait up to this long, beyond originFallbackMs, only when
+  // recent peer timing projects the segment needs it and the playback buffer
+  // covers that projection while keeping originReserveMs for origin.
+  maxPeerWaitMs: 5_000,
   originReserveMs: 2_000,
   lateWindowMs: 6_000,
   maxPeers: 6,
@@ -141,9 +145,14 @@ const TRANSPORT_EVENTS = Object.freeze({
 const increment = (value) => Math.min(Number.MAX_SAFE_INTEGER, value + 1);
 const PEER_ELIGIBILITY_REASONS = Object.freeze([
   "no-budget", "aborted-before-eligibility", "no-have-no-wait", "no-have-wait",
-  "wait-no-longer-eligible", "wait-aborted", "wait-expired", "have-at-entry", "have-after-wait",
+  "wait-no-longer-eligible", "wait-aborted", "wait-expired", "have-at-entry", "have-after-wait", "projected-late",
 ]);
-const PEER_REQUEST_OUTCOMES = Object.freeze(["payload", "none", "timeout", "abort", "closed", "busy", "send-error"]);
+const PEER_REQUEST_OUTCOMES = Object.freeze(["payload", "none", "timeout", "abort", "abandoned", "closed", "busy", "send-error"]);
+// A projection from evidence this old may be stale; one attempt within the
+// ordinary budget is allowed to renew it.
+const PEER_EVIDENCE_STALE_MS = 15_000;
+// A holder's scheduling jitter must not read as silence on a short path.
+const SILENCE_FLOOR_MS = 250;
 const ADMISSION_CALL_SITES = Object.freeze(["presence", "dialStart", "offerBeforeSend", "offerIncoming", "answerIncoming", "glareBeforeRollback", "glareAfterRollback", "answerBeforeSend", "upload", "refresh", "other"]);
 const UPLOAD_REFUSAL_REASONS = Object.freeze([
   "admission", "not-held", "not-serving", "banned", "session-allowance", "peer-limit", "rate-limit",
@@ -324,6 +333,10 @@ class HlsSwarm {
       coordinatedWaits: 0,
       coordinatedPeerLoads: 0,
       peerSkippedLate: 0,
+      peerProjectedLate: 0,
+      peerWaitExtended: 0,
+      peerAbandoned: 0,
+      peerNoFit: 0,
       commitmentRequests: 0,
       commitmentRejected: 0,
       commitmentUnavailable: 0,
@@ -372,6 +385,9 @@ class HlsSwarm {
     this.signallingSamples = [];
     this.peerLatencySamples = [];
     this.originLatencySamples = [];
+    // Per rendition: origin load times, and the last committed segment size.
+    this.renditionOriginSamples = new Map();
+    this.renditionSizes = new Map();
     this.errorsByStage = {};
   }
 
@@ -395,7 +411,7 @@ class HlsSwarm {
     if (typeof this.options.serve !== "boolean" || typeof this.options.serveOnCellular !== "boolean") return "invalid-serve-option";
     if (this.options.ticket !== undefined && !validTicket(this.options.ticket)) return "invalid-ticket";
     if (this.options.maxUploadBytesPerSession !== undefined && (!Number.isSafeInteger(this.options.maxUploadBytesPerSession) || this.options.maxUploadBytesPerSession < 0)) return "invalid-upload-session-limit";
-    for (const key of ["originFallbackMs", "originReserveMs", "lateWindowMs", "maxPeers", "maxUploadPeers", "maxUploadBytesPerSecond", "maxDialsInFlight", "dialTimeoutMs", "presenceIntervalMs", "metricsIntervalMs", "maxHeldSegments", "maxHeldBytes", "maxSegmentBytes", "maxConcurrentRaces", "admissionTimeoutMs"]) {
+    for (const key of ["originFallbackMs", "maxPeerWaitMs", "originReserveMs", "lateWindowMs", "maxPeers", "maxUploadPeers", "maxUploadBytesPerSecond", "maxDialsInFlight", "dialTimeoutMs", "presenceIntervalMs", "metricsIntervalMs", "maxHeldSegments", "maxHeldBytes", "maxSegmentBytes", "maxConcurrentRaces", "admissionTimeoutMs"]) {
       if (!Number.isSafeInteger(this.options[key]) || this.options[key] < 1) return "invalid-limits";
     }
     if (!Number.isFinite(this.options.shadowSampleRate) || this.options.shadowSampleRate < 0 || this.options.shadowSampleRate > 1) return "invalid-sample-rate";
@@ -521,7 +537,7 @@ class HlsSwarm {
         capacity: 64,
         dropped: this.peerEligibilityDropped,
         counters: { ...this.peerEligibilityCounters },
-        records: this.peerEligibilityRecords.map((record) => ({ ...record, budgetGeometry: { ...record.budgetGeometry } })),
+        records: this.peerEligibilityRecords.map((record) => ({ ...record, budgetGeometry: { ...record.budgetGeometry }, ...(record.projection ? { projection: { ...record.projection } } : {}) })),
       },
       peerRequestDiagnostics: {
         capacity: 64,
@@ -562,6 +578,10 @@ class HlsSwarm {
         coordinatedWaits: c.coordinatedWaits,
         coordinatedPeerLoads: c.coordinatedPeerLoads,
         peerSkippedLate: c.peerSkippedLate,
+        peerProjectedLate: c.peerProjectedLate,
+        peerWaitExtended: c.peerWaitExtended,
+        peerAbandoned: c.peerAbandoned,
+        peerNoFit: c.peerNoFit,
         commitmentRequests: c.commitmentRequests,
         commitmentRejected: c.commitmentRejected,
         commitmentUnavailable: c.commitmentUnavailable,
@@ -594,6 +614,7 @@ class HlsSwarm {
       errors: { total: c.errors, byStage: { ...this.errorsByStage } },
       config: {
         originFallbackMs: this.options.originFallbackMs,
+        maxPeerWaitMs: this.options.maxPeerWaitMs,
         originReserveMs: this.options.originReserveMs,
         lateWindowMs: this.options.lateWindowMs,
         maxPeers: this.options.maxPeers,
@@ -668,7 +689,7 @@ class HlsSwarm {
         this.releaseFetch = null;
         this.peerStats = null;
         this.peerContext = context;
-        const budgetGeometry = { source: "unobserved", positionSource: null, currentTime: null, bufferedEnd: null, playableEnd: null, fragmentStart: null, originReserveMs: null };
+        const budgetGeometry = { source: "unobserved", positionSource: null, currentTime: null, bufferedEnd: null, playableEnd: null, fragmentStart: null, originReserveMs: null, uncappedMs: null };
         const budgetMs = swarm.#peerBudget(context, budgetGeometry);
         swarm.#contributionContext(context);
         if (swarm.stopped || !context.frag || context.frag.sn === "initSegment" || (context.part && !swarm.options.swarmParts)
@@ -722,6 +743,7 @@ class HlsSwarm {
               try { if (response.data?.byteLength) copy = response.data.slice(0); } catch {}
               completed = true;
               pushSample(swarm.originLatencySamples, now() - originStarted);
+              swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - originStarted);
               callbacks.onSuccess(response, stats, ctx, details);
               if (copy && !swarm.stopped) swarm.#guard("peer-first-origin", async () => {
                 swarm.counters.originLoaded += 1;
@@ -741,9 +763,21 @@ class HlsSwarm {
         }
         timer = setTimeout(fallback, budgetMs);
         swarm.lifecycle.signal.addEventListener("abort", fallback, { once: true });
-        swarm.#peerFirst(context, controller.signal, t0 + budgetMs, budgetMs, budgetGeometry).then((result) => {
+        // The wait may grow from budgetMs up to the buffer-safe limit, never
+        // past the buffered playback less the origin reserve.
+        const ceiling = Math.max(swarm.options.originFallbackMs, swarm.options.maxPeerWaitMs);
+        const limitMs = Math.max(budgetMs, Math.min(ceiling, budgetGeometry.uncappedMs ?? budgetMs));
+        const plan = { deadline: t0 + budgetMs, limit: t0 + limitMs, extend: (to) => {
+          const target = Math.min(plan.limit, to);
+          if (this.active !== token || target <= plan.deadline) return false;
+          plan.deadline = target;
+          clearTimeout(timer);
+          timer = setTimeout(fallback, Math.max(0, target - now()));
+          return true;
+        } };
+        swarm.#peerFirst(context, controller.signal, plan, budgetMs, budgetGeometry).then((result) => {
           if (this.active !== token || controller.signal.aborted || swarm.stopped) return;
-          if (!result || now() >= t0 + budgetMs) return fallback();
+          if (!result || now() >= plan.deadline) return fallback();
           this.active = null;
           this.pendingCallbacks = null;
           cleanup();
@@ -853,14 +887,15 @@ class HlsSwarm {
           let partStart, bufferedEnd, currentTime;
           const fragStart = (partStart = context?.part?.start) ?? context?.frag?.start;
           const playableEnd = Number.isFinite(fragStart) && fragStart > media.currentTime ? Math.min(bufferedEnd = media.buffered.end(i), fragStart) : (bufferedEnd = media.buffered.end(i));
-          const budgetMs = Math.min(this.options.originFallbackMs, Math.max(0, (playableEnd - (currentTime = media.currentTime)) * 1000 - originReserve));
+          const uncappedMs = Math.max(0, (playableEnd - (currentTime = media.currentTime)) * 1000 - originReserve);
+          const budgetMs = Math.min(this.options.originFallbackMs, uncappedMs);
           // Capture the values already consumed by the formula, without
           // rereading mutable media/fragment getters or changing their order.
           try {
             const finite = (value) => Number.isFinite(value) ? value : null;
             Object.assign(geometry, { source: "buffer", positionSource: partStart == null ? "fragment" : "part",
               currentTime: finite(currentTime), bufferedEnd: finite(bufferedEnd), playableEnd: finite(playableEnd),
-              fragmentStart: finite(fragStart), originReserveMs: finite(originReserve) });
+              fragmentStart: finite(fragStart), originReserveMs: finite(originReserve), uncappedMs: finite(uncappedMs) });
           } catch {}
           return budgetMs;
         }
@@ -877,7 +912,7 @@ class HlsSwarm {
     return sha256Hex(utf8.encode(`${this.options.swarmId}\n${raw}${range}`));
   }
 
-  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry) {
+  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry, projection) {
     // Observe only decisions already made. In particular a zero budget must
     // not hash a key or inspect HAVE merely to fill this local diagnostic.
     try {
@@ -890,6 +925,7 @@ class HlsSwarm {
       const record = { atMs: Number.isFinite(elapsed) ? Math.max(0, Math.round(elapsed)) : 0,
         cc, level, budgetMs: Number.isFinite(budgetMs) && budgetMs >= 0 ? budgetMs : null,
         reason, matchingHave: typeof matchingHave === "boolean" ? matchingHave : null, budgetGeometry: { ...budgetGeometry } };
+      if (projection) record.projection = { ...projection };
       this.peerEligibilityCounters[reason] = increment(this.peerEligibilityCounters[reason]);
       if (this.peerEligibilityRecords.length === 64) {
         this.peerEligibilityRecords.shift();
@@ -899,7 +935,62 @@ class HlsSwarm {
     } catch {}
   }
 
-  async #peerFirst(context, signal, deadline, budgetMs, budgetGeometry) {
+  #renditionSample(map, context, value) {
+    const rendition = this.#renditionContext(context);
+    if (!map.has(rendition) && map.size >= 16) map.delete(map.keys().next().value);
+    const list = map.get(rendition) || [];
+    pushSample(list, value);
+    map.set(rendition, list);
+  }
+
+  // Expected time until a same-rendition contributor announces this segment:
+  // this viewer's own median origin time for the rendition, less however long
+  // an announced origin fetch has already run. Null without a measurement.
+  #holderWaitMs(key, rendition) {
+    const typical = percentile(this.renditionOriginSamples.get(rendition) || [], 0.5);
+    if (typical === null) return null;
+    let started = null;
+    for (const peer of this.links.values()) {
+      const expires = peer.fetching.get(key) || 0;
+      // Leases are announced for 2000 ms when an origin fetch starts.
+      if (expires > Date.now()) started = Math.min(started ?? Infinity, expires - 2_000);
+    }
+    return Math.max(0, typical - (started === null ? 0 : Date.now() - started));
+  }
+
+  // How long a delivery may wait, from its projection (holder wait plus
+  // transfer) against the room left to the buffer-safe limit:
+  //   "late"    go to origin now: the holder wait alone leaves no room for a
+  //             first byte, or fresh evidence overruns the room by over 25%;
+  //   "fits"    wait as long as the projection needs;
+  //   "stretch" nearly fits, or the evidence is stale: wait to the limit and
+  //             let abandonment decide, since a failed attempt that gives up
+  //             early costs less buffer than a segment brings;
+  //   "unknown" no evidence: the ordinary budget applies.
+  #projection(transferMs, holderWaitMs, plan) {
+    const room = plan.limit - now(), firstByte = this.peerSelection.firstByteMs();
+    if (holderWaitMs !== null && holderWaitMs + (firstByte ?? 0) > room) return "late";
+    if (transferMs === null || holderWaitMs === null) return "unknown";
+    const projected = holderWaitMs + transferMs;
+    if (projected <= room) return "fits";
+    if (Date.now() - this.peerSelection.lastObservedAt >= PEER_EVIDENCE_STALE_MS) return "stretch";
+    return projected > room * 1.25 ? "late" : "stretch";
+  }
+
+  #applyProjection(decision, projectedMs, plan) {
+    const to = decision === "fits" ? now() + projectedMs * 1.25 + 100 : decision === "stretch" ? plan.limit : null;
+    if (to !== null && plan.extend(to)) this.counters.peerWaitExtended += 1;
+  }
+
+  // Local diagnostic for a projected-late decision: what it was based on.
+  #projectionDetail(stage, transferMs, holderWaitMs, plan) {
+    const ms = (value) => Number.isFinite(value) ? Math.round(value) : null;
+    const rate = this.peerSelection.rate();
+    return { stage, transferMs: ms(transferMs), holderWaitMs: ms(holderWaitMs), roomMs: ms(plan.limit - now()),
+      firstByteMs: ms(this.peerSelection.firstByteMs()), rateBytesPerSecond: Number.isFinite(rate) ? Math.round(rate * 1000) : null };
+  }
+
+  async #peerFirst(context, signal, plan, budgetMs, budgetGeometry) {
     const discoveryContext = this.discovery.contexts.get(context.frag.type || "main");
     const key = await this.#segmentKey(context);
     if (signal.aborted || this.stopped) {
@@ -912,35 +1003,47 @@ class HlsSwarm {
       this.#seekNeighbours();
     }
     const coordinated = ![...this.links.values()].some((peer) => peer.have.has(key));
+    if (coordinated && !this.#shouldWaitForOrigin(key, rendition)) {
+      this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry);
+      return null;
+    }
+    // Go to origin at once, keeping the buffer, when the holder wait and the
+    // transfer together cannot fit; otherwise allow the wait they need.
+    const sizeHint = this.renditionSizes.get(rendition);
+    const holderWait = coordinated ? this.#holderWaitMs(key, rendition) : 0;
+    const entryTransfer = sizeHint ? this.peerSelection.projectMs(sizeHint) : null;
+    const entry = this.#projection(entryTransfer, holderWait, plan);
+    if (entry === "late") {
+      this.#peerEligibility(context, budgetMs, "projected-late", !coordinated, budgetGeometry, this.#projectionDetail("entry", entryTransfer, holderWait, plan));
+      this.counters.peerProjectedLate += 1;
+      return null;
+    }
+    this.#applyProjection(entry, holderWait + entryTransfer, plan);
     if (coordinated) {
-      if (!this.#shouldWaitForOrigin(key, rendition)) {
-        this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry);
-        return null;
-      }
       this.#peerEligibility(context, budgetMs, "no-have-wait", false, budgetGeometry);
       this.counters.coordinatedWaits += 1;
     }
-    const commitmentRemaining = deadline - now();
+    const commitmentRemaining = plan.deadline - now();
     if (signal.aborted || this.stopped || commitmentRemaining <= 0) return null;
     // Every null/error, load abort and stop reaches the original loader's
     // cancellation path. Catch both outcomes before waiting for HAVE.
     this.counters.commitmentRequests += 1;
     const commitmentResult = boundedOperation((operationSignal) => {
-      if (signal.aborted || this.stopped || now() >= deadline) throw new Error("Commitment load no longer active.");
+      if (signal.aborted || this.stopped || now() >= plan.deadline) throw new Error("Commitment load no longer active.");
       return this.options.getCommitment(context, { signal: operationSignal });
     }, signal, commitmentRemaining).then((event) => ({ ok: true, event }), () => ({ ok: false }));
     if (coordinated) {
       // No playlist manipulation or origin prefetch. The elected contributor
       // loads normally; all advisory leases expire before the HTTP deadline.
-      while (!signal.aborted && !this.stopped && now() < deadline && ![...this.links.values()].some((peer) => peer.have.has(key))) {
+      while (!signal.aborted && !this.stopped && now() < plan.deadline && ![...this.links.values()].some((peer) => peer.have.has(key))) {
         if (!this.#shouldWaitForOrigin(key, rendition)) {
           this.#peerEligibility(context, budgetMs, "wait-no-longer-eligible", false, budgetGeometry);
           return null;
         }
-        await this.#waitForHave(key, Math.min(100, deadline - now()), signal);
+        await this.#waitForHave(key, Math.min(100, plan.deadline - now()), signal);
       }
       const cancelled = signal.aborted || this.stopped;
-      if (cancelled || now() >= deadline) {
+      if (cancelled || now() >= plan.deadline) {
         this.#peerEligibility(context, budgetMs, cancelled ? "wait-aborted" : "wait-expired", null, budgetGeometry);
         return null;
       }
@@ -958,27 +1061,46 @@ class HlsSwarm {
     } catch { if (!this.stopped) this.counters.commitmentUnavailable += 1; return null; }
     if (!commitment) { this.counters.commitmentRejected += 1; return null; }
     if (signal.aborted || this.stopped) return null;
+    if (!this.renditionSizes.has(rendition) && this.renditionSizes.size >= 16) this.renditionSizes.delete(this.renditionSizes.keys().next().value);
+    this.renditionSizes.set(rendition, commitment.size);
+    // The committed size is now known and a holder has it.
+    const transfer = this.peerSelection.projectMs(commitment.size);
+    const known = this.#projection(transfer, 0, plan);
+    if (known === "late") {
+      this.#peerEligibility(context, budgetMs, "projected-late", true, budgetGeometry, this.#projectionDetail("commitment", transfer, 0, plan));
+      this.counters.peerProjectedLate += 1;
+      return null;
+    }
+    this.#applyProjection(known, transfer, plan);
     const tried = new Set();
-    while (!signal.aborted && !this.stopped && now() < deadline && tried.size < this.options.maxPeers) {
+    while (!signal.aborted && !this.stopped && now() < plan.deadline && tried.size < this.options.maxPeers) {
+      // Candidates are judged against the buffer-safe limit, which the wait
+      // may grow to; the chosen link's own estimate then sets the deadline.
+      const room = plan.limit - now();
       // Go to origin now, keeping the buffer, rather than ask a holder for a
-      // segment no recent transfer could have delivered in the time left.
-      if (this.peerSelection.minimumMs(commitment.size) > deadline - now()) {
+      // segment no recent transfer could have delivered in the time left, or
+      // with too little time left for even a recent first byte to arrive.
+      const firstByte = this.peerSelection.firstByteMs();
+      if (this.peerSelection.minimumMs(commitment.size) > room || (firstByte ?? 0) > room) {
         this.counters.peerSkippedLate += 1;
         return null;
       }
-      const link = this.peerSelection.select(this.links.values(), key, tried, commitment.size, deadline - now());
+      const fits = (peer, ms) => this.peerSelection.estimate(peer, commitment.size) === null || this.peerSelection.estimate(peer, commitment.size) * 1.25 + 25 <= ms;
+      const link = this.peerSelection.select(this.links.values(), key, tried, commitment.size, room);
       if (!link) {
-        if (![...this.links.values()].some((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key)
-          && (this.peerSelection.estimate(peer, commitment.size) === null || this.peerSelection.estimate(peer, commitment.size) * 1.25 + 25 <= deadline - now()))) return null;
-        await this.#waitForHave(key, Math.min(100, deadline - now()), signal);
+        if (![...this.links.values()].some((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, room))) {
+          this.counters.peerNoFit += 1;
+          return null;
+        }
+        await this.#waitForHave(key, Math.min(100, plan.deadline - now()), signal);
         continue;
       }
       tried.add(link.pubkey);
-      const requestedAt = now();
-      const remainingMs = deadline - now();
-      const alternatives = [...this.links.values()].filter((peer) => !peer.closed && !peer.busy && !tried.has(peer.pubkey) && peer.have.has(key)
-        && (this.peerSelection.estimate(peer, commitment.size) === null || this.peerSelection.estimate(peer, commitment.size) * 1.25 + 25 <= remainingMs)).length;
       const estimateMs = this.peerSelection.estimate(link, commitment.size);
+      if (estimateMs !== null && plan.extend(now() + estimateMs * 1.25 + 25)) this.counters.peerWaitExtended += 1;
+      const requestedAt = now();
+      const remainingMs = plan.deadline - now();
+      const alternatives = [...this.links.values()].filter((peer) => !peer.closed && !peer.busy && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, remainingMs)).length;
       // Give an unmeasured route time to complete, retaining the existing
       // 25ms minimum opportunity for up to two quick alternative attempts.
       // Equal slices can time out every cold route before any can be measured.
@@ -987,8 +1109,18 @@ class HlsSwarm {
       // be cut short by an equal share intended for unmeasured alternatives.
       const attemptMs = estimateMs === null ? Math.min(remainingMs, Math.max(25, coldAttemptMs))
         : Math.min(remainingMs, Math.max(25, remainingMs / Math.min(3, alternatives + 1), estimateMs * 1.25 + 25));
-      const bytes = await link.request(key, Math.max(1, attemptMs), { signal, expectedSize: commitment.size,
-        onResult: (result) => this.#peerRequestResult(context, link, remainingMs, result) });
+      const attempt = this.#abandonableAttempt(signal, requestedAt, commitment.size, plan, firstByte);
+      let bytes;
+      try {
+        bytes = await link.request(key, Math.max(1, attemptMs), { signal: attempt.signal, expectedSize: commitment.size, onProgress: attempt.progress,
+          onResult: (result) => this.#peerRequestResult(context, link, remainingMs, result) });
+      } finally { attempt.done(); }
+      this.peerSelection.observe(attempt.observation());
+      if (attempt.abandoned) {
+        this.peerSelection.record(link, now() - requestedAt);
+        this.counters.peerAbandoned += 1;
+        return null;
+      }
       if (!bytes || signal.aborted || this.stopped) {
         if (!signal.aborted && !this.stopped) this.peerSelection.record(link, now() - requestedAt);
         continue;
@@ -1010,6 +1142,61 @@ class HlsSwarm {
     return null;
   }
 
+  // A request that gives up early, so its failure costs little buffer, but
+  // only once it cannot finish by the deadline on generous assumptions: with
+  // no first byte yet, not even at the best recent rate if bytes began now;
+  // once data flows, not even at double its latest rate (slow start roughly
+  // doubles it each round trip) or the best recent rate. Never before three
+  // recent first-byte times (and 250 ms) without data, or one round trip
+  // after the first byte. The observation it returns is the rate over the latest part of the
+  // flow, since a whole-flow average on a fresh path mostly measures slow start.
+  #abandonableAttempt(signal, requestedAt, size, plan, firstByteMs) {
+    const controller = new AbortController();
+    const relay = () => controller.abort(signal.reason);
+    if (signal.aborted) relay(); else signal.addEventListener("abort", relay, { once: true });
+    const points = [];
+    const best = this.peerSelection.rate();
+    let firstByte = null;
+    const state = { abandoned: false, signal: controller.signal };
+    const abandon = () => {
+      if (state.abandoned || controller.signal.aborted) return;
+      state.abandoned = true;
+      controller.abort(PeerLink.ABANDON_REASON);
+    };
+    let silence = null;
+    if (firstByteMs !== null) {
+      const hopelessAt = best ? plan.deadline - size / best : -Infinity;
+      silence = setTimeout(() => { if (firstByte === null) abandon(); }, Math.max(SILENCE_FLOOR_MS, firstByteMs * 3, hopelessAt - now()));
+    }
+    // Rate from the latest point at least `span` before the newest, so a
+    // gap in delivery lowers it; null until 150 ms of flow is observed.
+    const windowRate = (span) => {
+      const last = points.at(-1);
+      if (!last) return null;
+      let first = points[0];
+      for (const point of points) { if (point[0] <= last[0] - span) first = point; else break; }
+      return last[0] - first[0] >= 150 ? { bytes: last[1] - first[1], ms: last[0] - first[0] } : null;
+    };
+    state.progress = (received, _size, firstByteAt) => {
+      const at = now();
+      if (firstByte === null) firstByte = Number.isFinite(firstByteAt) ? firstByteAt : at - requestedAt;
+      points.push([at, received]);
+      if (points.length > 256) points.shift();
+      if (at - requestedAt < firstByte * 2) return;
+      const recent = windowRate(400);
+      if (!recent) return;
+      const rate = Math.max(2 * recent.bytes / recent.ms, best ?? 0);
+      if (!rate || at + (size - received) / rate > plan.deadline) abandon();
+    };
+    state.observation = () => {
+      const flow = points.length ? points.at(-1)[0] - points[0][0] : 0;
+      const recent = windowRate(Math.max(300, flow / 2));
+      return { firstByteMs: firstByte, bytes: recent?.bytes ?? 0, flowMs: recent?.ms ?? 0, totalFlowMs: flow };
+    };
+    state.done = () => { clearTimeout(silence); signal.removeEventListener("abort", relay); };
+    return state;
+  }
+
   #peerRequestResult(context, link, remainingMs, result) {
     try {
       if (!PEER_REQUEST_OUTCOMES.includes(result.outcome)) return;
@@ -1023,6 +1210,7 @@ class HlsSwarm {
         remainingMs: numeric(remainingMs), outcome: result.outcome,
         elapsedMs: numeric(result.elapsedMs), timeoutMs: numeric(result.timeoutMs),
         expectedBytes: integer(result.expectedBytes), receivedBytes: integer(result.receivedBytes),
+        firstByteMs: numeric(result.firstByteMs),
         metadataReceived: result.metadataReceived === true, draining: result.draining === true,
         closeReason: TRANSPORT_EVENTS["link-close"].includes(result.closeReason) ? result.closeReason : null };
       this.peerRequestCounters[result.outcome] = increment(this.peerRequestCounters[result.outcome]);
@@ -2072,6 +2260,9 @@ class HlsSwarm {
       onUploadCancelled: (_link, unsentBytes) => {
         this.counters.uploadsCancelled += 1;
         this.counters.uploadCancelledBytes += unsentBytes;
+        // Bytes never sent return to the per-second rate. The session
+        // allowance and any host reservation stay charged.
+        this.uploadTokens = Math.min(this.options.maxUploadBytesPerSecond * 2, this.uploadTokens + unsentBytes);
       },
       onClose: (closed) => {
         dial.pc.removeEventListener("datachannel", rejectExtraChannel);

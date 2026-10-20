@@ -344,13 +344,14 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `relays` | required | 1-8 relay URLs (`wss://`, or `ws://` on loopback). |
 | `mode` | `"shadow"` | `"off"` disables; `"peer-first"` requires a signed stream authorisation and commitment provider. |
 | `secretKey` | fresh per viewer | Ephemeral signing key for presence and signalling. Never the viewer's own identity. |
-| `originFallbackMs` | `1500` | The in-time budget a peer delivery is measured against. |
+| `originFallbackMs` | `1500` | The in-time budget a peer delivery is measured against, and peer-first's ordinary wait. |
+| `maxPeerWaitMs` | `5000` | Peer-first may wait past `originFallbackMs`, up to this, only while recent peer timing projects the segment needs it and the playback buffer covers the wait with `originReserveMs` to spare. |
 | `originReserveMs` | `2000` | Peer-first reserves this much buffered playback for the origin; an empty buffer goes directly to origin. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
 | `maxPeers` | `6` | Connections in and out. The demo selects four explicitly. |
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
 | `maxUploadPeers` | `4` | Distinct peers served in any 30 s. |
-| `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. |
+| `maxUploadBytesPerSecond` | `1250000` | Upload token bucket. Bytes a receiver's cancel kept from being sent return to it. |
 | `maxUploadBytesPerSession` | unlimited | Optional non-negative safe integer, including zero. Reserves full accepted media payloads; interrupted transfers do not refund the allowance. |
 | `reserveUploadBytes` | none | Optional async `(bytes, {signal}) => boolean` host reservation before serving; refusal/error/timeout stops the send. Use for persistent cross-tab budgets. |
 | `serveOnCellular` | `false` | With `false`, detected cellular or `saveData` connections neither upload nor fetch peer media. Detection is advisory and does not identify every metered connection. |
@@ -420,7 +421,8 @@ not an identity), `uptimeMs`, `serving`, plus:
   `aborted`, `peerInTime`, `peerLate`, `peerMiss`, `peerCorrupt`,
   `peerUnverified`, `inTimeShare`, `sampledInTimeShare`, `observedInTimeShare`,
   `sampledInTimeByteShare`, `observedInTimeByteShare`, `peerFirstLoaded`,
-  `originFallbacks`, `peerSkippedLate`, `commitmentRequests`, `commitmentRejected`,
+  `originFallbacks`, `peerSkippedLate`, `peerProjectedLate`, `peerWaitExtended`,
+  `peerAbandoned`, `peerNoFit`, `commitmentRequests`, `commitmentRejected`,
   `commitmentUnavailable`, `peerFirstShare`, `peerFirstByteShare`, `peerLatencyMedianMs`,
   `peerLatencyP90Ms`, `originLatencyMedianMs`.
 - `bytes`: `fromOrigin`, `fromPeers`, `peerFirst`, `uploaded`, `uploadsServed`,
@@ -428,7 +430,8 @@ not an identity), `uptimeMs`, `serving`, plus:
   `uploadRemaining` (null when unlimited), `uploadExhausted`.
   `uploadsCancelled` counts responses this viewer stopped early because the
   receiver cancelled them; `uploadCancelledBytes` is the part of `uploaded` that
-  was therefore not sent. Upload allowance already charged is not refunded.
+  was therefore not sent. Those bytes return to the per-second upload rate; the
+  session allowance and any host reservation already charged are not refunded.
 - `peers.deliveryMeasurements`: bounded measurements for active links,
   including completion time, payload rate and failures.
 - `relays`: `connected`, `presenceSent`, `signalsSent`, `published`,
@@ -453,14 +456,20 @@ original origin fallback may still compute its normal key afterwards.
 Positive-budget reasons distinguish `no-have-no-wait`, `no-have-wait`,
 `wait-no-longer-eligible`, `wait-aborted`, `wait-expired`, `have-at-entry` and
 `have-after-wait`; `aborted-before-eligibility` means cancellation after the
-existing key computation, before the HAVE decision. Wait expiry/cancellation
+existing key computation, before the HAVE decision. `projected-late` means
+recent peer timing projected that the delivery could not fit before the buffer
+limit (see [peer-first loading](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md#authenticated-peer-first-loading)); such a row adds `projection`:
+`stage` (`entry`, before availability, or `commitment`, after), `transferMs`,
+`holderWaitMs`, `roomMs`, `firstByteMs` and `rateBytesPerSecond`, each a
+number or null. Wait expiry/cancellation
 also leaves HAVE null rather than claiming it was still absent. One load can
 produce both a wait-entry and a wait-outcome row: counters count decisions,
 not distinct segments. Budget is the initial allowance, not remaining request
 time. Rows contain no segment keys, hashes, URLs, peer identities or addresses.
 Each row also carries `budgetGeometry`: the calculation's final `currentTime`,
-`bufferedEnd`, `playableEnd`, `fragmentStart` (seconds) and computed
-`originReserveMs`. These are the values consumed by the original calculation,
+`bufferedEnd`, `playableEnd`, `fragmentStart` (seconds), computed
+`originReserveMs`, and `uncappedMs`, the buffered playback less that reserve
+before `originFallbackMs` caps it. These are the values consumed by the original calculation,
 without additional media or context getter reads. Finite signed values are
 retained; unavailable or nonfinite values are null. The fixed `source` is
 `buffer`, `no-media`, `no-buffer`, `error` or `unobserved`; `positionSource` is
@@ -474,12 +483,14 @@ observations do not establish the cause of a failed peer transfer.
 
 `peerRequestDiagnostics` records the outcome of each peer-first transport
 request, after peer selection. Its fixed counters distinguish `payload`, `none`,
-`timeout`, `abort`, `closed`, `busy` and `send-error`. At most 64 rows are retained;
+`timeout`, `abort`, `abandoned`, `closed`, `busy` and `send-error`. At most 64 rows are retained;
 `dropped` counts evicted rows. Rows contain elapsed `atMs`, the same page-local
-connection `id` as transport diagnostics, numeric `cc` and `level`, the original
-deadline's `remainingMs` at selection, the actual request `timeoutMs`, request
-`elapsedMs`, `expectedBytes`, `receivedBytes`, `metadataReceived`, `draining`
-and a fixed `closeReason` or null. Unavailable numeric values are null. A
+connection `id` as transport diagnostics, numeric `cc` and `level`, the
+deadline's `remainingMs` at selection (after any extension), the actual request
+`timeoutMs`, request `elapsedMs`, `expectedBytes`, `receivedBytes`,
+`firstByteMs` (request to first payload chunk), `metadataReceived`, `draining`
+and a fixed `closeReason` or null. `abandoned` is a request the loader gave up
+as unable to finish in time. Unavailable numeric values are null. A
 `payload` means the transport assembled bytes; signature, size, hash, expiry
 and final loader-deadline checks still decide whether playback accepts them.
 Each logical request contributes one outcome. A timeout or abort may leave an
@@ -680,19 +691,43 @@ the host's current revocation view are supported; see
 [delegated signing](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md#signing-and-discovery).
 
 Signature validation, peer discovery, transfer and SHA-256 verification must
-all finish within `originFallbackMs`. With a thin playback buffer the wait is
-shortened to reserve `originReserveMs` for origin loading. Startup, an empty
-buffer, or a fragment with neither advertised availability nor an eligible
-contributor goes directly to origin. The loader also goes to origin without
-asking a peer when the time left is less than the fastest of its last 16
-completed peer transfers at least as large as the segment would need for the
-segment's committed size; `peerSkippedLate` counts these. Without such a
-completion there is no limit.
+all finish within the loader's wait. The ordinary wait is `originFallbackMs`,
+shortened with a thin playback buffer so that `originReserveMs` of playback
+remains for origin loading. Startup, an empty buffer, or a fragment with
+neither advertised availability nor an eligible contributor goes directly to
+origin.
+
+The loader projects each delivery from recent peer timing on any link: the
+median time to first byte, the upper-quartile payload rate after first byte
+measured over the latest part of recent transfers (completed, timed out or
+abandoned; flows of at least three first-byte times decide once two exist),
+and, when no holder has the segment yet, this viewer's median origin time for
+the rendition less however long an announced origin fetch has run. The buffer
+limit is the buffered playback less the origin reserve, at most
+`maxPeerWaitMs`, and the wait never passes it. A projection that fits may
+extend the wait to cover it with a quarter to spare; one that overruns the room
+by no more than a quarter, or rests on evidence older than 15 s, waits to the
+limit; one that overruns by more, or whose holder wait leaves no time for a
+first byte, goes to origin at once (`peerProjectedLate`). `peerWaitExtended`
+counts extensions. Without evidence the ordinary wait applies.
+
+The loader also goes to origin without asking a peer when the time left to the
+limit is less than the fastest of its last 16 completed transfers at least as
+large as the segment would need, or less than a recent first byte
+(`peerSkippedLate`), and when no link with the segment could fit (`peerNoFit`).
+Once a link is chosen, the wait may grow to cover that link's own estimate,
+within the limit. A request is abandoned, and the load goes to origin, when it
+can no longer finish by the deadline on generous assumptions: without a first
+byte, after three recent first-byte times (at least 250 ms) and once even an
+immediate first byte at the best recent rate would be late; with data flowing,
+from two first-byte times in, when neither double its latest rate nor the best
+recent rate would finish in time. `peerAbandoned` counts these. The holder is
+asked to stop and returns the unsent bytes to its per-second rate.
 
 When an eligible same-rendition contributor is fetching a new segment, the
 loader requests its signed commitment while waiting for availability. It
 verifies the commitment after availability arrives, before requesting peer
-bytes. Both operations share the original deadline. An eligible wait may make
+bytes. Both operations share the loader's deadline. An eligible wait may make
 one commitment request even if availability never arrives. A failed commitment
 request still falls back to origin, without a commitment retry.
 

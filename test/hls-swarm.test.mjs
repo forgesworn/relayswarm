@@ -293,6 +293,41 @@ test("peer selection reports the time the fastest recent completion at least as 
   assert.equal(policy.minimumMs(100_000), 1000, "only the last 16 completions count");
 });
 
+test("peer selection projects a transfer from completions, else from rates after first byte", () => {
+  const policy = new PeerSelection();
+  const link = { pubkey: "link", have: new Set([KEY]) };
+  assert.equal(policy.projectMs(100_000), null, "no evidence gives no projection");
+  assert.equal(policy.firstByteMs(), null);
+  policy.observe({ firstByteMs: 200, bytes: 1000, flowMs: 1000 });
+  assert.equal(policy.firstByteMs(), 200);
+  assert.equal(policy.projectMs(100_000), null, "a flow under 32 KiB measures the first round trip, not the path");
+  policy.observe({ firstByteMs: 300, bytes: 64 * 1024, flowMs: 200 });
+  assert.equal(policy.projectMs(100_000), null, "a flow under 300 ms is not a rate");
+  assert.equal(policy.lastObservedAt, 0);
+  policy.observe({ firstByteMs: 250, bytes: 50_000, flowMs: 500 });
+  assert.ok(policy.lastObservedAt > 0);
+  assert.equal(policy.firstByteMs(), 250, "median recent first byte");
+  assert.equal(policy.projectMs(100_000), 250 + 1000, "first byte plus size at the median rate");
+  policy.record(link, 400, 100_000);
+  assert.equal(policy.projectMs(100_000), 400, "a completion at least as large includes its first byte and wins");
+  assert.equal(policy.projectMs(200_000), 250 + 2000, "a smaller completion never projects a larger transfer");
+  assert.equal(policy.projectMs(0), null);
+  for (const rate of [50, 60, 200]) policy.observe({ bytes: rate * 1000, flowMs: 1000 });
+  assert.equal(policy.rate(), 200, "the upper quartile of recent rates, not the median");
+  assert.equal(policy.projectMs(200_000), 250 + 1000);
+  for (let i = 0; i < 16; i++) policy.observe({ firstByteMs: 100 });
+  assert.equal(policy.firstByteMs(), 100, "only the last 16 first bytes count");
+  const flows = new PeerSelection();
+  flows.observe({ firstByteMs: 300, bytes: 40_000, flowMs: 400 });
+  for (const rate of [300, 400]) flows.observe({ firstByteMs: 300, bytes: rate * 400, flowMs: 400, totalFlowMs: 2000 });
+  for (let i = 0; i < 4; i++) flows.observe({ firstByteMs: 300, bytes: 40_000, flowMs: 400 });
+  assert.equal(flows.rate(), 400, "flows of three first-byte times or more decide once two exist");
+  const short = new PeerSelection();
+  short.observe({ firstByteMs: 300, bytes: 400 * 400, flowMs: 400, totalFlowMs: 2000 });
+  for (let i = 0; i < 4; i++) short.observe({ firstByteMs: 300, bytes: 40_000, flowMs: 400 });
+  assert.equal(short.rate(), 100, "one long flow is not enough to set aside the rest");
+});
+
 test("instant failures cannot make a previously quick peer outrank a healthy measured peer", () => {
   const policy = new PeerSelection();
   const failed = { pubkey: "failed", have: new Set([KEY]) }, healthy = { pubkey: "healthy", have: new Set([KEY]) };

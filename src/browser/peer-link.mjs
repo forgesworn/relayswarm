@@ -19,6 +19,10 @@
 // Integrity is not decided here: the caller hashes what arrives.
 
 const HEX64 = /^[0-9a-f]{64}$/u;
+// Abort reason a caller gives when it abandons a request it projects to be
+// late; recorded as "abandoned" rather than an ordinary abort. Exposed as
+// PeerLink.ABANDON_REASON; the module keeps its single PeerLink export.
+const ABANDON_REASON = "relayswarm-abandon";
 const CHUNK_BYTES = 16 * 1024;
 // A response is handed to the channel only while little is queued, so a
 // cancel can stop most of the rest; bytes already queued cannot be recalled.
@@ -32,6 +36,7 @@ const CLOSE_REASONS = new Set([
 ]);
 
 export class PeerLink {
+  static ABANDON_REASON = ABANDON_REASON;
   #uploadDrainTimedOut = false;
   constructor({ pubkey, pc, channel, maxSegmentBytes, onRequest, onHaveChange, onScheduleChange, onClose, onUploadCancelled, maxQueuedRequests = 4, drainTimeoutMs = 3_000 }) {
     this.pubkey = pubkey;
@@ -111,9 +116,10 @@ export class PeerLink {
 
   // Resolves with the bytes, or null when the peer does not serve them in time.
   // Optional diagnostics describe that logical result once, before any late drain.
-  request(key, timeoutMs, { signal, expectedSize, onResult } = {}) {
+  // onProgress(received, size, firstByteMs) runs after each accepted chunk.
+  request(key, timeoutMs, { signal, expectedSize, onResult, onProgress } = {}) {
     let startedAt = null;
-    if (typeof onResult === "function") { try { startedAt = performance.now(); } catch {} }
+    try { startedAt = performance.now(); } catch {}
     let reported = false;
     const report = (outcome, pending = null) => {
       if (reported) return;
@@ -123,11 +129,13 @@ export class PeerLink {
         let elapsedMs = null;
         if (Number.isFinite(startedAt)) { try { elapsedMs = performance.now() - startedAt; } catch {} }
         const receivedBytes = pending?.received ?? 0;
+        const firstByteMs = Number.isFinite(pending?.firstByteAt) && Number.isFinite(startedAt) ? pending.firstByteAt - startedAt : null;
         onResult({ outcome,
           elapsedMs: Number.isFinite(elapsedMs) && elapsedMs >= 0 ? elapsedMs : null,
           timeoutMs: Number.isFinite(timeoutMs) && timeoutMs >= 0 ? timeoutMs : null,
           expectedBytes: Number.isSafeInteger(expectedSize) && expectedSize >= 0 ? expectedSize : null,
           receivedBytes: Number.isSafeInteger(receivedBytes) && receivedBytes >= 0 ? receivedBytes : null,
+          firstByteMs: Number.isFinite(firstByteMs) && firstByteMs >= 0 ? firstByteMs : null,
           metadataReceived: pending ? pending.size >= 0 : false,
           draining: pending?.draining === true,
           closeReason: CLOSE_REASONS.has(this.closeReason) ? this.closeReason : null });
@@ -164,7 +172,7 @@ export class PeerLink {
           reliable = this.channel.ordered === true && this.channel.maxRetransmits === null &&
             this.channel.maxPacketLifeTime === null && this.channel.readyState === "open";
         } catch {}
-        const outcome = reason === "request-abort" ? "abort" : "timeout";
+        const outcome = reason !== "request-abort" ? "timeout" : signal?.reason === ABANDON_REASON ? "abandoned" : "abort";
         if (!reliable) {
           finish(null, outcome, false);
           try { this.close(reason); } finally { report(outcome, pending); }
@@ -182,7 +190,10 @@ export class PeerLink {
       };
       const cancel = () => abandon("request-abort");
       const timeout = () => abandon("request-timeout");
-      this.pending = { id, key, expectedSize, size: -1, parts: [], chunks: 0, received: 0, draining: false, cancelled: false, finish, timer: setTimeout(timeout, Math.max(1, timeoutMs)) };
+      const progress = typeof onProgress === "function" ? (pending) => {
+        try { onProgress(pending.received, pending.size, Number.isFinite(startedAt) ? pending.firstByteAt - startedAt : null); } catch {}
+      } : null;
+      this.pending = { id, key, expectedSize, size: -1, parts: [], chunks: 0, received: 0, firstByteAt: null, progress, draining: false, cancelled: false, finish, timer: setTimeout(timeout, Math.max(1, timeoutMs)) };
       signal?.addEventListener("abort", cancel, { once: true });
       if (!this.#sendText({ t: "want", id, k: key })) finish(null, "send-error");
     });
@@ -223,7 +234,11 @@ export class PeerLink {
       pending.received += chunk.byteLength;
       this.bytesIn += chunk.byteLength;
       if (pending.received > pending.size) return this.close("protocol");
-      if (!pending.draining) pending.parts.push(chunk);
+      if (pending.draining) return;
+      if (pending.firstByteAt === null) { try { pending.firstByteAt = performance.now(); } catch {} }
+      pending.parts.push(chunk);
+      // May abandon this request; a draining request discards later chunks.
+      pending.progress?.(pending);
       return;
     }
     if (data.length > 64 * 1024) return this.close("protocol");

@@ -33,8 +33,11 @@ function fixture(t, options = {}) {
 }
 function clock(t) { t.mock.timers.enable({ apis: ["setTimeout"] }); }
 function result(row, expected) {
-  const { elapsedMs, ...fields } = row;
+  const { elapsedMs, firstByteMs, ...fields } = row;
   assert.equal(typeof elapsedMs, "number"); assert.ok(Number.isFinite(elapsedMs) && elapsedMs >= 0);
+  // First byte is the first accepted payload chunk, never later than the result.
+  if (row.receivedBytes) assert.ok(Number.isFinite(firstByteMs) && firstByteMs >= 0 && firstByteMs <= elapsedMs);
+  else assert.equal(firstByteMs, null);
   assert.deepEqual(fields, expected);
   assert.equal(JSON.stringify(row).includes(KEY), false, "result contains no requested key");
 }
@@ -384,7 +387,7 @@ test("diagnostic start or settlement clock failures preserve payload and one res
       channel.control("meta", { size: 3 }); channel.chunk([1, 2, 3]); channel.control("eof");
       assert.deepEqual(await request, new Uint8Array([1, 2, 3]));
       assert.deepEqual(rows, [{ outcome: "payload", elapsedMs: null, timeoutMs: 100, expectedBytes: 3,
-        receivedBytes: 3, metadataReceived: true, draining: false, closeReason: null }]);
+        receivedBytes: 3, firstByteMs: null, metadataReceived: true, draining: false, closeReason: null }]);
       assert.equal(link.busy, false); assert.equal(link.closed, false); assert.equal(channel.sent.length, 1);
       t.mock.timers.tick(100); channel.control("eof"); assert.equal(rows.length, 1);
     } finally { time.mock.restore(); }
@@ -486,4 +489,32 @@ test("a holder queues at most about 128 KiB of a response before waiting, so a c
   channel.bufferedAmount = 0; channel.dispatchEvent(new Event("bufferedamountlow")); await turn();
   assert.equal(chunks(), 9); assert.deepEqual(channel.sent.at(-1), { t: "eof", id: 1 });
   assert.deepEqual(cancelled, [size - 9 * 16_384]);
+});
+
+test("progress reports each accepted chunk with its first byte, and an abandon is recorded as abandoned", async (t) => {
+  clock(t);
+  const { channel, link } = fixture(t), rows = [], progress = [];
+  const controller = new AbortController();
+  const request = link.request(KEY, 100, { signal: controller.signal, expectedSize: 4, onResult: row => rows.push(row),
+    onProgress: (received, size, firstByteMs) => progress.push({ received, size, firstByte: Number.isFinite(firstByteMs) && firstByteMs >= 0 }) });
+  channel.control("meta", { size: 4 });
+  assert.deepEqual(progress, [], "metadata alone is not a first byte");
+  channel.chunk([1]); channel.chunk([2]);
+  assert.deepEqual(progress, [{ received: 1, size: 4, firstByte: true }, { received: 2, size: 4, firstByte: true }]);
+  controller.abort(PeerLink.ABANDON_REASON);
+  assert.equal(await request, null);
+  result(rows[0], { outcome: "abandoned", timeoutMs: 100, expectedBytes: 4,
+    receivedBytes: 2, metadataReceived: true, draining: true, closeReason: null });
+  assert.deepEqual(channel.sent, [{ t: "want", id: 1, k: KEY }, { t: "cancel", id: 1 }]);
+  channel.chunk([3]);
+  assert.equal(progress.length, 2, "a draining request reports no further progress");
+  channel.control("eof"); assert.equal(link.busy, false); assert.equal(rows.length, 1);
+});
+
+test("a throwing progress callback cannot break the transfer", async (t) => {
+  clock(t);
+  const { channel, link } = fixture(t);
+  const request = link.request(KEY, 100, { expectedSize: 2, onProgress: () => { throw new Error("host failure"); } });
+  channel.control("meta", { size: 2 }); channel.chunk([1, 2]); channel.control("eof");
+  assert.deepEqual(await request, new Uint8Array([1, 2])); assert.equal(link.closed, false);
 });

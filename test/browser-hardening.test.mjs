@@ -176,6 +176,28 @@ test("a cancelled upload stops before its next chunk and is counted without a re
   } finally { await fixture.close(); }
 });
 
+test("bytes a cancel kept from being sent return to the per-second upload rate", async () => {
+  const fixture = await linkedFixture({ serve: true, maxUploadBytesPerSecond: 32 });
+  try {
+    const peer = await fixture.addPeer();
+    await fixture.load(); await until(() => fixture.swarm.metrics().bytes.held === 32);
+    const key = peer.sent.find((frame) => frame.t === "have" && frame.add?.length).add[0];
+    peer.bufferedAmount = 2_000_000;
+    peer.receive(JSON.stringify({ t: "want", id: 1, k: key }));
+    await until(() => peer.sent.some((frame) => frame.t === "meta" && frame.id === 1));
+    peer.receive(JSON.stringify({ t: "cancel", id: 1 }));
+    peer.bufferedAmount = 0; peer.dispatchEvent(new Event("bufferedamountlow"));
+    await until(() => peer.sent.some((frame) => frame.t === "eof" && frame.id === 1));
+    // The 32 B/s rate allows one 32-byte response now; the unsent first is returned.
+    peer.receive(JSON.stringify({ t: "want", id: 2, k: key }));
+    await until(() => peer.sent.some((frame) => (frame.t === "meta" || frame.t === "none") && frame.id === 2));
+    assert.ok(peer.sent.some((frame) => frame.t === "meta" && frame.id === 2), "the second request is served, not refused");
+    const metrics = fixture.swarm.metrics();
+    assert.equal(metrics.uploadRefusalDiagnostics.counters["rate-limit"] ?? 0, 0);
+    assert.equal(metrics.bytes.uploadsCancelled, 1); assert.equal(metrics.bytes.uploadCancelledBytes, 32);
+  } finally { await fixture.close(); }
+});
+
 test("an oversized next payload is refused and an interrupted reservation is never refunded", async () => {
   const fixture = await linkedFixture({ serve: true, maxUploadBytesPerSession: 48 });
   try {
@@ -689,12 +711,14 @@ test("a peer request is skipped for origin when the time left is below the faste
     assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 1);
     assert.equal(fixture.swarm.metrics().segments.peerSkippedLate, 0, "no completed transfer gives no floor");
     // 2.15 s buffered less the 2 s origin reserve leaves 150 ms; the only
-    // completion took at least 250 ms for this size.
+    // completion took at least 250 ms for this size. The projection from that
+    // completion sends the load to origin before any wait or request.
     fixture.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 12.15 } };
     assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
     const segments = fixture.swarm.metrics().segments;
     assert.deepEqual(requested, ["holder"], "the holder is not asked for a segment it could not deliver in time");
-    assert.equal(segments.peerSkippedLate, 1);
+    assert.equal(segments.peerProjectedLate, 1);
+    assert.equal(segments.peerSkippedLate, 0);
     assert.equal(segments.peerFirstLoaded, 1);
     assert.equal(segments.originLoaded, 1);
   } finally { await fixture.close(); }
@@ -734,7 +758,7 @@ test("peer eligibility distinguishes zero budget with HAVE from positive budget 
     assert.equal(keyCalls, 5, "positive eligibility adds only its existing key computation, not a diagnostic hash");
     assert.deepEqual(trace.records.at(-1), { atMs: trace.records.at(-1).atMs, cc: 0, level: 0,
       budgetMs: 120, reason: "no-have-no-wait", matchingHave: false,
-      budgetGeometry: { source: "buffer", positionSource: "fragment", currentTime: 10, bufferedEnd: 15, playableEnd: 15, fragmentStart: null, originReserveMs: 2000 } });
+      budgetGeometry: { source: "buffer", positionSource: "fragment", currentTime: 10, bufferedEnd: 15, playableEnd: 15, fragmentStart: null, originReserveMs: 2000, uncappedMs: 3000 } });
     assert.equal(trace.counters["no-budget"], 1); assert.equal(trace.counters["no-have-no-wait"], 1);
     assert.equal(commitments, 0); assert.equal(admissions, admissionBaseline);
     assert.equal(deliveries, 2); assert.equal(fixture.connections.length, 1);
@@ -761,7 +785,7 @@ test("peer eligibility geometry captures original getter order and final calcula
     const row = fixture.swarm.metrics().peerEligibilityDiagnostics.records.at(-1);
     assert.equal(row.budgetMs, 500);
     assert.deepEqual(row.budgetGeometry, { source: "buffer", positionSource: "part", currentTime: 10.25,
-      bufferedEnd: 13, playableEnd: 12.75, fragmentStart: 12.75, originReserveMs: 2000 });
+      bufferedEnd: 13, playableEnd: 12.75, fragmentStart: 12.75, originReserveMs: 2000, uncappedMs: 500 });
     assert.equal(row.reason, "no-have-no-wait");
     assert.equal(fixture.swarm.metrics().segments.originFallbacks, 1);
     assert.equal(fixture.swarm.metrics().segments.commitmentRequests, 0);
@@ -778,7 +802,7 @@ test("peer eligibility geometry retains signed finite positions and isolates una
     let row = fixture.swarm.metrics().peerEligibilityDiagnostics.records.at(-1);
     assert.equal(timeReads, 4); assert.equal(startReads, 1); assert.equal(row.budgetMs, 1500);
     assert.deepEqual(row.budgetGeometry, { source: "buffer", positionSource: "fragment", currentTime: -5,
-      bufferedEnd: 0, playableEnd: -1, fragmentStart: -1, originReserveMs: 2000 });
+      bufferedEnd: 0, playableEnd: -1, fragmentStart: -1, originReserveMs: 2000, uncappedMs: 2000 });
     for (const start of [NaN, Infinity, "private-fragment-position"]) {
       timeReads = 0;
       const nonfinite = { ...context, frag: { ...context.frag, start } };
@@ -795,7 +819,7 @@ test("peer eligibility geometry retains signed finite positions and isolates una
     row = fixture.swarm.metrics().peerEligibilityDiagnostics.records.at(-1);
     assert.equal(row.reason, "no-budget"); assert.equal(row.matchingHave, null);
     assert.deepEqual(row.budgetGeometry, { source: "error", positionSource: null, currentTime: null,
-      bufferedEnd: null, playableEnd: null, fragmentStart: null, originReserveMs: null });
+      bufferedEnd: null, playableEnd: null, fragmentStart: null, originReserveMs: null, uncappedMs: null });
     assert.ok(!JSON.stringify(row).includes("private geometry failure"));
   } finally { await fixture.close(); }
 });
@@ -1021,6 +1045,91 @@ test("known 900ms verified delivery keeps enough of a 1500ms deadline when alter
     assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 2);
     assert.equal(fixture.swarm.metrics().segments.originFallbacks, 0);
     assert.equal(known.readyState, "open", "the measured useful link was not closed by a short equal slice");
+  } finally { await fixture.close(); }
+});
+
+test("a holder projected slower than the budget gets a longer wait only while the buffer covers it", async () => {
+  const playback = peerPlaybackOptions(1000), trace = [];
+  const fixture = await linkedFixture(playback.options);
+  try {
+    // 5 s buffered less the 2 s origin reserve leaves 3 s: room to wait.
+    const deep = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 15 } };
+    fixture.hls.media = deep;
+    const first = await fixture.addPeer(new ServingChannel(playback.bytes, 900, trace, "first"));
+    first.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    await fixture.load(); // A 900 ms completion is the evidence.
+    assert.equal(fixture.swarm.metrics().segments.peerWaitExtended, 0, "no evidence, no longer wait");
+    first.receive(JSON.stringify({ t: "have", keys: [] }));
+    const slow = await fixture.addPeer(new ServingChannel(playback.bytes, 1110, trace, "slow"));
+    Object.assign(slow, { ordered: true, maxRetransmits: null, maxPacketLifeTime: null }); // A deadline drains, not closes.
+    slow.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    // 3.05 s buffered leaves 1050 ms: the projection fits, the slow holder does not.
+    fixture.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 13.05 } };
+    let started = performance.now();
+    await fixture.load();
+    const elapsed = performance.now() - started;
+    let segments = fixture.swarm.metrics().segments;
+    assert.deepEqual(trace, ["first", "slow"]);
+    assert.equal(segments.originFallbacks, 1, "the wait never passes the buffer less the origin reserve");
+    assert.ok(elapsed >= 1000 && elapsed < 1100, `fell back at the buffer limit, not later (${Math.round(elapsed)} ms)`);
+    await sleep(150); // The cancelled response drains.
+    fixture.hls.media = deep;
+    started = performance.now();
+    assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+    assert.ok(performance.now() - started > 1000, "delivered after the 1000 ms budget");
+    segments = fixture.swarm.metrics().segments;
+    assert.equal(segments.peerFirstLoaded, 2); assert.equal(segments.originFallbacks, 1);
+    assert.ok(segments.peerWaitExtended >= 1);
+  } finally { await fixture.close(); }
+});
+
+test("a projection that cannot fit the buffer goes to origin before any wait or request", async () => {
+  const playback = peerPlaybackOptions(1500), trace = [];
+  const fixture = await linkedFixture(playback.options);
+  try {
+    const holder = await fixture.addPeer(new ServingChannel(playback.bytes, 600, trace, "holder"));
+    holder.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    await fixture.load();
+    // 2.5 s buffered leaves 500 ms against a 600 ms projection.
+    fixture.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 12.5 } };
+    const started = performance.now();
+    await fixture.load();
+    assert.ok(performance.now() - started < 200, "no budget is spent on a delivery that cannot fit");
+    const metrics = fixture.swarm.metrics();
+    assert.deepEqual(trace, ["holder"]);
+    assert.equal(metrics.segments.peerProjectedLate, 1);
+    const row = metrics.peerEligibilityDiagnostics.records.at(-1);
+    assert.equal(row.reason, "projected-late");
+    // A single-chunk 600 ms completion: its first byte alone overruns 500 ms.
+    assert.equal(row.projection.stage, "entry"); assert.equal(row.projection.holderWaitMs, 0);
+    assert.ok(row.projection.firstByteMs >= 600 && row.projection.roomMs <= 500);
+    assert.deepEqual(Object.keys(row.projection).sort(), ["firstByteMs", "holderWaitMs", "rateBytesPerSecond", "roomMs", "stage", "transferMs"]);
+    assert.equal(metrics.segments.originFallbacks, 1);
+  } finally { await fixture.close(); }
+});
+
+test("a silent holder is abandoned after its silence floor and the load goes to origin early", async () => {
+  const playback = peerPlaybackOptions(1500), trace = [];
+  const fixture = await linkedFixture(playback.options);
+  try {
+    fixture.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 15 } };
+    const fast = await fixture.addPeer(new ServingChannel(playback.bytes, 50, trace, "fast"));
+    fast.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    await fixture.load();
+    fast.receive(JSON.stringify({ t: "have", keys: [] }));
+    const silent = await fixture.addPeer(new ServingChannel(playback.bytes, null, trace, "silent"));
+    Object.assign(silent, { ordered: true, maxRetransmits: null, maxPacketLifeTime: null }); // Reliable: cancel, not close.
+    silent.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    const started = performance.now();
+    await fixture.load();
+    const elapsed = performance.now() - started;
+    // Three 50 ms first bytes is under the 250 ms floor; no rate is known.
+    assert.ok(elapsed >= 240 && elapsed < 1000, `abandoned near 250 ms, not at the 1500 ms budget (${Math.round(elapsed)} ms)`);
+    const metrics = fixture.swarm.metrics();
+    assert.deepEqual(trace, ["fast", "silent"]);
+    assert.equal(metrics.segments.peerAbandoned, 1); assert.equal(metrics.segments.originFallbacks, 1);
+    assert.equal(metrics.peerRequestDiagnostics.records.at(-1).outcome, "abandoned");
+    assert.ok(silent.sent.some((frame) => frame.t === "cancel"), "the holder is asked to stop");
   } finally { await fixture.close(); }
 });
 
@@ -2619,7 +2728,8 @@ test("cold delivery retains deadline time when measured alternatives cannot fit"
     assert.equal(f.fixture.swarm.metrics().segments.peerFirstLoaded, 1);
     assert.equal(f.fixture.swarm.metrics().segments.originFallbacks, 0);
     assert(f.otherPeers.every(peer => !peer.sent.some(frame => frame?.t === "want")), "unfit alternatives are never requested");
-    assert.equal(f.fixture.swarm.metrics().peerRequestDiagnostics.records.at(-1).timeoutMs, 1500);
+    // The clock starts at a fractional real time, so (t0 + 1500) - t0 may round.
+    assert.ok(Math.abs(f.fixture.swarm.metrics().peerRequestDiagnostics.records.at(-1).timeoutMs - 1500) < 1e-6);
   } finally { await f.close(); }
 });
 
