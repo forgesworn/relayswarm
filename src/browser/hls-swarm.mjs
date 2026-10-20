@@ -26,6 +26,7 @@
 // play from the origin for ever, which is the failure that makes peer-assist
 // look useless exactly when an audience is growing.
 
+import { ORIGIN_CLOCK_SAMPLES, originClockOffsetMs, originClockSummary } from "./origin-clock.mjs";
 import { generateSecretKey } from "nostr-tools/pure";
 import { RelayPool, RelaySwarmSession, validTicket } from "../relay-session.mjs";
 import { PeerLink } from "./peer-link.mjs";
@@ -95,6 +96,12 @@ const DEFAULTS = Object.freeze({
 const SAMPLE_LIMIT = 500;
 
 const now = () => performance.now();
+// Wall-clock time of the response's first byte, which is when the origin
+// stamped Date. Using completion time would read low by the download time.
+const firstByteWallMs = (stats) => {
+  const first = stats?.loading?.first;
+  return Date.now() - (Number.isFinite(first) && first > 0 && first <= now() ? now() - first : 0);
+};
 const hex = (buffer) => Array.from(new Uint8Array(buffer), (byte) => byte.toString(16).padStart(2, "0")).join("");
 const utf8 = new TextEncoder();
 
@@ -383,6 +390,7 @@ class HlsSwarm {
     this.firstPeerSegmentAtMs = null;
     this.pairTypes = {};
     this.signallingSamples = [];
+    this.originClockSamples = [];
     this.peerLatencySamples = [];
     this.originLatencySamples = [];
     // Per rendition: origin load times, and the last committed segment size.
@@ -553,6 +561,12 @@ class HlsSwarm {
         samples: this.signallingSamples.length,
         medianMs: percentile(this.signallingSamples, 0.5),
         p90Ms: percentile(this.signallingSamples, 0.9),
+        // Additive metrics-v2 field: local age-window counts, no identities.
+        // Without a session the session fields are null; origin is still reported.
+        clock: {
+          ...(this.session ? this.session.clockDiagnostics() : { aheadRejected: null, staleRejected: null, maxAheadSeconds: null, signalSamples: null, signalAgeMedianSeconds: null }),
+          origin: originClockSummary(this.originClockSamples),
+        },
       },
       segments: {
         originLoaded: c.originLoaded,
@@ -609,6 +623,8 @@ class HlsSwarm {
         signalsSent: c.signalsSent,
         published: this.pool?.published ?? 0,
         rejected: this.pool?.rejected ?? 0,
+        rejectedTimestamp: this.pool?.rejectedTimestamp ?? 0,
+        sinceDropped: this.pool?.sinceDropped ?? 0,
         publishErrors: c.publishErrors,
       },
       errors: { total: c.errors, byStage: { ...this.errorsByStage } },
@@ -670,6 +686,15 @@ class HlsSwarm {
   }
 
   // --- the player side ------------------------------------------------------
+
+  #noteOriginClock(details, receivedMs) {
+    try {
+      const offset = originClockOffsetMs(details, receivedMs);
+      if (offset === null) return;
+      this.originClockSamples.push(offset);
+      if (this.originClockSamples.length > ORIGIN_CLOCK_SAMPLES) this.originClockSamples.shift();
+    } catch {}
+  }
 
   #peerFirstLoader(BaseLoader) {
     const swarm = this;
@@ -739,12 +764,14 @@ class HlsSwarm {
             onTimeout: (...args) => { finishOrigin(); callbacks.onTimeout?.(...args); },
             onAbort: (...args) => { finishOrigin(); callbacks.onAbort?.(...args); },
             onSuccess: (response, stats, ctx, details) => {
+              const receivedMs = firstByteWallMs(stats);
               let copy = null;
               try { if (response.data?.byteLength) copy = response.data.slice(0); } catch {}
               completed = true;
               pushSample(swarm.originLatencySamples, now() - originStarted);
               swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - originStarted);
               callbacks.onSuccess(response, stats, ctx, details);
+              swarm.#noteOriginClock(details, receivedMs);
               if (copy && !swarm.stopped) swarm.#guard("peer-first-origin", async () => {
                 swarm.counters.originLoaded += 1;
                 swarm.counters.bytesFromOrigin += copy.byteLength;
@@ -1253,6 +1280,7 @@ class HlsSwarm {
               }
             : undefined,
           onSuccess: (response, stats, ctx, details) => {
+            const receivedMs = firstByteWallMs(stats);
             // Copy before hls.js sees the buffer: it may transfer it to a worker.
             let copy = null;
             try {
@@ -1262,6 +1290,7 @@ class HlsSwarm {
             } catch {}
             race.originSucceeded = true;
             callbacks.onSuccess(response, stats, ctx, details);
+            swarm.#noteOriginClock(details, receivedMs);
             if (copy) swarm.#guard("origin-loaded", () => swarm.#originLoaded(race, copy));
             else swarm.#guard("origin-empty", () => swarm.#originFailed(race));
           },

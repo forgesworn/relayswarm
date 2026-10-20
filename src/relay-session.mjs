@@ -16,6 +16,8 @@ const MAX_PRESENCE_BYTES = 16 * 1024;
 const MAX_SIGNAL_CIPHERTEXT_BYTES = 64 * 1024;
 const MAX_SIGNAL_PLAINTEXT_BYTES = 8 * 1024;
 const MAX_TICKET_BYTES = 2 * 1024;
+const FUTURE_TOLERANCE_SECONDS = 30;
+const CLOCK_SAMPLE_CAPACITY = 64;
 
 const utf8 = new TextEncoder();
 
@@ -36,6 +38,8 @@ function eventTagValues(event, name) {
     .filter((tag) => Array.isArray(tag) && tag.length >= 2 && tag[0] === name && typeof tag[1] === "string")
     .map((tag) => tag[1]);
 }
+
+const saturating = (value) => Math.min(Number.MAX_SAFE_INTEGER, value);
 
 function uniqueTag(event, name) {
   const values = eventTagValues(event, name);
@@ -93,6 +97,10 @@ export class RelayPool {
     this.retryTimers = new Set();
     this.published = 0;
     this.rejected = 0;
+    // Diagnostics only: relay NOTICE-style timestamp refusals, and events the
+    // `since` filter dropped (what a viewer with a fast clock would not see).
+    this.rejectedTimestamp = 0;
+    this.sinceDropped = 0;
     this.rejectHandlers = new Set();
   }
 
@@ -187,6 +195,9 @@ export class RelayPool {
     }
     if (Array.isArray(frame) && frame[0] === "OK" && frame[2] === false) {
       this.rejected += 1;
+      if (/created_at|timestamp|future|too (old|far|new)/i.test(String(frame[3] || ""))) {
+        this.rejectedTimestamp = Math.min(Number.MAX_SAFE_INTEGER, this.rejectedTimestamp + 1);
+      }
       for (const handler of this.rejectHandlers) {
         try { handler({ id: frame[1], message: String(frame[3] || "") }); } catch {}
       }
@@ -197,6 +208,12 @@ export class RelayPool {
     const filter = this.subscriptions.get(frame[1]);
     // Reject unsolicited/misrouted frames cheaply, before Schnorr work or
     // deduplication. A relay cannot widen a recipient-scoped subscription.
+    try {
+      if (filter && !matchFilter(filter, event) && filter.since && Number.isSafeInteger(event.created_at)
+        && event.created_at < filter.since && matchFilter({ ...filter, since: undefined }, event)) {
+        this.sinceDropped = Math.min(Number.MAX_SAFE_INTEGER, this.sinceDropped + 1);
+      }
+    } catch {}
     try {
       if (!filter || !matchFilter(filter, event) || typeof event.id !== "string" || this.seen.has(event.id) || !verifyEvent(event)) return;
     } catch { return; }
@@ -274,6 +291,27 @@ export class RelaySwarmSession {
     this.started = false;
     this.unsubscribe = null;
     this.subscriptionIds = [];
+    // Local counts only. A peer whose clock is wrong is otherwise invisible:
+    // its events fail the age window and it looks like a NAT or relay fault.
+    this.clock = { aheadRejected: 0, staleRejected: 0, maxAheadSeconds: 0, signalAges: [] };
+  }
+
+  /**
+   * Swarm events rejected by the age window, and the age of validated signals
+   * on arrival. A signal is published just before it is sent, so its age is
+   * relay delay plus the sender's clock offset: a median well above zero
+   * suggests this clock is ahead of peers, well below zero that it is behind.
+   * Stale rejections also include relay history older than the window.
+   */
+  clockDiagnostics() {
+    const ages = [...this.clock.signalAges].sort((a, b) => a - b);
+    return {
+      aheadRejected: this.clock.aheadRejected,
+      staleRejected: this.clock.staleRejected,
+      maxAheadSeconds: this.clock.maxAheadSeconds,
+      signalSamples: ages.length,
+      signalAgeMedianSeconds: ages.length ? ages[Math.floor(ages.length / 2)] : null,
+    };
   }
 
   start() {
@@ -397,9 +435,17 @@ export class RelaySwarmSession {
 
   #receive(event) {
     if (event.pubkey === this.pubkey || (event.kind !== KIND_PRESENCE && event.kind !== KIND_SIGNAL)) return;
-    const now = Math.floor(Date.now() / 1000);
-    if (!Number.isSafeInteger(event.created_at) || event.created_at > now + 30 || event.created_at < now - this.maxEventAgeSeconds) return;
-    if (uniqueTag(event, SWARM_TAG) !== this.swarmId) return;
+    if (!Number.isSafeInteger(event.created_at) || uniqueTag(event, SWARM_TAG) !== this.swarmId) return;
+    const age = Math.floor(Date.now() / 1000) - event.created_at;
+    if (age < -FUTURE_TOLERANCE_SECONDS) {
+      this.clock.aheadRejected = saturating(this.clock.aheadRejected + 1);
+      this.clock.maxAheadSeconds = Math.max(this.clock.maxAheadSeconds, saturating(-age));
+      return;
+    }
+    if (age > this.maxEventAgeSeconds) {
+      this.clock.staleRejected = saturating(this.clock.staleRejected + 1);
+      return;
+    }
     try {
       if (event.kind === KIND_PRESENCE) this.#receivePresence(event);
       else this.#receiveSignal(event);
@@ -435,6 +481,10 @@ export class RelaySwarmSession {
     const payload = parseObject(plaintext);
     if (payload.v !== RELAYSWARM_VERSION || !validToken(payload.type) || !validToken(payload.transport) || !validRequestId(payload.requestId)) return;
     if (!payload.payload || typeof payload.payload !== "object" || Array.isArray(payload.payload)) return;
+    // Presence can be relay history, and anyone can sign a signal to us, so
+    // only live signals that decrypt and validate inform the median age.
+    if (this.clock.signalAges.length >= CLOCK_SAMPLE_CAPACITY) this.clock.signalAges.shift();
+    this.clock.signalAges.push(Math.floor(Date.now() / 1000) - event.created_at);
     this.#dispatch(this.signalHandlers, { from: event.pubkey, event, payload });
   }
 

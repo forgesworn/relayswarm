@@ -4,6 +4,11 @@
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Report swarm events rejected by the age window, and the age of recent live
+  signals, in `signalling.clock`, with an origin `Date` offset estimate
+  (`clock.origin`) and `relays.sinceDropped` / `relays.rejectedTimestamp`
+  counters (additive within metrics version 2). Local counts only;
+  acceptance rules and wire format are unchanged.
 - Set app and waiting-listener HTTP keep-alive to 130 seconds so Caddy's
   default 120-second upstream pool retires them first. The 128-connection cap
   and ten-second request/header deadlines remain. A real 121-second regression

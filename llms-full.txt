@@ -417,6 +417,20 @@ not an identity), `uptimeMs`, `serving`, plus:
   `candidatePairs` (counts keyed `local/remote` candidate type, the NAT
   outcome: `host/host`, `srflx/srflx`, `relay/...`, `unknown`).
 - `signalling`: `samples`, `medianMs`, `p90Ms` from offer sent to channel open.
+  `signalling.clock` holds local age-window counts: `aheadRejected` (swarm
+  events dated more than 30 s ahead), `staleRejected` (older than the 60 s
+  window, including relay history), `maxAheadSeconds`, and `signalSamples` with
+  `signalAgeMedianSeconds` from at most 64 recent live signals that decrypted
+  and validated. A median far from zero suggests this device's clock differs from its peers'; it is relay
+  delay plus skew in whole seconds, not a clock measurement. No identities.
+  `signalling.clock.origin` is `{ samples, offsetSeconds }` from the HTTP `Date`
+  (plus `Age`, when present) of up to 16 recent origin fragment loads, timed
+  at first byte, as origin minus this device; positive means the origin is ahead. It needs a
+  readable `Date`: same-origin, or `Access-Control-Expose-Headers: Date`;
+  otherwise `samples` stays 0 and `offsetSeconds` is null. `Date` has one-second
+  resolution and delay only lowers a sample, so `offsetSeconds` is the largest
+  recent sample, rounded. It is a diagnostic, not a clock correction. Without a
+  session the session fields are null and `origin` is still reported.
 - `segments`: `originLoaded`, `raced`, `noPeers`, `sampledOut`, `skipped`,
   `aborted`, `peerInTime`, `peerLate`, `peerMiss`, `peerCorrupt`,
   `peerUnverified`, `inTimeShare`, `sampledInTimeShare`, `observedInTimeShare`,
@@ -435,7 +449,10 @@ not an identity), `uptimeMs`, `serving`, plus:
 - `peers.deliveryMeasurements`: bounded measurements for active links,
   including completion time, payload rate and failures.
 - `relays`: `connected`, `presenceSent`, `signalsSent`, `published`,
-  `rejected`, `publishErrors`.
+  `rejected`, `rejectedTimestamp` (the `rejected` frames whose message mentions
+  a timestamp), `sinceDropped` (events dropped only by the subscription `since`
+  filter, unverified and so unauthenticated; a device clock ahead of its peers
+  raises it), `publishErrors`.
 - `errors`: `total` and `byStage`.
 - `config`: the effective settings, so a receipt says what produced it.
 
@@ -794,6 +811,11 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 
+- Report swarm events rejected by the age window, and the age of recent live
+  signals, in `signalling.clock`, with an origin `Date` offset estimate
+  (`clock.origin`) and `relays.sinceDropped` / `relays.rejectedTimestamp`
+  counters (additive within metrics version 2). Local counts only;
+  acceptance rules and wire format are unchanged.
 - Set app and waiting-listener HTTP keep-alive to 130 seconds so Caddy's
   default 120-second upstream pool retires them first. The 128-connection cap
   and ten-second request/header deadlines remain. A real 121-second regression
@@ -1558,6 +1580,10 @@ uses a fresh ephemeral key by default; maximum event age defaults to 120 s.
   signed NIP-44-encrypted event addressed to that session key.
 - `waitForPresence(predicate, timeoutMs?)` / `waitForSignal(predicate,
   timeoutMs?)` resolve matching `{ from, event, payload }`; default deadline 15 s.
+- `clockDiagnostics()` returns local counts `{ aheadRejected, staleRejected,
+  maxAheadSeconds, signalSamples, signalAgeMedianSeconds }`: swarm events outside
+  the age window, and arrival age of up to 64 recent signals that decrypted and
+  validated. Acceptance rules are unchanged.
 
 `validTicket(ticket)` validates the opaque ticket's shape/size, not permission,
 signature, identity or expiry. Host admission policy supplies those decisions.

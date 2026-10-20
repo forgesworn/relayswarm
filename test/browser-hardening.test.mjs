@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { generateSecretKey, finalizeEvent, getPublicKey } from "nostr-tools/pure";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
+import { originClockOffsetMs, originClockSummary } from "../src/browser/origin-clock.mjs";
 import { PeerLink } from "../src/browser/peer-link.mjs";
 import { RelayPool, RelaySwarmSession } from "../src/relay-session.mjs";
 import { commitmentContent, KIND_SEGMENT_COMMITMENT, verifySegmentCommitment } from "../src/browser/segment-commitment.mjs";
@@ -2835,4 +2836,91 @@ test("commitment overlap still rejects corrupt peer bytes before the original or
     assert.equal(f.fixture.swarm.metrics().segments.originFallbacks, 1);
     assert.equal(f.callbacks.success, 1);
   } finally { await f.close(); }
+});
+
+test("session counts events rejected by the age window and samples validated signal ages", () => {
+  let deliver;
+  const pool = { onEvent(handler) { deliver = handler; return () => {}; }, subscribe() { return "1"; }, unsubscribe() {}, publish() {} };
+  const session = new RelaySwarmSession({ pool, swarmId: base.swarmId, maxEventAgeSeconds: 60 });
+  const sender = new RelaySwarmSession({ pool, swarmId: base.swarmId });
+  session.start();
+  const now = Math.floor(Date.now() / 1000);
+  const presence = (createdAt, tags = [["x", base.swarmId]]) => finalizeEvent({ kind: 24170, created_at: createdAt, tags, content: "{}" }, sender.secretKey);
+  const signal = sender.sendSignal(session.pubkey, { type: "offer", transport: "webrtc", requestId: "clock-probe", payload: { type: "offer" } });
+  const signalAt = (createdAt) => finalizeEvent({ ...signal, created_at: createdAt }, sender.secretKey);
+  const forged = finalizeEvent({ kind: 24171, created_at: now - 50, tags: [["x", base.swarmId], ["p", session.pubkey]], content: "not ciphertext" }, sender.secretKey);
+  try {
+    assert.deepEqual(session.clockDiagnostics(), { aheadRejected: 0, staleRejected: 0, maxAheadSeconds: 0, signalSamples: 0, signalAgeMedianSeconds: null });
+    deliver(presence(now + 120));
+    deliver(signalAt(now + 45));
+    deliver(presence(now - 300));
+    deliver(presence(now + 120, [["x", "another-swarm-id"]]));
+    deliver(presence(now - 20));
+    deliver(forged);
+    for (const age of [3, 4, 5]) deliver(signalAt(now - age));
+    const clock = session.clockDiagnostics();
+    assert.equal(clock.aheadRejected, 2);
+    assert.equal(clock.staleRejected, 1);
+    assert.ok(clock.maxAheadSeconds >= 119 && clock.maxAheadSeconds <= 120);
+    assert.equal(clock.signalSamples, 3);
+    assert.ok(clock.signalAgeMedianSeconds >= 4 && clock.signalAgeMedianSeconds <= 5);
+    for (let i = 0; i < 70; i++) deliver(signalAt(now - (i % 2)));
+    assert.equal(session.clockDiagnostics().signalSamples, 64);
+  } finally { session.close(); sender.close(); }
+});
+
+test("pool counts since drops only when since alone caused them, and classifies timestamp refusals", async () => {
+  let socket;
+  class Socket extends EventTarget {
+    constructor(url) { super(); this.url = url; socket = this; queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
+    send() {}
+    close() {}
+    receive(id, event) { this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(["EVENT", id, event]) })); }
+    frame(frame) { this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(frame) })); }
+  }
+  const pool = new RelayPool(["wss://relay.example"], { WebSocketImpl: Socket });
+  await pool.connect();
+  try {
+    const now = Math.floor(Date.now() / 1000), me = "a".repeat(64), other = "b".repeat(64);
+    const id = pool.subscribe({ kinds: [24171], "#x": [base.swarmId], "#p": [me], since: now - 60 });
+    const sign = (kind, createdAt, p) => finalizeEvent({ kind, created_at: createdAt, tags: [["x", base.swarmId], ["p", p]], content: "t" }, generateSecretKey());
+    let received = 0; pool.onEvent(() => received++);
+    socket.receive(id, sign(24171, now - 600, me));
+    assert.equal(pool.sinceDropped, 1);
+    socket.receive(id, sign(24170, now - 600, me));
+    socket.receive(id, sign(24171, now - 600, other));
+    socket.receive(id, sign(24171, now, other));
+    assert.equal(pool.sinceDropped, 1, "kind and recipient failures are not since drops");
+    assert.equal(received, 0, "the drop itself is unchanged");
+    socket.receive(id, sign(24171, now, me));
+    assert.equal(received, 1);
+    assert.equal(pool.sinceDropped, 1);
+    socket.frame(["OK", "e1", false, "invalid: created_at too far in the future"]);
+    socket.frame(["OK", "e2", false, "blocked: spam"]);
+    socket.frame(["OK", "e3", false, "invalid: event timestamp too old"]);
+    assert.equal(pool.rejected, 3);
+    assert.equal(pool.rejectedTimestamp, 2);
+  } finally { pool.close(); }
+});
+
+test("origin clock offset reads Date and Age from XHR-like and Response-like details", () => {
+  const at = Date.parse("Wed, 21 Oct 2026 07:28:00 GMT");
+  const xhr = (headers) => ({ getResponseHeader: (name) => headers[name] ?? null });
+  const response = (headers) => ({ headers: new Headers(headers) });
+  assert.equal(originClockOffsetMs(xhr({ Date: "Wed, 21 Oct 2026 07:28:05 GMT" }), at), 5000);
+  assert.equal(originClockOffsetMs(response({ Date: "Wed, 21 Oct 2026 07:27:50 GMT" }), at), -10000);
+  // RFC 850 carries GMT and parses; asctime has no zone and would read as local time.
+  assert.equal(originClockOffsetMs(xhr({ Date: "Wednesday, 21-Oct-26 07:28:05 GMT" }), at), 5000);
+  assert.equal(originClockOffsetMs(xhr({ Date: "Wed Oct 21 07:28:05 2026" }), at), null);
+  assert.equal(originClockOffsetMs(response({ Date: "Wed, 21 Oct 2026 07:28:00 GMT", Age: "7" }), at), 7000);
+  assert.equal(originClockOffsetMs(xhr({ Date: "Wed, 21 Oct 2026 07:28:00 GMT", Age: "-3" }), at), 0);
+  assert.equal(originClockOffsetMs(xhr({ Date: "Wed, 21 Oct 2026 07:28:00 GMT", Age: "soon" }), at), 0);
+  assert.equal(originClockOffsetMs(xhr({}), at), null);
+  assert.equal(originClockOffsetMs(xhr({ Date: "not a date" }), at), null);
+  assert.equal(originClockOffsetMs(null, at), null);
+  assert.equal(originClockOffsetMs({ getResponseHeader() { throw new Error("blocked"); } }, at), null);
+  assert.equal(originClockOffsetMs(xhr({ Date: "Wed, 21 Oct 2026 07:28:00 GMT", Age: "700000" }), at), null);
+  assert.equal(originClockOffsetMs(xhr({ Date: "Wed, 21 Oct 2020 07:28:00 GMT" }), at), null);
+  assert.deepEqual(originClockSummary([]), { samples: 0, offsetSeconds: null });
+  assert.deepEqual(originClockSummary([1200, 4600, -3000]), { samples: 3, offsetSeconds: 5 });
 });

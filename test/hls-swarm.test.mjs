@@ -591,3 +591,30 @@ test("remembered admission refuses both a rejected renewal and revoked current t
     assert.equal(f.swarm.metrics().peers.connected, 0);
   });
 });
+
+test("origin loads populate signalling.clock.origin from the Date header, in both modes", async () => {
+  const date = new Date(Date.now() + 42_000).toUTCString();
+  class DatedLoader extends FakeLoader {
+    load(context, config, callbacks) {
+      const data = new Uint8Array(1024).fill(1).buffer;
+      const details = { getResponseHeader: (name) => name === "Date" ? date : null };
+      callbacks.onSuccess({ url: context.url, data }, this.stats, context, details);
+    }
+  }
+  for (const mode of ["shadow", "peer-first"]) {
+    const relay = await startLocalRelay();
+    const swarm = createHlsSwarm({ swarmId: "swarm-abcdefgh", relays: [relay.url], mode, shadowSampleRate: 1, originFallbackMs: 0, RTCPeerConnectionImpl: FakePeerConnection, segmentKey: (url) => new URL(url).pathname });
+    try {
+      assert.deepEqual(swarm.metrics().signalling.clock.origin, { samples: 0, offsetSeconds: null });
+      if (swarm.metrics().mode !== mode) continue; // peer-first needs signed-stream options; shadow is the end-to-end case
+      const hls = { config: { loader: DatedLoader } };
+      swarm.attach(hls);
+      new hls.config.fLoader({}).load(fragmentContext("https://origin.example/live/seg1.ts"), {}, { onSuccess() {}, onError() {}, onTimeout() {} });
+      const origin = swarm.metrics().signalling.clock.origin;
+      assert.equal(origin.samples, 1);
+      assert.ok(origin.offsetSeconds >= 41 && origin.offsetSeconds <= 42);
+      assert.equal(swarm.metrics().relays.sinceDropped, 0);
+      assert.equal(swarm.metrics().relays.rejectedTimestamp, 0);
+    } finally { swarm.stop(); await relay.close?.(); }
+  }
+});

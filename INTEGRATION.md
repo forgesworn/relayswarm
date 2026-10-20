@@ -153,6 +153,20 @@ not an identity), `uptimeMs`, `serving`, plus:
   `candidatePairs` (counts keyed `local/remote` candidate type, the NAT
   outcome: `host/host`, `srflx/srflx`, `relay/...`, `unknown`).
 - `signalling`: `samples`, `medianMs`, `p90Ms` from offer sent to channel open.
+  `signalling.clock` holds local age-window counts: `aheadRejected` (swarm
+  events dated more than 30 s ahead), `staleRejected` (older than the 60 s
+  window, including relay history), `maxAheadSeconds`, and `signalSamples` with
+  `signalAgeMedianSeconds` from at most 64 recent live signals that decrypted
+  and validated. A median far from zero suggests this device's clock differs from its peers'; it is relay
+  delay plus skew in whole seconds, not a clock measurement. No identities.
+  `signalling.clock.origin` is `{ samples, offsetSeconds }` from the HTTP `Date`
+  (plus `Age`, when present) of up to 16 recent origin fragment loads, timed
+  at first byte, as origin minus this device; positive means the origin is ahead. It needs a
+  readable `Date`: same-origin, or `Access-Control-Expose-Headers: Date`;
+  otherwise `samples` stays 0 and `offsetSeconds` is null. `Date` has one-second
+  resolution and delay only lowers a sample, so `offsetSeconds` is the largest
+  recent sample, rounded. It is a diagnostic, not a clock correction. Without a
+  session the session fields are null and `origin` is still reported.
 - `segments`: `originLoaded`, `raced`, `noPeers`, `sampledOut`, `skipped`,
   `aborted`, `peerInTime`, `peerLate`, `peerMiss`, `peerCorrupt`,
   `peerUnverified`, `inTimeShare`, `sampledInTimeShare`, `observedInTimeShare`,
@@ -171,7 +185,10 @@ not an identity), `uptimeMs`, `serving`, plus:
 - `peers.deliveryMeasurements`: bounded measurements for active links,
   including completion time, payload rate and failures.
 - `relays`: `connected`, `presenceSent`, `signalsSent`, `published`,
-  `rejected`, `publishErrors`.
+  `rejected`, `rejectedTimestamp` (the `rejected` frames whose message mentions
+  a timestamp), `sinceDropped` (events dropped only by the subscription `since`
+  filter, unverified and so unauthenticated; a device clock ahead of its peers
+  raises it), `publishErrors`.
 - `errors`: `total` and `byStage`.
 - `config`: the effective settings, so a receipt says what produced it.
 

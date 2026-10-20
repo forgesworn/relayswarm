@@ -421,6 +421,10 @@ uses a fresh ephemeral key by default; maximum event age defaults to 120 s.
   signed NIP-44-encrypted event addressed to that session key.
 - `waitForPresence(predicate, timeoutMs?)` / `waitForSignal(predicate,
   timeoutMs?)` resolve matching `{ from, event, payload }`; default deadline 15 s.
+- `clockDiagnostics()` returns local counts `{ aheadRejected, staleRejected,
+  maxAheadSeconds, signalSamples, signalAgeMedianSeconds }`: swarm events outside
+  the age window, and arrival age of up to 64 recent signals that decrypted and
+  validated. Acceptance rules are unchanged.
 
 `validTicket(ticket)` validates the opaque ticket's shape/size, not permission,
 signature, identity or expiry. Host admission policy supplies those decisions.
