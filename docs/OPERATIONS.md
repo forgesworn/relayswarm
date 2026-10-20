@@ -2,7 +2,7 @@
 
 [Documentation](README.md) · [Broadcaster](BROADCASTING.md) · [Container deployment](../deploy/README.md) · [API](API.md) · [Evidence](STATUS.md)
 
-These controls belong to the **0.2.0 source candidate** and are absent from v0.1.0 assets. The candidate adds bounded admission, durable reporting and crash supervision; final production acceptance remains open. See [production features](PRODUCTION-FEATURES.md) and [Status](STATUS.md).
+These controls belong to **v0.2.0** and are absent from v0.1.0 assets. It adds bounded admission, durable reporting and crash supervision; final production acceptance remains open. See [production features](PRODUCTION-FEATURES.md) and [Status](STATUS.md).
 
 Before the first broadcast is ready, the root returns an HTTP 200 waiting page with a three-second refresh. Other endpoints return HTTP 503 with `Retry-After: 3`, including the authenticated status route; the waiting listener exposes no session, relay or operator API. The launcher replaces it with the player on the same port when both renditions publish. Waiting-page reachability does not establish fresh media, successful decoding or a verified public deployment.
 
@@ -30,7 +30,7 @@ Unconfigured operator controls return 503; absent/incorrect credentials return 4
 
 The page checks policy and publisher session every two seconds, with at most
 three independent checks pending. Authority expires five seconds after a
-check was issued; response arrival cannot extend it. The source candidate
+check was issued; response arrival cannot extend it. v0.2.0
 advertises `deliveryPolicySession: "inline-v1"` and returns both public snapshots
 in one response from `/delivery-policy.json?session=1`. Older server descriptors
 retain the two parallel requests. Missing or malformed advertised session data
@@ -62,7 +62,7 @@ Publisher metrics include signing/hashing/cache activity, concurrent work and re
 
 ## Diagnosing control-path timeouts
 
-The source candidate adds a numeric `Server-Timing: rs-app;dur=...` header to
+v0.2.0 adds a numeric `Server-Timing: rs-app;dur=...` header to
 session, policy, admission, report and commitment responses. It measures handler
 entry to response headers. It excludes queueing before the handler, network
 transport and response-body receipt. Media responses are not instrumented.

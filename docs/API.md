@@ -3,7 +3,7 @@
 [Documentation](README.md) · [Installation](GETTING-STARTED.md) ·
 [hls.js integration](../INTEGRATION.md)
 
-This describes the current 0.2.0 source candidate. The published v0.1.0
+This describes v0.2.0, the published experimental prerelease. The earlier v0.1.0
 assets do not include the newer production feature work. Package version `0.2.0`,
 session wire version `3`, segment-commitment schemas `1`/`2` and metrics snapshot
 version `2` are different version numbers. Source exports and protocol fields

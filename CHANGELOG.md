@@ -1,8 +1,14 @@
 # RelaySwarm changelog
 
-## Unreleased
+## v0.2.0 (21 October 2026)
 
-The 0.2.0 candidate remains unreleased pending final CI and acceptance.
+Experimental [GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0) adding the supervised
+broadcaster and production feature work to v0.1.0. Field acceptance remains
+open: the fourteen-role qualifier is RED (R65 passed 14 of 16 gates), and the
+sustained, natural-expiry, physical-device, difficult-network, measured-benefit
+and downloaded-release gates have not passed. The pilot runs `5f2ece0`; this
+release also includes the later loader clock-skew diagnostics. See
+[Status](docs/STATUS.md).
 
 - Report swarm events rejected by the age window, and the age of recent live
   signals, in `signalling.clock`, with an origin `Date` offset estimate
@@ -118,9 +124,8 @@ The 0.2.0 candidate remains unreleased pending final CI and acceptance.
 - Made container public code readable and directories traversable when a build
   context uses private modes, while retaining private state permissions.
 
-## 0.2.0 source candidate — broadcaster work on 12 October 2026
+### Earlier 0.2.0 broadcaster work (12 October 2026)
 
-This source work has not yet been published as a release.
 The earlier intermittent hosted MSE failure and physical-device, separate-network,
 sustained-operation and external-platform acceptance remain open.
 

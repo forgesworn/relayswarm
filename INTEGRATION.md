@@ -9,11 +9,11 @@ comes from the origin, and the swarm only measures what peer delivery would
 have achieved. That is the mode to deploy first.
 
 The module is browser ESM with a direct runtime dependency on `nostr-tools`.
-The published [v0.1.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0)
+The published [v0.2.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0)
 supplies an installable tarball and a standalone bundle containing the browser
 runtime dependencies. The host supplies hls.js. The npm registry is unpublished;
 [Getting started](docs/GETTING-STARTED.md) gives exact asset and pinned-Git commands.
-The current 0.2.0 source adds the
+v0.2.0 adds the
 [production feature work](docs/PRODUCTION-FEATURES.md); those additions are
 absent from v0.1.0 assets and retain separate delivery/acceptance gates.
 

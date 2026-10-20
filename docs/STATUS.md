@@ -3,15 +3,28 @@
 [Documentation](README.md) · [Field-test guide](FIELD-TEST.md) ·
 [Changelog](../CHANGELOG.md)
 
-Checkpoint: 19 October 2026. The published experimental release is
-[v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0), which points to
-`3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. The 0.2.0 production feature
-candidate remains on PR 8 pending final checks and release. Later documentation corrections
-on `main` do not change that tag or its immutable downloaded assets.
+Checkpoint: 21 October 2026. The published experimental prerelease is
+[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0), built from `main` after PR 8 merged; field
+acceptance remains open. The earlier
+[v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0) points to
+`3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. Later documentation corrections
+on `main` do not change either tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
 
-Checkpoint: 19 October 2026. The pilot
+Checkpoint: 20 October 2026. The pilot runs
+`5f2ece0bc8e0a78e9a7eca5c56f5ca9141df4669`. All nine required
+[CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39384666332),
+fresh consumption of 284 package members, guarded deployment and its
+independent review passed, followed by reporting lifecycle acceptance (P05) and
+parent-crash recovery (P07 r5). The fourteen-role qualifier is RED from R62 to
+R65: R65 completed its 300-second measurement with 14 of 16 gates, failing
+`each4BothQualityPeer` and `all8ActuallyUploaded`. A one-link probe through the
+pilot's TURN service, with no qualifier load, moved high-quality segments at 3 to
+4 Mbit/s over TLS; UDP relay addresses were no faster and lost more. Run-by-run
+evidence is in [Goals and agent handover](AGENT-GOALS.md).
+
+Previous checkpoint: 19 October 2026. The pilot
 runs `3f706a9bc4a895d17345be26b77006cf13093c46`. All nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39169937465),
 fresh consumption of 280 package members and guarded deployment passed.

@@ -127,11 +127,11 @@ their own integration and distribution work.
 
 ## Does RelaySwarmKit interoperate with this release?
 
-The current 0.2.0 source candidate passes author, delegated-signing and
+v0.2.0 passes author, delegated-signing and
 adversarial transfer journeys with the published RelaySwarmKit v0.5.0 public
 SDK. These are macOS arm64/Chrome loopback checks, not physical iPhone
 acceptance. The earlier version-2 Kit baseline is incompatible with the
-candidate's version-3 signalling. Published RelaySwarm v0.1.0 assets keep their
+release's version-3 signalling. Published RelaySwarm v0.1.0 assets keep their
 original protocol; do not infer compatibility from matching event kinds alone.
 See [the recorded SDK evidence](STATUS.md) and [interop guide](interop/README.md).
 No RelaySwarm NIP is accepted yet.

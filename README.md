@@ -4,26 +4,26 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.1.0 is the published GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0).
-The 0.2.0 source candidate includes further production feature work; its
+**Status:** [v0.2.0 is the published experimental GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0).
+It adds the broadcaster and production feature work to v0.1.0; its
 [delivery requirements](docs/PRODUCTION-READINESS.md) remain open. MIT licensed,
 Node 22.13+; CI uses Node 24. The npm registry is unpublished.
 
 The [current experimental pilot](docs/STATUS.md#current-delivery-checkpoint)
-runs exact `44b21d6`. Nine required CI jobs, fresh 273-member package
+runs exact `5f2ece0`. Its nine required CI jobs, fresh 284-member package
 consumption and guarded HTTPS deployment passed. Bounded rendition-neighbour
 discovery and cold-peer deadline allocation are deployed. Nostr and an authenticated host-supplied account API are
 implemented; integrating websites supply their authentication.
 
 The agreed feature surfaces are implemented, but production acceptance is
-incomplete. The latest fourteen-role trial measured 36.188 seconds before a
-contributor briefly switched to origin-only delivery. Peer-first recovered
-82 ms later; the interruption still fails the unchanged continuity requirement.
-All owned cleanup passed independent review. The pilot uses the explicit
+incomplete. The latest fourteen-role qualifier completed its 300-second
+measurement and passed 14 of 16 gates. It is RED because only one of four
+receivers obtained high-quality peer media and one contributor uploaded nothing
+during measurement; its cleanup passed. The pilot uses the explicit
 900-request address budget; the default remains 600. Matching capacity, two-hour/churn,
 natural expiry, physical/browser breadth, difficult networks, measured wire/cost
-benefit and immutable release/download acceptance remain open. v0.1.0 is the
-published prerelease; 0.2.0 remains the source candidate. See the
+benefit and downloaded-release acceptance remain open. v0.2.0 is published as
+an experimental prerelease. See the
 [P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
 
 [Documentation](docs/README.md) · [Installation](docs/GETTING-STARTED.md) ·
@@ -36,7 +36,7 @@ published prerelease; 0.2.0 remains the source candidate. See the
 Install ffmpeg with libx264 for synthetic media, then:
 
 ```sh
-git clone --branch v0.1.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.2.0 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -58,11 +58,11 @@ See [the field-test guide](docs/FIELD-TEST.md) for the supported HLS subset,
 HTTPS access from separate devices and receipt interpretation. Synthetic
 media requires ffmpeg; serving an existing directory does not.
 
-The current source candidate includes a **broadcaster**: live
+v0.2.0 includes a **broadcaster**: live
 RTMP-to-HLS ingest, persistent publisher identity, cumulative viewer upload
 allowances, measured peer choice and authenticated operator controls.
 Optional RTMPS forwarding can send the source to an external platform
-independently of RelaySwarm delivery. These features are absent from the
+independently of RelaySwarm delivery. These features are in v0.2.0 and absent from the
 immutable v0.1.0 downloads. The [production feature guide](docs/PRODUCTION-FEATURES.md)
 also describes wider media, delegation, admission, durable budgets/reports and
 native fallback. See [broadcasting](docs/BROADCASTING.md),
@@ -74,7 +74,7 @@ The release supplies an installable tarball, a standalone browser ESM bundle
 and SHA-256 checksums:
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.1.0/relayswarm-0.1.0.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/relayswarm-0.2.0.tgz
 ```
 
 ```js
@@ -238,10 +238,10 @@ The canonical public repository is
 [`llms.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms.txt)
 is a short index with direct Markdown links;
 [`llms-full.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms-full.txt)
-is generated from the maintained guides. Published code is pinned at `v0.1.0`;
+is generated from the maintained guides. Published code is pinned at `v0.2.0`;
 documentation on `main` can include later corrections. [Maintaining the docs](docs/MAINTAINING-DOCS.md)
-explains regeneration and publication checks. The release assets remain v0.1.0
-until a new release is actually published. [Changelog](CHANGELOG.md) records
+explains regeneration and publication checks. Release assets are never
+replaced after publication. [Changelog](CHANGELOG.md) records
 release and documentation changes.
 
 [MIT licence](LICENSE).

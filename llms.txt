@@ -3,7 +3,7 @@
 > Experimental peer-assisted HLS video delivery with WebRTC data channels,
 > Nostr relay rendezvous, author-signed segment commitments and an hls.js
 > loader. A separate native Node path uses HyperDHT and Noise. MIT licensed;
-> v0.1.0 is published; source package 0.2.0 remains a production candidate.
+> v0.2.0 is the published experimental prerelease; production acceptance remains open.
 
 The canonical repository is https://github.com/forgesworn/relayswarm. Node 22.13+
 is required; CI uses Node 24. Public distribution includes an installable
@@ -53,7 +53,7 @@ recoverable playlist 503s occurred only with it on. Reliability improvement and
 ordinary public/physical acceptance remain unproved.
 The v0.2.0 supervised broadcast bridge creates two live HLS renditions and
 can forward H.264/AAC separately to RTMPS with explicit TLS verification.
-These additions belong to the current candidate and are absent from v0.1.0 downloads.
+These additions are in v0.2.0 and absent from v0.1.0 downloads.
 The source app and waiting listener use a 130-second HTTP keep-alive timeout
 to outlast Caddy's default 120-second upstream idle pool. Ten-second request
 and header deadlines and 128 connections remain bounded. A real 121-second
@@ -65,28 +65,21 @@ Peer-first media loads/bytes avoided are not net connection-data savings, and
 upload counters measure committed media payload rather than acknowledged delivery.
 Pending durable reservations can consume quota without entering those counters.
 Documentation on main can include corrections after the immutable releases.
-Current deployed source `3f706a9`. Nine required CI jobs, fresh 280-member
+Current deployed source `5f2ece0`. Nine required CI jobs, fresh 284-member
 package consumption and guarded HTTPS deployment passed. The demo selects
 four neighbours; the SDK default stays six. Nostr and an authenticated
 host-supplied account API are implemented. The pilot selects 900 address
 requests per minute; the default remains 600 and global capacity 2,048.
 
 The agreed feature surfaces are implemented, but production acceptance is
-incomplete. R55 stopped during its sixth browser setup with zero measurement;
-independent finite cleanup passed. Earlier R54's both-quality peer gate also
-remains failed. The two-hour run is ineligible. Current durable reporting
-acceptance passes trusted opt-in, duplicate idempotence, same-volume restart
-persistence and natural expiry after 304.105 seconds. Reporting was restored
-to off, with full browser/source cleanup independently reviewed. Client
-conflict and consent checks remain in place. The latest parent-crash test
-passed the strict audit, guarded recovery and server restart, preserving state,
-leases and restart policy. Browser recovery remains RED after playlist502
-retry exhaustion. An unchanged-source browser regression also stalls after a
-35-second503 outage. Corrections are being verified; no post-restart playback
-or extended acceptance window is claimed. Owned browser/source cleanup passed.
+incomplete. On `5f2ece0`, reporting lifecycle acceptance (P05) and parent-crash
+recovery (P07) passed. The fourteen-role qualifier is RED: R65 completed its
+300-second measurement and passed 14 of 16 gates, but only one of four receivers
+obtained high-quality peer media and one contributor uploaded nothing during
+measurement. The two-hour run waits for a matching short qualifier pass.
 Matching capacity, two-hour/churn, natural expiry, physical/browser breadth,
-difficult networks, measured wire/cost benefit and final release/download
-acceptance remain open. v0.1.0 is published; 0.2.0 remains the source candidate.
+difficult networks, measured wire/cost benefit and downloaded-release
+acceptance remain open. v0.2.0 is published as an experimental prerelease.
 See the [P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
 
 ## Documentation
