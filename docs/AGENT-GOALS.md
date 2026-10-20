@@ -864,6 +864,17 @@ Findings for the next agent:
   to UDP relay addresses is not supported. Cleanup proved on both Macs.
   Record: `artifacts/link-throughput-bench-20261020/FINDINGS.md`. Awaiting
   the user's decision.
+- **v0.2.0 published as an experimental GitHub prerelease (21 October,
+  about 00:25 UTC).** The user said "commit push merge ship" and chose a
+  v0.2.0 prerelease. The handover docs and a release-preparation docs commit
+  (`fd046f5`) passed all nine required CI jobs; PR 8 merged as `bf43940`
+  (merge commit, tree identical to `fd046f5`), whose main CI run 39514327948
+  also passed. Annotated tag `v0.2.0` points to `bf43940`. Assets (tarball,
+  standalone bundle, `SHA256SUMS`) were built from a clean archive with the
+  recipe that rebuilds v0.1.0's bundle byte for byte, then downloaded from the
+  public URLs and verified; see [Status](STATUS.md#release-verification).
+  Field gates stay open: the qualifier is RED and the pilot still runs
+  `5f2ece0` without the release's clock-skew diagnostics. No npm publish.
 - **R60 is RED on the same single gate (19 October, 15:34 to 15:40 UTC).**
   Source 46494d5, Till app 124e3bcc unrestarted, 3 roles on M1 and 11 on M4,
   302 s measured, both Macs on the LAN with no VPN carrying the default route.

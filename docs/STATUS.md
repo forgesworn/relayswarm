@@ -1394,8 +1394,37 @@ no 37-item completion is asserted. PR 8 remains open; no new release is publishe
 
 ## Release verification
 
-This section records v0.1.0's release checks; v0.2.0 broadcaster evidence
-appears below.
+### v0.2.0 (21 October 2026)
+
+[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0) is an
+experimental GitHub prerelease of merge commit
+`bf4394031809abb37b6a534d6be86aae3a3c556b` (PR 8), with an annotated `v0.2.0`
+tag. [Main CI run 39514327948](https://github.com/forgesworn/relayswarm/actions/runs/39514327948)
+passed all nine required jobs on that commit (soak skipped). The merged tree is
+identical to PR head `fd046f5`, which passed
+[run 39512633566](https://github.com/forgesworn/relayswarm/actions/runs/39512633566).
+Assets were built from a clean `git archive` of the commit after `npm ci`:
+`npm pack`, and esbuild 0.28.2 with `src/browser/hls-swarm.mjs --bundle
+--format=esm --platform=browser --minify --legal-comments=inline`. The same
+command rebuilds v0.1.0's bundle byte for byte from its tag.
+
+| Asset | SHA-256 |
+|---|---|
+| `relayswarm-0.2.0.tgz` (286 files, 1,394,299 bytes) | `221324ea5e6cb8f9a56ee67c8dc60f9bd91c3ee0f302b7901b93eef046c214b7` |
+| `relayswarm-hls-swarm-0.2.0.mjs` (145,696 bytes) | `376cf5296b298a41e00de85f460ea9141200794036863c979ee7fabe81c06d13` |
+
+After publication, all three assets were downloaded from their public URLs into
+an empty directory and passed `shasum -a 256 -c SHA256SUMS`. Installing the
+tarball by URL into a clean production consumer imported the package; the built
+tarball imported all ten public export paths; and the bundle loaded in headless
+Chrome 155 with `createHlsSwarm` exported and no page errors. These are
+distribution checks on macOS arm64 and close no field gate. The public pilot
+still runs `5f2ece0`; the release's later loader clock-skew diagnostics are not
+deployed.
+
+### v0.1.0
+
+This subsection records v0.1.0's release checks.
 
 [Main CI run 38233694634](https://github.com/forgesworn/relayswarm/actions/runs/38233694634)
 passed seven standard jobs: native suites on three operating systems, shadow and
@@ -1426,9 +1455,9 @@ retain their own dates, topology, code and integrity assumptions.
 
 ## Outstanding gates
 
-The **0.2.0 source broadcaster candidate** includes the additions below.
-These changes are absent from v0.1.0's immutable release assets. Release and
-merged source do not establish production readiness.
+**v0.2.0** includes the additions below. These changes are absent from
+v0.1.0's immutable release assets. Release and merged source do not establish
+production readiness.
 
 ## Previous deployed checkpoint: 2dd on 14 October 2026
 
