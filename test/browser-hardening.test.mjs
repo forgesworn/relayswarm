@@ -3116,14 +3116,6 @@ async function staleHolderFixture(t, { maxPeers = 2, answering = false, sibling 
     }
     assert.equal(outcomes(), target, "the stuck holder produced the deadline outcomes");
   };
-  // The holder announces the demanded key while the viewer waits for it.
-  const ahead = async via => {
-    const segment = next(); via.announce(segment.key); await sleep(30); touch();
-    const waits = counters()["no-have-wait"], pending = load(segment.name);
-    await until(() => counters()["no-have-wait"] === waits + 1, 2_000);
-    holder.receive(haveFrame(segment.key)); await pending; await sleep(5);
-    holder.receive(haveFrame());
-  };
   // The holder holds the demanded key at the decision and then fails to deliver
   // it (its channel never answers); the load ends at origin. Its HAVE is then
   // cleared, as when its announced window moves on.
@@ -3149,7 +3141,7 @@ async function staleHolderFixture(t, { maxPeers = 2, answering = false, sibling 
     await load(segment.name); await sleep(30);
     return rows().filter(row => row.reason === "no-have-wait").at(-1);
   };
-  return { ...f, shift, holderKey, holderChannel: holder, siblingChannel: first, requests, commitments, candidate, next, load, rows, counters, outcomes, discovery, touch, label, miss, ahead, fail, deliver, trigger };
+  return { ...f, shift, holderKey, holderChannel: holder, siblingChannel: first, requests, commitments, candidate, next, load, rows, counters, outcomes, discovery, touch, label, miss, fail, deliver, trigger };
 }
 
 test("a linked holder that is never ahead stops suppressing discovery after four misses over ten seconds", async t => {
@@ -3207,11 +3199,67 @@ test("a holder that is ahead but never delivers goes stale and lets discovery st
   } finally { await f.close(); }
 });
 
-test("an undelivering stale holder is the rotation victim while a non-stale serving holder is protected", async t => {
+test("a stale holder that keeps advertising the demanded key neither keeps discovery off nor stays protected", async t => {
+  // The R68 shape with its HAVE left in place: it holds the last demanded key at the next demand.
+  const f = await staleHolderFixture(t, { serve: { bytes: bytes32, delayMs: null } });
+  try {
+    const via = f.candidate(), label = f.label(f.holderKey);
+    for (let i = 0; i < 3; i++) await f.fail(via, { keepHave: true });
+    assert.equal(f.discovery().heldMiss, 3);
+    // Not yet stale: the HAVE still keeps the context met.
+    assert.equal(f.discovery().checks, 0);
+    await f.fail(via, { keepHave: true });
+    assert.equal(f.discovery().heldMiss, 4);
+    assert.equal(f.discovery().checks, 0, "four held misses in under ten seconds keep discovery off"); assert.equal(via.offers.length, 0);
+    f.shift.ms += 10_001; f.touch();
+    const segment = f.next(); via.announce(segment.key); await sleep(30);
+    const pending = f.load(segment.name);
+    await until(() => via.offers.length === 1);
+    assert.equal(via.offers[0].payload.requestedKey, segment.key);
+    assert.equal(f.discovery().checks, 1); assert.equal(f.discovery().staleHolder, 1);
+    await pending; await sleep(5);
+    const wait = f.rows().filter(row => row.reason === "no-have-wait").at(-1);
+    assert.deepEqual(wait.staleHolders, [label]); assert.deepEqual(wait.haveHolders, [], "it does not hold the new key, only the last one");
+  } finally { await f.close(); }
+});
+
+test("a non-stale holder that advertises a demanded key still keeps discovery off", async t => {
+  const f = await staleHolderFixture(t, { serve: { bytes: bytes32, delayMs: null } });
+  try {
+    const via = f.candidate();
+    // Three held misses over more than ten seconds are not four.
+    for (let i = 0; i < 3; i++) await f.fail(via, { keepHave: true });
+    f.shift.ms += 10_001; f.touch();
+    const segment = f.next(); via.announce(segment.key); await sleep(30);
+    await f.load(segment.name); await sleep(30);
+    assert.equal(f.discovery().checks, 0); assert.equal(via.offers.length, 0);
+  } finally { await f.close(); }
+});
+
+test("a verified peer segment that arrives after the deadline goes to origin and charges the holders that held the key", async t => {
+  const realNow = performance.now.bind(performance), jump = { ms: 0 };
+  t.mock.method(performance, "now", () => realNow() + jump.ms);
+  const f = await staleHolderFixture(t, { originFallbackMs: 1000, serve: { bytes: bytes32, delayMs: 60 } });
+  try {
+    const via = f.candidate(), label = f.label(f.holderKey);
+    const segment = f.next(); via.announce(segment.key); await sleep(30); f.touch();
+    f.holderChannel.receive(haveFrame(segment.key));
+    const pending = f.load(segment.name);
+    // The clock passes the deadline while the payload is on its way; the payload still verifies.
+    await until(() => f.requests.length === 1); jump.ms = 5_000;
+    await pending; await sleep(5);
+    const metrics = f.swarm.metrics();
+    assert.equal(metrics.segments.peerFirstLoaded, 0, "a late segment is not used"); assert.equal(metrics.segments.originFallbacks, 1);
+    assert.equal(f.discovery().heldMiss, 1);
+    assert.deepEqual(f.rows().filter(row => row.heldMissHolders?.length).map(row => row.heldMissHolders), [[label]]);
+  } finally { await f.close(); }
+});
+
+test("an undelivering stale holder that still advertises a key is the rotation victim while a non-stale serving holder is protected", async t => {
   const f = await staleHolderFixture(t, { sibling: true, serve: { bytes: bytes32, delayMs: null } });
   try {
     const via = f.candidate();
-    for (let i = 0; i < 4; i++) await f.fail(via);
+    for (let i = 0; i < 4; i++) await f.fail(via, { keepHave: true });
     assert.equal(f.discovery().heldMiss, 4);
     f.shift.ms += 10_001; f.touch(); f.siblingChannel.receive(serving("audio:0"));
     // The candidate still hints the last demanded key.

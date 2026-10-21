@@ -404,8 +404,8 @@ context, only from loads that reached the HAVE check (zero-budget,
 aborted-before-eligibility and no-longer-eligible loads neither count nor
 reset). A load that is aborted by the caller (an hls.js abort) or by `stop()`, an
 unavailable, rejected or expired commitment, and an integrity failure (the link
-is banned and closed) do not count, and nor does a segment that arrives after
-the deadline. A link's history is dropped only when a verified segment from that
+is banned and closed) do not count. A segment that arrives after the deadline
+goes to origin and is a to-origin outcome like the others. A link's history is dropped only when a verified segment from that
 link reaches this viewer's loader in time, when the link closes, when the
 rendition changes, or when the context sees no demand for 30 seconds. A stale
 link is still asked for any segment it does hold.
@@ -422,8 +422,10 @@ candidate hinted a demanded key for such a context but a bound (spent allowance,
 no room or victim, no outgoing slot, an attempt in flight) began no attempt;
 `heldMiss` counts one per link and demanded key for a held miss. All are local
 counts in the local snapshot, are not added to the numeric operator report, and
-do not show that delivery improved. A link whose HAVE still holds a key this
-context demands keeps meeting the context, as before, even when it is stale.
+do not show that delivery improved. A stale link's HAVE does not count: a link
+that still advertises a demanded key but is stale for that context neither keeps
+the context met nor is protected as a useful neighbour. A link that is not stale
+still counts through its HAVE, as before.
 
 Discovery retains at most two requested keys for each selected `main` and
 `audio` context, 64 candidate hints of at most eight hashes, and one opportunity

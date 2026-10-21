@@ -815,6 +815,7 @@ class HlsSwarm {
         } };
         swarm.#peerFirst(context, controller.signal, plan, budgetMs, budgetGeometry).then((result) => {
           if (this.active !== token || controller.signal.aborted || swarm.stopped) return;
+          if (result && now() >= plan.deadline) swarm.#recordOutcome(result.demand);
           if (!result || now() >= plan.deadline) return fallback();
           this.active = null;
           this.pendingCallbacks = null;
@@ -1269,7 +1270,11 @@ class HlsSwarm {
         continue;
       }
       const digest = await sha256Hex(bytes);
-      if (signal.aborted || this.stopped) return null;
+      if (signal.aborted || this.stopped) {
+        // The whole payload arrived but the origin timer's deadline had passed: a to-origin outcome.
+        if (!this.stopped && plan.expired) this.#recordOutcome(demand);
+        return null;
+      }
       if (bytes.byteLength !== commitment.size || digest !== commitment.sha256) {
         this.peerSelection.record(link, now() - requestedAt);
         this.counters.peerCorrupt += 1;
@@ -1280,7 +1285,7 @@ class HlsSwarm {
       if (commitment.expiresAt <= Math.floor(Date.now() / 1000)) return null;
       this.peerSelection.record(link, now() - requestedAt, bytes.byteLength);
       if (coordinated) this.counters.coordinatedPeerLoads += 1;
-      return { key, bytes, discoveryContext, holderContext, pubkey: link.pubkey };
+      return { key, bytes, discoveryContext, holderContext, pubkey: link.pubkey, demand };
     }
     // The deadline passed or every holder tried failed. The origin timer's abort
     // (plan.expired) is the deadline; a caller abort or stop is neutral.
@@ -1760,8 +1765,9 @@ class HlsSwarm {
   #unmetDiscovery(context) {
     // A serving link that has repeatedly lacked this viewer's segments at the
     // deadline no longer meets the context, unless it holds a demanded key.
-    return ![...this.links.values()].some(link => this.#servesRendition(link, context.rendition) && !this.discovery.stale(context, link.pubkey)
-      || context.keys.some(key => link.have.has(key)));
+    // A stale link's HAVE does not count either: it may still advertise a key it never delivers.
+    return ![...this.links.values()].some(link => !this.discovery.stale(context, link.pubkey)
+      && (this.#servesRendition(link, context.rendition) || context.keys.some(key => link.have.has(key))));
   }
 
   // At least one link serves this context's rendition and every one is stale.
@@ -1788,7 +1794,7 @@ class HlsSwarm {
     // Preserve a useful sibling audio/video neighbour as well as the target.
     const contexts = [...this.discovery.contexts.values()].filter(value => Date.now() - value.activityAt < 30_000);
     return rotationCandidate([...this.links.values()].filter(link => !contexts.some(value =>
-      this.#servesRendition(link, value.rendition) && !this.discovery.stale(value, link.pubkey) || value.keys.some(key => link.have.has(key)))), { ...this.options, banned: this.banned });
+      !this.discovery.stale(value, link.pubkey) && (this.#servesRendition(link, value.rendition) || value.keys.some(key => link.have.has(key))))), { ...this.options, banned: this.banned });
   }
 
   #endDiscovery(window = this.discovery.window, closePending = true) {
