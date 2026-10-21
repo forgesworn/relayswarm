@@ -5,7 +5,7 @@
 
 The demo is a runnable publisher and an hls.js player with origin-only,
 shadow and authenticated peer-first modes. Uploading starts **off**. Receipts
-are downloaded locally. Reporting is disabled by default; v0.2.0
+are downloaded locally. Reporting is disabled by default; v0.2.1
 can offer explicitly opted-in numeric reports and authenticated
 operator controls. See [operations](OPERATIONS.md). The publisher's signing
 key stays on the server. v0.1.0 release assets retain their original behaviour.

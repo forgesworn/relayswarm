@@ -1,0 +1,267 @@
+{
+  "v": 1,
+  "checkpointDate": "2026-10-21",
+  "sourceSha": "140c2566e5d7fc90c59216fdf256e6d73dbb1a71",
+  "branch": "fix/holder-discovery",
+  "pr": 9,
+  "productionComplete": false,
+  "scope": "Source, CI, consumption, deployment, P05, P07 and a short fourteen-role qualifier pass on this source. The sustained 7,200 s run (Item 5) and the P06 3 MB both-quality shared-cap lifecycle are RED and open. Desktop installed-browser journeys are macOS arm64 desktop scope only. v0.2.1 is the experimental prerelease of this source after PR 9 merges, released by owner decision while Item 5, P06 and Safari 17.6 are RED and open.",
+  "code": {
+    "commits": [
+      "368b860 feat: add local holder labels to peer diagnostics",
+      "140c256 fix: stop a never-ahead holder suppressing neighbour discovery"
+    ],
+    "docsCommits": [
+      "0bf88cc",
+      "c4aa050"
+    ]
+  },
+  "configuration": {
+    "iceTransportPolicy": "relay",
+    "turnUrlProjection": "tls-tcp",
+    "reporting": false,
+    "forwarding": false,
+    "servedClient": {
+      "bytes": 787462,
+      "sha256": "9bab513340b4dfd47bffda04d0edd7ee0669b781d17ab5fa1cec594df3c36fb3"
+    }
+  },
+  "release": {
+    "published": "v0.2.0",
+    "preparedVersion": "v0.2.1",
+    "merged": false,
+    "tagged": false,
+    "npmPublished": false
+  },
+  "ci": {
+    "run": 39529800310,
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/39529800310",
+    "requiredJobsPassed": 9,
+    "note": "Attempt 2 reran only the hls.js playback job after the runner's Chrome install hit an apt 403 before any test step."
+  },
+  "consumer": {
+    "verdict": "PASS",
+    "packageMembers": 286,
+    "scope": "Exact committed source, not downloaded release assets"
+  },
+  "deployed": {
+    "appStartedUTCAfterP07": "2026-10-21T02:59:29Z",
+    "appIdPrefix": "38eb5c2d",
+    "runtimeContractSha256Prefix": "565253011870",
+    "independentDeploymentReview": "PASS",
+    "reporting": false,
+    "forwarding": false
+  },
+  "reporting": {
+    "verdict": "PASS",
+    "naturalExpiryMs": 303923
+  },
+  "parentCrash": {
+    "verdict": "PASS",
+    "independentNativeReview": "PASS"
+  },
+  "shortQualifier": {
+    "run": "R66",
+    "verdict": "GREEN",
+    "gates": "16 of 16",
+    "measurementElapsedMs": 302823,
+    "includesGates": [
+      "each4BothQualityPeer",
+      "all8ActuallyUploaded"
+    ],
+    "firstGreenFourteenRoleQualifier": true,
+    "contributorRateBytesPerSecond": 1250000,
+    "scope": "Three roles on one Mac, eleven on another, relay-only TURN over TLS/TCP, no VPN tunnel carrying the default route; not a sustained, device or separate-network result."
+  },
+  "matchedWireAndCost": {
+    "scope": "R66 302 s window with two origin-only baseline roles",
+    "receiverOriginTrafficPercentLessThanBaseline": 31.5,
+    "receiverOriginMB": 185.9,
+    "baselineOriginMB": 271.2,
+    "modelErrorPercent": 4,
+    "originServedMBLessThanAllOrigin": 226,
+    "turnHostEgressMB": 319,
+    "turnHostEgressRangeMB": [
+      280,
+      365
+    ],
+    "turnHostIngressMB": 323,
+    "totalEgressAcrossBothHostsRoseMBApprox": [
+      85,
+      100
+    ],
+    "marginalCost": "Not determined: the hosts' plan terms are not recorded.",
+    "notSeparable": "Nostr signalling bytes",
+    "note": "TURN runs on a separate host from the origin. The correction in HOST-CHECK.json governs over the worker report's headline."
+  },
+  "sustained": {
+    "item": 5,
+    "verdict": "RED",
+    "open": true,
+    "completed7200s": false,
+    "runs": {
+      "R37": "RED at the first churn event on a harness assertion about retained renewals; the check was fixed for R38",
+      "R38": "RED after 640,110 ms of measurement; the first failure is a harness race: rejoin() read the page 7 ms after clicking Start, before the page applied its settings (diagnosis confidence high)"
+    },
+    "productEvidence": "None either way for the rejoin itself.",
+    "userDecision": "Record RED and open, and move on."
+  },
+  "p06": {
+    "verdict": "RED_HIGH_QUALITY_NO_VERIFIED_COMPLETION_BEFORE_SHARED_CAP_REFUSAL",
+    "open": true,
+    "contributorRateBytesPerSecond": 1250000,
+    "lowVerifiedPeerMedia": {
+      "bytes": 216952,
+      "atMs": 9750
+    },
+    "acceptedHighReservationsBytes": [
+      659128,
+      673604,
+      659692
+    ],
+    "refusedHighReservationBytes": 661948,
+    "chargedBeforeRefusalBytes": 2625232,
+    "capBytes": 3000000,
+    "classification": "Design limitation under relay throughput (about 255 KB/s on the best link), one high-quality holder and a 3 MB cap, with the shared allowance behaving as documented. Not recorded as a product defect.",
+    "userDecision": "Record RED and open; no re-run on this source.",
+    "sourceCleanupReview": "PASS",
+    "deadSummaryFields": "videoQualities, verifiedPeerQualities, zeroFrameIntervals and contributionWithdrawn do not update in that harness and are not cited."
+  },
+  "desktopBrowsers": {
+    "scope": "macOS arm64 desktop; one dedicated 1,800 s finite source; three owned Chrome 155 actors on M4 per browser; relay-only TURN over TLS/TCP. Not physical devices, hard NAT or a separate network.",
+    "firefox152_0_6_onM1": {
+      "verdict": "PASS",
+      "checkpoints": "six of six",
+      "verifiedPeerBytesAtReceiveCheckpoint": 663828,
+      "uploadedBytes": 413600
+    },
+    "safari26_6_2_onM4": {
+      "verdict": "PASS",
+      "checkpoints": "six of six",
+      "verifiedPeerBytesAtReceiveCheckpoint": 667212,
+      "uploadedBytes": 213004,
+      "note": "First Safari pass."
+    },
+    "safari17_6_onM1": {
+      "verdict": "RED",
+      "observation": "No verified peer download within 45 s and no selected ICE candidate pair recorded; cause not determined; not retried."
+    },
+    "sourceCleanupReview": "PASS (finite-source cleanup prerequisite only; it does not judge the journey outcomes)"
+  },
+  "remaining": [
+    "Item 5: 7,200 s run with 22 churn events and natural TURN expiry and renewal (RED, open)",
+    "P06: 3 MB both-quality shared-cap lifecycle (RED, open)",
+    "Safari 17.6 desktop (RED, cause not determined)",
+    "Marginal cost on the hosts' plans (not determined)",
+    "Physical iPhone (unavailable), physical Android, device Safari and Firefox (need the owner)",
+    "Hard NAT and a separate network (need another network)",
+    "Version choice, merge, tag and release (none done); npm publish is out of scope"
+  ],
+  "evidence": [
+    {
+      "path": "artifacts/cycle-140c256-record-20261021.json",
+      "bytes": 3681,
+      "sha256": "d55dc881629472e26ad4757b16fcef4ddb1cf34b3f7c099b0ed24b4cb30bf0c5"
+    },
+    {
+      "path": "artifacts/ci-140c256-39529800310-20261021/ci-terminal-success.json",
+      "bytes": 22062,
+      "sha256": "d3918161e4467a9e030f85e4571a8c8250b9fd7d78d86172458f06b978d3711e"
+    },
+    {
+      "path": "artifacts/clean-consumer-140c256-20261021/package-review.json",
+      "bytes": 3593,
+      "sha256": "86b4df9b872f97f3da096ef0624b75a60c35031165d477030997be300dae26b8"
+    },
+    {
+      "path": "artifacts/deployment-140c256-holder-discovery-r2-20261021/runtime-contract.json",
+      "bytes": 12284,
+      "sha256": "c5cef48e5af90362b31ece47266bd027c11bb41dbedfdadf417282294bba3fb7"
+    },
+    {
+      "path": "artifacts/independent-deployment-140c256-review-20261021/review.json",
+      "bytes": 22490,
+      "sha256": "f9ba684e53a9d8497a2fa50bc1052aa17499e01f9261b30567072c019f8334e9"
+    },
+    {
+      "path": "artifacts/independent-p05-140c256-positive-own-review-20261021/review.json",
+      "bytes": 8342,
+      "sha256": "06d33662cd00ddc5b482490271c994f0b4e2d8bff3633f716fbd4241d7fe252f"
+    },
+    {
+      "path": "artifacts/independent-p07-140c256-positive-native-review-20261021/review.json",
+      "bytes": 7679,
+      "sha256": "96dbda2f7a634bb0ad3627057f80963ddf15073e43f65f61a2802efeec33a8e8"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-140c256-r66-data-preparation-20261021/attested-runtime-contract.json",
+      "bytes": 12284,
+      "sha256": "565253011870d39252f8ec33ced318eb6bbbfcd3b515bef52e02b3121694513d"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-140c256-r66-result-20261021.json",
+      "bytes": 8056,
+      "sha256": "a8b766313246fc66f5dd3f2875d96c2fe3c659404e096a03bd6fc146c725238c"
+    },
+    {
+      "path": "artifacts/r66-wire-cost-20261021/HOST-CHECK.json",
+      "bytes": 2292,
+      "sha256": "1b215d9cfaa5d364cfdb8922b6b1973b81454154811a882a939c113e9eb3dff0"
+    },
+    {
+      "path": "artifacts/distributed-long-three-eleven-140c256-r37-result-20261021.json",
+      "bytes": 3530,
+      "sha256": "9f169a736b951f5d473137628b4ef1c3d0bd3bcbf11c4ff8cb277f6fe0bd2f0e"
+    },
+    {
+      "path": "artifacts/distributed-long-three-eleven-140c256-r38-result-20261021.json",
+      "bytes": 2988,
+      "sha256": "9a98ce3637b89156968cff259359a5d2a1bf1faedd404891d8b2581a9f7fb29f"
+    },
+    {
+      "path": "artifacts/distributed-long-three-eleven-140c256-r38-result-addendum-20261021.json",
+      "bytes": 1941,
+      "sha256": "77e2d2ce9c271c40f0faaadf0b79c58112129be7bd194799fad690c85916ca13"
+    },
+    {
+      "path": "artifacts/p06-140c256-result-20261021.json",
+      "bytes": 3734,
+      "sha256": "8e729592b59be6f0318a262742b9ef196ac42959b49dc7f0630a5b6956afeded"
+    },
+    {
+      "path": "artifacts/p06-140c256-result-addendum-20261021.json",
+      "bytes": 2022,
+      "sha256": "1c8d07108764a3d8080d62950ab0ec1407a911cad1b821ea0c3e43c4ebb7eef7"
+    },
+    {
+      "path": "artifacts/p06-140c256-result-addendum-2-20261021.json",
+      "bytes": 2725,
+      "sha256": "ee9d7c84e0d220874824ee6068578376105953cb4681fbd2e324c27fb215ef0a"
+    },
+    {
+      "path": "artifacts/p06-140c256-red-diagnosis-20261021/DIAGNOSIS.md",
+      "bytes": 11349,
+      "sha256": "24d7ebdeaa85e79b9305324103dda2cd9117dc09a4b4b43607245c386fe87cb3"
+    },
+    {
+      "path": "artifacts/p06-140c256-user-decision-20261021.json",
+      "bytes": 924,
+      "sha256": "d52b0f55aff5545fc5efc3dbe2b599087868d9868f8984f13ac4d6671f068711"
+    },
+    {
+      "path": "artifacts/independent-p06-140c256-source-cleanup-review-20261021/review.json",
+      "bytes": 14803,
+      "sha256": "fca18858e952324c5c15b3f218358521e1f206e6a471f0db93a0a15375b4ea8f"
+    },
+    {
+      "path": "artifacts/desktop-journeys-140c256-result-20261021.json",
+      "bytes": 7914,
+      "sha256": "98ec69e97e1ac100d8b5674cff200003926dd8759ad8836526bc4d3f229dd2fc"
+    },
+    {
+      "path": "artifacts/independent-desktop-140c256-source-cleanup-review-20261021/review.json",
+      "bytes": 15649,
+      "sha256": "8dd3047a27f61d4f0abb65f774e216700ad94acdd077b3277de77d56058d159d"
+    }
+  ]
+}

@@ -292,6 +292,10 @@ class HlsSwarm {
     this.peerEligibilityRecords = [];
     this.peerEligibilityDropped = 0;
     this.peerEligibilityCounters = Object.fromEntries(PEER_ELIGIBILITY_REASONS.map((reason) => [reason, 0]));
+    // Session-local holder labels for local diagnostics only: small counters in
+    // first-link order, never derived from a key and never sent to any peer.
+    this.holderLabels = new Map();
+    this.holderLabelNext = 1;
     this.peerRequestRecords = [];
     this.peerRequestDropped = 0;
     this.peerRequestCounters = Object.fromEntries(PEER_REQUEST_OUTCOMES.map((outcome) => [outcome, 0]));
@@ -528,7 +532,7 @@ class HlsSwarm {
         banned: this.banned.size,
         firstLinkAtMs: this.firstLinkAtMs,
         candidatePairs: { ...this.pairTypes },
-        deliveryMeasurements: [...this.links.values()].map((link) => ({ pubkey: link.pubkey, ...this.peerSelection.summary(link) })),
+        deliveryMeasurements: [...this.links.values()].map((link) => ({ pubkey: link.pubkey, holder: this.#holderLabel(link.pubkey), ...this.peerSelection.summary(link) })),
       },
       // IDs are per swarm instance; 0 means no PC allocated/correlated. Signal
       // send records local acceptance, not relay delivery or remote receipt.
@@ -545,7 +549,10 @@ class HlsSwarm {
         capacity: 64,
         dropped: this.peerEligibilityDropped,
         counters: { ...this.peerEligibilityCounters },
-        records: this.peerEligibilityRecords.map((record) => ({ ...record, budgetGeometry: { ...record.budgetGeometry }, ...(record.projection ? { projection: { ...record.projection } } : {}) })),
+        records: this.peerEligibilityRecords.map((record) => ({ ...record, budgetGeometry: { ...record.budgetGeometry },
+          ...("holders" in record ? { holders: record.holders && [...record.holders], haveHolders: record.haveHolders && [...record.haveHolders],
+            staleHolders: record.staleHolders && [...record.staleHolders] } : {}),
+          ...(record.projection ? { projection: { ...record.projection } } : {}) })),
       },
       peerRequestDiagnostics: {
         capacity: 64,
@@ -788,18 +795,21 @@ class HlsSwarm {
           swarm.#peerEligibility(context, budgetMs, "no-budget", null, budgetGeometry);
           return fallback();
         }
-        timer = setTimeout(fallback, budgetMs);
+        // Both timer arms mark the plan as deadline-driven before falling back,
+        // so a wait ended by the deadline differs from a caller abort or stop.
+        const atDeadline = () => { plan.expired = true; fallback(); };
+        timer = setTimeout(atDeadline, budgetMs);
         swarm.lifecycle.signal.addEventListener("abort", fallback, { once: true });
         // The wait may grow from budgetMs up to the buffer-safe limit, never
         // past the buffered playback less the origin reserve.
         const ceiling = Math.max(swarm.options.originFallbackMs, swarm.options.maxPeerWaitMs);
         const limitMs = Math.max(budgetMs, Math.min(ceiling, budgetGeometry.uncappedMs ?? budgetMs));
-        const plan = { deadline: t0 + budgetMs, limit: t0 + limitMs, extend: (to) => {
+        const plan = { deadline: t0 + budgetMs, limit: t0 + limitMs, expired: false, extend: (to) => {
           const target = Math.min(plan.limit, to);
           if (this.active !== token || target <= plan.deadline) return false;
           plan.deadline = target;
           clearTimeout(timer);
-          timer = setTimeout(fallback, Math.max(0, target - now()));
+          timer = setTimeout(atDeadline, Math.max(0, target - now()));
           return true;
         } };
         swarm.#peerFirst(context, controller.signal, plan, budgetMs, budgetGeometry).then((result) => {
@@ -939,7 +949,62 @@ class HlsSwarm {
     return sha256Hex(utf8.encode(`${this.options.swarmId}\n${raw}${range}`));
   }
 
-  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry, projection) {
+  // A holder label is a local counter, not a key. It is assigned when a remote
+  // peer first becomes a link and kept across PC replacement, in a bounded map.
+  #assignHolderLabel(pubkey) {
+    if (this.holderLabels.has(pubkey)) return;
+    this.holderLabels.set(pubkey, this.holderLabelNext++);
+    if (this.holderLabels.size <= 64) return;
+    // Evict the oldest label of a peer that is not linked now, so a live link
+    // keeps its label. If every entry is linked, evict the oldest regardless.
+    const evicted = [...this.holderLabels.keys()].find((held) => !this.links.has(held)) ?? this.holderLabels.keys().next().value;
+    this.holderLabels.delete(evicted);
+  }
+
+  #holderLabel(pubkey) { return this.holderLabels.get(pubkey) ?? 0; }
+
+  // Labels for a diagnostic row: serving links, links holding the key, and the
+  // serving links that are stale. Reads only; no decision depends on it.
+  #holderDiagnostics({ key, rendition, context }) {
+    const small = (labels) => labels.sort((a, b) => a - b).slice(0, 8);
+    const holders = [], haveHolders = [], staleHolders = [];
+    for (const link of this.links.values()) {
+      const label = this.#holderLabel(link.pubkey);
+      if (this.#servesRendition(link, rendition)) {
+        holders.push(label);
+        if (this.discovery.stale(context, link.pubkey)) staleHolders.push(label);
+      }
+      if (link.have.has(key)) haveHolders.push(label);
+    }
+    return { holders: small(holders), haveHolders: small(haveHolders), staleHolders: small(staleHolders) };
+  }
+
+  // One decision per load that reached the HAVE check. A serving link whose HAVE
+  // holds the demanded key is ahead (its miss history is dropped); one that
+  // lacks it at a miss decision gains a miss. Zero-budget, aborted and
+  // no-longer-eligible loads never reach here. Advisory: nothing waits on it.
+  #noteHolders({ key, rendition, context }, outcome) {
+    if (!context) return;
+    try {
+      for (const link of this.links.values()) {
+        if (!this.#servesRendition(link, rendition)) continue;
+        if (outcome === "ahead") { if (link.have.has(key)) this.discovery.holderAhead(context, link.pubkey); }
+        else if (!link.have.has(key)) this.discovery.holderMiss(context, link.pubkey, key);
+      }
+    } catch {}
+  }
+
+  // The demand-time seek began no attempt although the context is unmet only
+  // because its serving links are stale and a fresh eligible candidate hints a
+  // demanded key: a bound (spent allowance, no room or victim, no outgoing
+  // slot, an attempt in flight) held it back, rather than a lack of candidates.
+  #noteStaleBlocked(context, checksBefore) {
+    if (this.stopped || this.options.mode !== "peer-first" || this.discovery.counters.checks !== checksBefore) return;
+    if (!this.discovery.current(context) || !this.#unmetDiscovery(context) || !this.#onlyStaleServing(context)) return;
+    if (this.discovery.hinted(context, (candidate) => this.#discoveryEligible(candidate))) this.discovery.counters.staleBlocked++;
+  }
+
+  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry, projection, demand) {
     // Observe only decisions already made. In particular a zero budget must
     // not hash a key or inspect HAVE merely to fill this local diagnostic.
     try {
@@ -953,6 +1018,11 @@ class HlsSwarm {
         cc, level, budgetMs: Number.isFinite(budgetMs) && budgetMs >= 0 ? budgetMs : null,
         reason, matchingHave: typeof matchingHave === "boolean" ? matchingHave : null, budgetGeometry: { ...budgetGeometry } };
       if (projection) record.projection = { ...projection };
+      // Only decisions that already computed the key and inspected links.
+      if (demand) {
+        try { Object.assign(record, this.#holderDiagnostics(demand)); }
+        catch { Object.assign(record, { holders: null, haveHolders: null, staleHolders: null }); }
+      }
       this.peerEligibilityCounters[reason] = increment(this.peerEligibilityCounters[reason]);
       if (this.peerEligibilityRecords.length === 64) {
         this.peerEligibilityRecords.shift();
@@ -1029,13 +1099,19 @@ class HlsSwarm {
       return null;
     }
     const rendition = this.#renditionContext(context);
-    if (discoveryContext?.rendition === rendition && this.discovery.contexts.get(discoveryContext.mediaType) === discoveryContext) {
+    const holderContext = discoveryContext?.rendition === rendition && this.discovery.contexts.get(discoveryContext.mediaType) === discoveryContext
+      ? discoveryContext : null;
+    if (holderContext) {
       this.discovery.demand(discoveryContext.mediaType, rendition, key);
+      const checks = this.discovery.counters.checks;
       this.#seekNeighbours();
+      try { this.#noteStaleBlocked(holderContext, checks); } catch {}
     }
+    // What the diagnostic rows and the holder bookkeeping below refer to.
+    const demand = { key, rendition, context: holderContext };
     const coordinated = ![...this.links.values()].some((peer) => peer.have.has(key));
     if (coordinated && !this.#shouldWaitForOrigin(key, rendition)) {
-      this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry);
+      this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry, undefined, demand);
       return null;
     }
     // Go to origin at once, keeping the buffer, when the holder wait and the
@@ -1045,13 +1121,15 @@ class HlsSwarm {
     const entryTransfer = sizeHint ? this.peerSelection.projectMs(sizeHint) : null;
     const entry = this.#projection(entryTransfer, holderWait, plan);
     if (entry === "late") {
-      this.#peerEligibility(context, budgetMs, "projected-late", !coordinated, budgetGeometry, this.#projectionDetail("entry", entryTransfer, holderWait, plan));
+      this.#peerEligibility(context, budgetMs, "projected-late", !coordinated, budgetGeometry, this.#projectionDetail("entry", entryTransfer, holderWait, plan), demand);
+      // Nobody held the key at entry: a miss for every serving link. A held key: ahead.
+      this.#noteHolders(demand, coordinated ? "miss" : "ahead");
       this.counters.peerProjectedLate += 1;
       return null;
     }
     this.#applyProjection(entry, holderWait + entryTransfer, plan);
     if (coordinated) {
-      this.#peerEligibility(context, budgetMs, "no-have-wait", false, budgetGeometry);
+      this.#peerEligibility(context, budgetMs, "no-have-wait", false, budgetGeometry, undefined, demand);
       this.counters.coordinatedWaits += 1;
     }
     const commitmentRemaining = plan.deadline - now();
@@ -1068,18 +1146,23 @@ class HlsSwarm {
       // loads normally; all advisory leases expire before the HTTP deadline.
       while (!signal.aborted && !this.stopped && now() < plan.deadline && ![...this.links.values()].some((peer) => peer.have.has(key))) {
         if (!this.#shouldWaitForOrigin(key, rendition)) {
-          this.#peerEligibility(context, budgetMs, "wait-no-longer-eligible", false, budgetGeometry);
+          this.#peerEligibility(context, budgetMs, "wait-no-longer-eligible", false, budgetGeometry, undefined, demand);
           return null;
         }
         await this.#waitForHave(key, Math.min(100, plan.deadline - now()), signal);
       }
       const cancelled = signal.aborted || this.stopped;
       if (cancelled || now() >= plan.deadline) {
-        this.#peerEligibility(context, budgetMs, cancelled ? "wait-aborted" : "wait-expired", null, budgetGeometry);
+        this.#peerEligibility(context, budgetMs, cancelled ? "wait-aborted" : "wait-expired", null, budgetGeometry, undefined, demand);
+        // A miss is the wait reaching its deadline, whether the loop or the
+        // fallback timer saw it first. A loader abort or stop says nothing about
+        // the holder. Decided by cause (plan.expired), never by comparing clocks.
+        if (!cancelled || (plan.expired && !this.stopped)) this.#noteHolders(demand, "miss");
         return null;
       }
     }
-    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry);
+    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry, undefined, demand);
+    this.#noteHolders(demand, "ahead");
     let commitment;
     try {
       const result = await commitmentResult;
@@ -1098,7 +1181,7 @@ class HlsSwarm {
     const transfer = this.peerSelection.projectMs(commitment.size);
     const known = this.#projection(transfer, 0, plan);
     if (known === "late") {
-      this.#peerEligibility(context, budgetMs, "projected-late", true, budgetGeometry, this.#projectionDetail("commitment", transfer, 0, plan));
+      this.#peerEligibility(context, budgetMs, "projected-late", true, budgetGeometry, this.#projectionDetail("commitment", transfer, 0, plan), demand);
       this.counters.peerProjectedLate += 1;
       return null;
     }
@@ -1237,7 +1320,7 @@ class HlsSwarm {
       try { cc = integer(context?.frag?.cc); } catch {}
       try { level = integer(context?.frag?.level); } catch {}
       const record = { atMs: Math.max(0, Math.round(now() - this.transportStartedAt)),
-        id: this.transportConnections.get(link.pc)?.id || 0, cc, level,
+        id: this.transportConnections.get(link.pc)?.id || 0, holder: this.#holderLabel(link.pubkey), cc, level,
         remainingMs: numeric(remainingMs), outcome: result.outcome,
         elapsedMs: numeric(result.elapsedMs), timeoutMs: numeric(result.timeoutMs),
         expectedBytes: integer(result.expectedBytes), receivedBytes: integer(result.receivedBytes),
@@ -1643,8 +1726,23 @@ class HlsSwarm {
   }
 
   #unmetDiscovery(context) {
-    return ![...this.links.values()].some(link => this.#servesRendition(link, context.rendition)
+    // A serving link that has repeatedly lacked this viewer's segments at the
+    // deadline no longer meets the context, unless it holds a demanded key.
+    return ![...this.links.values()].some(link => this.#servesRendition(link, context.rendition) && !this.discovery.stale(context, link.pubkey)
       || context.keys.some(key => link.have.has(key)));
+  }
+
+  // At least one link serves this context's rendition and every one is stale.
+  #onlyStaleServing(context) {
+    const serving = [...this.links.values()].filter(link => this.#servesRendition(link, context.rendition));
+    return serving.length > 0 && serving.every(link => this.discovery.stale(context, link.pubkey));
+  }
+
+  #discoveryEligible(candidate) {
+    return !this.links.has(candidate.pubkey) && !this.dials.has(candidate.pubkey)
+      && !this.dialChecks.has(candidate.pubkey) && !this.#coolingDown(candidate.pubkey)
+      && (!this.#gated() || validTicket(candidate.ticket))
+      && (this.retries.get(candidate.pubkey) || 0) <= this.options.maxRetriesPerPeer;
   }
 
   #discoveryVictim(context) {
@@ -1652,7 +1750,7 @@ class HlsSwarm {
     // Preserve a useful sibling audio/video neighbour as well as the target.
     const contexts = [...this.discovery.contexts.values()].filter(value => Date.now() - value.activityAt < 30_000);
     return rotationCandidate([...this.links.values()].filter(link => !contexts.some(value =>
-      this.#servesRendition(link, value.rendition) || value.keys.some(key => link.have.has(key)))), { ...this.options, banned: this.banned });
+      this.#servesRendition(link, value.rendition) && !this.discovery.stale(value, link.pubkey) || value.keys.some(key => link.have.has(key)))), { ...this.options, banned: this.banned });
   }
 
   #endDiscovery(window = this.discovery.window, closePending = true) {
@@ -1682,14 +1780,13 @@ class HlsSwarm {
     this.#expireDiscovery();
     if (!this.#hasOutgoingSlot()) return;
     const room = this.links.size + this.dials.size < this.options.maxPeers;
-    const choice = this.discovery.choose(candidate => !this.links.has(candidate.pubkey) && !this.dials.has(candidate.pubkey)
-      && !this.dialChecks.has(candidate.pubkey) && !this.#coolingDown(candidate.pubkey)
-      && (!this.#gated() || validTicket(candidate.ticket))
-      && (this.retries.get(candidate.pubkey) || 0) <= this.options.maxRetriesPerPeer,
+    const choice = this.discovery.choose(candidate => this.#discoveryEligible(candidate),
     context => this.#unmetDiscovery(context) && (room || this.discovery.reserved() || Boolean(this.#discoveryVictim(context))), room);
     if (!choice) return;
     const attempt = this.discovery.begin(choice);
     if (!attempt) return;
+    // The old rule would have kept this attempt off: its serving links are all stale.
+    if (this.#onlyStaleServing(choice.context)) this.discovery.counters.staleHolder++;
     const window = attempt.window;
     if (!window.timer) window.timer = this.#after(Math.max(0, window.expiresAt - Date.now()), () => this.#endDiscovery(window));
     this.#guard("discovery", () => this.#dial(attempt.pubkey, attempt));
@@ -2302,12 +2399,14 @@ class HlsSwarm {
         this.#endTransport(dial.pc, "link-close", closed.closeReason);
         if (this.links.get(closed.pubkey) === closed) {
           this.links.delete(closed.pubkey);
+          this.discovery.forget(closed.pubkey);
           this.counters.linksClosed += 1;
           this.#guard("reannounce", () => this.#scheduleReannounce());
         }
       },
     });
     this.links.set(dial.pubkey, link);
+    this.#assignHolderLabel(dial.pubkey);
     if (this.firstLinkAtMs === null) this.firstLinkAtMs = Date.now() - this.startedAt;
     link.sendContribution(this.#servingAllowed(), this.rendition);
     for (const identity of this.renditions.keys()) if (identity !== this.rendition) link.sendContribution(this.#servingAllowed(), identity);

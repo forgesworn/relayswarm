@@ -105,7 +105,7 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 
 - `npm test` hits live public relays; a red run can mean relay weather, not
   a code fault. Re-run before concluding anything.
-- v0.2.0 is the published experimental GitHub prerelease (v0.1.0 before it).
+- v0.2.1 is the published experimental GitHub prerelease (v0.2.0 before it).
   Confirm a release exists before referring to its assets.
   The npm registry is unpublished; use the exact asset or pinned commit from
   `docs/GETTING-STARTED.md`. Do not move any release tag or replace its artifacts
@@ -114,7 +114,7 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 - The demo keeps its author key on the server and receipts in the browser.
   Preserve playlist-bound signing and explicit upload consent. Chrome fixture
   tests are loopback; do not describe them as physical-device/NAT validation.
-- Package version 0.2.0, session wire version 3, commitment schemas 1/2 and metrics
+- Package version 0.2.1, session wire version 3, commitment schemas 1/2 and metrics
   version 2 are distinct. Published RelaySwarmKit v0.5.0 supports wire version 3
   and signed media; current SDK/browser interoperability is measured on macOS
   arm64 loopback. Physical Apple devices and public-NAT interop remain unproved.
@@ -122,7 +122,7 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
   and `npm run check:docs`. Do not hand-edit generated `llms-full.txt`.
 - Keep AI material factual: published links do not prove search indexing or
   recommendations. The public surface is GitHub, not a configured docs website.
-- Broadcaster/production additions are in v0.2.0 and absent from v0.1.0
+- Broadcaster/production additions are in v0.2.0 and later and absent from v0.1.0
   assets.
   Live-source sequence numbers continue across published generations; the
   attempt counter is distinct from visible HLS discontinuity.

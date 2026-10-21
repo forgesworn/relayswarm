@@ -9,11 +9,11 @@ comes from the origin, and the swarm only measures what peer delivery would
 have achieved. That is the mode to deploy first.
 
 The module is browser ESM with a direct runtime dependency on `nostr-tools`.
-The published [v0.2.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0)
+The published [v0.2.1 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1)
 supplies an installable tarball and a standalone bundle containing the browser
 runtime dependencies. The host supplies hls.js. The npm registry is unpublished;
 [Getting started](docs/GETTING-STARTED.md) gives exact asset and pinned-Git commands.
-v0.2.0 adds the
+v0.2.1 adds the
 [production feature work](docs/PRODUCTION-FEATURES.md); those additions are
 absent from v0.1.0 assets and retain separate delivery/acceptance gates.
 
@@ -218,7 +218,23 @@ number or null. Wait expiry/cancellation
 also leaves HAVE null rather than claiming it was still absent. One load can
 produce both a wait-entry and a wait-outcome row: counters count decisions,
 not distinct segments. Budget is the initial allowance, not remaining request
-time. Rows contain no segment keys, hashes, URLs, peer identities or addresses.
+time. Rows contain no segment keys, hashes, URLs, peer public keys or addresses.
+Rows for decisions made after the key computation and link inspection (every
+positive-budget reason except `aborted-before-eligibility`; never `no-budget`)
+also carry three sorted arrays of at most eight holder labels: `holders`
+(links serving this rendition now), `haveHolders` (links whose HAVE contains
+the demanded key now) and `staleHolders` (the serving links that neighbour
+discovery treats as stale for this rendition, see below). They are read after the decision and change no decision, timer
+or deadline; if reading them fails the row is still written with the arrays
+null. A holder label is a positive integer that this instance assigns to each
+remote peer when it first becomes a link, in first-link order, kept across
+connection replacement in a map of at most 64 peers (oldest evicted; `0` means
+unknown). It is a local counter, not a key or address: it is never derived from
+a key and never sent to a peer, placed in presence or signalling, or added to
+the numeric operator report. A full local receipt can still join the label to
+the ephemeral public key through `peers.deliveryMeasurements[].holder`, which
+the snapshot already exposes with that key, so treat rows with the same
+consent as the rest of the receipt.
 Each row also carries `budgetGeometry`: the calculation's final `currentTime`,
 `bufferedEnd`, `playableEnd`, `fragmentStart` (seconds), computed
 `originReserveMs`, and `uncappedMs`, the buffered playback less that reserve
@@ -241,8 +257,9 @@ request, after peer selection. Its fixed counters distinguish `payload`, `none`,
 connection `id` as transport diagnostics, numeric `cc` and `level`, the
 deadline's `remainingMs` at selection (after any extension), the actual request
 `timeoutMs`, request `elapsedMs`, `expectedBytes`, `receivedBytes`,
-`firstByteMs` (request to first payload chunk), `metadataReceived`, `draining`
-and a fixed `closeReason` or null. `abandoned` is a request the loader gave up
+`firstByteMs` (request to first payload chunk), `metadataReceived`, `draining`,
+a fixed `closeReason` or null, and `holder`, the local label (see above) of the
+link the request went to. `abandoned` is a request the loader gave up
 as unable to finish in time. Unavailable numeric values are null. A
 `payload` means the transport assembled bytes; signature, size, hash, expiry
 and final loader-deadline checks still decide whether playback accepts them.
@@ -256,8 +273,9 @@ selection, and shadow-mode requests are outside its scope.
 branches: `admission`, `not-held`, `not-serving`, `banned`, `session-allowance`,
 `peer-limit`, `rate-limit`, `reservation-refused` and `reservation-inactive`.
 These count local decisions, not wire delivery or remote receipt. Both fields
-are local metrics, contain no media keys, URLs, peer identities or addresses,
-and are excluded from automatic numeric reporting. They add no network traffic,
+are local metrics, contain no media keys, URLs, peer public keys or addresses
+(the eligibility and request rows carry only the local holder label described
+above), and are excluded from automatic numeric reporting. They add no network traffic,
 timers, retries, upload permission or deadline changes. Returned snapshots own
 their copies, and retained outcomes remain readable after stop.
 
@@ -359,6 +377,36 @@ The existing peer, outgoing-dial and admission-check limits remain unchanged.
 Victim selection protects active receiving, draining and queued/active uploads,
 minimum link life, bidirectional idle time, the shared rotation cooldown and
 useful sibling audio/video neighbours. At least one established link remains.
+
+A serving link normally counts as a neighbour for its rendition even before it
+holds any segment, which keeps discovery off. A link that serves the current
+rendition but lacks this viewer's demanded segment is given a miss when the wait
+reaches its deadline (a `wait-expired` outcome, or a `wait-aborted` outcome that
+the deadline timer itself caused, which keeps its row reason) and when an
+entry-stage `projected-late` decision finds that no link held the key. Four
+misses on distinct segments, "distinct" meaning a different key from the last
+missed key (consecutive keys), at least ten seconds after the first, make the
+link stale for that context: it no longer meets the context and is no longer
+protected as a useful neighbour, so discovery may seek a peer hinting the exact
+demanded key and may replace it. The count is kept per `main` or `audio`
+context, only from loads that reached the HAVE check (zero-budget,
+aborted-before-eligibility and no-longer-eligible loads neither count nor
+reset). A load that is aborted by the caller (an hls.js abort) or by `stop()`
+does not count. A link's history is dropped when one of this viewer's loads
+finds the demanded key in that link's HAVE at entry or before the wait deadline,
+when the link closes, when the rendition changes, or when the context sees no
+demand for 30 seconds. A stale link is still asked for any segment it does hold.
+The thresholds are internal constants, not options, and the wait, deadlines,
+HTTP fallback, `maxPeers`, the single 15-second window, the one-replacement
+allowance, the rotation cooldown and every upload limit are unchanged. In a full
+neighbourhood the allowance still bounds this to one replacement per context
+generation until a verified delivery renews it, so a replacement that is also
+never ahead leaves the viewer on origin for that rendition. The additive
+`neighbourDiscovery.counters.staleHolder` counts attempts that began because
+every serving link was stale; `staleBlocked` counts loads where a fresh eligible
+candidate hinted a demanded key for such a context but a bound (spent allowance,
+no room or victim, no outgoing slot, an attempt in flight) began no attempt. Both
+are local counts and do not show that delivery improved.
 
 Discovery retains at most two requested keys for each selected `main` and
 `audio` context, 64 candidate hints of at most eight hashes, and one opportunity

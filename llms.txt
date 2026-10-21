@@ -3,7 +3,7 @@
 > Experimental peer-assisted HLS video delivery with WebRTC data channels,
 > Nostr relay rendezvous, author-signed segment commitments and an hls.js
 > loader. A separate native Node path uses HyperDHT and Noise. MIT licensed;
-> v0.2.0 is the published experimental prerelease; production acceptance remains open.
+> v0.2.1 is the published experimental prerelease; production acceptance remains open.
 
 The canonical repository is https://github.com/forgesworn/relayswarm. Node 22.13+
 is required; CI uses Node 24. Public distribution includes an installable
@@ -13,7 +13,7 @@ source demo runs with `npm run demo`; synthetic media needs ffmpeg/libx264.
 The original WebRTC CLI signs plaintext SDP and uses a digest supplied by its
 seeder. The browser loader and shared session wire version 3 use pairwise
 NIP-44-encrypted signals; the native path encrypts dial authorisation and uses
-Noise for transfer. Package version 0.2.0, session version 3, commitment schemas
+Noise for transfer. Package version 0.2.1, session version 3, commitment schemas
 1/2 and metrics version 2 are distinct. Published Swift RelaySwarmKit v0.5.0
 supports wire version 3 and signed media, with actual SDK/Chrome loopback proof;
 physical Apple-device and public-NAT compatibility remain unverified.
@@ -23,7 +23,7 @@ peer traffic) and peer-first (verified peer bytes within a deadline, then normal
 HTTP fallback). Uploading defaults to off and requires viewer opt-in. Peer-first
 also requires a trusted signed kind-30311 event with the experimental
 redistribution tag and an author or scoped-delegate signed commitment. The host selects
-the stream, relays and ICE policy. The trusted-event adapter in v0.2.0 queries
+the stream, relays and ICE policy. The trusted-event adapter in v0.2.1 queries
 through a bounded host callback with explicit author/origin/relay allowlists;
 it does not adopt event-selected services or establish publisher trust.
 Native HyperDHT cannot run in an ordinary browser page.
@@ -51,9 +51,9 @@ Raw media, peer deadlines and playback holdback are unchanged. One injected
 loopback pair passed both qualities and restart with the option on and off;
 recoverable playlist 503s occurred only with it on. Reliability improvement and
 ordinary public/physical acceptance remain unproved.
-The v0.2.0 supervised broadcast bridge creates two live HLS renditions and
+The v0.2.1 supervised broadcast bridge creates two live HLS renditions and
 can forward H.264/AAC separately to RTMPS with explicit TLS verification.
-These additions are in v0.2.0 and absent from v0.1.0 downloads.
+These additions are in v0.2.1 and absent from v0.1.0 downloads.
 The source app and waiting listener use a 130-second HTTP keep-alive timeout
 to outlast Caddy's default 120-second upstream idle pool. Ten-second request
 and header deadlines and 128 connections remain bounded. A real 121-second
@@ -79,7 +79,7 @@ obtained high-quality peer media and one contributor uploaded nothing during
 measurement. The two-hour run waits for a matching short qualifier pass.
 Matching capacity, two-hour/churn, natural expiry, physical/browser breadth,
 difficult networks, measured wire/cost benefit and downloaded-release
-acceptance remain open. v0.2.0 is published as an experimental prerelease.
+acceptance remain open. v0.2.1 is published as an experimental prerelease.
 See the [P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
 
 ## Documentation

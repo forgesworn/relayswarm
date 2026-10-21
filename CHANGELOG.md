@@ -1,5 +1,27 @@
 # RelaySwarm changelog
 
+## v0.2.1 (21 October 2026)
+
+Experimental [GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) of the source from
+[PR 9](https://github.com/forgesworn/relayswarm/pull/9), following v0.2.0. Field
+acceptance remains open: the sustained 7,200 s run, the 3 MB both-quality
+shared-cap lifecycle and Safari 17.6 desktop are RED, and physical-device,
+difficult-network and downloaded-release gates have not passed. The prerelease
+was published by owner decision with those open. See
+[Status](docs/STATUS.md).
+
+- Add local holder labels to the peer diagnostics. Labels are session-local
+  counters, not keys, and are for local diagnostics only.
+- Stop a linked holder that is never ahead from suppressing neighbour
+  discovery, so such a holder is no longer treated as enough; bounded peer work,
+  deadlines and HTTP fallback are unchanged.
+- Field results on this source (21 October 2026, desktop and relay-only scope):
+  the fourteen-role short qualifier passed 16 of 16 gates for the first time,
+  and Firefox 152.0.6 and Safari 26.6.2 desktop journeys passed. The sustained
+  7,200 s run and the 3 MB both-quality shared-cap lifecycle are RED and open,
+  and Safari 17.6 desktop is RED. Physical devices, hard NAT and a separate
+  network are not tested. See [Status](docs/STATUS.md#current-delivery-checkpoint).
+
 ## v0.2.0 (21 October 2026)
 
 Experimental [GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0) adding the supervised

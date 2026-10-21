@@ -4,13 +4,95 @@
 [Changelog](../CHANGELOG.md)
 
 Checkpoint: 21 October 2026. The published experimental prerelease is
-[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0), built from `main` after PR 8 merged; field
-acceptance remains open. The earlier
+[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1), built from `main` after PR 9 merged; field
+acceptance remains open. The previous prerelease,
+[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0), was built after PR 8 merged. The earlier
 [v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0) points to
 `3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. Later documentation corrections
 on `main` do not change either tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
+
+Checkpoint: 21 October 2026. This is source `140c256` on `fix/holder-discovery`
+([PR 9](https://github.com/forgesworn/relayswarm/pull/9), open and unmerged). It
+adds local holder labels to the peer diagnostics (`368b860`) and stops a linked
+holder that is never ahead from suppressing neighbour discovery (`140c256`).
+v0.2.1 is the experimental prerelease of this source after PR 9 merges. It is
+released as an experimental prerelease by owner decision while field acceptance
+remains open: Item 5, P06 and Safari 17.6 are RED.
+
+**Passed on this source.**
+
+- All nine required
+  [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39529800310)
+  succeeded. Attempt 2 reran only the hls.js playback job, after the runner's
+  Chrome install hit an apt 403 before any test step.
+- Fresh consumption of the exact committed source (not downloaded release
+  assets) passed with 286 package members. The served client is 787,462 bytes.
+- Guarded deployment to the pilot passed its independent deployment review.
+  After P07 the pilot app is `38eb5c2d`, started 02:59:29 UTC, with reporting
+  and forwarding off.
+- P05 reporting lifecycle passed, with natural expiry after 303,923 ms. P07
+  parent-crash recovery passed, with an independent native review.
+- **Fourteen-role short qualifier R66 is GREEN, 16 of 16 gates**, including
+  `each4BothQualityPeer` and `all8ActuallyUploaded`. This is the first green
+  fourteen-role qualifier. It ran 302.823 s with contributors at 1,250,000 B/s,
+  relay-only TURN over TLS/TCP and no VPN tunnel carrying the default route.
+- Desktop installed-browser journeys passed for Firefox 152.0.6 on one Mac and
+  Safari 26.6.2 on another (all six checkpoints each: verified receive, quality
+  and seek, explicit upload, reload retains usage without consent, origin-only
+  kill). The Safari 26.6.2 pass is the first Safari pass. Scope is macOS arm64
+  desktop with one dedicated 1,800 s finite source and three owned Chrome 155
+  actors per browser; it is not physical-device, hard-NAT or separate-network
+  evidence.
+- Finite-source cleanup reviews for the P06 and desktop sources passed.
+
+**Matched wire and cost (R66, 302 s window, two origin-only baseline roles).**
+Receivers used 31.5% less origin traffic than their matched baselines (185.9 MB
+against 271.2 MB, model error about ±4%). The origin served about 226 MB less
+than all-origin delivery. TURN runs on a separate host, which carried about
+319 MB egress (280 to 365 MB, endpoint-side estimate) and about 323 MB ingress,
+so total egress across both hosts rose by roughly 85 to 100 MB. Marginal cost on
+the hosts' plans is not determined because the plan terms are not recorded.
+Nostr signalling bytes were not separable.
+
+**RED or open.**
+
+- **Item 5, the sustained 7,200 s run (22 churn events, natural TURN expiry and
+  renewal), is RED and open.** R37 failed at the first churn event on a harness
+  assertion about retained renewals, which was fixed. R38 failed after 640,110 ms
+  of measurement; its first failure is a harness race, in which `rejoin()` read
+  the page 7 ms after clicking Start, before the page applied its settings
+  (diagnosis confidence high). That gives no product evidence either way, and
+  the 7,200 s run has not completed. It is recorded RED and open by decision.
+- **P06, the 3 MB both-quality shared-cap lifecycle, is RED and open**
+  (`RED_HIGH_QUALITY_NO_VERIFIED_COMPLETION_BEFORE_SHARED_CAP_REFUSAL`, the same
+  class as the a416f7e third run). Low-quality verified peer media reached the
+  receiver (216,952 B at 9.75 s). Three 720p reservations (659,128, 673,604 and
+  659,692 B) were accepted and charged, but none completed as verified peer
+  media within the receiver's buffer-safe wait on the relay path (about 255 KB/s
+  on the best link). The fourth (661,948 B) was refused as exhausted at
+  2,625,232 of 3,000,000 B, and the only high-quality holder stopped. The shared
+  allowance behaved as documented in
+  [Account upload budget](ACCOUNT-UPLOAD-BUDGET.md): the client reserves its full
+  payload before sending, and an accepted reservation stays charged after
+  cancellation. This is a design limitation under relay throughput, one
+  high-quality holder and a 3 MB cap, not a recorded product defect. It is
+  recorded RED and open by decision, with no re-run on this source.
+- **Safari 17.6 on the desktop is RED.** No verified peer download within 45 s
+  and no selected ICE candidate pair was recorded; every fragment came from the
+  origin. The cause is not determined and the journey was not retried.
+- Physical iPhone (unavailable), physical Android and device Safari or Firefox
+  (these need the owner), hard NAT and a separate network (these need another
+  network) remain open and unverified. npm publication is out of scope.
+- Release: v0.2.1 is released as an experimental prerelease by owner decision
+  while field acceptance remains open: Item 5, P06 and Safari 17.6 are RED.
+
+Run-by-run evidence is in [Goals and agent handover](AGENT-GOALS.md). See the
+[checkpoint record](../spikes/results/140c256-current-delivery-checkpoint-20261021.json)
+and [P01–P12 checklist](PRODUCTION-READINESS.md#delivery-checklist).
+
+## Previous checkpoint: 20 October 2026 (5f2ece0)
 
 Checkpoint: 20 October 2026. The pilot runs
 `5f2ece0bc8e0a78e9a7eca5c56f5ca9141df4669`. All nine required
@@ -24,7 +106,7 @@ pilot's TURN service, with no qualifier load, moved high-quality segments at 3 t
 4 Mbit/s over TLS; UDP relay addresses were no faster and lost more. Run-by-run
 evidence is in [Goals and agent handover](AGENT-GOALS.md).
 
-Previous checkpoint: 19 October 2026. The pilot
+Earlier checkpoint: 19 October 2026. The pilot
 runs `3f706a9bc4a895d17345be26b77006cf13093c46`. All nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39169937465),
 fresh consumption of 280 package members and guarded deployment passed.
@@ -1393,6 +1475,15 @@ no 37-item completion is asserted. PR 8 remains open; no new release is publishe
 | AI documentation | Curated `llms.txt`, generated `llms-full.txt`, public Markdown and repository/package metadata | Publication does not establish crawler discovery, indexing or recommendations |
 
 ## Release verification
+
+### v0.2.1 (21 October 2026)
+
+[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) is the
+experimental GitHub prerelease of the source in PR 9, published by owner
+decision with Item 5, P06 and Safari 17.6 RED and open. Its assets
+(`relayswarm-0.2.1.tgz`, `relayswarm-hls-swarm-0.2.1.mjs` and `SHA256SUMS`) and
+their checksums and download verification are recorded here after publication.
+The v0.2.0 record below is unchanged.
 
 ### v0.2.0 (21 October 2026)
 
