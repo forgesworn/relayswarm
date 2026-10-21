@@ -221,12 +221,14 @@ not distinct segments. Budget is the initial allowance, not remaining request
 time. Rows contain no segment keys, hashes, URLs, peer public keys or addresses.
 Rows for decisions made after the key computation and link inspection (every
 positive-budget reason except `aborted-before-eligibility`; never `no-budget`)
-also carry three sorted arrays of at most eight holder labels: `holders`
+also carry four sorted arrays of at most eight holder labels: `holders`
 (links serving this rendition now), `haveHolders` (links whose HAVE contains
-the demanded key now) and `staleHolders` (the serving links that neighbour
-discovery treats as stale for this rendition, see below). They are read after the decision and change no decision, timer
-or deadline; if reading them fails the row is still written with the arrays
-null. A holder label is a positive integer that this instance assigns to each
+the demanded key now), `staleHolders` (the serving links that neighbour
+discovery treats as stale for this rendition, see below) and `heldMissHolders`
+(the links recorded as a held miss on this decision, see below; empty until the
+load ends, then filled on the decision's last row). The first three are read
+after the decision and change no decision, timer or deadline; if reading them
+fails the row is still written with the arrays null. A holder label is a positive integer that this instance assigns to each
 remote peer when it first becomes a link, in first-link order, kept across
 connection replacement in a map of at most 64 peers (oldest evicted; `0` means
 unknown). It is a local counter, not a key or address: it is never derived from
@@ -379,11 +381,20 @@ minimum link life, bidirectional idle time, the shared rotation cooldown and
 useful sibling audio/video neighbours. At least one established link remains.
 
 A serving link normally counts as a neighbour for its rendition even before it
-holds any segment, which keeps discovery off. A link that serves the current
-rendition but lacks this viewer's demanded segment is given a miss when the wait
-reaches its deadline (a `wait-expired` outcome, or a `wait-aborted` outcome that
-the deadline timer itself caused, which keeps its row reason) and when an
-entry-stage `projected-late` decision finds that no link held the key. Four
+holds any segment, which keeps discovery off. Each load that reached the HAVE
+check is decided once, when it ends. If a verified segment came from a link, that
+link's history is dropped and no other link is changed. If the load went to
+origin, the outcome is charged by who held the key. When some serving link's HAVE
+held the key (at the HAVE check or when the load ended), only the serving links
+that held it take a miss, called a held miss: the wait or projection ended at
+origin, a request was abandoned or timed out, the transfer was projected late
+after the commitment, no recent transfer could finish, or every link tried
+failed. A serving link that did not hold the key was not asked and is left
+alone. When no link held the key, every serving link takes a miss, as before: at
+a `wait-expired` outcome (or a `wait-aborted` outcome that the deadline timer
+itself caused, which keeps its row reason) and at an entry-stage `projected-late`
+decision. Holding the key at entry or after the wait no longer clears a link
+by itself. Four
 misses on distinct segments, "distinct" meaning a different key from the last
 missed key (consecutive keys), at least ten seconds after the first, make the
 link stale for that context: it no longer meets the context and is no longer
@@ -391,11 +402,13 @@ protected as a useful neighbour, so discovery may seek a peer hinting the exact
 demanded key and may replace it. The count is kept per `main` or `audio`
 context, only from loads that reached the HAVE check (zero-budget,
 aborted-before-eligibility and no-longer-eligible loads neither count nor
-reset). A load that is aborted by the caller (an hls.js abort) or by `stop()`
-does not count. A link's history is dropped when one of this viewer's loads
-finds the demanded key in that link's HAVE at entry or before the wait deadline,
-when the link closes, when the rendition changes, or when the context sees no
-demand for 30 seconds. A stale link is still asked for any segment it does hold.
+reset). A load that is aborted by the caller (an hls.js abort) or by `stop()`, an
+unavailable, rejected or expired commitment, and an integrity failure (the link
+is banned and closed) do not count, and nor does a segment that arrives after
+the deadline. A link's history is dropped only when a verified segment from that
+link reaches this viewer's loader in time, when the link closes, when the
+rendition changes, or when the context sees no demand for 30 seconds. A stale
+link is still asked for any segment it does hold.
 The thresholds are internal constants, not options, and the wait, deadlines,
 HTTP fallback, `maxPeers`, the single 15-second window, the one-replacement
 allowance, the rotation cooldown and every upload limit are unchanged. In a full
@@ -405,8 +418,11 @@ never ahead leaves the viewer on origin for that rendition. The additive
 `neighbourDiscovery.counters.staleHolder` counts attempts that began because
 every serving link was stale; `staleBlocked` counts loads where a fresh eligible
 candidate hinted a demanded key for such a context but a bound (spent allowance,
-no room or victim, no outgoing slot, an attempt in flight) began no attempt. Both
-are local counts and do not show that delivery improved.
+no room or victim, no outgoing slot, an attempt in flight) began no attempt;
+`heldMiss` counts one per link and demanded key for a held miss. All are local
+counts in the local snapshot, are not added to the numeric operator report, and
+do not show that delivery improved. A link whose HAVE still holds a key this
+context demands keeps meeting the context, as before, even when it is stale.
 
 Discovery retains at most two requested keys for each selected `main` and
 `audio` context, 64 candidate hints of at most eight hashes, and one opportunity

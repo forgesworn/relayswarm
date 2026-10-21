@@ -831,6 +831,7 @@ class HlsSwarm {
           swarm.counters.peerFirstLoaded += 1;
           swarm.counters.peerFirstBytes += size;
           swarm.counters.bytesFromPeers += size;
+          swarm.discovery.holderDelivered(result.holderContext, result.pubkey);
           if (swarm.discovery.verified(result.discoveryContext)
             && swarm.discovery.window?.context === result.discoveryContext) swarm.#endDiscovery();
           if (swarm.firstPeerSegmentAtMs === null) swarm.firstPeerSegmentAtMs = Date.now() - swarm.startedAt;
@@ -981,17 +982,34 @@ class HlsSwarm {
     return { holders: small(holders), haveHolders: small(haveHolders), staleHolders: small(staleHolders), heldMissHolders: [] };
   }
 
-  // One decision per load that reached the HAVE check. A serving link whose HAVE
-  // holds the demanded key is ahead (its miss history is dropped); one that
-  // lacks it at a miss decision gains a miss. Zero-budget, aborted and
-  // no-longer-eligible loads never reach here. Advisory: nothing waits on it.
-  #noteHolders({ key, rendition, context }, outcome) {
-    if (!context) return;
+  // The serving links whose HAVE holds the demanded key right now, as pubkeys.
+  #heldBy({ key, rendition }) {
+    return new Set([...this.links.values()].filter((link) => this.#servesRendition(link, rendition) && link.have.has(key)).map((link) => link.pubkey));
+  }
+
+  // The outcome of a load that went to origin, recorded once per load. A serving
+  // link whose HAVE held the key (at the HAVE check or now) gets a held miss; a
+  // link that did not hold it was never asked and is left alone. Only when no
+  // link at all held the key, and the caller says so, is every serving link
+  // charged (the wait or the entry projection ended with nobody ahead).
+  // Delivered, aborted and other neutral outcomes never reach here. Advisory.
+  #recordOutcome(demand, { everyServing = false } = {}) {
+    const { key, rendition, context } = demand;
+    if (!context || demand.recorded) return;
+    demand.recorded = true;
     try {
-      for (const link of this.links.values()) {
-        if (!this.#servesRendition(link, rendition)) continue;
-        if (outcome === "ahead") { if (link.have.has(key)) this.discovery.holderAhead(context, link.pubkey); }
-        else if (!link.have.has(key)) this.discovery.holderMiss(context, link.pubkey, key);
+      const serving = [...this.links.values()].filter((link) => this.#servesRendition(link, rendition));
+      const held = serving.filter((link) => demand.held.has(link.pubkey) || link.have.has(key));
+      if (held.length) {
+        const labels = [];
+        for (const link of held) {
+          if (!this.discovery.holderMiss(context, link.pubkey, key)) continue;
+          this.discovery.counters.heldMiss++;
+          labels.push(this.#holderLabel(link.pubkey));
+        }
+        if (demand.row?.heldMissHolders) demand.row.heldMissHolders = labels.sort((a, b) => a - b).slice(0, 8);
+      } else if (everyServing && ![...this.links.values()].some((link) => link.have.has(key))) {
+        for (const link of serving) this.discovery.holderMiss(context, link.pubkey, key);
       }
     } catch {}
   }
@@ -1024,6 +1042,8 @@ class HlsSwarm {
       if (demand) {
         try { Object.assign(record, this.#holderDiagnostics(demand)); }
         catch { Object.assign(record, { holders: null, haveHolders: null, staleHolders: null, heldMissHolders: null }); }
+        // The latest row of this decision is the one a held miss annotates.
+        demand.row = record;
       }
       this.peerEligibilityCounters[reason] = increment(this.peerEligibilityCounters[reason]);
       if (this.peerEligibilityRecords.length === 64) {
@@ -1110,7 +1130,7 @@ class HlsSwarm {
       try { this.#noteStaleBlocked(holderContext, checks); } catch {}
     }
     // What the diagnostic rows and the holder bookkeeping below refer to.
-    const demand = { key, rendition, context: holderContext };
+    const demand = { key, rendition, context: holderContext, recorded: false, held: new Set(), row: null };
     const coordinated = ![...this.links.values()].some((peer) => peer.have.has(key));
     if (coordinated && !this.#shouldWaitForOrigin(key, rendition)) {
       this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry, undefined, demand);
@@ -1124,8 +1144,9 @@ class HlsSwarm {
     const entry = this.#projection(entryTransfer, holderWait, plan);
     if (entry === "late") {
       this.#peerEligibility(context, budgetMs, "projected-late", !coordinated, budgetGeometry, this.#projectionDetail("entry", entryTransfer, holderWait, plan), demand);
-      // Nobody held the key at entry: a miss for every serving link. A held key: ahead.
-      this.#noteHolders(demand, coordinated ? "miss" : "ahead");
+      // Nobody held the key at entry: a miss for every serving link. Otherwise
+      // only the serving links that held it take a held miss.
+      this.#recordOutcome(demand, { everyServing: true });
       this.counters.peerProjectedLate += 1;
       return null;
     }
@@ -1159,12 +1180,14 @@ class HlsSwarm {
         // A miss is the wait reaching its deadline, whether the loop or the
         // fallback timer saw it first. A loader abort or stop says nothing about
         // the holder. Decided by cause (plan.expired), never by comparing clocks.
-        if (!cancelled || (plan.expired && !this.stopped)) this.#noteHolders(demand, "miss");
+        if (!cancelled || (plan.expired && !this.stopped)) this.#recordOutcome(demand, { everyServing: true });
         return null;
       }
     }
     this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry, undefined, demand);
-    this.#noteHolders(demand, "ahead");
+    // Holding the key is not a delivery: remember who held it at this decision
+    // and leave every holder entry alone until a verified segment arrives.
+    try { demand.held = this.#heldBy(demand); } catch {}
     let commitment;
     try {
       const result = await commitmentResult;
@@ -1184,6 +1207,7 @@ class HlsSwarm {
     const known = this.#projection(transfer, 0, plan);
     if (known === "late") {
       this.#peerEligibility(context, budgetMs, "projected-late", true, budgetGeometry, this.#projectionDetail("commitment", transfer, 0, plan), demand);
+      this.#recordOutcome(demand);
       this.counters.peerProjectedLate += 1;
       return null;
     }
@@ -1199,6 +1223,7 @@ class HlsSwarm {
       const firstByte = this.peerSelection.firstByteMs();
       if (this.peerSelection.minimumMs(commitment.size) > room || (firstByte ?? 0) > room) {
         this.counters.peerSkippedLate += 1;
+        this.#recordOutcome(demand);
         return null;
       }
       const fits = (peer, ms) => this.peerSelection.estimate(peer, commitment.size) === null || this.peerSelection.estimate(peer, commitment.size) * 1.25 + 25 <= ms;
@@ -1206,6 +1231,7 @@ class HlsSwarm {
       if (!link) {
         if (![...this.links.values()].some((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, room))) {
           this.counters.peerNoFit += 1;
+          this.#recordOutcome(demand);
           return null;
         }
         await this.#waitForHave(key, Math.min(100, plan.deadline - now()), signal);
@@ -1235,6 +1261,7 @@ class HlsSwarm {
       if (attempt.abandoned) {
         this.peerSelection.record(link, now() - requestedAt);
         this.counters.peerAbandoned += 1;
+        this.#recordOutcome(demand);
         return null;
       }
       if (!bytes || signal.aborted || this.stopped) {
@@ -1253,8 +1280,11 @@ class HlsSwarm {
       if (commitment.expiresAt <= Math.floor(Date.now() / 1000)) return null;
       this.peerSelection.record(link, now() - requestedAt, bytes.byteLength);
       if (coordinated) this.counters.coordinatedPeerLoads += 1;
-      return { key, bytes, discoveryContext };
+      return { key, bytes, discoveryContext, holderContext, pubkey: link.pubkey };
     }
+    // The deadline passed or every holder tried failed. The origin timer's abort
+    // (plan.expired) is the deadline; a caller abort or stop is neutral.
+    if (!this.stopped && (!signal.aborted || plan.expired)) this.#recordOutcome(demand);
     return null;
   }
 

@@ -1,9 +1,10 @@
 // Internal bounded advisory state. HlsSwarm owns admission, slots and PCs.
 import { validTicket } from "../relay-session.mjs";
 const HASH = /^[0-9a-f]{64}$/u;
-// A serving link is stale for a context once it has lacked the segment this
-// viewer demanded, at the deadline, on this many distinct segments over at
-// least this long. Internal bounds, not options.
+// A serving link is stale for a context once this viewer's demand has gone to
+// origin without it delivering (it lacked the segment at the deadline, or held
+// it and did not deliver in time) on this many distinct segments over at least
+// this long. A verified delivery from the link clears it. Internal bounds, not options.
 const STALE_HOLDER_MISSES = 4;
 const STALE_HOLDER_MS = 10_000;
 const MAX_HOLDERS = 8;
@@ -53,22 +54,25 @@ export class NeighbourDiscovery {
   }
 
   // Advisory per-context holder state. HlsSwarm decides what counts as a miss
-  // or as ahead; this only records it, anchored to this viewer's own demand.
+  // or as a delivery; this only records it, anchored to this viewer's own demand.
   #live(context) { return Boolean(context && this.contexts.get(context.mediaType) === context); }
 
+  // True when this recorded a new miss for the link, false for a repeated key.
   holderMiss(context, pubkey, key) {
-    if (!this.#live(context) || !HASH.test(pubkey) || !HASH.test(key)) return;
+    if (!this.#live(context) || !HASH.test(pubkey) || !HASH.test(key)) return false;
     const entry = context.holders.get(pubkey);
     if (entry) {
-      if (entry.lastKey === key) return;
+      if (entry.lastKey === key) return false;
       entry.misses++; entry.lastKey = key;
-      return;
+      return true;
     }
     if (context.holders.size >= MAX_HOLDERS) context.holders.delete(context.holders.keys().next().value);
     context.holders.set(pubkey, { firstMissAt: this.clock(), misses: 1, lastKey: key });
+    return true;
   }
 
-  holderAhead(context, pubkey) { if (this.#live(context)) context.holders.delete(pubkey); }
+  // A verified segment came from this link: the only thing that clears its entry.
+  holderDelivered(context, pubkey) { if (this.#live(context)) context.holders.delete(pubkey); }
 
   stale(context, pubkey) {
     const entry = this.#live(context) ? context.holders.get(pubkey) : null;
