@@ -5992,7 +5992,7 @@ Findings for the next agent:
   retry acts only on failed loads. Earlier "2 to 4 times slower" figures were
   per-role maxima; netlog medians for R58 were 1.2 to 1.6 times R54.
 - **Network environment (R59 path monitor).** M1 and M4 both use Wi-Fi and
-  route all default traffic through a full-tunnel WireGuard VPN. During R59,
+  route all default traffic through a full-tunnel VPN. During R59,
   M4's TCP connect median to the pilot rose from 38 ms to 94 ms in setup and
   101 ms in measurement (90th percentile about 240 ms), then returned to 37 ms
   after the run; M1 rose from 40 ms to 54 ms. This was measured on one run and
