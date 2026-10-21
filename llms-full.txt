@@ -1732,13 +1732,15 @@ on `main` do not change either tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
 
-Checkpoint: 21 October 2026. This is source `140c256` on `fix/holder-discovery`
-([PR 9](https://github.com/forgesworn/relayswarm/pull/9), open and unmerged). It
-adds local holder labels to the peer diagnostics (`368b860`) and stops a linked
-holder that is never ahead from suppressing neighbour discovery (`140c256`).
-v0.2.1 is the experimental prerelease of this source after PR 9 merges. It is
-released as an experimental prerelease by owner decision while field acceptance
-remains open: Item 5, P06 and Safari 17.6 are RED.
+Checkpoint: 21 October 2026. [PR 9](https://github.com/forgesworn/relayswarm/pull/9)
+merged as `1d54538`, which is published as experimental prerelease
+[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) and
+deployed to the pilot. Its loader change is `140c256`: it adds local holder
+labels to the peer diagnostics (`368b860`) and stops a linked holder that is
+never ahead from suppressing neighbour discovery. The field results below were
+measured on the `140c256` deployment of the same loader. v0.2.1 is released by
+owner decision while field acceptance remains open: Item 5, P06 and Safari 17.6
+are RED.
 
 **Passed on this source.**
 
@@ -1748,9 +1750,15 @@ remains open: Item 5, P06 and Safari 17.6 are RED.
   Chrome install hit an apt 403 before any test step.
 - Fresh consumption of the exact committed source (not downloaded release
   assets) passed with 286 package members. The served client is 787,462 bytes.
+  The release merge commit `1d54538` passed its own fresh consumption with 287
+  members (one added evidence file) and builds the same client.
 - Guarded deployment to the pilot passed its independent deployment review.
-  After P07 the pilot app is `38eb5c2d`, started 02:59:29 UTC, with reporting
-  and forwarding off.
+  After P07 the pilot app was `38eb5c2d`, started 02:59:29 UTC. The release
+  merge commit `1d54538` was then deployed through the same guarded cycle and
+  passed its own independent deployment review: the pilot app is `ce410033`,
+  started 14:56:56 UTC, with reporting and forwarding off. Its runtime differs
+  from `140c256` only in the `package.json` and `package-lock.json` version
+  fields, and it serves the same client.
 - P05 reporting lifecycle passed, with natural expiry after 303,923 ms. P07
   parent-crash recovery passed, with an independent native review.
 - **Fourteen-role short qualifier R66 is GREEN, 16 of 16 gates**, including
@@ -1804,8 +1812,9 @@ Nostr signalling bytes were not separable.
 - Physical iPhone (unavailable), physical Android and device Safari or Firefox
   (these need the owner), hard NAT and a separate network (these need another
   network) remain open and unverified. npm publication is out of scope.
-- Release: v0.2.1 is released as an experimental prerelease by owner decision
-  while field acceptance remains open: Item 5, P06 and Safari 17.6 are RED.
+- Release: v0.2.1 is published as an experimental prerelease by owner decision
+  while field acceptance remains open: Item 5, P06 and Safari 17.6 are RED. See
+  [Release verification](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#release-verification).
 
 Run-by-run evidence is in [Goals and agent handover](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/AGENT-GOALS.md). See the
 [checkpoint record](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/140c256-current-delivery-checkpoint-20261021.json)
@@ -3197,12 +3206,41 @@ no 37-item completion is asserted. PR 8 remains open; no new release is publishe
 
 ### v0.2.1 (21 October 2026)
 
-[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) is the
-experimental GitHub prerelease of the source in PR 9, published by owner
-decision with Item 5, P06 and Safari 17.6 RED and open. Its assets
-(`relayswarm-0.2.1.tgz`, `relayswarm-hls-swarm-0.2.1.mjs` and `SHA256SUMS`) and
-their checksums and download verification are recorded here after publication.
-The v0.2.0 record below is unchanged.
+[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) is an
+experimental GitHub prerelease of merge commit
+`1d54538c56179387b7541924e068d0d9c41d18e6` (PR 9), with an annotated `v0.2.1`
+tag, published by owner decision with Item 5, P06 and Safari 17.6 RED and open.
+[Main CI run 39601445318](https://github.com/forgesworn/relayswarm/actions/runs/39601445318)
+passed all nine required jobs on that commit (soak skipped); attempt 2 reran
+only the hls.js playback job after the account-budget TURN renewal browser case
+timed out in attempt 1. The merged tree is identical to PR head `55c0f68`, which
+passed [run 39589990218](https://github.com/forgesworn/relayswarm/actions/runs/39589990218)
+on attempt 2 after one wall-clock-bound unit test failed on the macOS runner.
+Fresh consumption of the merge commit passed with 287 package members. Assets
+were built from a clean `git archive` of the commit after `npm ci`, with the
+v0.2.0 commands; the same bundle command rebuilds the published v0.2.0 bundle
+byte for byte.
+
+| Asset | SHA-256 |
+|---|---|
+| `relayswarm-0.2.1.tgz` (287 files, 1,420,583 bytes) | `9f67a5f3ea8f5dffdf2e574d33703dfe952e01069a57635ae8349dd6d85455cb` |
+| `relayswarm-hls-swarm-0.2.1.mjs` (148,439 bytes) | `358a026a563d645498faa1461d76ad44e64ae9cfe3d8de234c25c6e78025cda2` |
+
+After publication, all three assets were downloaded from their public URLs into
+an empty directory and passed `shasum -a 256 -c SHA256SUMS`. Installing the
+tarball by URL into a clean production consumer imported the package; the
+downloaded tarball imported all ten public export paths; and the bundle loaded
+in headless Chrome 155 with `createHlsSwarm` exported and no page errors. These
+are distribution checks on macOS arm64 and close no field gate.
+
+The merge commit was then deployed to the pilot through the guarded cycle, with
+`140c256` as the predecessor and its positive P07 as the incoming handover, and
+passed its independent deployment review. The pilot app is `ce410033`, started
+14:56:56 UTC. Normal HTTPS attestation matched the 787,462-byte client and read
+two fresh rendition playlists, and the deployment's verification source was
+removed. Reporting and forwarding remain off. No field run was repeated on
+`1d54538`; its runtime differs from `140c256` only in the package version
+fields. The v0.2.0 record below is unchanged.
 
 ### v0.2.0 (21 October 2026)
 
@@ -6985,15 +7023,17 @@ Findings for the next agent:
 
 ## Next work, in dependency order
 
-Position on 21 October 2026: v0.2.0 is a published experimental GitHub
-prerelease of `bf43940`. Source `140c256` (PR 9, unmerged) has passed CI,
-consumption, guarded deployment and its review, P05, P07 and the short
-qualifier R66 (GREEN, 16 of 16). The owner decided to publish v0.2.1 as an
-experimental prerelease of this source with Item 5, P06 and Safari 17.6 RED and
-open, as v0.2.0 shipped with its qualifier RED. Those items stay RED and open.
+Position on 21 October 2026: v0.2.1 is a published experimental GitHub
+prerelease of merge commit `1d54538` (PR 9), deployed to the pilot (app
+`ce410033`). Its loader source `140c256` passed CI, consumption, guarded
+deployment and its review, P05, P07 and the short qualifier R66 (GREEN, 16 of
+16). The owner decided to publish v0.2.1 with Item 5, P06 and Safari 17.6 RED
+and open, as v0.2.0 shipped with its qualifier RED. Those items stay RED and
+open. Release and deployment evidence is in
+[Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#release-verification).
 
-1. **Reconcile and merge PR 9.** Apply the updated PR description and keep the
-   code description. Merging and tagging are the host's actions.
+1. **PR 9 is merged and released as v0.2.1.** The next finite source or
+   deployment chains on the `1d54538` deployment's independent cleanup review.
 2. **Item 5, the sustained 7,200 s run (RED, open).** Fix the harness `rejoin()`
    race and prove the fix in its own review cycle, then run on the same qualified
    source, topology and profile: 7,200 seconds, 22 churn events, two
@@ -7011,11 +7051,9 @@ open, as v0.2.0 shipped with its qualifier RED. Those items stay RED and open.
 5. **Cost.** Marginal cost on the hosts' plans is not determined. Record the
    plan terms before any cost statement; distinguish saved traffic from actual
    marginal cost.
-6. **Release v0.2.1.** Obtain all required checks on the final source and fresh
-   consumption, merge PR 9, then tag, publish the experimental prerelease and
-   deploy. Verify immutable downloaded assets and the served build, and record
-   their checksums in [Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#release-verification). Keep earlier
-   release assets unchanged. npm publication is out of scope.
+6. **Releases.** v0.2.1 is published, its downloaded assets verified and its
+   merge commit deployed. Keep the v0.2.1, v0.2.0 and v0.1.0 tags and assets
+   unchanged. npm publication is out of scope.
 
 The short and long builders are prepared source. Review their changes and pure
 checks before materialising them. Frozen source manifests must remain intact:
@@ -8616,7 +8654,7 @@ requirements for production acceptance.
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
 | P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact `140c256` fresh 286-member consumption/install/import/native/HTTP smoke checks pass. Consumer semver resolutions differ from root lock; standalone ESM is root-lock bound. Final publication and downloaded-release acceptance remain open |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact `140c256` nine-job CI, 286-member consumption, guarded deployment/HTTPS with independent review, P05 and P07 pass; private state, permanent leases and proxy preserved. v0.2.1 is the experimental prerelease of this source after PR 9 merges, released by owner decision while Item 5, P06 and Safari 17.6 are RED; downloaded-asset acceptance and final acceptance remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact `140c256` nine-job CI, 286-member consumption, guarded deployment/HTTPS with independent review, P05 and P07 pass; private state, permanent leases and proxy preserved. v0.2.1 is published from merge commit `1d54538` (nine-job main CI, 287-member consumption, downloaded assets verified) by owner decision while Item 5, P06 and Safari 17.6 are RED; the merge commit is deployed with guarded deployment/HTTPS and independent review (app `ce410033`). Final acceptance remains open |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | 21 October, `140c256`, macOS arm64 desktop scope (one 1,800 s finite source, three owned Chrome 155 actors per browser, relay-only TURN over TLS/TCP): Firefox 152.0.6 PASS and Safari 26.6.2 PASS (first Safari pass), all six checkpoints each; Safari 17.6 RED (no verified peer download in 45 s, no selected candidate pair, cause not determined, not retried). R66 short qualifier GREEN. Sustained 7,200 s/churn/natural-expiry (Item 5) RED and open; marginal cost not determined. Physical iPhone (unavailable), physical Android and device Safari/Firefox (need the owner), hard NAT and a separate network (need another network) remain open. Prior Simulator/account/LOW lifecycle/Internet TURN passes retain original scopes |
 
 ## Evidence rules

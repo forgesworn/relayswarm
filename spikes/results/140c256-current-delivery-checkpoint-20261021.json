@@ -27,10 +27,27 @@
     }
   },
   "release": {
-    "published": "v0.2.0",
-    "preparedVersion": "v0.2.1",
-    "merged": false,
-    "tagged": false,
+    "published": "v0.2.1",
+    "previous": "v0.2.0",
+    "mergeCommit": "1d54538c56179387b7541924e068d0d9c41d18e6",
+    "pr": 9,
+    "merged": true,
+    "tagged": true,
+    "prerelease": true,
+    "mainCiRun": 39601445318,
+    "consumerMembers": 287,
+    "assets": {
+      "relayswarm-0.2.1.tgz": {
+        "bytes": 1420583,
+        "sha256": "9f67a5f3ea8f5dffdf2e574d33703dfe952e01069a57635ae8349dd6d85455cb"
+      },
+      "relayswarm-hls-swarm-0.2.1.mjs": {
+        "bytes": 148439,
+        "sha256": "358a026a563d645498faa1461d76ad44e64ae9cfe3d8de234c25c6e78025cda2"
+      }
+    },
+    "downloadedAssetsVerified": true,
+    "ownerDecision": "published while Item 5, P06 and Safari 17.6 are RED",
     "npmPublished": false
   },
   "ci": {
@@ -263,5 +280,18 @@
       "bytes": 15649,
       "sha256": "8dd3047a27f61d4f0abb65f774e216700ad94acdd077b3277de77d56058d159d"
     }
-  ]
+  ],
+  "releaseDeployment": {
+    "sourceSha": "1d54538c56179387b7541924e068d0d9c41d18e6",
+    "appIdPrefix": "ce410033",
+    "appStartedUTC": "2026-10-21T14:56:56Z",
+    "independentDeploymentReview": "PASS",
+    "clientSha256": "9bab513340b4dfd47bffda04d0edd7ee0669b781d17ab5fa1cec594df3c36fb3",
+    "runtimeDifferenceFrom140c256": [
+      "package-lock.json",
+      "package.json"
+    ],
+    "reporting": false,
+    "forwarding": false
+  }
 }

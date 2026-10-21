@@ -13,13 +13,15 @@ on `main` do not change either tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
 
-Checkpoint: 21 October 2026. This is source `140c256` on `fix/holder-discovery`
-([PR 9](https://github.com/forgesworn/relayswarm/pull/9), open and unmerged). It
-adds local holder labels to the peer diagnostics (`368b860`) and stops a linked
-holder that is never ahead from suppressing neighbour discovery (`140c256`).
-v0.2.1 is the experimental prerelease of this source after PR 9 merges. It is
-released as an experimental prerelease by owner decision while field acceptance
-remains open: Item 5, P06 and Safari 17.6 are RED.
+Checkpoint: 21 October 2026. [PR 9](https://github.com/forgesworn/relayswarm/pull/9)
+merged as `1d54538`, which is published as experimental prerelease
+[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) and
+deployed to the pilot. Its loader change is `140c256`: it adds local holder
+labels to the peer diagnostics (`368b860`) and stops a linked holder that is
+never ahead from suppressing neighbour discovery. The field results below were
+measured on the `140c256` deployment of the same loader. v0.2.1 is released by
+owner decision while field acceptance remains open: Item 5, P06 and Safari 17.6
+are RED.
 
 **Passed on this source.**
 
@@ -29,9 +31,15 @@ remains open: Item 5, P06 and Safari 17.6 are RED.
   Chrome install hit an apt 403 before any test step.
 - Fresh consumption of the exact committed source (not downloaded release
   assets) passed with 286 package members. The served client is 787,462 bytes.
+  The release merge commit `1d54538` passed its own fresh consumption with 287
+  members (one added evidence file) and builds the same client.
 - Guarded deployment to the pilot passed its independent deployment review.
-  After P07 the pilot app is `38eb5c2d`, started 02:59:29 UTC, with reporting
-  and forwarding off.
+  After P07 the pilot app was `38eb5c2d`, started 02:59:29 UTC. The release
+  merge commit `1d54538` was then deployed through the same guarded cycle and
+  passed its own independent deployment review: the pilot app is `ce410033`,
+  started 14:56:56 UTC, with reporting and forwarding off. Its runtime differs
+  from `140c256` only in the `package.json` and `package-lock.json` version
+  fields, and it serves the same client.
 - P05 reporting lifecycle passed, with natural expiry after 303,923 ms. P07
   parent-crash recovery passed, with an independent native review.
 - **Fourteen-role short qualifier R66 is GREEN, 16 of 16 gates**, including
@@ -85,8 +93,9 @@ Nostr signalling bytes were not separable.
 - Physical iPhone (unavailable), physical Android and device Safari or Firefox
   (these need the owner), hard NAT and a separate network (these need another
   network) remain open and unverified. npm publication is out of scope.
-- Release: v0.2.1 is released as an experimental prerelease by owner decision
-  while field acceptance remains open: Item 5, P06 and Safari 17.6 are RED.
+- Release: v0.2.1 is published as an experimental prerelease by owner decision
+  while field acceptance remains open: Item 5, P06 and Safari 17.6 are RED. See
+  [Release verification](#release-verification).
 
 Run-by-run evidence is in [Goals and agent handover](AGENT-GOALS.md). See the
 [checkpoint record](../spikes/results/140c256-current-delivery-checkpoint-20261021.json)
@@ -1478,12 +1487,41 @@ no 37-item completion is asserted. PR 8 remains open; no new release is publishe
 
 ### v0.2.1 (21 October 2026)
 
-[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) is the
-experimental GitHub prerelease of the source in PR 9, published by owner
-decision with Item 5, P06 and Safari 17.6 RED and open. Its assets
-(`relayswarm-0.2.1.tgz`, `relayswarm-hls-swarm-0.2.1.mjs` and `SHA256SUMS`) and
-their checksums and download verification are recorded here after publication.
-The v0.2.0 record below is unchanged.
+[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) is an
+experimental GitHub prerelease of merge commit
+`1d54538c56179387b7541924e068d0d9c41d18e6` (PR 9), with an annotated `v0.2.1`
+tag, published by owner decision with Item 5, P06 and Safari 17.6 RED and open.
+[Main CI run 39601445318](https://github.com/forgesworn/relayswarm/actions/runs/39601445318)
+passed all nine required jobs on that commit (soak skipped); attempt 2 reran
+only the hls.js playback job after the account-budget TURN renewal browser case
+timed out in attempt 1. The merged tree is identical to PR head `55c0f68`, which
+passed [run 39589990218](https://github.com/forgesworn/relayswarm/actions/runs/39589990218)
+on attempt 2 after one wall-clock-bound unit test failed on the macOS runner.
+Fresh consumption of the merge commit passed with 287 package members. Assets
+were built from a clean `git archive` of the commit after `npm ci`, with the
+v0.2.0 commands; the same bundle command rebuilds the published v0.2.0 bundle
+byte for byte.
+
+| Asset | SHA-256 |
+|---|---|
+| `relayswarm-0.2.1.tgz` (287 files, 1,420,583 bytes) | `9f67a5f3ea8f5dffdf2e574d33703dfe952e01069a57635ae8349dd6d85455cb` |
+| `relayswarm-hls-swarm-0.2.1.mjs` (148,439 bytes) | `358a026a563d645498faa1461d76ad44e64ae9cfe3d8de234c25c6e78025cda2` |
+
+After publication, all three assets were downloaded from their public URLs into
+an empty directory and passed `shasum -a 256 -c SHA256SUMS`. Installing the
+tarball by URL into a clean production consumer imported the package; the
+downloaded tarball imported all ten public export paths; and the bundle loaded
+in headless Chrome 155 with `createHlsSwarm` exported and no page errors. These
+are distribution checks on macOS arm64 and close no field gate.
+
+The merge commit was then deployed to the pilot through the guarded cycle, with
+`140c256` as the predecessor and its positive P07 as the incoming handover, and
+passed its independent deployment review. The pilot app is `ce410033`, started
+14:56:56 UTC. Normal HTTPS attestation matched the 787,462-byte client and read
+two fresh rendition playlists, and the deployment's verification source was
+removed. Reporting and forwarding remain off. No field run was repeated on
+`1d54538`; its runtime differs from `140c256` only in the package version
+fields. The v0.2.0 record below is unchanged.
 
 ### v0.2.0 (21 October 2026)
 

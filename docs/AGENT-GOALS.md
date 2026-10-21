@@ -960,15 +960,17 @@ Findings for the next agent:
 
 ## Next work, in dependency order
 
-Position on 21 October 2026: v0.2.0 is a published experimental GitHub
-prerelease of `bf43940`. Source `140c256` (PR 9, unmerged) has passed CI,
-consumption, guarded deployment and its review, P05, P07 and the short
-qualifier R66 (GREEN, 16 of 16). The owner decided to publish v0.2.1 as an
-experimental prerelease of this source with Item 5, P06 and Safari 17.6 RED and
-open, as v0.2.0 shipped with its qualifier RED. Those items stay RED and open.
+Position on 21 October 2026: v0.2.1 is a published experimental GitHub
+prerelease of merge commit `1d54538` (PR 9), deployed to the pilot (app
+`ce410033`). Its loader source `140c256` passed CI, consumption, guarded
+deployment and its review, P05, P07 and the short qualifier R66 (GREEN, 16 of
+16). The owner decided to publish v0.2.1 with Item 5, P06 and Safari 17.6 RED
+and open, as v0.2.0 shipped with its qualifier RED. Those items stay RED and
+open. Release and deployment evidence is in
+[Status](STATUS.md#release-verification).
 
-1. **Reconcile and merge PR 9.** Apply the updated PR description and keep the
-   code description. Merging and tagging are the host's actions.
+1. **PR 9 is merged and released as v0.2.1.** The next finite source or
+   deployment chains on the `1d54538` deployment's independent cleanup review.
 2. **Item 5, the sustained 7,200 s run (RED, open).** Fix the harness `rejoin()`
    race and prove the fix in its own review cycle, then run on the same qualified
    source, topology and profile: 7,200 seconds, 22 churn events, two
@@ -986,11 +988,9 @@ open, as v0.2.0 shipped with its qualifier RED. Those items stay RED and open.
 5. **Cost.** Marginal cost on the hosts' plans is not determined. Record the
    plan terms before any cost statement; distinguish saved traffic from actual
    marginal cost.
-6. **Release v0.2.1.** Obtain all required checks on the final source and fresh
-   consumption, merge PR 9, then tag, publish the experimental prerelease and
-   deploy. Verify immutable downloaded assets and the served build, and record
-   their checksums in [Status](STATUS.md#release-verification). Keep earlier
-   release assets unchanged. npm publication is out of scope.
+6. **Releases.** v0.2.1 is published, its downloaded assets verified and its
+   merge commit deployed. Keep the v0.2.1, v0.2.0 and v0.1.0 tags and assets
+   unchanged. npm publication is out of scope.
 
 The short and long builders are prepared source. Review their changes and pure
 checks before materialising them. Frozen source manifests must remain intact:
