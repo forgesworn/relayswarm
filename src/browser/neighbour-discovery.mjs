@@ -7,13 +7,16 @@ const HASH = /^[0-9a-f]{64}$/u;
 const STALE_HOLDER_MISSES = 4;
 const STALE_HOLDER_MS = 10_000;
 const MAX_HOLDERS = 8;
+// A spent replacement may re-arm once this long has passed with no verified
+// delivery, if every link serving the context is stale. Internal, not an option.
+const REPLACEMENT_REARM_MS = 20_000;
 export class NeighbourDiscovery {
   constructor(clock = () => Date.now()) {
     this.clock = clock;
     this.contexts = new Map();
     this.candidates = new Map();
     this.window = null;
-    this.counters = { checks: 0, replacements: 0, expired: 0, opened: 0, verified: 0, staleHolder: 0, staleBlocked: 0 };
+    this.counters = { checks: 0, replacements: 0, expired: 0, opened: 0, verified: 0, staleHolder: 0, staleBlocked: 0, heldMiss: 0, rearmed: 0 };
   }
 
   context(mediaType, rendition) {
@@ -159,7 +162,7 @@ export class NeighbourDiscovery {
     return { v: 1, candidateCapacity: 64, candidates: this.candidates.size, contexts: this.contexts.size,
       requestedKeys: [...this.contexts.values()].reduce((sum, context) => sum + context.keys.length, 0),
       replacementSpent: [...this.contexts.values()].filter(context => context.spent).length,
-      opportunityActive: this.live(), remainingMs: this.live() ? Math.min(15_000, this.window.expiresAt - this.clock()) : 0,
+      replacementRearmMs: REPLACEMENT_REARM_MS, opportunityActive: this.live(), remainingMs: this.live() ? Math.min(15_000, this.window.expiresAt - this.clock()) : 0,
       vacancyReserved: this.reserved(), counters: { ...this.counters } };
   }
   clear() { this.window = null; this.contexts.clear(); this.candidates.clear(); }

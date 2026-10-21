@@ -551,7 +551,8 @@ class HlsSwarm {
         counters: { ...this.peerEligibilityCounters },
         records: this.peerEligibilityRecords.map((record) => ({ ...record, budgetGeometry: { ...record.budgetGeometry },
           ...("holders" in record ? { holders: record.holders && [...record.holders], haveHolders: record.haveHolders && [...record.haveHolders],
-            staleHolders: record.staleHolders && [...record.staleHolders] } : {}),
+            staleHolders: record.staleHolders && [...record.staleHolders],
+            heldMissHolders: record.heldMissHolders && [...record.heldMissHolders] } : {}),
           ...(record.projection ? { projection: { ...record.projection } } : {}) })),
       },
       peerRequestDiagnostics: {
@@ -963,8 +964,9 @@ class HlsSwarm {
 
   #holderLabel(pubkey) { return this.holderLabels.get(pubkey) ?? 0; }
 
-  // Labels for a diagnostic row: serving links, links holding the key, and the
-  // serving links that are stale. Reads only; no decision depends on it.
+  // Labels for a diagnostic row: serving links, links holding the key, the
+  // serving links that are stale, and the links recorded as a held miss on this
+  // decision (filled in when the load ends). Reads only; no decision depends on it.
   #holderDiagnostics({ key, rendition, context }) {
     const small = (labels) => labels.sort((a, b) => a - b).slice(0, 8);
     const holders = [], haveHolders = [], staleHolders = [];
@@ -976,7 +978,7 @@ class HlsSwarm {
       }
       if (link.have.has(key)) haveHolders.push(label);
     }
-    return { holders: small(holders), haveHolders: small(haveHolders), staleHolders: small(staleHolders) };
+    return { holders: small(holders), haveHolders: small(haveHolders), staleHolders: small(staleHolders), heldMissHolders: [] };
   }
 
   // One decision per load that reached the HAVE check. A serving link whose HAVE
@@ -1021,7 +1023,7 @@ class HlsSwarm {
       // Only decisions that already computed the key and inspected links.
       if (demand) {
         try { Object.assign(record, this.#holderDiagnostics(demand)); }
-        catch { Object.assign(record, { holders: null, haveHolders: null, staleHolders: null }); }
+        catch { Object.assign(record, { holders: null, haveHolders: null, staleHolders: null, heldMissHolders: null }); }
       }
       this.peerEligibilityCounters[reason] = increment(this.peerEligibilityCounters[reason]);
       if (this.peerEligibilityRecords.length === 64) {

@@ -761,7 +761,7 @@ test("peer eligibility distinguishes zero budget with HAVE from positive budget 
     trace = fixture.swarm.metrics().peerEligibilityDiagnostics;
     assert.equal(keyCalls, 5, "positive eligibility adds only its existing key computation, not a diagnostic hash");
     assert.deepEqual(trace.records.at(-1), { atMs: trace.records.at(-1).atMs, cc: 0, level: 0,
-      budgetMs: 120, reason: "no-have-no-wait", matchingHave: false, holders: [], haveHolders: [], staleHolders: [],
+      budgetMs: 120, reason: "no-have-no-wait", matchingHave: false, holders: [], haveHolders: [], staleHolders: [], heldMissHolders: [],
       budgetGeometry: { source: "buffer", positionSource: "fragment", currentTime: 10, bufferedEnd: 15, playableEnd: 15, fragmentStart: null, originReserveMs: 2000, uncappedMs: 3000 } });
     assert.equal(trace.counters["no-budget"], 1); assert.equal(trace.counters["no-have-no-wait"], 1);
     assert.equal(commitments, 0); assert.equal(admissions, admissionBaseline);
@@ -2944,6 +2944,7 @@ test("holder labels tie request, wait and measurement rows to a link without exp
     assert.ok(waiting.length >= 1);
     for (const row of waiting) {
       assert.deepEqual(row.holders, [1, 2]); assert.deepEqual(row.haveHolders, []); assert.deepEqual(row.staleHolders, []);
+      assert.deepEqual(row.heldMissHolders, [], "no held miss is recorded without a held-miss rule");
     }
     first.receive(haveFrame(playback.key));
     await fixture.load();
@@ -2960,7 +2961,7 @@ test("holder labels tie request, wait and measurement rows to a link without exp
     await fixture.load();
     row = rows().at(-1);
     assert.equal(row.reason, "no-budget");
-    for (const field of ["holders", "haveHolders", "staleHolders"]) assert.ok(!(field in row), `no-budget rows omit ${field}`);
+    for (const field of ["holders", "haveHolders", "staleHolders", "heldMissHolders"]) assert.ok(!(field in row), `no-budget rows omit ${field}`);
     fixture.hls.media = undefined;
     // Labels are small local counters that survive a relink of the same remote peer.
     const measured = () => Object.fromEntries(fixture.swarm.metrics().peers.deliveryMeasurements.map(value => [value.pubkey, value.holder]));
@@ -2984,7 +2985,8 @@ test("holder labels tie request, wait and measurement rows to a link without exp
     for (const peer of fixture.peers) assert.ok(!encoded.includes(peer.pubkey), "rows never carry a key");
     // Returned snapshots own their arrays.
     const owned = fixture.swarm.metrics().peerEligibilityDiagnostics.records.find(record => record.holders?.length);
-    owned.holders.push(99);
+    owned.holders.push(99); owned.heldMissHolders.push(99);
+    assert.ok(!fixture.swarm.metrics().peerEligibilityDiagnostics.records.some(record => record.heldMissHolders?.includes(99)));
     assert.ok(!fixture.swarm.metrics().peerEligibilityDiagnostics.records.some(record => record.holders?.includes(99)));
     const sent = JSON.stringify([first.sent, second.sent, relinked.sent]);
     assert.ok(!sent.includes('"holder"'), "labels are never sent to a peer");
@@ -3204,6 +3206,12 @@ test("neighbour holder state is bounded, scoped to its context and cleared with 
   state.holderMiss(context, holders[8], "6".repeat(64)); f.advance(30_001); state.context("main", "main:0");
   assert.equal(context.holders.size, 0, "inactivity clears holder state with the keys");
   const replaced = state.context("main", "main:1"); assert.notEqual(replaced.holders, context.holders); assert.equal(replaced.holders.size, 0);
+});
+
+test("held-miss and re-arm diagnostics start at zero and the re-arm interval is a fixed local constant", () => {
+  const { state } = advisoryFixture(), snapshot = state.snapshot();
+  assert.equal(snapshot.counters.heldMiss, 0); assert.equal(snapshot.counters.rearmed, 0);
+  assert.equal(snapshot.replacementRearmMs, 20_000);
 });
 
 test("a stale holder is the rotation victim while a non-stale serving holder is protected", async t => {
