@@ -909,27 +909,25 @@ are identity rebases of the 3f706a9 versions.
 
 ## Next work, in dependency order
 
-Position at 19:45 UTC on 19 October: for 4178c26 the deployment, its
-independent review, positive P05 and P07 r2 are complete (items 1 to 3 below,
-which still read as written for 46494d5). The short qualifier (item 4) is RED
-on `each4BothQualityPeer` in R61, so item 5 and everything after it stay
-blocked. Any fix for high-quality peer delivery is a source change and needs
-its own cycle (CI, deployment, review, P05, P07, rebuilt qualifier). The
-structural analysis (20:45 UTC) finds the gate failure structural on every
-source: high segments need about 3 to 4 s end to end against a fixed 1.5 s
-wait. R61's path was also worse than R60's, and R61 regressed high-quality
-playback. On 20 October a local bench reproduced that failure and candidate
-`eb8a62f` (local, not pushed) improved it without a gate pass: buffers held,
-low-quality peer delivery became routine, high stayed marginal at the
-pilot's 512 kB/s holder rate. At 1.25 MB/s the candidate passed the bench
-gate in both regimes and current code did not. Position at 17:00 UTC on 20
-October: the candidate (`5f2ece0`) cycle is complete through P07 r5. R62 to
-R65 are RED. R64 (512 kB/s, tunnels off, Chrome background downloads
-disabled) cleared setup and went RED 106 s into measurement, when another
-workload loaded M1. R65 (the same method at 1.25 MB/s) completed the 300 s
-measurement with 14 of 16 gates: on this method high-quality peer delivery
-happened only at the higher limit, but reached one of four receivers, and one contributor got
-no requests. The next step is the user's decision.
+Position on 21 October 2026: v0.2.0 is a published experimental GitHub
+prerelease of `bf43940`, and `main` (`3770fee`) passed CI in
+[run 39516467313](https://github.com/forgesworn/relayswarm/actions/runs/39516467313).
+The pilot runs `5f2ece0`, for which items 1 to 3 are complete (deployment, its
+independent review, positive P05 and P07 r5). Item 4 is RED: R62 to R65 failed,
+and R65 (1.25 MB/s holders, tunnels off, Chrome background downloads disabled)
+completed its 300 s measurement with 14 of 16 gates. High-quality peer media
+reached one of four receivers, and one contributor got no requests. The likely
+cause is inferred, not proved, because request records carry no holder identity:
+a receiver stays bound to a same-rendition holder that is never ahead, and
+neighbour discovery treats that holder as enough. A one-link probe through the
+pilot's TURN service moved high-quality segments at 3 to 4 Mbit/s over TLS, so a
+discovery fix may not clear `each4BothQualityPeer` on its own. The user chose to
+fix this on `fix/holder-discovery`: holder labels in the local diagnostics first,
+then stopping a never-ahead holder from suppressing discovery, with bounded peer
+work, deadlines and HTTP fallback unchanged. That source needs its own cycle (CI,
+consumption, deployment and review, P05, P07, then a rebuilt R66 at the R65
+profile). Item 5 and everything after it stay blocked until a short qualifier
+passes.
 
 1. **Independently close the latest deployment.** Review the prepared reader,
    verify its pinned inputs, run the original bounded fresh cleanup review, and
