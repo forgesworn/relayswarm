@@ -410,11 +410,12 @@ link reaches this viewer's loader in time, when the link closes, when the
 rendition changes, or when the context sees no demand for 30 seconds. A stale
 link is still asked for any segment it does hold.
 The thresholds are internal constants, not options, and the wait, deadlines,
-HTTP fallback, `maxPeers`, the single 15-second window, the one-replacement
-allowance, the rotation cooldown and every upload limit are unchanged. In a full
+HTTP fallback, `maxPeers`, the single 15-second window, the rotation cooldown
+and every upload limit are unchanged. In a full
 neighbourhood the allowance still bounds this to one replacement per context
-generation until a verified delivery renews it, so a replacement that is also
-never ahead leaves the viewer on origin for that rendition. The additive
+generation until a verified delivery or the twenty-second re-arm below renews
+it, so a replacement that is also never ahead or never delivers leaves the
+viewer on origin for that rendition between attempts. The additive
 `neighbourDiscovery.counters.staleHolder` counts attempts that began because
 every serving link was stale; `staleBlocked` counts loads where a fresh eligible
 candidate hinted a demanded key for such a context but a bound (spent allowance,
@@ -430,10 +431,17 @@ with an absolute maximum of 15 seconds. Quality changes invalidate only that
 media type, including zero-budget loads; those loads add no key hashing or HAVE
 lookup. A refused attempt may reuse its single vacancy before that same deadline.
 The reservation and scoped victim reconnect suppression then expire even if
-loads continue. Only an accepted commitment/hash-verified delivery for the exact
+loads continue. An accepted commitment/hash-verified delivery for the exact
 selected context generation renews its one-replacement allowance; PC-open,
-HAVE, sibling progress and inactivity do not. Per-piece origin fallback remains
-unchanged.
+HAVE, sibling progress and inactivity do not. Without a delivery, a spent
+allowance also renews once at least twenty seconds (an internal constant,
+`neighbourDiscovery.replacementRearmMs`) after it was spent, if the context is
+still current and every link serving its rendition is stale or none serves it;
+`neighbourDiscovery.counters.rearmed` counts these. That allows at most one
+replacement per twenty seconds per context. The single 15-second window, one
+attempt at a time, the rotation cooldown, `maxPeers` and ticket gating still
+apply, so two contexts that re-arm together do not rotate links in quick
+succession. Per-piece origin fallback remains unchanged.
 
 A still-current discovery offer can include the exact demanded `requestedKey`
 inside its existing pairwise NIP-44 payload, alongside the truthful peer count.

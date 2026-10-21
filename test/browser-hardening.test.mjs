@@ -2435,17 +2435,17 @@ test("neighbour opportunity expiry is hard, nonrenewable and releases every rese
     assert.equal(f.state.snapshot().replacementSpent, 1);
     f.advance(30_001); f.state.demand("main", "main:0", "d".repeat(64));
     assert.deepEqual(f.context.keys, ["d".repeat(64)], "inactivity clears stale keys before resuming");
-    assert.equal(f.context.spent, true, "inactivity does not renew the eviction budget");
+    assert.equal(f.state.spent(f.context), true, "inactivity does not renew the eviction budget");
   }
 });
 
 test("neighbour success requires the exact selected generation and cannot credit a sibling or A-to-B-to-A result", () => {
   const f = advisoryFixture(), attempt = f.begin(); f.state.replaced(attempt, "c".repeat(64));
   const audio = f.state.demand("audio", "audio:0", "d".repeat(64));
-  assert.equal(f.state.verified(audio), true); assert.equal(f.context.spent, true);
-  f.state.context("main", "main:1"); const newMain = f.state.demand("main", "main:0", f.key); newMain.spent = true;
-  assert.equal(f.state.verified(f.context), false); assert.equal(newMain.spent, true);
-  assert.equal(f.state.verified(newMain), true); assert.equal(newMain.spent, false);
+  assert.equal(f.state.verified(audio), true); assert.equal(f.state.spent(f.context), true);
+  f.state.context("main", "main:1"); const newMain = f.state.demand("main", "main:0", f.key); newMain.spentAt = f.state.clock();
+  assert.equal(f.state.verified(f.context), false); assert.equal(f.state.spent(newMain), true);
+  assert.equal(f.state.verified(newMain), true); assert.equal(f.state.spent(newMain), false);
 });
 
 test("neighbour clock rollback invalidates intent and never reports more than its original fifteen seconds", () => {
@@ -2463,10 +2463,10 @@ test("neighbour advancing clock cannot extend the opportunity past creation plus
 });
 
 test("neighbour zero-budget activity cannot revive a stale positive-budget key", () => {
-  const f = advisoryFixture(); f.context.spent = true;
+  const f = advisoryFixture(); f.context.spentAt = f.state.clock();
   for (let i = 0; i < 4; i++) { f.advance(10_000); f.state.context("main", "main:0"); }
   f.state.demand("main", "main:0", "e".repeat(64));
-  assert.deepEqual(f.context.keys, ["e".repeat(64)]); assert.equal(f.context.spent, true);
+  assert.deepEqual(f.context.keys, ["e".repeat(64)]); assert.equal(f.state.spent(f.context), true);
 });
 
 async function discoveryFixture({ admit = async () => true, candidateSecretKey, ...options } = {}) {
@@ -3506,6 +3506,109 @@ test("held-miss and re-arm diagnostics start at zero and the re-arm interval is 
   const { state } = advisoryFixture(), snapshot = state.snapshot();
   assert.equal(snapshot.counters.heldMiss, 0); assert.equal(snapshot.counters.rearmed, 0);
   assert.equal(snapshot.replacementRearmMs, 20_000);
+});
+
+test("a spent replacement re-arms only after twenty seconds with no verified delivery, every serving link stale and a current context", () => {
+  const f = advisoryFixture(), { state, context } = f, staleAll = () => true;
+  assert.equal(state.rearm(context, staleAll), false, "an unspent context has nothing to re-arm");
+  assert.equal(state.snapshot().replacementRearmMs, 20_000);
+  assert.ok(state.replaced(f.begin(), "c".repeat(64)));
+  assert.equal(state.spent(context), true); assert.equal(context.spentAt, state.clock());
+  f.advance(19_999);
+  assert.equal(state.rearm(context, staleAll), false, "not before twenty seconds");
+  assert.equal(state.rearm(context, () => false), false, "not while a fresh serving link exists");
+  f.advance(1);
+  assert.equal(state.rearm(context, () => false), false, "not while a fresh serving link exists");
+  assert.equal(state.spent(context), true); assert.equal(state.snapshot().counters.rearmed, 0);
+  assert.equal(state.rearm(context, staleAll), true);
+  assert.equal(state.spent(context), false); assert.equal(state.snapshot().replacementSpent, 0);
+  assert.equal(state.snapshot().counters.rearmed, 1);
+  // A second replacement succeeds, and is bounded the same way.
+  state.end(); state.demand("main", "main:0", f.key);
+  assert.ok(state.replaced(f.begin(), "d".repeat(64)));
+  f.advance(20_000); assert.equal(state.rearm(context, staleAll), true);
+  assert.equal(state.snapshot().counters.rearmed, 2);
+  // Not once the context is no longer current.
+  state.end(); state.demand("main", "main:0", f.key);
+  assert.ok(state.replaced(f.begin(), "e".repeat(64)));
+  f.advance(30_001); assert.equal(state.rearm(context, staleAll), false, "an idle context does not re-arm");
+});
+
+test("a verified delivery ends the spent state, so there is nothing to re-arm", () => {
+  const f = advisoryFixture(), { state, context } = f;
+  assert.ok(state.replaced(f.begin(), "c".repeat(64)));
+  f.advance(10_000); assert.equal(state.verified(context), true);
+  assert.equal(state.spent(context), false); assert.equal(context.spentAt, null);
+  f.advance(20_000); assert.equal(state.rearm(context, () => true), false);
+  assert.equal(state.snapshot().counters.rearmed, 0, "the delivery, not the timer, renewed it");
+});
+
+test("two spent contexts re-arming together still make one replacement per discovery window", () => {
+  const f = advisoryFixture(), { state, context: main } = f, key = "d".repeat(64);
+  const audio = state.demand("audio", "audio:0", key);
+  state.hint(f.pubkey, [f.key, key], "fixture-ticket");
+  const eligible = () => true, unmet = () => true;
+  // Both are spent at the same instant, one after the other in two windows.
+  const first = state.begin(state.choose(eligible, unmet, false));
+  assert.ok(first && state.replaced(first, "c".repeat(64)));
+  state.end();
+  const second = state.begin(state.choose(eligible, unmet, false));
+  assert.ok(second && second.window.context !== first.window.context && state.replaced(second, "e".repeat(64)));
+  state.end();
+  assert.equal(state.spent(main) && state.spent(audio), true);
+  f.advance(20_000);
+  assert.equal(state.rearm(main, () => true) && state.rearm(audio, () => true), true);
+  assert.equal(state.snapshot().counters.rearmed, 2);
+  state.demand("main", "main:0", f.key); state.demand("audio", "audio:0", key);
+  // One window and one attempt at a time: the other context cannot begin inside it.
+  const open = state.begin(state.choose(eligible, unmet, false));
+  assert.ok(open); assert.equal(state.choose(eligible, unmet, false), null, "an attempt is in flight");
+  const other = open.window.context === main ? audio : main;
+  assert.equal(state.begin({ context: other, candidate: state.candidates.get(f.pubkey), key: other.keys[0] }), null, "the window belongs to one context");
+  assert.ok(state.replaced(open, "f".repeat(64)));
+  assert.equal(state.replaced(open, "f".repeat(64)), false, "one replacement per context per window");
+  assert.equal(state.snapshot().counters.replacements, 3);
+});
+
+test("a re-armed replacement is still bounded by the eviction cooldown and the discovery window", async t => {
+  // The replacement leaves a link that serves nothing, so the context stays stale-only
+  // and re-arms after twenty seconds; the second eviction waits for the 25 s cooldown.
+  const f = await staleHolderFixture(t, { answering: true, evictionCooldownMs: 25_000, serve: { bytes: bytes32, delayMs: null } });
+  try {
+    const first = f.candidate(), second = f.candidate();
+    for (let i = 0; i < 4; i++) await f.fail(first);
+    f.shift.ms += 10_001; f.touch();
+    const segment = f.next(); first.announce(segment.key); await sleep(30);
+    const opening = f.load(segment.name);
+    await until(() => f.swarm.metrics().peers.linksOpened === 3);
+    await opening; await sleep(5);
+    let snapshot = f.swarm.metrics();
+    assert.equal(snapshot.peers.evicted, 1); assert.equal(snapshot.neighbourDiscovery.replacementSpent, 1);
+    assert.equal(snapshot.neighbourDiscovery.counters.rearmed, 0);
+    const demandSecond = async () => {
+      const demanded = f.next(); second.announce(demanded.key); await sleep(30);
+      await f.load(demanded.name); await sleep(5);
+    };
+    // Ten seconds on: still spent, so nothing is attempted.
+    f.shift.ms += 10_000; await demandSecond();
+    assert.equal(f.discovery().rearmed, 0); assert.equal(second.offers.length, 0);
+    assert.equal(f.swarm.metrics().neighbourDiscovery.replacementSpent, 1);
+    // Twenty seconds after the replacement: re-armed, but the 25 s eviction cooldown still holds.
+    f.shift.ms += 10_001; await demandSecond();
+    assert.equal(f.discovery().rearmed, 1); assert.equal(f.swarm.metrics().neighbourDiscovery.replacementSpent, 0);
+    assert.equal(second.offers.length, 0, "the eviction cooldown has not passed"); assert.equal(f.swarm.metrics().peers.evicted, 1);
+    // Past the cooldown the second replacement goes ahead, and the context is spent again.
+    f.shift.ms += 5_000;
+    const last = f.next(); second.announce(last.key); await sleep(30);
+    const pending = f.load(last.name);
+    await until(() => second.offers.length === 1); await pending; await sleep(5);
+    snapshot = f.swarm.metrics();
+    assert.equal(snapshot.peers.evicted, 2); assert.equal(snapshot.neighbourDiscovery.replacementSpent, 1);
+    assert.equal(snapshot.neighbourDiscovery.counters.replacements, 2); assert.equal(snapshot.neighbourDiscovery.counters.rearmed, 1);
+    // And not again for another twenty seconds.
+    f.shift.ms += 5_000; await demandSecond();
+    assert.equal(f.swarm.metrics().neighbourDiscovery.counters.rearmed, 1);
+  } finally { await f.close(); }
 });
 
 test("a stale holder is the rotation victim while a non-stale serving holder is protected", async t => {

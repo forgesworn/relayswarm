@@ -1,5 +1,32 @@
 # RelaySwarm changelog
 
+## Unreleased
+
+Not field-tested. These changes make a receiver try more neighbours when its
+linked holders do not deliver; they do not show that high-quality peer delivery
+improves, and field acceptance remains open. See [Status](docs/STATUS.md).
+
+- Count a linked holder that held the demanded segment but did not deliver it
+  in time as a miss. Previously a holder whose HAVE held the key was treated as
+  ahead and cleared, so one that was ahead but too slow was never stale and kept
+  neighbour discovery off. Each peer-first load is now decided once, when it
+  ends. A verified delivery clears only the link it came from. A load that goes
+  to origin gives a held miss to the serving links that held the key, and a miss
+  to every serving link only when no link held it. Loader aborts, `stop()`,
+  commitment failures and integrity failures record nothing. The thresholds
+  (four misses on distinct segments over at least ten seconds) are unchanged.
+- Let a spent replacement re-arm once, at most every twenty seconds per context,
+  when no verified peer delivery has happened since it was spent and every link
+  serving that rendition is stale or none serves it. The 15-second discovery
+  window, one attempt at a time, the eviction cooldown, `maxPeers` and ticket
+  gating are unchanged. The interval is an internal constant, not an option.
+- Add local diagnostics: `neighbourDiscovery.counters.heldMiss` and `rearmed`,
+  `neighbourDiscovery.replacementRearmMs`, and `heldMissHolders` on the
+  eligibility rows that carry holder labels. They sit in the local snapshot and
+  are not part of the numeric operator report.
+- The late-arrival projection, deadlines, abandonment, bounded peer work,
+  admission and HTTP fallback are unchanged.
+
 ## v0.2.1 (21 October 2026)
 
 Experimental [GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) of the source from

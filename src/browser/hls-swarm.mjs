@@ -1770,6 +1770,12 @@ class HlsSwarm {
     return serving.length > 0 && serving.every(link => this.discovery.stale(context, link.pubkey));
   }
 
+  // No link serves this context's rendition, or every one that does is stale.
+  #noFreshServing(context) {
+    return [...this.links.values()].filter(link => this.#servesRendition(link, context.rendition))
+      .every(link => this.discovery.stale(context, link.pubkey));
+  }
+
   #discoveryEligible(candidate) {
     return !this.links.has(candidate.pubkey) && !this.dials.has(candidate.pubkey)
       && !this.dialChecks.has(candidate.pubkey) && !this.#coolingDown(candidate.pubkey)
@@ -1778,7 +1784,7 @@ class HlsSwarm {
   }
 
   #discoveryVictim(context) {
-    if (context.spent || this.links.size < 2 || Date.now() - this.lastEvictionAt < this.options.evictionCooldownMs) return null;
+    if (this.discovery.spent(context) || this.links.size < 2 || Date.now() - this.lastEvictionAt < this.options.evictionCooldownMs) return null;
     // Preserve a useful sibling audio/video neighbour as well as the target.
     const contexts = [...this.discovery.contexts.values()].filter(value => Date.now() - value.activityAt < 30_000);
     return rotationCandidate([...this.links.values()].filter(link => !contexts.some(value =>
@@ -1811,6 +1817,7 @@ class HlsSwarm {
     if (this.stopped || this.options.mode !== "peer-first") return;
     this.#expireDiscovery();
     if (!this.#hasOutgoingSlot()) return;
+    for (const context of this.discovery.contexts.values()) this.discovery.rearm(context, () => this.#noFreshServing(context));
     const room = this.links.size + this.dials.size < this.options.maxPeers;
     const choice = this.discovery.choose(candidate => this.#discoveryEligible(candidate),
     context => this.#unmetDiscovery(context) && (room || this.discovery.reserved() || Boolean(this.#discoveryVictim(context))), room);

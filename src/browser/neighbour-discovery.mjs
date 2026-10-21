@@ -24,7 +24,7 @@ export class NeighbourDiscovery {
     if (!["main", "audio"].includes(mediaType)) return null;
     let context = this.contexts.get(mediaType);
     if (!context || context.rendition !== rendition) {
-      context = { mediaType, rendition, keys: [], lastDemandAt: null, activityAt: this.clock(), spent: false, holders: new Map() };
+      context = { mediaType, rendition, keys: [], lastDemandAt: null, activityAt: this.clock(), spentAt: null, holders: new Map() };
       this.contexts.set(mediaType, context);
     } else {
       const at = this.clock();
@@ -81,6 +81,22 @@ export class NeighbourDiscovery {
 
   forget(pubkey) { for (const context of this.contexts.values()) context.holders.delete(pubkey); }
 
+  // A context is spent from a successful replaced() until verified() clears it.
+  spent(context) { return context.spentAt !== null; }
+
+  // A spent context re-arms once REPLACEMENT_REARM_MS has passed since it was
+  // spent, if it is still current and `allStale()` says no serving link is fresh.
+  // A verified delivery clears spentAt, so none has happened since. This bounds
+  // replacements to one per interval per context; choose() and the eviction
+  // cooldown still serialise rotation across contexts.
+  rearm(context, allStale) {
+    if (!this.#live(context) || !this.spent(context)) return false;
+    const at = this.clock();
+    if (at < context.spentAt || at - context.spentAt < REPLACEMENT_REARM_MS || !this.current(context) || !allStale()) return false;
+    context.spentAt = null; this.counters.rearmed++;
+    return true;
+  }
+
   current(context) {
     const at = this.clock();
     return this.contexts.get(context.mediaType) === context && at >= context.activityAt && at - context.activityAt < 30_000
@@ -91,7 +107,7 @@ export class NeighbourDiscovery {
     if (this.window?.attempt) return null;
     const contexts = this.window ? [this.window.context] : [...this.contexts.values()];
     for (const context of contexts) {
-      if (!this.current(context) || !unmet(context) || (!room && context.spent && !this.window?.vacant)) continue;
+      if (!this.current(context) || !unmet(context) || (!room && this.spent(context) && !this.window?.vacant)) continue;
       const found = this.hinted(context, eligible);
       if (found) return found;
     }
@@ -131,8 +147,8 @@ export class NeighbourDiscovery {
   }
 
   replaced(attempt, victim) {
-    if (!this.valid(attempt) || attempt.window.context.spent) return false;
-    attempt.window.context.spent = true;
+    if (!this.valid(attempt) || this.spent(attempt.window.context)) return false;
+    attempt.window.context.spentAt = this.clock();
     attempt.window.vacant = true;
     attempt.window.victim = victim;
     this.counters.replacements++;
@@ -156,7 +172,7 @@ export class NeighbourDiscovery {
   }
   verified(context) {
     if (!context || this.contexts.get(context.mediaType) !== context) return false;
-    context.spent = false; this.counters.verified++;
+    context.spentAt = null; this.counters.verified++;
     return true;
   }
   live(window = this.window) { return Boolean(window && this.window === window && this.clock() >= window.createdAt && this.clock() < window.expiresAt); }
@@ -165,7 +181,7 @@ export class NeighbourDiscovery {
   snapshot() {
     return { v: 1, candidateCapacity: 64, candidates: this.candidates.size, contexts: this.contexts.size,
       requestedKeys: [...this.contexts.values()].reduce((sum, context) => sum + context.keys.length, 0),
-      replacementSpent: [...this.contexts.values()].filter(context => context.spent).length,
+      replacementSpent: [...this.contexts.values()].filter(context => this.spent(context)).length,
       replacementRearmMs: REPLACEMENT_REARM_MS, opportunityActive: this.live(), remainingMs: this.live() ? Math.min(15_000, this.window.expiresAt - this.clock()) : 0,
       vacancyReserved: this.reserved(), counters: { ...this.counters } };
   }
