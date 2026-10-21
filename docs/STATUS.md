@@ -86,7 +86,15 @@ Nostr signalling bytes were not separable.
   payload before sending, and an accepted reservation stays charged after
   cancellation. This is a design limitation under relay throughput, one
   high-quality holder and a 3 MB cap, not a recorded product defect. It is
-  recorded RED and open by decision, with no re-run on this source.
+  recorded RED and open. The owner then raised the starting allowance to 6 MB
+  for one run on the deployed `1d54538`: high-quality peer media from the shared
+  account completed (seven of eight 720p reservations verified, 4,689,096 B), but
+  the lifecycle stayed RED at natural exhaustion
+  (`RED_LOCAL_SESSION_CAP_BELOW_SEGMENT_NO_ACCOUNT_REFUSAL`). Each uploading page
+  takes the smaller of its local allowance and the account's remaining allowance
+  when uploading is applied, and refuses locally once a segment exceeds its own
+  remainder, so the account never received the request it would have refused. A
+  different cap cannot reach that stage; P06 is stopped by decision.
 - **Safari 17.6 on the desktop is RED.** No verified peer download within 45 s
   and no selected ICE candidate pair was recorded; every fragment came from the
   origin. The cause is not determined and the journey was not retried.

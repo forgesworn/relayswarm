@@ -924,6 +924,7 @@ relative to a checkout holding the local `artifacts/` tree.
 | R37 sustained | RED at the first churn event on a harness assertion about retained renewals | `artifacts/distributed-long-three-eleven-140c256-r37-result-20261021.json` |
 | R38 sustained | RED after 640,110 ms of measurement; first failure is a harness race in `rejoin()` (read 7 ms after clicking Start, before the page applied its settings; diagnosis confidence high) | `artifacts/distributed-long-three-eleven-140c256-r38-result-20261021.json`, `artifacts/distributed-long-three-eleven-140c256-r38-result-addendum-20261021.json` |
 | P06 3 MB shared-cap lifecycle | RED, `RED_HIGH_QUALITY_NO_VERIFIED_COMPLETION_BEFORE_SHARED_CAP_REFUSAL`; finite-source cleanup review PASS | `artifacts/p06-140c256-result-20261021.json`, `artifacts/p06-140c256-result-addendum-20261021.json`, `artifacts/p06-140c256-result-addendum-2-20261021.json`, `artifacts/p06-140c256-red-diagnosis-20261021/DIAGNOSIS.md`, `artifacts/p06-140c256-user-decision-20261021.json`, `artifacts/independent-p06-140c256-source-cleanup-review-20261021/review.json` |
+| P06 6 MB shared-cap lifecycle (`1d54538`) | RED, `RED_LOCAL_SESSION_CAP_BELOW_SEGMENT_NO_ACCOUNT_REFUSAL`; high-quality verified peer media passed (seven of eight 720p reservations verified, 4,689,096 B); finite-source cleanup review PASS | `artifacts/p06-1d54538-6mb-result-20261021.json`, `artifacts/p06-1d54538-6mb-result-addendum-20261021.json`, `artifacts/p06-1d54538-6mb-red-diagnosis-20261021/DIAGNOSIS.md`, `artifacts/independent-p06-1d54538-6mb-source-cleanup-review-20261021/review.json` |
 | Desktop D1 Firefox 152.0.6 (M1) | PASS, six of six checkpoints; 663,828 B verified peer at the receive checkpoint, 413,600 B uploaded | `artifacts/desktop-journeys-140c256-result-20261021.json` |
 | Desktop D2 Safari 17.6 (M1) | RED: no verified peer download within 45 s, no selected ICE candidate pair; cause not determined; not retried | `artifacts/desktop-journeys-140c256-result-20261021.json` |
 | Desktop D3 Safari 26.6.2 (M4) | PASS, six of six checkpoints; 667,212 B verified peer, 213,004 B uploaded; first Safari pass | `artifacts/desktop-journeys-140c256-result-20261021.json`; finite-source cleanup review PASS in `artifacts/independent-desktop-140c256-source-cleanup-review-20261021/review.json` |
@@ -955,8 +956,21 @@ Findings for the next agent:
   About 660 KB high-quality segments did not complete within the receiver's
   buffer-safe wait on the relay path (about 255 KB/s on the best link), so three
   accepted reservations consumed the cap before the fourth was refused.
+- **P06 at 6 MB stops on the page's own cap.** Each uploading page snapshots the
+  smaller of its local allowance and the account's remaining allowance when
+  uploading is applied (`demo/client.mjs`) and refuses locally with
+  `session-allowance` before any account reservation once a segment exceeds its
+  own remainder (`src/browser/hls-swarm.mjs`). The account refusal the stage
+  waits for can only come from a donor whose local remainder lies within the
+  other devices' spend of one segment; at 6 MB that window was narrower than one
+  720p segment, so no cap size reaches it in this scenario. Two product findings
+  follow: a holder keeps advertising segments it will always refuse, because
+  serving stops only at exactly zero remaining, and the receiver has no back-off
+  against a holder that refuses every request (39 wasted round trips); and the
+  page cap is never refreshed from the account after it is applied. Fixing
+  either is a product cycle.
 - **Decisions.** The user chose to record Item 5 and P06 as RED and open and to
-  move on; P06 is not to be re-run on this source.
+  move on. After one 6 MB run on `1d54538`, the user chose to stop P06.
 
 ## Next work, in dependency order
 
@@ -977,10 +991,12 @@ open. Release and deployment evidence is in
    3,600-second windows and natural TURN expiry/renewal under unchanged limits.
    Do not shorten the run or substitute fake credential expiry. Only the user
    decides to resume it.
-3. **P06, the 3 MB both-quality shared-cap lifecycle (RED, open).** Re-running
-   the same scenario on this source is not wanted. Any further attempt needs a
-   scenario or throughput change that the user chooses, and the result must not
-   be cited through the dead role-summary fields.
+3. **P06, the both-quality shared-cap lifecycle (RED, open, stopped by
+   decision).** The 3 MB run failed at high quality; the 6 MB run passed high
+   quality but cannot reach natural exhaustion because of the page's own cap
+   snapshot. A further attempt needs a scenario change (for example a receiver
+   order of low, high, low) or a product change to the two findings above, both
+   the user's decision. Do not cite the dead role-summary fields.
 4. **Remaining browser, device and network coverage (open).** Safari 17.6
    desktop is RED with the cause undetermined. Physical iPhone is unavailable;
    physical Android and device Safari/Firefox need the owner; hard NAT and a
@@ -1002,7 +1018,9 @@ make a fresh copy when binding new evidence.
   renewals assertion; R38 failed on the `rejoin()` race after 640,110 ms of
   measurement. The 7,200 s run has not completed on any source.
 - P06 on `140c256` is RED with high-quality delivery unverified before the shared
-  cap refused a reservation (same class as the a416f7e third run). Public
+  cap refused a reservation (same class as the a416f7e third run). On `1d54538`
+  at 6 MB it is RED at natural exhaustion (page cap below a segment, no account
+  refusal) after high-quality peer media passed. Public
   shared-account API and the focused LOW lifecycle passed earlier.
 - Safari 17.6 on the desktop is RED on `140c256` (no verified peer download, no
   selected candidate pair, cause not determined). Earlier Safari REDs (f393abf,

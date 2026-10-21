@@ -1805,7 +1805,15 @@ Nostr signalling bytes were not separable.
   payload before sending, and an accepted reservation stays charged after
   cancellation. This is a design limitation under relay throughput, one
   high-quality holder and a 3 MB cap, not a recorded product defect. It is
-  recorded RED and open by decision, with no re-run on this source.
+  recorded RED and open. The owner then raised the starting allowance to 6 MB
+  for one run on the deployed `1d54538`: high-quality peer media from the shared
+  account completed (seven of eight 720p reservations verified, 4,689,096 B), but
+  the lifecycle stayed RED at natural exhaustion
+  (`RED_LOCAL_SESSION_CAP_BELOW_SEGMENT_NO_ACCOUNT_REFUSAL`). Each uploading page
+  takes the smaller of its local allowance and the account's remaining allowance
+  when uploading is applied, and refuses locally once a segment exceeds its own
+  remainder, so the account never received the request it would have refused. A
+  different cap cannot reach that stage; P06 is stopped by decision.
 - **Safari 17.6 on the desktop is RED.** No verified peer download within 45 s
   and no selected ICE candidate pair was recorded; every fragment came from the
   origin. The cause is not determined and the journey was not retried.
@@ -6987,6 +6995,7 @@ relative to a checkout holding the local `artifacts/` tree.
 | R37 sustained | RED at the first churn event on a harness assertion about retained renewals | `artifacts/distributed-long-three-eleven-140c256-r37-result-20261021.json` |
 | R38 sustained | RED after 640,110 ms of measurement; first failure is a harness race in `rejoin()` (read 7 ms after clicking Start, before the page applied its settings; diagnosis confidence high) | `artifacts/distributed-long-three-eleven-140c256-r38-result-20261021.json`, `artifacts/distributed-long-three-eleven-140c256-r38-result-addendum-20261021.json` |
 | P06 3 MB shared-cap lifecycle | RED, `RED_HIGH_QUALITY_NO_VERIFIED_COMPLETION_BEFORE_SHARED_CAP_REFUSAL`; finite-source cleanup review PASS | `artifacts/p06-140c256-result-20261021.json`, `artifacts/p06-140c256-result-addendum-20261021.json`, `artifacts/p06-140c256-result-addendum-2-20261021.json`, `artifacts/p06-140c256-red-diagnosis-20261021/DIAGNOSIS.md`, `artifacts/p06-140c256-user-decision-20261021.json`, `artifacts/independent-p06-140c256-source-cleanup-review-20261021/review.json` |
+| P06 6 MB shared-cap lifecycle (`1d54538`) | RED, `RED_LOCAL_SESSION_CAP_BELOW_SEGMENT_NO_ACCOUNT_REFUSAL`; high-quality verified peer media passed (seven of eight 720p reservations verified, 4,689,096 B); finite-source cleanup review PASS | `artifacts/p06-1d54538-6mb-result-20261021.json`, `artifacts/p06-1d54538-6mb-result-addendum-20261021.json`, `artifacts/p06-1d54538-6mb-red-diagnosis-20261021/DIAGNOSIS.md`, `artifacts/independent-p06-1d54538-6mb-source-cleanup-review-20261021/review.json` |
 | Desktop D1 Firefox 152.0.6 (M1) | PASS, six of six checkpoints; 663,828 B verified peer at the receive checkpoint, 413,600 B uploaded | `artifacts/desktop-journeys-140c256-result-20261021.json` |
 | Desktop D2 Safari 17.6 (M1) | RED: no verified peer download within 45 s, no selected ICE candidate pair; cause not determined; not retried | `artifacts/desktop-journeys-140c256-result-20261021.json` |
 | Desktop D3 Safari 26.6.2 (M4) | PASS, six of six checkpoints; 667,212 B verified peer, 213,004 B uploaded; first Safari pass | `artifacts/desktop-journeys-140c256-result-20261021.json`; finite-source cleanup review PASS in `artifacts/independent-desktop-140c256-source-cleanup-review-20261021/review.json` |
@@ -7018,8 +7027,21 @@ Findings for the next agent:
   About 660 KB high-quality segments did not complete within the receiver's
   buffer-safe wait on the relay path (about 255 KB/s on the best link), so three
   accepted reservations consumed the cap before the fourth was refused.
+- **P06 at 6 MB stops on the page's own cap.** Each uploading page snapshots the
+  smaller of its local allowance and the account's remaining allowance when
+  uploading is applied (`demo/client.mjs`) and refuses locally with
+  `session-allowance` before any account reservation once a segment exceeds its
+  own remainder (`src/browser/hls-swarm.mjs`). The account refusal the stage
+  waits for can only come from a donor whose local remainder lies within the
+  other devices' spend of one segment; at 6 MB that window was narrower than one
+  720p segment, so no cap size reaches it in this scenario. Two product findings
+  follow: a holder keeps advertising segments it will always refuse, because
+  serving stops only at exactly zero remaining, and the receiver has no back-off
+  against a holder that refuses every request (39 wasted round trips); and the
+  page cap is never refreshed from the account after it is applied. Fixing
+  either is a product cycle.
 - **Decisions.** The user chose to record Item 5 and P06 as RED and open and to
-  move on; P06 is not to be re-run on this source.
+  move on. After one 6 MB run on `1d54538`, the user chose to stop P06.
 
 ## Next work, in dependency order
 
@@ -7040,10 +7062,12 @@ open. Release and deployment evidence is in
    3,600-second windows and natural TURN expiry/renewal under unchanged limits.
    Do not shorten the run or substitute fake credential expiry. Only the user
    decides to resume it.
-3. **P06, the 3 MB both-quality shared-cap lifecycle (RED, open).** Re-running
-   the same scenario on this source is not wanted. Any further attempt needs a
-   scenario or throughput change that the user chooses, and the result must not
-   be cited through the dead role-summary fields.
+3. **P06, the both-quality shared-cap lifecycle (RED, open, stopped by
+   decision).** The 3 MB run failed at high quality; the 6 MB run passed high
+   quality but cannot reach natural exhaustion because of the page's own cap
+   snapshot. A further attempt needs a scenario change (for example a receiver
+   order of low, high, low) or a product change to the two findings above, both
+   the user's decision. Do not cite the dead role-summary fields.
 4. **Remaining browser, device and network coverage (open).** Safari 17.6
    desktop is RED with the cause undetermined. Physical iPhone is unavailable;
    physical Android and device Safari/Firefox need the owner; hard NAT and a
@@ -7065,7 +7089,9 @@ make a fresh copy when binding new evidence.
   renewals assertion; R38 failed on the `rejoin()` race after 640,110 ms of
   measurement. The 7,200 s run has not completed on any source.
 - P06 on `140c256` is RED with high-quality delivery unverified before the shared
-  cap refused a reservation (same class as the a416f7e third run). Public
+  cap refused a reservation (same class as the a416f7e third run). On `1d54538`
+  at 6 MB it is RED at natural exhaustion (page cap below a segment, no account
+  refusal) after high-quality peer media passed. Public
   shared-account API and the focused LOW lifecycle passed earlier.
 - Safari 17.6 on the desktop is RED on `140c256` (no verified peer download, no
   selected candidate pair, cause not determined). Earlier Safari REDs (f393abf,
@@ -8649,7 +8675,7 @@ requirements for production acceptance.
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Exact3f selects four demo neighbours and address budget900, retaining SDKdefault6/default600/global2048. Historical R54 admission checks pass with0refusals/unknowns and provider peak731/alignedminute; full field capacity remains unqualified |
 | P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Real-browser acceptance PASS on `3f706a9` and again on `140c256` (natural expiry after 303,923 ms; reporting restored OFF; independent review). Other browser/load requirements remain under P12 |
-| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Nostr and authenticated host-supplied account API supported; Nostr-only pilot valid, no named website/human wallet required. Public cross-Mac shared-cap API PASS and focused LOW lifecycle PASS (74.412 s/seven gates) cover low verified media/reservations, reload/new key/spend, reconnect OFF/fresh consent and state withdrawal. The 3 MB both-quality shared-cap lifecycle is RED and open on `140c256` (21 October): low verified peer media reached the receiver, three accepted 720p reservations (659,128, 673,604 and 659,692 B) were charged without completing as verified peer media, and the fourth was refused as exhausted at 2,625,232 of 3,000,000 B. Same class as the a416f7e third run; a design limitation under relay throughput (about 255 KB/s best link), one high-quality holder and a 3 MB cap, with the allowance behaving as documented. No re-run on this source. Desktop Firefox 152.0.6 and Safari 26.6.2 explicit-upload and reload-retains-usage checkpoints pass within desktop scope. Complete shared-media/physical acceptance remains open |
+| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Nostr and authenticated host-supplied account API supported; Nostr-only pilot valid, no named website/human wallet required. Public cross-Mac shared-cap API PASS and focused LOW lifecycle PASS (74.412 s/seven gates) cover low verified media/reservations, reload/new key/spend, reconnect OFF/fresh consent and state withdrawal. The 3 MB both-quality shared-cap lifecycle is RED and open on `140c256` (21 October): low verified peer media reached the receiver, three accepted 720p reservations (659,128, 673,604 and 659,692 B) were charged without completing as verified peer media, and the fourth was refused as exhausted at 2,625,232 of 3,000,000 B. Same class as the a416f7e third run; a design limitation under relay throughput (about 255 KB/s best link), one high-quality holder and a 3 MB cap, with the allowance behaving as documented. No re-run on this source. On deployed `1d54538` at a user-chosen 6 MB starting allowance, high-quality verified peer media passed (seven of eight 720p reservations) but the lifecycle stayed RED at natural exhaustion: each page's cap snapshot refused locally before the account could. P06 is stopped by decision. Desktop Firefox 152.0.6 and Safari 26.6.2 explicit-upload and reload-retains-usage checkpoints pass within desktop scope. Complete shared-media/physical acceptance remains open |
 | P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | `140c256` actual parent-crash test PASS with independent native review (21 October), following the earlier `5f2ece0` pass. Guardian/host catastrophe still requires operator inspection |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
 | P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact `140c256` fresh 286-member consumption/install/import/native/HTTP smoke checks pass. Consumer semver resolutions differ from root lock; standalone ESM is root-lock bound. Final publication and downloaded-release acceptance remain open |

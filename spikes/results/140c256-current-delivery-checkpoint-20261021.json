@@ -142,7 +142,23 @@
     "classification": "Design limitation under relay throughput (about 255 KB/s on the best link), one high-quality holder and a 3 MB cap, with the shared allowance behaving as documented. Not recorded as a product defect.",
     "userDecision": "Record RED and open; no re-run on this source.",
     "sourceCleanupReview": "PASS",
-    "deadSummaryFields": "videoQualities, verifiedPeerQualities, zeroFrameIntervals and contributionWithdrawn do not update in that harness and are not cited."
+    "deadSummaryFields": "videoQualities, verifiedPeerQualities, zeroFrameIntervals and contributionWithdrawn do not update in that harness and are not cited.",
+    "sixMegabyteRun": {
+      "sourceSha": "1d54538c56179387b7541924e068d0d9c41d18e6",
+      "capBytes": 6000000,
+      "verdict": "RED_LOCAL_SESSION_CAP_BELOW_SEGMENT_NO_ACCOUNT_REFUSAL",
+      "highReservations": 8,
+      "highVerifiedAsPeerMedia": 7,
+      "levelOneVerifiedPeerBytes": 4689096,
+      "mechanism": "page cap snapshot of min(local, account remaining) at apply time refuses locally before the account; no account exhausted refusal reachable at any cap in this scenario",
+      "cleanupReview": "PASS",
+      "userDecision": "stop P06",
+      "evidence": [
+        "artifacts/p06-1d54538-6mb-result-20261021.json",
+        "artifacts/p06-1d54538-6mb-result-addendum-20261021.json",
+        "artifacts/p06-1d54538-6mb-red-diagnosis-20261021/DIAGNOSIS.md"
+      ]
+    }
   },
   "desktopBrowsers": {
     "scope": "macOS arm64 desktop; one dedicated 1,800 s finite source; three owned Chrome 155 actors on M4 per browser; relay-only TURN over TLS/TCP. Not physical devices, hard NAT or a separate network.",
