@@ -218,7 +218,22 @@ number or null. Wait expiry/cancellation
 also leaves HAVE null rather than claiming it was still absent. One load can
 produce both a wait-entry and a wait-outcome row: counters count decisions,
 not distinct segments. Budget is the initial allowance, not remaining request
-time. Rows contain no segment keys, hashes, URLs, peer identities or addresses.
+time. Rows contain no segment keys, hashes, URLs, peer public keys or addresses.
+Rows for decisions made after the key computation and link inspection (every
+positive-budget reason except `aborted-before-eligibility`; never `no-budget`)
+also carry three sorted arrays of at most eight holder labels: `holders`
+(links serving this rendition now), `haveHolders` (links whose HAVE contains the demanded key now) and
+`staleHolders`. They are read after the decision and change no decision, timer
+or deadline; if reading them fails the row is still written with the arrays
+null. A holder label is a positive integer that this instance assigns to each
+remote peer when it first becomes a link, in first-link order, kept across
+connection replacement in a map of at most 64 peers (oldest evicted; `0` means
+unknown). It is a local counter, not a key or address: it is never derived from
+a key and never sent to a peer, placed in presence or signalling, or added to
+the numeric operator report. A full local receipt can still join the label to
+the ephemeral public key through `peers.deliveryMeasurements[].holder`, which
+the snapshot already exposes with that key, so treat rows with the same
+consent as the rest of the receipt.
 Each row also carries `budgetGeometry`: the calculation's final `currentTime`,
 `bufferedEnd`, `playableEnd`, `fragmentStart` (seconds), computed
 `originReserveMs`, and `uncappedMs`, the buffered playback less that reserve
@@ -241,8 +256,9 @@ request, after peer selection. Its fixed counters distinguish `payload`, `none`,
 connection `id` as transport diagnostics, numeric `cc` and `level`, the
 deadline's `remainingMs` at selection (after any extension), the actual request
 `timeoutMs`, request `elapsedMs`, `expectedBytes`, `receivedBytes`,
-`firstByteMs` (request to first payload chunk), `metadataReceived`, `draining`
-and a fixed `closeReason` or null. `abandoned` is a request the loader gave up
+`firstByteMs` (request to first payload chunk), `metadataReceived`, `draining`,
+a fixed `closeReason` or null, and `holder`, the local label (see above) of the
+link the request went to. `abandoned` is a request the loader gave up
 as unable to finish in time. Unavailable numeric values are null. A
 `payload` means the transport assembled bytes; signature, size, hash, expiry
 and final loader-deadline checks still decide whether playback accepts them.
@@ -256,8 +272,9 @@ selection, and shadow-mode requests are outside its scope.
 branches: `admission`, `not-held`, `not-serving`, `banned`, `session-allowance`,
 `peer-limit`, `rate-limit`, `reservation-refused` and `reservation-inactive`.
 These count local decisions, not wire delivery or remote receipt. Both fields
-are local metrics, contain no media keys, URLs, peer identities or addresses,
-and are excluded from automatic numeric reporting. They add no network traffic,
+are local metrics, contain no media keys, URLs, peer public keys or addresses
+(the eligibility and request rows carry only the local holder label described
+above), and are excluded from automatic numeric reporting. They add no network traffic,
 timers, retries, upload permission or deadline changes. Returned snapshots own
 their copies, and retained outcomes remain readable after stop.
 

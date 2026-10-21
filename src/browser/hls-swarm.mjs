@@ -292,6 +292,10 @@ class HlsSwarm {
     this.peerEligibilityRecords = [];
     this.peerEligibilityDropped = 0;
     this.peerEligibilityCounters = Object.fromEntries(PEER_ELIGIBILITY_REASONS.map((reason) => [reason, 0]));
+    // Session-local holder labels for local diagnostics only: small counters in
+    // first-link order, never derived from a key and never sent to any peer.
+    this.holderLabels = new Map();
+    this.holderLabelNext = 1;
     this.peerRequestRecords = [];
     this.peerRequestDropped = 0;
     this.peerRequestCounters = Object.fromEntries(PEER_REQUEST_OUTCOMES.map((outcome) => [outcome, 0]));
@@ -528,7 +532,7 @@ class HlsSwarm {
         banned: this.banned.size,
         firstLinkAtMs: this.firstLinkAtMs,
         candidatePairs: { ...this.pairTypes },
-        deliveryMeasurements: [...this.links.values()].map((link) => ({ pubkey: link.pubkey, ...this.peerSelection.summary(link) })),
+        deliveryMeasurements: [...this.links.values()].map((link) => ({ pubkey: link.pubkey, holder: this.#holderLabel(link.pubkey), ...this.peerSelection.summary(link) })),
       },
       // IDs are per swarm instance; 0 means no PC allocated/correlated. Signal
       // send records local acceptance, not relay delivery or remote receipt.
@@ -545,7 +549,10 @@ class HlsSwarm {
         capacity: 64,
         dropped: this.peerEligibilityDropped,
         counters: { ...this.peerEligibilityCounters },
-        records: this.peerEligibilityRecords.map((record) => ({ ...record, budgetGeometry: { ...record.budgetGeometry }, ...(record.projection ? { projection: { ...record.projection } } : {}) })),
+        records: this.peerEligibilityRecords.map((record) => ({ ...record, budgetGeometry: { ...record.budgetGeometry },
+          ...("holders" in record ? { holders: record.holders && [...record.holders], haveHolders: record.haveHolders && [...record.haveHolders],
+            staleHolders: record.staleHolders && [...record.staleHolders] } : {}),
+          ...(record.projection ? { projection: { ...record.projection } } : {}) })),
       },
       peerRequestDiagnostics: {
         capacity: 64,
@@ -939,7 +946,34 @@ class HlsSwarm {
     return sha256Hex(utf8.encode(`${this.options.swarmId}\n${raw}${range}`));
   }
 
-  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry, projection) {
+  // A holder label is a local counter, not a key. It is assigned when a remote
+  // peer first becomes a link and kept across PC replacement, in a bounded map.
+  #assignHolderLabel(pubkey) {
+    if (this.holderLabels.has(pubkey)) return;
+    this.holderLabels.set(pubkey, this.holderLabelNext++);
+    if (this.holderLabels.size <= 64) return;
+    // Evict the oldest label of a peer that is not linked now, so a live link
+    // keeps its label. If every entry is linked, evict the oldest regardless.
+    const evicted = [...this.holderLabels.keys()].find((held) => !this.links.has(held)) ?? this.holderLabels.keys().next().value;
+    this.holderLabels.delete(evicted);
+  }
+
+  #holderLabel(pubkey) { return this.holderLabels.get(pubkey) ?? 0; }
+
+  // Labels for a diagnostic row: serving links, links holding the key, and the
+  // serving links that are stale. Reads only; no decision depends on it.
+  #holderDiagnostics(key, rendition) {
+    const small = (labels) => labels.sort((a, b) => a - b).slice(0, 8);
+    const holders = [], haveHolders = [], staleHolders = [];
+    for (const link of this.links.values()) {
+      const label = this.#holderLabel(link.pubkey);
+      if (this.#servesRendition(link, rendition)) holders.push(label);
+      if (link.have.has(key)) haveHolders.push(label);
+    }
+    return { holders: small(holders), haveHolders: small(haveHolders), staleHolders: small(staleHolders) };
+  }
+
+  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry, projection, demand) {
     // Observe only decisions already made. In particular a zero budget must
     // not hash a key or inspect HAVE merely to fill this local diagnostic.
     try {
@@ -953,6 +987,11 @@ class HlsSwarm {
         cc, level, budgetMs: Number.isFinite(budgetMs) && budgetMs >= 0 ? budgetMs : null,
         reason, matchingHave: typeof matchingHave === "boolean" ? matchingHave : null, budgetGeometry: { ...budgetGeometry } };
       if (projection) record.projection = { ...projection };
+      // Only decisions that already computed the key and inspected links.
+      if (demand) {
+        try { Object.assign(record, this.#holderDiagnostics(demand.key, demand.rendition)); }
+        catch { Object.assign(record, { holders: null, haveHolders: null, staleHolders: null }); }
+      }
       this.peerEligibilityCounters[reason] = increment(this.peerEligibilityCounters[reason]);
       if (this.peerEligibilityRecords.length === 64) {
         this.peerEligibilityRecords.shift();
@@ -1035,7 +1074,7 @@ class HlsSwarm {
     }
     const coordinated = ![...this.links.values()].some((peer) => peer.have.has(key));
     if (coordinated && !this.#shouldWaitForOrigin(key, rendition)) {
-      this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry);
+      this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry, undefined, { key, rendition });
       return null;
     }
     // Go to origin at once, keeping the buffer, when the holder wait and the
@@ -1045,13 +1084,13 @@ class HlsSwarm {
     const entryTransfer = sizeHint ? this.peerSelection.projectMs(sizeHint) : null;
     const entry = this.#projection(entryTransfer, holderWait, plan);
     if (entry === "late") {
-      this.#peerEligibility(context, budgetMs, "projected-late", !coordinated, budgetGeometry, this.#projectionDetail("entry", entryTransfer, holderWait, plan));
+      this.#peerEligibility(context, budgetMs, "projected-late", !coordinated, budgetGeometry, this.#projectionDetail("entry", entryTransfer, holderWait, plan), { key, rendition });
       this.counters.peerProjectedLate += 1;
       return null;
     }
     this.#applyProjection(entry, holderWait + entryTransfer, plan);
     if (coordinated) {
-      this.#peerEligibility(context, budgetMs, "no-have-wait", false, budgetGeometry);
+      this.#peerEligibility(context, budgetMs, "no-have-wait", false, budgetGeometry, undefined, { key, rendition });
       this.counters.coordinatedWaits += 1;
     }
     const commitmentRemaining = plan.deadline - now();
@@ -1068,18 +1107,18 @@ class HlsSwarm {
       // loads normally; all advisory leases expire before the HTTP deadline.
       while (!signal.aborted && !this.stopped && now() < plan.deadline && ![...this.links.values()].some((peer) => peer.have.has(key))) {
         if (!this.#shouldWaitForOrigin(key, rendition)) {
-          this.#peerEligibility(context, budgetMs, "wait-no-longer-eligible", false, budgetGeometry);
+          this.#peerEligibility(context, budgetMs, "wait-no-longer-eligible", false, budgetGeometry, undefined, { key, rendition });
           return null;
         }
         await this.#waitForHave(key, Math.min(100, plan.deadline - now()), signal);
       }
       const cancelled = signal.aborted || this.stopped;
       if (cancelled || now() >= plan.deadline) {
-        this.#peerEligibility(context, budgetMs, cancelled ? "wait-aborted" : "wait-expired", null, budgetGeometry);
+        this.#peerEligibility(context, budgetMs, cancelled ? "wait-aborted" : "wait-expired", null, budgetGeometry, undefined, { key, rendition });
         return null;
       }
     }
-    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry);
+    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry, undefined, { key, rendition });
     let commitment;
     try {
       const result = await commitmentResult;
@@ -1098,7 +1137,7 @@ class HlsSwarm {
     const transfer = this.peerSelection.projectMs(commitment.size);
     const known = this.#projection(transfer, 0, plan);
     if (known === "late") {
-      this.#peerEligibility(context, budgetMs, "projected-late", true, budgetGeometry, this.#projectionDetail("commitment", transfer, 0, plan));
+      this.#peerEligibility(context, budgetMs, "projected-late", true, budgetGeometry, this.#projectionDetail("commitment", transfer, 0, plan), { key, rendition });
       this.counters.peerProjectedLate += 1;
       return null;
     }
@@ -1237,7 +1276,7 @@ class HlsSwarm {
       try { cc = integer(context?.frag?.cc); } catch {}
       try { level = integer(context?.frag?.level); } catch {}
       const record = { atMs: Math.max(0, Math.round(now() - this.transportStartedAt)),
-        id: this.transportConnections.get(link.pc)?.id || 0, cc, level,
+        id: this.transportConnections.get(link.pc)?.id || 0, holder: this.#holderLabel(link.pubkey), cc, level,
         remainingMs: numeric(remainingMs), outcome: result.outcome,
         elapsedMs: numeric(result.elapsedMs), timeoutMs: numeric(result.timeoutMs),
         expectedBytes: integer(result.expectedBytes), receivedBytes: integer(result.receivedBytes),
@@ -2308,6 +2347,7 @@ class HlsSwarm {
       },
     });
     this.links.set(dial.pubkey, link);
+    this.#assignHolderLabel(dial.pubkey);
     if (this.firstLinkAtMs === null) this.firstLinkAtMs = Date.now() - this.startedAt;
     link.sendContribution(this.#servingAllowed(), this.rendition);
     for (const identity of this.renditions.keys()) if (identity !== this.rendition) link.sendContribution(this.#servingAllowed(), identity);

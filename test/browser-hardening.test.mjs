@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { Readable } from "node:stream";
+import { readFile } from "node:fs/promises";
 import { generateSecretKey, finalizeEvent, getPublicKey } from "nostr-tools/pure";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 import { originClockOffsetMs, originClockSummary } from "../src/browser/origin-clock.mjs";
@@ -13,6 +15,7 @@ import { startLocalRelay } from "./support/local-relay.mjs";
 import { boundedOperation } from "../src/browser/bounded-operation.mjs";
 import { NeighbourDiscovery } from "../src/browser/neighbour-discovery.mjs";
 import { PeerSelection } from "../src/browser/peer-selection.mjs";
+import { createOperatorControls } from "../demo/operator.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(predicate, timeoutMs = 5_000) {
@@ -758,7 +761,7 @@ test("peer eligibility distinguishes zero budget with HAVE from positive budget 
     trace = fixture.swarm.metrics().peerEligibilityDiagnostics;
     assert.equal(keyCalls, 5, "positive eligibility adds only its existing key computation, not a diagnostic hash");
     assert.deepEqual(trace.records.at(-1), { atMs: trace.records.at(-1).atMs, cc: 0, level: 0,
-      budgetMs: 120, reason: "no-have-no-wait", matchingHave: false,
+      budgetMs: 120, reason: "no-have-no-wait", matchingHave: false, holders: [], haveHolders: [], staleHolders: [],
       budgetGeometry: { source: "buffer", positionSource: "fragment", currentTime: 10, bufferedEnd: 15, playableEnd: 15, fragmentStart: null, originReserveMs: 2000, uncappedMs: 3000 } });
     assert.equal(trace.counters["no-budget"], 1); assert.equal(trace.counters["no-have-no-wait"], 1);
     assert.equal(commitments, 0); assert.equal(admissions, admissionBaseline);
@@ -2923,4 +2926,87 @@ test("origin clock offset reads Date and Age from XHR-like and Response-like det
   assert.equal(originClockOffsetMs(xhr({ Date: "Wed, 21 Oct 2020 07:28:00 GMT" }), at), null);
   assert.deepEqual(originClockSummary([]), { samples: 0, offsetSeconds: null });
   assert.deepEqual(originClockSummary([1200, 4600, -3000]), { samples: 3, offsetSeconds: 5 });
+});
+
+const serving = (rendition = "main:0") => JSON.stringify({ t: "contribution", serving: true, rendition });
+const haveFrame = (...keys) => JSON.stringify({ t: "have", keys });
+
+test("holder labels tie request, wait and measurement rows to a link without exposing keys", async () => {
+  const playback = peerPlaybackOptions(300), trace = [];
+  const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket() });
+  const rows = () => fixture.swarm.metrics().peerEligibilityDiagnostics.records;
+  try {
+    const first = await fixture.addPeer(new ServingChannel(playback.bytes, 1, trace, "first"));
+    const second = await fixture.addPeer(new ServingChannel(playback.bytes, 1, trace, "second"));
+    first.receive(serving()); second.receive(serving());
+    await fixture.load();
+    const waiting = rows().filter(row => row.reason !== "no-budget");
+    assert.ok(waiting.length >= 1);
+    for (const row of waiting) {
+      assert.deepEqual(row.holders, [1, 2]); assert.deepEqual(row.haveHolders, []); assert.deepEqual(row.staleHolders, []);
+    }
+    first.receive(haveFrame(playback.key));
+    await fixture.load();
+    let row = rows().at(-1);
+    assert.equal(row.reason, "have-at-entry");
+    assert.deepEqual([row.holders, row.haveHolders, row.staleHolders], [[1, 2], [1], []]);
+    const requests = fixture.swarm.metrics().peerRequestDiagnostics.records;
+    assert.deepEqual(trace.slice(-1), ["first"]); assert.equal(requests.at(-1).holder, 1);
+    second.receive(haveFrame(playback.key)); first.receive(haveFrame());
+    await fixture.load();
+    assert.deepEqual(rows().at(-1).haveHolders, [2]); assert.equal(fixture.swarm.metrics().peerRequestDiagnostics.records.at(-1).holder, 2);
+    // A zero budget neither hashes a key nor inspects links, so it gains no label fields.
+    fixture.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    await fixture.load();
+    row = rows().at(-1);
+    assert.equal(row.reason, "no-budget");
+    for (const field of ["holders", "haveHolders", "staleHolders"]) assert.ok(!(field in row), `no-budget rows omit ${field}`);
+    fixture.hls.media = undefined;
+    // Labels are small local counters that survive a relink of the same remote peer.
+    const measured = () => Object.fromEntries(fixture.swarm.metrics().peers.deliveryMeasurements.map(value => [value.pubkey, value.holder]));
+    assert.deepEqual(measured(), { [fixture.peers[0].pubkey]: 1, [fixture.peers[1].pubkey]: 2 });
+    first.close(); await until(() => fixture.swarm.metrics().peers.connected === 1);
+    const count = fixture.connections.length;
+    fixture.peers[0].sendSignal(fixture.swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: "relink-same-peer", payload: { sdp: "fixture-offer" } });
+    await until(() => fixture.connections.length > count);
+    const relinked = new RecordedChannel(), event = new Event("datachannel"); event.channel = relinked; fixture.connections[count].dispatchEvent(event);
+    await until(() => fixture.swarm.metrics().peers.connected === 2);
+    assert.deepEqual(measured(), { [fixture.peers[0].pubkey]: 1, [fixture.peers[1].pubkey]: 2 });
+    // A new remote peer takes the next label.
+    await fixture.addPeer(new RecordedChannel());
+    assert.equal(measured()[fixture.peers[2].pubkey], 3);
+    const snapshot = fixture.swarm.metrics(), labels = [
+      ...snapshot.peerEligibilityDiagnostics.records.flatMap(record => [...(record.holders || []), ...(record.haveHolders || []), ...(record.staleHolders || [])]),
+      ...snapshot.peerRequestDiagnostics.records.map(record => record.holder),
+      ...snapshot.peers.deliveryMeasurements.map(value => value.holder)];
+    assert.ok(labels.length > 0 && labels.every(label => Number.isSafeInteger(label) && label >= 1 && label <= 3), "labels are small integers");
+    const encoded = JSON.stringify([snapshot.peerEligibilityDiagnostics, snapshot.peerRequestDiagnostics]);
+    for (const peer of fixture.peers) assert.ok(!encoded.includes(peer.pubkey), "rows never carry a key");
+    // Returned snapshots own their arrays.
+    const owned = fixture.swarm.metrics().peerEligibilityDiagnostics.records.find(record => record.holders?.length);
+    owned.holders.push(99);
+    assert.ok(!fixture.swarm.metrics().peerEligibilityDiagnostics.records.some(record => record.holders?.includes(99)));
+    const sent = JSON.stringify([first.sent, second.sent, relinked.sent]);
+    assert.ok(!sent.includes('"holder"'), "labels are never sent to a peer");
+  } finally { await fixture.close(); }
+});
+
+test("the numeric operator report keeps exactly its eight fields and the server rejects a holder field", async () => {
+  const fields = ["durationMs", "peerBytes", "uploadedBytes", "originMediaRequests", "originMediaBytes", "stalls", "stallMs", "fatalErrors"];
+  const source = await readFile(new URL("../demo/client.mjs", import.meta.url), "utf8");
+  const builders = [...source.matchAll(/const values = \{([^}]*)\};/gu)].filter(([, body]) => fields.every(field => body.includes(`${field}:`)));
+  assert.equal(builders.length, 1, "exactly one numeric report builder");
+  const keys = [...builders[0][1].matchAll(/(?:^|,)\s*([A-Za-z]+):/gu)].map(match => match[1]);
+  assert.deepEqual([...keys].sort(), [...fields].sort());
+  assert.ok(!/holder/iu.test(builders[0][1]));
+  const controls = createOperatorControls({ telemetry: true });
+  const post = async values => {
+    const request = Readable.from([Buffer.from(JSON.stringify({ v: 1, reportId: "a".repeat(32), sequence: 1, values }))]);
+    Object.assign(request, { method: "POST", headers: { origin: "https://demo.example", "content-type": "application/json" } });
+    let code; await controls.handle(request, { writeHead(status) { code = status; return this; }, end() {} }, "/reports", "https://demo.example", {});
+    return code;
+  };
+  const values = Object.fromEntries(fields.map((field, index) => [field, index + 1]));
+  assert.equal(await post({ ...values, holder: 1 }), 400);
+  assert.equal(await post(values), 200);
 });

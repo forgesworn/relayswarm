@@ -7,7 +7,7 @@ export class NeighbourDiscovery {
     this.contexts = new Map();
     this.candidates = new Map();
     this.window = null;
-    this.counters = { checks: 0, replacements: 0, expired: 0, opened: 0, verified: 0 };
+    this.counters = { checks: 0, replacements: 0, expired: 0, opened: 0, verified: 0, staleHolder: 0, staleBlocked: 0 };
   }
 
   context(mediaType, rendition) {
