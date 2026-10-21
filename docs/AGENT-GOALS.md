@@ -910,7 +910,7 @@ are identity rebases of the 3f706a9 versions.
 ## Progress on 21 October 2026 (source 140c256)
 
 Source `140c256` is on `fix/holder-discovery` ([PR 9](https://github.com/forgesworn/relayswarm/pull/9),
-open, unmerged): holder labels in local diagnostics (`368b860`), then the fix
+merged as `1d54538` and released as v0.2.1): holder labels in local diagnostics (`368b860`), then the fix
 that stops a never-ahead holder suppressing neighbour discovery. Paths are
 relative to a checkout holding the local `artifacts/` tree.
 
@@ -925,6 +925,10 @@ relative to a checkout holding the local `artifacts/` tree.
 | R38 sustained | RED after 640,110 ms of measurement; first failure is a harness race in `rejoin()` (read 7 ms after clicking Start, before the page applied its settings; diagnosis confidence high) | `artifacts/distributed-long-three-eleven-140c256-r38-result-20261021.json`, `artifacts/distributed-long-three-eleven-140c256-r38-result-addendum-20261021.json` |
 | P06 3 MB shared-cap lifecycle | RED, `RED_HIGH_QUALITY_NO_VERIFIED_COMPLETION_BEFORE_SHARED_CAP_REFUSAL`; finite-source cleanup review PASS | `artifacts/p06-140c256-result-20261021.json`, `artifacts/p06-140c256-result-addendum-20261021.json`, `artifacts/p06-140c256-result-addendum-2-20261021.json`, `artifacts/p06-140c256-red-diagnosis-20261021/DIAGNOSIS.md`, `artifacts/p06-140c256-user-decision-20261021.json`, `artifacts/independent-p06-140c256-source-cleanup-review-20261021/review.json` |
 | P06 6 MB shared-cap lifecycle (`1d54538`) | RED, `RED_LOCAL_SESSION_CAP_BELOW_SEGMENT_NO_ACCOUNT_REFUSAL`; high-quality verified peer media passed (seven of eight 720p reservations verified, 4,689,096 B); finite-source cleanup review PASS | `artifacts/p06-1d54538-6mb-result-20261021.json`, `artifacts/p06-1d54538-6mb-result-addendum-20261021.json`, `artifacts/p06-1d54538-6mb-red-diagnosis-20261021/DIAGNOSIS.md`, `artifacts/independent-p06-1d54538-6mb-source-cleanup-review-20261021/review.json` |
+| R67 short qualifier (`1d54538`) | RED at controller binding before any browser started: the harness `dependency-pins.json` still pinned the 0.2.0 `package-lock.json` hash (harness defect, no product evidence); source cleanup review PASS | `artifacts/distributed-fourteen-qualifier-1d54538-r67-result-20261021.json`, `artifacts/distributed-fourteen-qualifier-1d54538-r67-result-addendum-20261021.json`, `artifacts/independent-fourteen-qualifier-1d54538-r67-source-cleanup-review-20261021/review.json` |
+| R68 short qualifier (`1d54538`) | RED, 15 of 16 gates, 303.088 s; `each4BothQualityPeer` FALSE (receiver-1 and receiver-2 received no high-quality peer segment after switching to high); cleanup review PASS with `strict300Passed` false | `artifacts/distributed-fourteen-qualifier-1d54538-r68-result-20261021.json`, `artifacts/distributed-fourteen-qualifier-1d54538-r68-result-addendum-20261021.json`, `artifacts/r68-1d54538-red-diagnosis-20261021/DIAGNOSIS.md`, `artifacts/independent-fourteen-qualifier-1d54538-r68-cleanup-review-20261021/review.json` |
+| R39 sustained (`1d54538`) | Prepared, not run, superseded: the `rejoin()` applied-state wait and a finite-source intake in the long finaliser; it carried the same stale lock pin, and no GREEN matching qualifier exists | `artifacts/long-1d54538-r39-preparation-record-20261021.json`, `artifacts/long-1d54538-r39-superseded-20261021.json` |
+| CI on docs commit `304cf8a` | PASS on attempt 2; attempt 1 failed one Windows case in `test/browser-hardening.test.mjs` (known flake) | `artifacts/ci-304cf8a-attempt1-20261021.json` |
 | Desktop D1 Firefox 152.0.6 (M1) | PASS, six of six checkpoints; 663,828 B verified peer at the receive checkpoint, 413,600 B uploaded | `artifacts/desktop-journeys-140c256-result-20261021.json` |
 | Desktop D2 Safari 17.6 (M1) | RED: no verified peer download within 45 s, no selected ICE candidate pair; cause not determined; not retried | `artifacts/desktop-journeys-140c256-result-20261021.json` |
 | Desktop D3 Safari 26.6.2 (M4) | PASS, six of six checkpoints; 667,212 B verified peer, 213,004 B uploaded; first Safari pass | `artifacts/desktop-journeys-140c256-result-20261021.json`; finite-source cleanup review PASS in `artifacts/independent-desktop-140c256-source-cleanup-review-20261021/review.json` |
@@ -969,8 +973,30 @@ Findings for the next agent:
   against a holder that refuses every request (39 wasted round trips); and the
   page cap is never refreshed from the account after it is applied. Fixing
   either is a product cycle.
+- **R68's both-quality failure is a product mechanism on a one-segment margin.**
+  Receivers switch quality together about 150 s in. In R66 receiver-1 received
+  exactly one high-quality peer segment after switching, so R66 passed by one
+  segment. In R68, with origin media fetches 1.5 to 2 times slower (cause not
+  determined; the pilot server and small control requests were unchanged),
+  receivers 1 and 2 received none. The projection in `src/browser/hls-swarm.mjs`
+  declines a peer request when the holder wait plus first byte exceeds the room
+  left; the holder wait is the viewer's own origin median, so each fallback
+  raises the next estimate, and there is no back-off. With no high-quality
+  holder ahead, HAVE waits expire; transfers of about 670 KB over the relay are
+  abandoned at the deadline; and a spent neighbour replacement resets only on a
+  verified high-quality segment (`src/browser/neighbour-discovery.mjs`). These
+  are findings, not fixes. Holder labels carry no mapping to roles, and the
+  origin-only baselines record no origin latency, so the evidence cannot say
+  which contributor served whom.
+- **Identity rebases miss bare hash pins.** R67's generator re-pinned path
+  records from the archive but copied `dependency-pins.json` `lockSHA256`, which
+  the controller checks against the checkout. R68's generator refuses stale
+  hashes of changed runtime files, and its authorisation runs the controller's
+  own dependency check first.
 - **Decisions.** The user chose to record Item 5 and P06 as RED and open and to
-  move on. After one 6 MB run on `1d54538`, the user chose to stop P06.
+  move on. After one 6 MB run on `1d54538`, the user chose to stop P06. After
+  R67 stopped on the harness pin, the user chose R68; after R68 was RED, the user
+  chose to record Item 5 RED and stop it.
 
 ## Next work, in dependency order
 
@@ -980,17 +1006,23 @@ prerelease of merge commit `1d54538` (PR 9), deployed to the pilot (app
 deployment and its review, P05, P07 and the short qualifier R66 (GREEN, 16 of
 16). The owner decided to publish v0.2.1 with Item 5, P06 and Safari 17.6 RED
 and open, as v0.2.0 shipped with its qualifier RED. Those items stay RED and
-open. Release and deployment evidence is in
+open. On the deployed `1d54538` the short qualifier R68 is RED, 15 of 16 gates,
+so the sustained run has no matching qualifier. Release and deployment evidence is in
 [Status](STATUS.md#release-verification).
 
 1. **PR 9 is merged and released as v0.2.1.** The next finite source or
    deployment chains on the `1d54538` deployment's independent cleanup review.
-2. **Item 5, the sustained 7,200 s run (RED, open).** Fix the harness `rejoin()`
-   race and prove the fix in its own review cycle, then run on the same qualified
-   source, topology and profile: 7,200 seconds, 22 churn events, two
+2. **Item 5, the sustained 7,200 s run (RED, stopped by decision).** It needs a
+   GREEN matching short qualifier on the deployed source. R68 on `1d54538` is
+   RED at `each4BothQualityPeer`, which R66 passed by one segment, so an
+   unchanged re-run measures variance rather than fixing anything. Resuming
+   needs the user's decision on the gate, the scenario or the product mechanism
+   in the R68 findings. The prepared long method (the `rejoin()` applied-state
+   wait and the finite-source intake) is in
+   `artifacts/1d54538-long-r39-builder-source-20261021`. Any new source chains on
+   the R68 source cleanup review. Run 7,200 seconds, 22 churn events, two
    3,600-second windows and natural TURN expiry/renewal under unchanged limits.
-   Do not shorten the run or substitute fake credential expiry. Only the user
-   decides to resume it.
+   Do not shorten the run or substitute fake credential expiry.
 3. **P06, the both-quality shared-cap lifecycle (RED, open, stopped by
    decision).** The 3 MB run failed at high quality; the 6 MB run passed high
    quality but cannot reach natural exhaustion because of the page's own cap
@@ -1016,7 +1048,15 @@ make a fresh copy when binding new evidence.
 
 - Item 5: R37 and R38 are RED. R37 failed at the first churn event on a harness
   renewals assertion; R38 failed on the `rejoin()` race after 640,110 ms of
-  measurement. The 7,200 s run has not completed on any source.
+  measurement. The 7,200 s run has not completed on any source; on `1d54538` it
+  did not start because no matching qualifier passed.
+- The v0.2.1 short qualifier R68 is RED at `each4BothQualityPeer` (one-segment
+  margin; see the R68 findings), and R67 stopped on a harness pin. R66's GREEN on
+  `140c256` is a narrow pass.
+- CI flakes, each passing on one rerun: `test/browser-hardening.test.mjs` on the
+  hosted Windows runner (docs commit `304cf8a`) and on macOS (PR head
+  `55c0f68`), and the account-budget TURN renewal browser case (main run
+  39601445318).
 - P06 on `140c256` is RED with high-quality delivery unverified before the shared
   cap refused a reservation (same class as the a416f7e third run). On `1d54538`
   at 6 MB it is RED at natural exhaustion (page cap below a segment, no account

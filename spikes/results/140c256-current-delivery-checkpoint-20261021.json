@@ -5,7 +5,7 @@
   "branch": "fix/holder-discovery",
   "pr": 9,
   "productionComplete": false,
-  "scope": "Source, CI, consumption, deployment, P05, P07 and a short fourteen-role qualifier pass on this source. The sustained 7,200 s run (Item 5) and the P06 3 MB both-quality shared-cap lifecycle are RED and open. Desktop installed-browser journeys are macOS arm64 desktop scope only. v0.2.1 is the experimental prerelease of this source after PR 9 merges, released by owner decision while Item 5, P06 and Safari 17.6 are RED and open.",
+  "scope": "Source, CI, consumption, deployment, P05, P07 and a short fourteen-role qualifier (R66) pass on this source. v0.2.1 is the experimental prerelease of merge commit 1d54538 (runtime identical apart from version fields), released by owner decision while field acceptance is open. On the deployed 1d54538 the short qualifier R68 is RED (15 of 16, each4BothQualityPeer), so the sustained 7,200 s run (Item 5) has no matching qualifier and is stopped by decision. P06 and Safari 17.6 are RED. Desktop installed-browser journeys are macOS arm64 desktop scope only.",
   "code": {
     "commits": [
       "368b860 feat: add local holder labels to peer diagnostics",
@@ -88,7 +88,8 @@
     ],
     "firstGreenFourteenRoleQualifier": true,
     "contributorRateBytesPerSecond": 1250000,
-    "scope": "Three roles on one Mac, eleven on another, relay-only TURN over TLS/TCP, no VPN tunnel carrying the default route; not a sustained, device or separate-network result."
+    "scope": "Three roles on one Mac, eleven on another, relay-only TURN over TLS/TCP, no VPN tunnel carrying the default route; not a sustained, device or separate-network result.",
+    "margin": "Passed each4BothQualityPeer by one high-quality peer segment (receiver-1 received exactly one after switching to high); a narrow pass, not repeatable evidence."
   },
   "matchedWireAndCost": {
     "scope": "R66 302 s window with two origin-only baseline roles",
@@ -114,14 +115,16 @@
   "sustained": {
     "item": 5,
     "verdict": "RED",
-    "open": true,
+    "open": false,
     "completed7200s": false,
     "runs": {
       "R37": "RED at the first churn event on a harness assertion about retained renewals; the check was fixed for R38",
-      "R38": "RED after 640,110 ms of measurement; the first failure is a harness race: rejoin() read the page 7 ms after clicking Start, before the page applied its settings (diagnosis confidence high)"
+      "R38": "RED after 640,110 ms of measurement; the first failure is a harness race: rejoin() read the page 7 ms after clicking Start, before the page applied its settings (diagnosis confidence high)",
+      "R39": "Prepared on 1d54538 (rejoin applied-state wait; finite-source intake in the long finaliser), not run, superseded: no GREEN matching qualifier on 1d54538"
     },
     "productEvidence": "None either way for the rejoin itself.",
-    "userDecision": "Record RED and open, and move on."
+    "userDecision": "Record RED and open after R38; after R68 was RED, record RED and stop Item 5.",
+    "stoppedByDecision": true
   },
   "p06": {
     "verdict": "RED_HIGH_QUALITY_NO_VERIFIED_COMPLETION_BEFORE_SHARED_CAP_REFUSAL",
@@ -182,13 +185,14 @@
     "sourceCleanupReview": "PASS (finite-source cleanup prerequisite only; it does not judge the journey outcomes)"
   },
   "remaining": [
-    "Item 5: 7,200 s run with 22 churn events and natural TURN expiry and renewal (RED, open)",
-    "P06: 3 MB both-quality shared-cap lifecycle (RED, open)",
+    "Item 5: 7,200 s run with 22 churn events and natural TURN expiry and renewal (RED, stopped by decision; needs a GREEN matching qualifier on the deployed source)",
+    "Short qualifier on deployed 1d54538: R68 RED at each4BothQualityPeer (product mechanism on a one-segment margin)",
+    "P06: both-quality shared-cap lifecycle (RED; stopped by decision after the 6 MB run)",
     "Safari 17.6 desktop (RED, cause not determined)",
     "Marginal cost on the hosts' plans (not determined)",
     "Physical iPhone (unavailable), physical Android, device Safari and Firefox (need the owner)",
     "Hard NAT and a separate network (need another network)",
-    "Version choice, merge, tag and release (none done); npm publish is out of scope"
+    "npm publication is out of scope"
   ],
   "evidence": [
     {
@@ -295,6 +299,36 @@
       "path": "artifacts/independent-desktop-140c256-source-cleanup-review-20261021/review.json",
       "bytes": 15649,
       "sha256": "8dd3047a27f61d4f0abb65f774e216700ad94acdd077b3277de77d56058d159d"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-1d54538-r67-result-20261021.json",
+      "bytes": 4043,
+      "sha256": "55e3ab791c9931c308c60259edd4f3abecabc6dcb4b69a8c1629ef4bccb1e56a"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-1d54538-r68-result-20261021.json",
+      "bytes": 7024,
+      "sha256": "f1f4a9c49b5cb5f582f26215925168a1aeaa8015a485448d36cfcea39a6ed106"
+    },
+    {
+      "path": "artifacts/distributed-fourteen-qualifier-1d54538-r68-result-addendum-20261021.json",
+      "bytes": 2480,
+      "sha256": "11a41b1f70cbdbb27b0fe76d97e380c6be633baf31ec82b04f3d3cc479dbf763"
+    },
+    {
+      "path": "artifacts/r68-1d54538-red-diagnosis-20261021/DIAGNOSIS.md",
+      "bytes": 7339,
+      "sha256": "a9debc4b7eb828816aaeac5fc4ad12cb9b6e0879fa21bef422d56ec16859dc88"
+    },
+    {
+      "path": "artifacts/independent-fourteen-qualifier-1d54538-r68-cleanup-review-20261021/review.json",
+      "bytes": 20928,
+      "sha256": "793e76e48d0198de50f6cad7b0d0be19cde4943e1db4941487994e84f430687f"
+    },
+    {
+      "path": "artifacts/r68-1d54538-user-decision-20261021.json",
+      "bytes": 909,
+      "sha256": "2410977b1bf0549326428a74a5cf919d7ab423e2d833298e56d8a2dbc68e3ef2"
     }
   ],
   "releaseDeployment": {
@@ -309,5 +343,30 @@
     ],
     "reporting": false,
     "forwarding": false
-  }
+  },
+  "shortQualifierOnRelease": {
+    "source": "1d54538c56179387b7541924e068d0d9c41d18e6",
+    "R67": {
+      "verdict": "RED",
+      "stage": "controller binding, before any browser",
+      "cause": "harness preparation pinned the 0.2.0 package-lock.json hash in dependency-pins.json; harness defect, no product evidence",
+      "sourceCleanupReview": "PASS"
+    },
+    "R68": {
+      "verdict": "RED",
+      "gates": "15 of 16",
+      "failedGate": "each4BothQualityPeer",
+      "measurementElapsedMs": 303088,
+      "verifiedPeerBytes": 138618792,
+      "r66VerifiedPeerBytes": 225930692,
+      "observation": "receiver-1 and receiver-2 switch from low to high about 150 s in and then received no high-quality segment from a peer; every high transfer was declined as projected-late or missed its deadline",
+      "diagnosis": "Product mechanism on a one-segment margin, tipped over by origin media fetches 1.5 to 2 times slower than in R66 (cause not determined). The projection uses the viewer's own origin median as the holder wait, with no back-off; about 670 KB high-quality segments over the relay are abandoned at the deadline; a spent neighbour replacement resets only on a verified high-quality segment. High confidence on mechanism, low on trigger.",
+      "cleanupReview": "PASS (strict300Passed false)",
+      "reRun": false
+    },
+    "userDecision": "Record RED, stop Item 5."
+  },
+  "ciFlakes": [
+    "test/browser-hardening.test.mjs on the hosted Windows runner (docs commit 304cf8a, run 39632475296 attempt 1) and on macOS (PR head 55c0f68); account-budget TURN renewal browser case (main run 39601445318 attempt 1); each passed on one rerun"
+  ]
 }

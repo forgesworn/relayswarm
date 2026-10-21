@@ -7,25 +7,32 @@ An entry remains open until the evidence described below exists.
 
 ## Current deployed pilot: 21 October 2026
 
-Exact `140c256` (PR 9, unmerged) passed all nine required CI jobs, fresh
-286-member consumption of the committed source, guarded deployment with
-independent review, P05 reporting acceptance (natural expiry after 303,923 ms)
-and P07 parent-crash recovery with an independent native review. The pilot app
-is `38eb5c2d`, the served client is 787,462 bytes, and reporting and forwarding
-remain off. The fourteen-role short qualifier R66 is GREEN, 16 of 16 gates,
-the first green fourteen-role qualifier.
+Exact `140c256` (PR 9) passed all nine required CI jobs, fresh 286-member
+consumption of the committed source, guarded deployment with independent
+review, P05 reporting acceptance (natural expiry after 303,923 ms) and P07
+parent-crash recovery with an independent native review. The fourteen-role
+short qualifier R66 is GREEN, 16 of 16 gates, the first green fourteen-role
+qualifier, though it passed `each4BothQualityPeer` by one high-quality peer
+segment. PR 9 merged as `1d54538`, published as experimental prerelease v0.2.1
+and deployed through the guarded cycle with its own independent review: the
+pilot app is `ce410033`, the served client is 787,462 bytes, and reporting and
+forwarding remain off.
 
-Two items are RED and open. The sustained 7,200 s run (Item 5) has not
-completed: R37 and R38 failed on harness faults, and no product evidence came
-from them either way. The P06 3 MB both-quality shared-cap lifecycle failed
+Several items are RED. v0.2.1's own short qualifier R68 is RED, 15 of 16 gates:
+receivers switching to high quality received no high-quality peer segment, a
+product mechanism on a one-segment margin (see
+[current status](STATUS.md#current-delivery-checkpoint)). The sustained 7,200 s
+run (Item 5) has not completed and is stopped by decision: R37 and R38 failed
+on harness faults with no product evidence either way, and on `1d54538` it
+cannot start without a matching qualifier. The P06 3 MB both-quality shared-cap lifecycle failed
 again as in the a416f7e third run: three accepted 720p reservations were
 charged but none completed as verified peer media over the relay path before
 the fourth was refused as exhausted. It is a design limitation under relay
 throughput, one high-quality holder and a 3 MB cap, with the allowance behaving
 as documented. Desktop Firefox 152.0.6 and Safari 26.6.2 passed their journeys
 (macOS arm64 desktop scope only); Safari 17.6 is RED with the cause not
-determined. Physical devices, hard NAT, a separate network, marginal cost on the
-hosts' plans and the release remain open. See
+determined. Physical devices, hard NAT, a separate network and marginal cost on
+the hosts' plans remain open. See
 [current status](STATUS.md#current-delivery-checkpoint), the
 [checkpoint record](../spikes/results/140c256-current-delivery-checkpoint-20261021.json)
 and the [delivery checklist](#delivery-checklist).
@@ -798,7 +805,7 @@ requirements for production acceptance.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | 21 October, `140c256`: nine-job CI, 286-member consumption, guarded deployment and its review pass. Short qualifier R66 GREEN, 16 of 16 gates including `each4BothQualityPeer` (302.823 s, 1,250,000 B/s contributors, relay-only TURN over TLS/TCP). Receivers used 31.5% less origin traffic than matched baselines; total egress across the origin and TURN hosts rose by roughly 85 to 100 MB, and marginal cost is not determined. The sustained 7,200 s/churn run (Item 5) is RED and open after harness faults in R37 and R38 |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | 21 October, `140c256`: nine-job CI, 286-member consumption, guarded deployment and its review pass. Short qualifier R66 GREEN, 16 of 16 gates including `each4BothQualityPeer` (302.823 s, 1,250,000 B/s contributors, relay-only TURN over TLS/TCP). Receivers used 31.5% less origin traffic than matched baselines; total egress across the origin and TURN hosts rose by roughly 85 to 100 MB, and marginal cost is not determined. On deployed `1d54538` (v0.2.1, runtime identical apart from version fields) R68 is RED, 15 of 16 gates: `each4BothQualityPeer` failed (receivers switching to high got no high-quality peer segment; R66 had passed it by one segment). The sustained 7,200 s/churn run (Item 5) is RED and stopped by decision: harness faults in R37 and R38, and no matching qualifier on `1d54538` |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Exact3f selects four demo neighbours and address budget900, retaining SDKdefault6/default600/global2048. Historical R54 admission checks pass with0refusals/unknowns and provider peak731/alignedminute; full field capacity remains unqualified |
@@ -809,7 +816,7 @@ requirements for production acceptance.
 | P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact `140c256` fresh 286-member consumption/install/import/native/HTTP smoke checks pass. Consumer semver resolutions differ from root lock; standalone ESM is root-lock bound. Final publication and downloaded-release acceptance remain open |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
 | P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact `140c256` nine-job CI, 286-member consumption, guarded deployment/HTTPS with independent review, P05 and P07 pass; private state, permanent leases and proxy preserved. v0.2.1 is published from merge commit `1d54538` (nine-job main CI, 287-member consumption, downloaded assets verified) by owner decision while Item 5, P06 and Safari 17.6 are RED; the merge commit is deployed with guarded deployment/HTTPS and independent review (app `ce410033`). Final acceptance remains open |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | 21 October, `140c256`, macOS arm64 desktop scope (one 1,800 s finite source, three owned Chrome 155 actors per browser, relay-only TURN over TLS/TCP): Firefox 152.0.6 PASS and Safari 26.6.2 PASS (first Safari pass), all six checkpoints each; Safari 17.6 RED (no verified peer download in 45 s, no selected candidate pair, cause not determined, not retried). R66 short qualifier GREEN. Sustained 7,200 s/churn/natural-expiry (Item 5) RED and open; marginal cost not determined. Physical iPhone (unavailable), physical Android and device Safari/Firefox (need the owner), hard NAT and a separate network (need another network) remain open. Prior Simulator/account/LOW lifecycle/Internet TURN passes retain original scopes |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | 21 October, `140c256`, macOS arm64 desktop scope (one 1,800 s finite source, three owned Chrome 155 actors per browser, relay-only TURN over TLS/TCP): Firefox 152.0.6 PASS and Safari 26.6.2 PASS (first Safari pass), all six checkpoints each; Safari 17.6 RED (no verified peer download in 45 s, no selected candidate pair, cause not determined, not retried). R66 short qualifier GREEN on `140c256`; R68 RED on deployed `1d54538` (15 of 16, `each4BothQualityPeer`). Sustained 7,200 s/churn/natural-expiry (Item 5) RED, stopped by decision; marginal cost not determined. Physical iPhone (unavailable), physical Android and device Safari/Firefox (need the owner), hard NAT and a separate network (need another network) remain open. Prior Simulator/account/LOW lifecycle/Internet TURN passes retain original scopes |
 
 ## Evidence rules
 

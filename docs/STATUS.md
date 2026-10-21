@@ -18,10 +18,11 @@ merged as `1d54538`, which is published as experimental prerelease
 [v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) and
 deployed to the pilot. Its loader change is `140c256`: it adds local holder
 labels to the peer diagnostics (`368b860`) and stops a linked holder that is
-never ahead from suppressing neighbour discovery. The field results below were
-measured on the `140c256` deployment of the same loader. v0.2.1 is released by
-owner decision while field acceptance remains open: Item 5, P06 and Safari 17.6
-are RED.
+never ahead from suppressing neighbour discovery. Most field results below were
+measured on the `140c256` deployment of the same loader; P06 at 6 MB and the
+short qualifiers R67 and R68 ran on the deployed `1d54538`. v0.2.1 is released
+by owner decision while field acceptance remains open: Item 5, P06, Safari 17.6
+and v0.2.1's own short qualifier R68 are RED.
 
 **Passed on this source.**
 
@@ -46,6 +47,9 @@ are RED.
   `each4BothQualityPeer` and `all8ActuallyUploaded`. This is the first green
   fourteen-role qualifier. It ran 302.823 s with contributors at 1,250,000 B/s,
   relay-only TURN over TLS/TCP and no VPN tunnel carrying the default route.
+  It passed `each4BothQualityPeer` by one high-quality peer segment (receiver-1
+  received exactly one after switching to high), so it is a narrow pass, not
+  repeatable evidence. R68 on the deployed v0.2.1 did not repeat it (below).
 - Desktop installed-browser journeys passed for Firefox 152.0.6 on one Mac and
   Safari 26.6.2 on another (all six checkpoints each: verified receive, quality
   and seek, explicit upload, reload retains usage without consent, origin-only
@@ -67,12 +71,33 @@ Nostr signalling bytes were not separable.
 **RED or open.**
 
 - **Item 5, the sustained 7,200 s run (22 churn events, natural TURN expiry and
-  renewal), is RED and open.** R37 failed at the first churn event on a harness
-  assertion about retained renewals, which was fixed. R38 failed after 640,110 ms
-  of measurement; its first failure is a harness race, in which `rejoin()` read
-  the page 7 ms after clicking Start, before the page applied its settings
-  (diagnosis confidence high). That gives no product evidence either way, and
-  the 7,200 s run has not completed. It is recorded RED and open by decision.
+  renewal), is RED and stopped by decision.** R37 failed at the first churn
+  event on a harness assertion about retained renewals, which was fixed. R38
+  failed after 640,110 ms of measurement on a harness race: `rejoin()` read the
+  page 7 ms after clicking Start, before the page applied its settings
+  (diagnosis confidence high). A fix that waits for the applied state, as the
+  setup path does, is prepared but has not run. The long run requires a GREEN
+  matching short qualifier on the deployed source, and none exists on
+  `1d54538`. R67 stopped at controller binding before any browser started,
+  because the harness preparation still pinned the 0.2.0 `package-lock.json`
+  hash: a harness defect with no product evidence. R68 is RED (next item). The
+  7,200 s run has not completed on any source.
+- **The fourteen-role short qualifier on the deployed v0.2.1 (R68) is RED, 15 of
+  16 gates.** It completed 303.088 s of measurement. `each4BothQualityPeer`
+  failed because receiver-1 and receiver-2, which switch from low to high
+  quality about 150 s in, then received no high-quality segment from a peer:
+  every high transfer was declined as projected to arrive late or missed its
+  deadline, and the origin served their high phase. The runtime is identical to
+  R66's apart from the version fields. An independent diagnosis (high confidence
+  on the mechanism, low on the trigger) found a product mechanism with a
+  one-segment margin, tipped over by origin media fetches 1.5 to 2 times slower
+  than in R66. The late-arrival projection uses the viewer's own origin latency
+  as the holder wait, so each origin fallback raises the next estimate; there is
+  no back-off; high-quality segments of about 670 KB over the relay are
+  abandoned at the deadline; and a spent neighbour replacement resets only after
+  a verified high-quality segment. Verified peer bytes were 138.6 MB, against
+  225.9 MB in R66. These are findings, not fixes. R68 was not re-run, by
+  decision.
 - **P06, the 3 MB both-quality shared-cap lifecycle, is RED and open**
   (`RED_HIGH_QUALITY_NO_VERIFIED_COMPLETION_BEFORE_SHARED_CAP_REFUSAL`, the same
   class as the a416f7e third run). Low-quality verified peer media reached the
@@ -102,7 +127,8 @@ Nostr signalling bytes were not separable.
   (these need the owner), hard NAT and a separate network (these need another
   network) remain open and unverified. npm publication is out of scope.
 - Release: v0.2.1 is published as an experimental prerelease by owner decision
-  while field acceptance remains open: Item 5, P06 and Safari 17.6 are RED. See
+  while field acceptance remains open: Item 5, P06, Safari 17.6 and the v0.2.1
+  short qualifier R68 are RED. See
   [Release verification](#release-verification).
 
 Run-by-run evidence is in [Goals and agent handover](AGENT-GOALS.md). See the
@@ -1527,9 +1553,12 @@ The merge commit was then deployed to the pilot through the guarded cycle, with
 passed its independent deployment review. The pilot app is `ce410033`, started
 14:56:56 UTC. Normal HTTPS attestation matched the 787,462-byte client and read
 two fresh rendition playlists, and the deployment's verification source was
-removed. Reporting and forwarding remain off. No field run was repeated on
-`1d54538`; its runtime differs from `140c256` only in the package version
-fields. The v0.2.0 record below is unchanged.
+removed. Reporting and forwarding remain off. The runtime of `1d54538` differs
+from `140c256` only in the package version fields. After deployment, P06 at
+6 MB (RED), R67 (stopped at controller binding on a harness pin) and R68 (RED,
+15 of 16 gates) ran on `1d54538`; see the
+[current delivery checkpoint](#current-delivery-checkpoint). The v0.2.0 record
+below is unchanged.
 
 ### v0.2.0 (21 October 2026)
 
