@@ -855,6 +855,23 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 # RelaySwarm changelog
 
+## Unreleased
+
+No version has been chosen for these changes ([PR 9](https://github.com/forgesworn/relayswarm/pull/9),
+not merged).
+
+- Add local holder labels to the peer diagnostics. Labels are session-local
+  counters, not keys, and are for local diagnostics only.
+- Stop a linked holder that is never ahead from suppressing neighbour
+  discovery, so such a holder is no longer treated as enough; bounded peer work,
+  deadlines and HTTP fallback are unchanged.
+- Field results on this source (21 October 2026, desktop and relay-only scope):
+  the fourteen-role short qualifier passed 16 of 16 gates for the first time,
+  and Firefox 152.0.6 and Safari 26.6.2 desktop journeys passed. The sustained
+  7,200 s run and the 3 MB both-quality shared-cap lifecycle are RED and open,
+  and Safari 17.6 desktop is RED. Physical devices, hard NAT and a separate
+  network are not tested. See [Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#current-delivery-checkpoint).
+
 ## v0.2.0 (21 October 2026)
 
 Experimental [GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0) adding the supervised
@@ -1708,6 +1725,86 @@ on `main` do not change either tag or its immutable downloaded assets.
 
 ## Current delivery checkpoint
 
+Checkpoint: 21 October 2026. This is source `140c256` on `fix/holder-discovery`
+([PR 9](https://github.com/forgesworn/relayswarm/pull/9), open and unmerged). It
+adds local holder labels to the peer diagnostics (`368b860`) and stops a linked
+holder that is never ahead from suppressing neighbour discovery (`140c256`).
+No version has been chosen; nothing is merged, tagged or released. The
+published experimental prerelease remains v0.2.0.
+
+**Passed on this source.**
+
+- All nine required
+  [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39529800310)
+  succeeded. Attempt 2 reran only the hls.js playback job, after the runner's
+  Chrome install hit an apt 403 before any test step.
+- Fresh consumption of the exact committed source (not downloaded release
+  assets) passed with 286 package members. The served client is 787,462 bytes.
+- Guarded deployment to the pilot passed its independent deployment review.
+  After P07 the pilot app is `38eb5c2d`, started 02:59:29 UTC, with reporting
+  and forwarding off.
+- P05 reporting lifecycle passed, with natural expiry after 303,923 ms. P07
+  parent-crash recovery passed, with an independent native review.
+- **Fourteen-role short qualifier R66 is GREEN, 16 of 16 gates**, including
+  `each4BothQualityPeer` and `all8ActuallyUploaded`. This is the first green
+  fourteen-role qualifier. It ran 302.823 s with contributors at 1,250,000 B/s,
+  relay-only TURN over TLS/TCP and no VPN tunnel carrying the default route.
+- Desktop installed-browser journeys passed for Firefox 152.0.6 on one Mac and
+  Safari 26.6.2 on another (all six checkpoints each: verified receive, quality
+  and seek, explicit upload, reload retains usage without consent, origin-only
+  kill). The Safari 26.6.2 pass is the first Safari pass. Scope is macOS arm64
+  desktop with one dedicated 1,800 s finite source and three owned Chrome 155
+  actors per browser; it is not physical-device, hard-NAT or separate-network
+  evidence.
+- Finite-source cleanup reviews for the P06 and desktop sources passed.
+
+**Matched wire and cost (R66, 302 s window, two origin-only baseline roles).**
+Receivers used 31.5% less origin traffic than their matched baselines (185.9 MB
+against 271.2 MB, model error about ±4%). The origin served about 226 MB less
+than all-origin delivery. TURN runs on a separate host, which carried about
+319 MB egress (280 to 365 MB, endpoint-side estimate) and about 323 MB ingress,
+so total egress across both hosts rose by roughly 85 to 100 MB. Marginal cost on
+the hosts' plans is not determined because the plan terms are not recorded.
+Nostr signalling bytes were not separable.
+
+**RED or open.**
+
+- **Item 5, the sustained 7,200 s run (22 churn events, natural TURN expiry and
+  renewal), is RED and open.** R37 failed at the first churn event on a harness
+  assertion about retained renewals, which was fixed. R38 failed after 640,110 ms
+  of measurement; its first failure is a harness race, in which `rejoin()` read
+  the page 7 ms after clicking Start, before the page applied its settings
+  (diagnosis confidence high). That gives no product evidence either way, and
+  the 7,200 s run has not completed. It is recorded RED and open by decision.
+- **P06, the 3 MB both-quality shared-cap lifecycle, is RED and open**
+  (`RED_HIGH_QUALITY_NO_VERIFIED_COMPLETION_BEFORE_SHARED_CAP_REFUSAL`, the same
+  class as the a416f7e third run). Low-quality verified peer media reached the
+  receiver (216,952 B at 9.75 s). Three 720p reservations (659,128, 673,604 and
+  659,692 B) were accepted and charged, but none completed as verified peer
+  media within the receiver's buffer-safe wait on the relay path (about 255 KB/s
+  on the best link). The fourth (661,948 B) was refused as exhausted at
+  2,625,232 of 3,000,000 B, and the only high-quality holder stopped. The shared
+  allowance behaved as documented in
+  [Account upload budget](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md): the client reserves its full
+  payload before sending, and an accepted reservation stays charged after
+  cancellation. This is a design limitation under relay throughput, one
+  high-quality holder and a 3 MB cap, not a recorded product defect. It is
+  recorded RED and open by decision, with no re-run on this source.
+- **Safari 17.6 on the desktop is RED.** No verified peer download within 45 s
+  and no selected ICE candidate pair was recorded; every fragment came from the
+  origin. The cause is not determined and the journey was not retried.
+- Physical iPhone (unavailable), physical Android and device Safari or Firefox
+  (these need the owner), hard NAT and a separate network (these need another
+  network) remain open and unverified. npm publication is out of scope.
+- Release: no version has been chosen. The goal's definition of done is not met
+  while Item 5 and P06 are open.
+
+Run-by-run evidence is in [Goals and agent handover](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/AGENT-GOALS.md). See the
+[checkpoint record](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/140c256-current-delivery-checkpoint-20261021.json)
+and [P01–P12 checklist](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md#delivery-checklist).
+
+## Previous checkpoint: 20 October 2026 (5f2ece0)
+
 Checkpoint: 20 October 2026. The pilot runs
 `5f2ece0bc8e0a78e9a7eca5c56f5ca9141df4669`. All nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39384666332),
@@ -1720,7 +1817,7 @@ pilot's TURN service, with no qualifier load, moved high-quality segments at 3 t
 4 Mbit/s over TLS; UDP relay addresses were no faster and lost more. Run-by-run
 evidence is in [Goals and agent handover](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/AGENT-GOALS.md).
 
-Previous checkpoint: 19 October 2026. The pilot
+Earlier checkpoint: 19 October 2026. The pilot
 runs `3f706a9bc4a895d17345be26b77006cf13093c46`. All nine required
 [CI jobs](https://github.com/forgesworn/relayswarm/actions/runs/39169937465),
 fresh consumption of 280 package members and guarded deployment passed.
@@ -6818,77 +6915,108 @@ pure r1 failed on a Root seal-order fault; r2 and r3 passed. The P07 root driver
 the R4 driver, dropping the negative handover. The OWN and native review sources
 are identity rebases of the 3f706a9 versions.
 
+## Progress on 21 October 2026 (source 140c256)
+
+Source `140c256` is on `fix/holder-discovery` ([PR 9](https://github.com/forgesworn/relayswarm/pull/9),
+open, unmerged): holder labels in local diagnostics (`368b860`), then the fix
+that stops a never-ahead holder suppressing neighbour discovery. Paths are
+relative to a checkout holding the local `artifacts/` tree.
+
+| Run | Verdict | Evidence |
+|---|---|---|
+| CI, fresh consumer, deployment, deployment review | PASS: nine required jobs in [run 39529800310](https://github.com/forgesworn/relayswarm/actions/runs/39529800310) (attempt 2 reran only the hls.js playback job after a runner apt 403 before any test step); 286 package members from the committed source; independent deployment review | `artifacts/cycle-140c256-record-20261021.json`, `artifacts/ci-140c256-39529800310-20261021/`, `artifacts/clean-consumer-140c256-20261021/package-review.json`, `artifacts/independent-deployment-140c256-review-20261021/review.json` |
+| P05 reporting lifecycle | PASS, natural expiry 303,923 ms, reporting restored off | `artifacts/cycle-140c256-record-20261021.json` |
+| P07 parent crash | PASS, independent native review | `artifacts/cycle-140c256-record-20261021.json` |
+| R66 short qualifier | GREEN, 16 of 16 gates, 302.823 s, including `each4BothQualityPeer` and `all8ActuallyUploaded`; first green fourteen-role qualifier | `artifacts/distributed-fourteen-qualifier-140c256-r66-result-20261021.json` |
+| R66 wire and cost | Receivers used 31.5% less origin traffic than matched baselines; TURN host carried about 319 MB egress; marginal cost not determined | `artifacts/r66-wire-cost-20261021/HOST-CHECK.json` (its correction governs over `WORKER4-REPORT.md`) |
+| R37 sustained | RED at the first churn event on a harness assertion about retained renewals | `artifacts/distributed-long-three-eleven-140c256-r37-result-20261021.json` |
+| R38 sustained | RED after 640,110 ms of measurement; first failure is a harness race in `rejoin()` (read 7 ms after clicking Start, before the page applied its settings; diagnosis confidence high) | `artifacts/distributed-long-three-eleven-140c256-r38-result-20261021.json`, `artifacts/distributed-long-three-eleven-140c256-r38-result-addendum-20261021.json` |
+| P06 3 MB shared-cap lifecycle | RED, `RED_HIGH_QUALITY_NO_VERIFIED_COMPLETION_BEFORE_SHARED_CAP_REFUSAL`; finite-source cleanup review PASS | `artifacts/p06-140c256-result-20261021.json`, `artifacts/p06-140c256-result-addendum-20261021.json`, `artifacts/p06-140c256-result-addendum-2-20261021.json`, `artifacts/p06-140c256-red-diagnosis-20261021/DIAGNOSIS.md`, `artifacts/p06-140c256-user-decision-20261021.json`, `artifacts/independent-p06-140c256-source-cleanup-review-20261021/review.json` |
+| Desktop D1 Firefox 152.0.6 (M1) | PASS, six of six checkpoints; 663,828 B verified peer at the receive checkpoint, 413,600 B uploaded | `artifacts/desktop-journeys-140c256-result-20261021.json` |
+| Desktop D2 Safari 17.6 (M1) | RED: no verified peer download within 45 s, no selected ICE candidate pair; cause not determined; not retried | `artifacts/desktop-journeys-140c256-result-20261021.json` |
+| Desktop D3 Safari 26.6.2 (M4) | PASS, six of six checkpoints; 667,212 B verified peer, 213,004 B uploaded; first Safari pass | `artifacts/desktop-journeys-140c256-result-20261021.json`; finite-source cleanup review PASS in `artifacts/independent-desktop-140c256-source-cleanup-review-20261021/review.json` |
+
+Pilot app after P07: `38eb5c2d`, started 02:59:29 UTC, reporting and forwarding
+off; served client 787,462 bytes. Repo-tracked summary:
+[checkpoint record](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/140c256-current-delivery-checkpoint-20261021.json).
+
+Findings for the next agent:
+
+- **R66 was run at the R65 profile** (contributors at 1,250,000 B/s, four
+  neighbours, relay-only TURN over TLS/TCP, no VPN tunnel on either Mac, checked
+  by the authorisation) on the rebuilt source. It is a short desktop-class
+  result; it says nothing about 7,200 s, devices or a separate network.
+- **TURN is a separate host from the origin.** The origin served about 226 MB
+  less than all-origin delivery over R66's 302 s window, but total egress across
+  both hosts rose by roughly 85 to 100 MB. Do not describe this as a bill
+  saving: the hosts' plan terms are not recorded.
+- **R38's rejoin race is a harness fault.** `rejoin()` in the long lineage reads
+  the actor straight after clicking Start; the page applies settings
+  asynchronously. A fix needs its own review cycle and a new run. No earlier long
+  run reached a rejoin, so the rejoin itself has no evidence either way.
+- **P06's role summary fields do not update.** Do not cite `videoQualities`,
+  `verifiedPeerQualities`, `zeroFrameIntervals` or `contributionWithdrawn` for
+  P06 or a416f7e; the observer never assigns `measurementStarted`. Use the raw
+  samples.
+- **P06 is a design limitation, not a product defect.** The shared allowance
+  behaved as documented in [Account upload budget](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md).
+  About 660 KB high-quality segments did not complete within the receiver's
+  buffer-safe wait on the relay path (about 255 KB/s on the best link), so three
+  accepted reservations consumed the cap before the fourth was refused.
+- **Decisions.** The user chose to record Item 5 and P06 as RED and open and to
+  move on; P06 is not to be re-run on this source.
+
 ## Next work, in dependency order
 
 Position on 21 October 2026: v0.2.0 is a published experimental GitHub
-prerelease of `bf43940`, and `main` (`3770fee`) passed CI in
-[run 39516467313](https://github.com/forgesworn/relayswarm/actions/runs/39516467313).
-The pilot runs `5f2ece0`, for which items 1 to 3 are complete (deployment, its
-independent review, positive P05 and P07 r5). Item 4 is RED: R62 to R65 failed,
-and R65 (1.25 MB/s holders, tunnels off, Chrome background downloads disabled)
-completed its 300 s measurement with 14 of 16 gates. High-quality peer media
-reached one of four receivers, and one contributor got no requests. The likely
-cause is inferred, not proved, because request records carry no holder identity:
-a receiver stays bound to a same-rendition holder that is never ahead, and
-neighbour discovery treats that holder as enough. A one-link probe through the
-pilot's TURN service moved high-quality segments at 3 to 4 Mbit/s over TLS, so a
-discovery fix may not clear `each4BothQualityPeer` on its own. The user chose to
-fix this on `fix/holder-discovery`: holder labels in the local diagnostics first,
-then stopping a never-ahead holder from suppressing discovery, with bounded peer
-work, deadlines and HTTP fallback unchanged. That source needs its own cycle (CI,
-consumption, deployment and review, P05, P07, then a rebuilt R66 at the R65
-profile). Item 5 and everything after it stay blocked until a short qualifier
-passes.
+prerelease of `bf43940`. Source `140c256` (PR 9, unmerged) has passed CI,
+consumption, guarded deployment and its review, P05, P07 and the short
+qualifier R66 (GREEN, 16 of 16). The goal's definition of done is not met while
+Item 5 and P06 are open. No version has been chosen; nothing is merged, tagged
+or released.
 
-1. **Independently close the latest deployment.** Review the prepared reader,
-   verify its pinned inputs, run the original bounded fresh cleanup review, and
-   bind the genuine verdict into the current runtime context. The existing
-   lifecycle/finaliser passes do not replace this independent review.
-2. **Repeat P05 on `46494d5`.** Bind the actual deployment review into a fresh
-   copy of the prepared source and reseal it. Run the reporting lifecycle through
-   natural expiry, restore reporting off, close browsers/temporary sources, and
-   independently verify the positive result and cleanup.
-3. **Repeat P07 on the same candidate.** Use genuine positive current P05
-   evidence and fresh runtime observations. Kill only the owned broadcaster
-   parent. Perform the strict writer audit; any dirty-marker recovery requires
-   explicit operator inspection and a concrete recovery decision. Preserve
-   permanent lease inodes and the original restart policy. Require both-quality
-   decoded/audio progress, new continuity and final 15-second progress within
-   the existing 60-second post-healthy window. Cleanup alone cannot pass P07.
-4. **Qualify the fourteen-role short run.** Require 300 seconds of measurement,
-   three roles on M1 and eleven on M4: eight contributors, four receivers and two
-   origin baselines. Every receiver must obtain verified peer media at both
-   qualities. Keep consent, renewal, admission, resource and cleanup gates.
-5. **Run sustained acceptance only after the matching short run passes.** Keep
-   the same qualified source, topology and profile. Require 7,200 seconds,
-   22 churn events, two 3,600-second windows and natural TURN expiry/renewal under
-   unchanged limits. Do not shorten the run or substitute fake credential expiry.
-6. **Close remaining P06/P12 and benefit checks.** Finish the original 3 MB
-   both-quality shared-cap lifecycle, remaining browser/device/network journeys
-   and matched origin-versus-peer measurements. Compare total wire traffic,
-   including TURN/control traffic, rather than only avoided origin payload.
-   Distinguish saved traffic from actual marginal cost on the host's plan.
-7. **Reconcile documentation and ship.** Update the dated status/checklist and
-   PR description from genuine results. Obtain all required checks on the final
-   source, complete fresh consumption, then merge/release/deploy and verify
-   immutable downloaded assets and the served build. Keep earlier release assets
-   unchanged. Do not merge, tag or release while required acceptance remains open.
+1. **Reconcile and review PR 9.** Apply the updated PR description, keep the
+   code description, and obtain the host's merge decision. Do not merge, tag or
+   release while required acceptance remains open.
+2. **Item 5, the sustained 7,200 s run (RED, open).** Fix the harness `rejoin()`
+   race and prove the fix in its own review cycle, then run on the same qualified
+   source, topology and profile: 7,200 seconds, 22 churn events, two
+   3,600-second windows and natural TURN expiry/renewal under unchanged limits.
+   Do not shorten the run or substitute fake credential expiry. Only the user
+   decides to resume it.
+3. **P06, the 3 MB both-quality shared-cap lifecycle (RED, open).** Re-running
+   the same scenario on this source is not wanted. Any further attempt needs a
+   scenario or throughput change that the user chooses, and the result must not
+   be cited through the dead role-summary fields.
+4. **Remaining browser, device and network coverage (open).** Safari 17.6
+   desktop is RED with the cause undetermined. Physical iPhone is unavailable;
+   physical Android and device Safari/Firefox need the owner; hard NAT and a
+   separate network need another network. Report each as open until it passes.
+5. **Cost.** Marginal cost on the hosts' plans is not determined. Record the
+   plan terms before any cost statement; distinguish saved traffic from actual
+   marginal cost.
+6. **Version and release.** The user chooses the version. Obtain all required
+   checks on the final source, complete fresh consumption, then merge, release
+   and deploy, and verify immutable downloaded assets and the served build.
+   Keep earlier release assets unchanged. npm publication is out of scope.
 
-The short and long builders are prepared source, not executed qualification.
-Review their changes and pure checks before materialising them. Frozen source
-manifests must remain intact: make a fresh copy when binding new evidence.
+The short and long builders are prepared source. Review their changes and pure
+checks before materialising them. Frozen source manifests must remain intact:
+make a fresh copy when binding new evidence.
 
 ## Known failures to retain
 
-- Latest actual P07, on older `3f706a9`: server restart passed, browser recovery
-  failed after six playlist HTTP 502 responses. The specific cause of the
-  missing current swarm report remains unproved. The new local outage regression
-  passes; a new actual P07 pass has not yet been recorded.
-- R54 short run completed 303.647 seconds and passed 15 of 16 gates. Receiver 2
-  lacked LOW peer bytes; receiver 3 lacked HIGH peer bytes. It remains a failed
-  qualifier. R55 stopped during setup with zero measurement.
-- Public shared-account API and the focused LOW lifecycle passed. The original
-  both-quality/exhaustion trial remains failed with HIGH delivery unverified.
+- Item 5: R37 and R38 are RED. R37 failed at the first churn event on a harness
+  renewals assertion; R38 failed on the `rejoin()` race after 640,110 ms of
+  measurement. The 7,200 s run has not completed on any source.
+- P06 on `140c256` is RED with high-quality delivery unverified before the shared
+  cap refused a reservation (same class as the a416f7e third run). Public
+  shared-account API and the focused LOW lifecycle passed earlier.
+- Safari 17.6 on the desktop is RED on `140c256` (no verified peer download, no
+  selected candidate pair, cause not determined). Earlier Safari REDs (f393abf,
+  2dd156e) and Firefox and Safari results at a023 stay history.
+- Earlier short-qualifier REDs R54 to R65 stay on record as history. R66 is the
+  first green run and does not change them.
 - Simulator playback/resume passed but did not reproduce the physical iPhone's
   stopped-video fault. It cannot close physical iPhone recovery acceptance.
 
@@ -7668,7 +7796,32 @@ retains the full scope of the feature review. Implementation, automated tests,
 publication, deployment and physical acceptance are separate requirements.
 An entry remains open until the evidence described below exists.
 
-## Current deployed pilot: 19 October 2026
+## Current deployed pilot: 21 October 2026
+
+Exact `140c256` (PR 9, unmerged) passed all nine required CI jobs, fresh
+286-member consumption of the committed source, guarded deployment with
+independent review, P05 reporting acceptance (natural expiry after 303,923 ms)
+and P07 parent-crash recovery with an independent native review. The pilot app
+is `38eb5c2d`, the served client is 787,462 bytes, and reporting and forwarding
+remain off. The fourteen-role short qualifier R66 is GREEN, 16 of 16 gates,
+the first green fourteen-role qualifier.
+
+Two items are RED and open. The sustained 7,200 s run (Item 5) has not
+completed: R37 and R38 failed on harness faults, and no product evidence came
+from them either way. The P06 3 MB both-quality shared-cap lifecycle failed
+again as in the a416f7e third run: three accepted 720p reservations were
+charged but none completed as verified peer media over the relay path before
+the fourth was refused as exhausted. It is a design limitation under relay
+throughput, one high-quality holder and a 3 MB cap, with the allowance behaving
+as documented. Desktop Firefox 152.0.6 and Safari 26.6.2 passed their journeys
+(macOS arm64 desktop scope only); Safari 17.6 is RED with the cause not
+determined. Physical devices, hard NAT, a separate network, marginal cost on the
+hosts' plans and the release remain open. See
+[current status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#current-delivery-checkpoint), the
+[checkpoint record](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/140c256-current-delivery-checkpoint-20261021.json)
+and the [delivery checklist](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md#delivery-checklist).
+
+## Previous deployed pilot: 19 October 2026
 
 Exact `3f706a9` passed all nine required CI jobs, fresh 280-member consumption,
 guarded HTTPS deployment and independent verification-source cleanup. The
@@ -8436,18 +8589,18 @@ requirements for production acceptance.
 
 | ID | Requirement | Evidence required | Current state |
 |---|---|---|---|
-| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | Exact3f CI, consumption and deployment pass. R55 stopped during setup with zero measurement; independent finite cleanup passed. Earlier R54's both-quality peer gate remains RED. Matching short, two-hour/churn and matched benefit remain open |
+| P01 | Reliable live-edge peer delivery and adaptive quality | Unmodified live playlists, simultaneous viewers, quality changes and bounded fallback; paired origin baseline | 21 October, `140c256`: nine-job CI, 286-member consumption, guarded deployment and its review pass. Short qualifier R66 GREEN, 16 of 16 gates including `each4BothQualityPeer` (302.823 s, 1,250,000 B/s contributors, relay-only TURN over TLS/TCP). Receivers used 31.5% less origin traffic than matched baselines; total egress across the origin and TURN hosts rose by roughly 85 to 100 MB, and marginal cost is not determined. The sustained 7,200 s/churn run (Item 5) is RED and open after harness faults in R37 and R38 |
 | P02 | Resolve intermittent MSE playback failure | Reproduction or supported diagnosis, regression and repeated concurrent hosted playback without fatal media errors | Exact later-retained sparse-AAC bytes reproduce the low-only failure; recovery restored video/audio in 403 ms with the original fatal retained; f999 maintained regression, required CI and repeated short concurrent public playback pass without fatal/native errors; original missing bytes do not establish historical causation, and sustained contribution remains separately open |
 | P03 | Wider HLS media support | Signed exact-context tests and actual playback for fMP4, alternate audio, supported encryption, parts/deltas and mixed variants | Current Chrome fixture and exact-source CI evidence pass; physical/browser coverage is recorded separately under P12 |
 | P04 | Production admission and adversarial resource defence | Key-bound expiring tickets, revocation, bounded issuance and verification; flood/exhaustion/withholding regressions | Exact3f selects four demo neighbours and address budget900, retaining SDKdefault6/default600/global2048. Historical R54 admission checks pass with0refusals/unknowns and provider peak731/alignedminute; full field capacity remains unqualified |
-| P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Current3f real-browser acceptance PASS: silent default, trusted opt-in, duplicate idempotence before/after same-volume restart, preserved report/policy and natural304.105s expiry. Reporting restored OFF and full browser/source cleanup independently reviewed. Other browser/load requirements remain under P12 |
-| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Nostr and authenticated host-supplied account API supported; Nostr-only pilot valid, no named website/human wallet required. Public cross-Mac shared-cap API PASS and focused LOW lifecycle PASS (74.412 s/seven gates) cover low verified media/reservations, reload/new key/spend, reconnect OFF/fresh consent and state withdrawal. Original 3 MB both-quality/exhaustion trial remains RED with high delivery unverified. Complete shared-media/physical acceptance remains open |
-| P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | Latest3f actual test passes parent-only crash, strict audit, guarded recovery and server restart with state/leases/policy preserved. Browser remains RED after live playlist502 retry exhaustion; no post-restart decoded progress. Unchanged-source35s browser outage regression also RED. Corrections are being verified; cleanup grants no playback acceptance. Guardian/host catastrophe requires operator inspection |
+| P05 | Durable operational measurements | Private persistence, cumulative-report deduplication, restart recovery, explicit reporting consent and bounded retention | Real-browser acceptance PASS on `3f706a9` and again on `140c256` (natural expiry after 303,923 ms; reporting restored OFF; independent review). Other browser/load requirements remain under P12 |
+| P06 | Persistent upload budgets and their device/account scope | Atomic persistent reservations, failure handling and actual reload/multiple-tab tests; a shared account cap across devices; uploading still requires new consent | Nostr and authenticated host-supplied account API supported; Nostr-only pilot valid, no named website/human wallet required. Public cross-Mac shared-cap API PASS and focused LOW lifecycle PASS (74.412 s/seven gates) cover low verified media/reservations, reload/new key/spend, reconnect OFF/fresh consent and state withdrawal. The 3 MB both-quality shared-cap lifecycle is RED and open on `140c256` (21 October): low verified peer media reached the receiver, three accepted 720p reservations (659,128, 673,604 and 659,692 B) were charged without completing as verified peer media, and the fourth was refused as exhausted at 2,625,232 of 3,000,000 B. Same class as the a416f7e third run; a design limitation under relay throughput (about 255 KB/s best link), one high-quality holder and a 3 MB cap, with the allowance behaving as documented. No re-run on this source. Desktop Firefox 152.0.6 and Safari 26.6.2 explicit-upload and reload-retains-usage checkpoints pass within desktop scope. Complete shared-media/physical acceptance remains open |
+| P07 | Safe broadcaster crash recovery | Concurrent-process exclusion, forced process termination/restart, stable identity, monotonically separate generations and private state | `140c256` actual parent-crash test PASS with independent native review (21 October), following the earlier `5f2ece0` pass. Guardian/host catastrophe still requires operator inspection |
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
-| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact3f fresh280-member consumption/install/import/native/HTTP smoke checks pass. Consumer semver resolutions differ from root lock; standalone ESM is root-lock bound. Final0.2publication and downloaded-release acceptance remain open |
+| P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact `140c256` fresh 286-member consumption/install/import/native/HTTP smoke checks pass. Consumer semver resolutions differ from root lock; standalone ESM is root-lock bound. Final publication and downloaded-release acceptance remain open |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact3f nine-job CI,280-member consumption, guarded deployment/HTTPS and independent source cleanup pass. Latest same-image crash test restarts the server; browser recovery remains RED. Private state, permanent leases and proxy preserved. PR8/0.2publication, fresh playback and final acceptance remain open |
-| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | Prior Simulator/account/LOW lifecycle/Internet TURN passes retain original scopes. Current R55 stopped during setup with zero measurement; historical R54 both-quality peer coverage remains RED. Independent finite cleanup passes. Full capacity, two-hour/churn, browser/device/network breadth, natural expiry and matched benefit remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact `140c256` nine-job CI, 286-member consumption, guarded deployment/HTTPS with independent review, P05 and P07 pass; private state, permanent leases and proxy preserved. PR 9 is unmerged and no version is chosen, tagged or released, so merge, release, downloaded-asset acceptance and final acceptance remain open |
+| P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | 21 October, `140c256`, macOS arm64 desktop scope (one 1,800 s finite source, three owned Chrome 155 actors per browser, relay-only TURN over TLS/TCP): Firefox 152.0.6 PASS and Safari 26.6.2 PASS (first Safari pass), all six checkpoints each; Safari 17.6 RED (no verified peer download in 45 s, no selected candidate pair, cause not determined, not retried). R66 short qualifier GREEN. Sustained 7,200 s/churn/natural-expiry (Item 5) RED and open; marginal cost not determined. Physical iPhone (unavailable), physical Android and device Safari/Firefox (need the owner), hard NAT and a separate network (need another network) remain open. Prior Simulator/account/LOW lifecycle/Internet TURN passes retain original scopes |
 
 ## Evidence rules
 
