@@ -3010,3 +3010,311 @@ test("the numeric operator report keeps exactly its eight fields and the server 
   assert.equal(await post({ ...values, holder: 1 }), 400);
   assert.equal(await post(values), 200);
 });
+
+// A full two-link neighbourhood: an idle link and a stuck holder that serves
+// the current rendition but never announces any segment. A separate candidate
+// presents each demanded key. Date.now is shifted to control elapsed time
+// without waiting; every shift stays under the 30 s freshness windows.
+async function staleHolderFixture(t, { maxPeers = 2, answering = false, sibling = false, loader = Loader, ...options } = {}) {
+  const playback = peerPlaybackOptions(150), realNow = Date.now.bind(Date), shift = { ms: 0 };
+  t.mock.method(Date, "now", () => realNow() + shift.ms);
+  const f = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(), ticket: "own-ticket",
+    admit: async () => true, maxPeers, minLinkLifeMs: 1, idleEvictMs: 1, evictionCooldownMs: 1, ...options }, loader);
+  const own = f.swarm.metrics().pubkey;
+  // The first link is idle, or with `sibling` serves the audio rendition only.
+  const first = await f.addPeer(); const holder = await f.addPeer();
+  holder.receive(serving());
+  if (sibling) first.receive(serving("audio:0"));
+  const holderKey = f.peers[1].pubkey;
+  const candidate = () => {
+    const session = new RelaySwarmSession({ pool: f.pool, swarmId: base.swarmId }), offers = [];
+    session.start(); f.peers.push(session);
+    session.onSignal(({ payload }) => {
+      if (payload.type !== "offer") return;
+      offers.push(payload);
+      if (answering) session.sendSignal(own, { type: "answer", transport: "webrtc", requestId: payload.requestId, payload: { ticket: "fixture-ticket", sdp: "fixture-answer" } });
+    });
+    const announce = (...keys) => session.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: session.pubkey }],
+      have: keys, open: true, ticket: "fixture-ticket" });
+    return { session, offers, announce };
+  };
+  const rank = (pubkey, key) => [...pubkey].map((digit, i) => (parseInt(digit, 16) ^ parseInt(key[i], 16)).toString(16)).join("");
+  let counter = 0;
+  // Only segments the viewer will wait for: the stuck holder out-ranks it.
+  const next = () => {
+    for (;;) {
+      const name = `stale-${counter++}`, key = createHash("sha256").update(`${base.swarmId}\n/${name}.ts`).digest("hex");
+      if (rank(holderKey, key) < rank(own, key)) return { name, key };
+    }
+  };
+  const load = (name, level = 0) => new Promise(resolve => new f.hls.config.fLoader({}).load({ ...context,
+    url: `https://origin.example/${name}.ts`, frag: { ...context.frag, level } }, {}, { onSuccess: resolve }));
+  const rows = () => f.swarm.metrics().peerEligibilityDiagnostics.records;
+  const counters = () => f.swarm.metrics().peerEligibilityDiagnostics.counters;
+  const discovery = () => f.swarm.metrics().neighbourDiscovery.counters;
+  const touch = () => holder.receive(serving());
+  const label = pubkey => f.swarm.metrics().peers.deliveryMeasurements.find(value => value.pubkey === pubkey)?.holder;
+  // A wait that reaches its deadline is recorded as wait-expired, or as
+  // wait-aborted when the origin timer wins the race with the wait loop at the
+  // same instant. Both are misses; a caller abort is a wait-aborted that is not.
+  const outcomes = () => counters()["wait-expired"] + counters()["wait-aborted"];
+  const miss = async (via, count = 1) => {
+    const target = outcomes() + count;
+    for (let i = 0; i < 100 && outcomes() < target; i++) {
+      const segment = next(); via.announce(segment.key); await sleep(30); touch(); await load(segment.name); await sleep(5);
+    }
+    assert.equal(outcomes(), target, "the stuck holder produced the deadline outcomes");
+  };
+  // The holder announces the demanded key while the viewer waits for it.
+  const ahead = async via => {
+    const segment = next(); via.announce(segment.key); await sleep(30); touch();
+    const waits = counters()["no-have-wait"], pending = load(segment.name);
+    await until(() => counters()["no-have-wait"] === waits + 1, 2_000);
+    holder.receive(haveFrame(segment.key)); await pending; await sleep(5);
+    holder.receive(haveFrame());
+  };
+  return { ...f, shift, holderKey, holderChannel: holder, siblingChannel: first, candidate, next, load, rows, counters, outcomes, discovery, touch, label, miss, ahead };
+}
+
+test("a linked holder that is never ahead stops suppressing discovery after four misses over ten seconds", async t => {
+  const f = await staleHolderFixture(t);
+  try {
+    const via = f.candidate();
+    await f.miss(via, 3);
+    assert.equal(f.discovery().checks, 0, "fewer than four misses keep today's behaviour"); assert.equal(via.offers.length, 0);
+    await f.miss(via, 1);
+    assert.equal(f.outcomes(), 4);
+    assert.equal(f.discovery().checks, 0, "four misses in under ten seconds keep today's behaviour"); assert.equal(via.offers.length, 0);
+    assert.ok(f.rows().every(row => row.staleHolders === undefined || row.staleHolders.length === 0));
+    f.shift.ms += 10_001; f.touch();
+    const segment = f.next(); via.announce(segment.key); await sleep(30);
+    const pending = f.load(segment.name);
+    await until(() => via.offers.length === 1);
+    assert.equal(via.offers[0].payload.requestedKey, segment.key, "the offer names the exact demanded key");
+    assert.equal(f.discovery().checks, 1); assert.equal(f.discovery().staleHolder, 1);
+    await pending; await sleep(5);
+    const wait = f.rows().filter(row => row.reason === "no-have-wait").at(-1), label = f.label(f.holderKey);
+    assert.ok(Number.isSafeInteger(label) && label > 0);
+    assert.deepEqual(wait.holders, [label]); assert.deepEqual(wait.haveHolders, []);
+    assert.deepEqual(wait.staleHolders, [label], "the stuck holder is labelled stale on the next wait row");
+  } finally { await f.close(); }
+});
+
+test("a holder that announces each demanded key before the deadline stays protected and never goes stale", async t => {
+  const f = await staleHolderFixture(t, { originFallbackMs: 400 });
+  try {
+    const via = f.candidate();
+    await f.miss(via, 3); await f.ahead(via);
+    await f.miss(via, 1);
+    f.shift.ms += 10_001; f.touch();
+    await f.ahead(via);
+    await f.ahead(via);
+    assert.equal(f.discovery().checks, 0, "past the threshold, an ahead holder keeps discovery off");
+    assert.equal(f.discovery().staleHolder, 0); assert.equal(via.offers.length, 0);
+    assert.ok(f.counters()["have-after-wait"] >= 3);
+    assert.ok(f.rows().every(row => !row.staleHolders?.length), "staleHolders stays empty on every row");
+  } finally { await f.close(); }
+});
+
+test("a rendition switch away and back starts a fresh holder context however long the viewer was away", async t => {
+  const f = await staleHolderFixture(t);
+  try {
+    const via = f.candidate();
+    await f.miss(via, 4);
+    f.shift.ms += 10_001; f.touch();
+    // Away on another rendition: its segment is not hinted, so nothing is dialled for it.
+    const away = f.next(); via.announce(f.next().key); await sleep(30);
+    await f.load(away.name, 1); await sleep(5);
+    assert.equal(f.discovery().checks, 0);
+    f.shift.ms += 5_000; f.touch();
+    await f.miss(via, 3);
+    assert.equal(f.discovery().checks, 0, "the holder is not stale on the first loads after returning");
+    assert.equal(f.discovery().staleHolder, 0); assert.equal(via.offers.length, 0);
+    assert.ok(f.rows().every(row => !row.staleHolders?.length));
+    // Four fresh misses over ten seconds still apply to the new context.
+    await f.miss(via, 1);
+    f.shift.ms += 10_001; f.touch();
+    const segment = f.next(); via.announce(segment.key); await sleep(30);
+    const pending = f.load(segment.name);
+    await until(() => via.offers.length === 1); await pending;
+    assert.equal(f.discovery().staleHolder, 1);
+  } finally { await f.close(); }
+});
+
+test("zero-budget loads neither count as misses nor reset them", async t => {
+  const f = await staleHolderFixture(t);
+  try {
+    const via = f.candidate();
+    await f.miss(via, 3);
+    f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    // 12 s in all, under the 30 s demand window: the first miss is now over ten seconds old.
+    for (let i = 0; i < 3; i++) { f.shift.ms += 4_000; f.touch(); await f.load(`idle-${i}`); }
+    assert.equal(f.counters()["no-budget"], 3);
+    f.hls.media = undefined; f.touch();
+    // Not stale: the zero-budget loads added no misses, so this load's demand-time seek finds three.
+    await f.miss(via, 1);
+    assert.equal(f.discovery().checks, 0); assert.equal(f.discovery().staleHolder, 0); assert.equal(via.offers.length, 0);
+    // The one real miss completed the four: they were not reset.
+    const segment = f.next(); via.announce(segment.key); await sleep(30); f.touch();
+    const pending = f.load(segment.name);
+    await until(() => via.offers.length === 1); await pending;
+    assert.equal(f.discovery().staleHolder, 1);
+  } finally { await f.close(); }
+});
+
+test("a stale-only context blocked by the spent replacement and a full neighbourhood counts staleBlocked once per load", async t => {
+  const f = await staleHolderFixture(t, { answering: true });
+  try {
+    const first = f.candidate(), second = f.candidate();
+    await f.miss(first, 4);
+    assert.equal(f.discovery().staleBlocked, 0, "no stale holder, nothing to count");
+    f.shift.ms += 10_001; f.touch();
+    const segment = f.next(); first.announce(segment.key); await sleep(30);
+    const opening = f.load(segment.name);
+    await until(() => f.swarm.metrics().peers.linksOpened === 3);
+    await opening; await sleep(5);
+    const snapshot = f.swarm.metrics();
+    assert.equal(snapshot.peers.evicted, 1); assert.equal(snapshot.neighbourDiscovery.replacementSpent, 1);
+    assert.equal(snapshot.peers.connected, 2); assert.equal(snapshot.neighbourDiscovery.counters.staleHolder, 1);
+    assert.equal(snapshot.neighbourDiscovery.counters.staleBlocked, 0, "the load that began an attempt was not blocked");
+    const checks = f.discovery().checks;
+    for (let load = 1; load <= 3; load++) {
+      const demanded = f.next(); second.announce(demanded.key); await sleep(30); f.touch();
+      await f.load(demanded.name); await sleep(5);
+      assert.equal(f.discovery().staleBlocked, load, "one count per load");
+    }
+    assert.equal(f.discovery().checks, checks, "no attempt begins while the allowance is spent"); assert.equal(second.offers.length, 0);
+    assert.equal(f.swarm.metrics().peers.evicted, 1);
+  } finally { await f.close(); }
+});
+
+test("neighbour holder state is bounded, scoped to its context and cleared with it", () => {
+  const f = advisoryFixture(), { state, context } = f, holders = Array.from({ length: 10 }, (_, i) => (i + 5).toString(16).repeat(64));
+  assert.equal(state.stale(context, holders[0]), false, "no entry is not stale");
+  for (const pubkey of holders) { state.holderMiss(context, pubkey, "1".repeat(64)); assert.equal(context.holders.size <= 8, true); }
+  assert.equal(context.holders.size, 8); assert.equal(context.holders.has(holders[0]), false, "oldest entry evicted");
+  const pubkey = holders[9];
+  for (const key of ["2", "3", "4", "4"]) state.holderMiss(context, pubkey, key.repeat(64));
+  assert.equal(context.holders.get(pubkey).misses, 4, "a repeated key is one miss");
+  assert.equal(state.stale(context, pubkey), false, "enough misses are not stale inside ten seconds");
+  f.advance(9_999); assert.equal(state.stale(context, pubkey), false);
+  f.advance(1); assert.equal(state.stale(context, pubkey), true);
+  state.holderAhead(context, pubkey); assert.equal(state.stale(context, pubkey), false);
+  state.holderMiss(context, pubkey, "5".repeat(64)); state.forget(pubkey); assert.equal(context.holders.has(pubkey), false);
+  state.holderMiss(context, holders[8], "6".repeat(64)); f.advance(30_001); state.context("main", "main:0");
+  assert.equal(context.holders.size, 0, "inactivity clears holder state with the keys");
+  const replaced = state.context("main", "main:1"); assert.notEqual(replaced.holders, context.holders); assert.equal(replaced.holders.size, 0);
+});
+
+test("a stale holder is the rotation victim while a non-stale serving holder is protected", async t => {
+  // The sibling serves audio only and is not stale there; the stuck holder serves
+  // main and is stale there. Without the exemption both would be protected.
+  const f = await staleHolderFixture(t, { sibling: true });
+  try {
+    const via = f.candidate();
+    await f.miss(via, 4);
+    f.shift.ms += 10_001; f.touch(); f.siblingChannel.receive(serving("audio:0"));
+    // An audio load makes the audio context live, so the sibling is a useful
+    // neighbour there; the seek it triggers finds the stale main context.
+    const audio = new Promise(resolve => new f.hls.config.fLoader({}).load({ ...context, url: "https://origin.example/audio-1.ts",
+      frag: { ...context.frag, type: "audio", level: 0 } }, {}, { onSuccess: resolve }));
+    await until(() => via.offers.length === 1); await audio;
+    assert.equal(f.holderChannel.readyState, "closed", "the stale holder was replaced");
+    assert.equal(f.siblingChannel.readyState, "open", "the non-stale serving holder survives");
+    const snapshot = f.swarm.metrics();
+    assert.equal(snapshot.peers.evicted, 1); assert.equal(snapshot.transportDiagnostics.counters["link-close"].rotation, 1);
+    assert.equal(snapshot.neighbourDiscovery.counters.staleHolder, 1);
+  } finally { await f.close(); }
+});
+
+test("an entry-stage projected-late with no holder counts as a miss", async t => {
+  class SlowOrigin extends Loader {
+    load(ctx, _config, callbacks) { setTimeout(() => callbacks.onSuccess({ data: new Uint8Array(32).fill(9).buffer }, this.stats, ctx, null), 100); }
+  }
+  const f = await staleHolderFixture(t, { originFallbackMs: 50, loader: SlowOrigin });
+  try {
+    const via = f.candidate();
+    // One ordinary miss; its origin fallback then measures a 100 ms holder wait.
+    await f.miss(via, 1);
+    assert.equal(f.counters()["projected-late"], 0);
+    for (let i = 0; i < 3; i++) {
+      const segment = f.next(); via.announce(segment.key); await sleep(30); f.touch(); await f.load(segment.name); await sleep(5);
+    }
+    assert.equal(f.counters()["projected-late"], 3);
+    const late = f.rows().filter(row => row.reason === "projected-late");
+    assert.ok(late.every(row => row.projection.stage === "entry" && row.matchingHave === false && row.haveHolders.length === 0));
+    assert.equal(f.discovery().checks, 0, "four misses in under ten seconds");
+    f.shift.ms += 10_001; f.touch();
+    const segment = f.next(); via.announce(segment.key); await sleep(30);
+    const pending = f.load(segment.name);
+    await until(() => via.offers.length === 1); await pending;
+    assert.equal(f.discovery().staleHolder, 1, "one wait miss and three entry-stage misses made the holder stale");
+  } finally { await f.close(); }
+});
+
+test("a wait that is no longer eligible leaves the miss count alone", async t => {
+  const f = await staleHolderFixture(t, { originFallbackMs: 400 });
+  try {
+    const via = f.candidate();
+    await f.miss(via, 3);
+    const segment = f.next(); via.announce(segment.key); await sleep(30); f.touch();
+    const waits = f.counters()["no-have-wait"], pending = f.load(segment.name);
+    await until(() => f.counters()["no-have-wait"] === waits + 1, 2_000);
+    f.holderChannel.receive(JSON.stringify({ t: "contribution", serving: false, rendition: "main:0" }));
+    await pending; await sleep(5);
+    assert.equal(f.counters()["wait-no-longer-eligible"], 1);
+    f.shift.ms += 10_001; f.touch();
+    // Three misses stand: this load's demand-time seek finds the holder fresh, and its miss makes four.
+    await f.miss(via, 1);
+    assert.equal(f.discovery().checks, 0); assert.equal(via.offers.length, 0);
+    const last = f.next(); via.announce(last.key); await sleep(30); f.touch();
+    const next = f.load(last.name);
+    await until(() => via.offers.length === 1); await next;
+  } finally { await f.close(); }
+});
+
+test("a deadline-driven wait-aborted counts as a miss and keeps its row reason", async t => {
+  const realNow = performance.now.bind(performance), lag = { ms: 0 };
+  t.mock.method(performance, "now", () => realNow() - lag.ms);
+  // The wait loop sees a clock running behind, so the origin timer reaches the
+  // deadline first and aborts the wait.
+  const f = await staleHolderFixture(t, { getCommitment: () => { lag.ms = 40; return new Promise(() => {}); } });
+  try {
+    const via = f.candidate();
+    for (let i = 0; i < 4; i++) {
+      const segment = f.next(); via.announce(segment.key); await sleep(30); f.touch(); lag.ms = 0;
+      await f.load(segment.name); lag.ms = 0; await sleep(5);
+    }
+    assert.equal(f.counters()["wait-aborted"], 4); assert.equal(f.counters()["wait-expired"], 0);
+    assert.equal(f.discovery().checks, 0, "four misses in under ten seconds");
+    f.shift.ms += 10_001; f.touch();
+    const segment = f.next(); via.announce(segment.key); await sleep(30); lag.ms = 0;
+    const pending = f.load(segment.name);
+    await until(() => via.offers.length === 1); await pending;
+    assert.equal(f.discovery().staleHolder, 1, "four deadline aborts made the holder stale");
+  } finally { await f.close(); }
+});
+
+test("a caller abort during the wait is not a miss", async t => {
+  const f = await staleHolderFixture(t, { originFallbackMs: 400 });
+  try {
+    const via = f.candidate();
+    await f.miss(via, 3);
+    for (let i = 0; i < 2; i++) {
+      const segment = f.next(); via.announce(segment.key); await sleep(30); f.touch();
+      const waits = f.counters()["no-have-wait"], aborts = f.counters()["wait-aborted"];
+      const loader = new f.hls.config.fLoader({});
+      loader.load({ ...context, url: `https://origin.example/${segment.name}.ts` }, {}, { onSuccess() {}, onAbort() {} });
+      await until(() => f.counters()["no-have-wait"] === waits + 1, 2_000);
+      loader.abort();
+      await until(() => f.counters()["wait-aborted"] === aborts + 1, 2_000);
+    }
+    f.shift.ms += 10_001; f.touch();
+    // Still three misses: this load's seek finds the holder fresh, and its miss makes four.
+    await f.miss(via, 1);
+    assert.equal(f.discovery().checks, 0); assert.equal(via.offers.length, 0);
+    const last = f.next(); via.announce(last.key); await sleep(30); f.touch();
+    const pending = f.load(last.name);
+    await until(() => via.offers.length === 1); await pending;
+  } finally { await f.close(); }
+});
