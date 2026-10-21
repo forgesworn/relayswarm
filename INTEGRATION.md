@@ -384,13 +384,15 @@ A serving link normally counts as a neighbour for its rendition even before it
 holds any segment, which keeps discovery off. Each load that reached the HAVE
 check is decided once, when it ends. If a verified segment came from a link, that
 link's history is dropped and no other link is changed. If the load went to
-origin, the outcome is charged by who held the key. When some serving link's HAVE
-held the key (at the HAVE check or when the load ended), only the serving links
-that held it take a miss, called a held miss: the wait or projection ended at
-origin, a request was abandoned or timed out, the transfer was projected late
-after the commitment, no recent transfer could finish, or every link tried
-failed. A serving link that did not hold the key was not asked and is left
-alone. When no link held the key, every serving link takes a miss, as before: at
+origin, only the links that were judged are charged, with a miss called a held
+miss. These are the serving links that were asked and did not deliver a verified
+segment in time (the request was abandoned, timed out or failed, or the payload
+arrived after the deadline), and, when no link could fit the time left
+(`peerNoFit`), the serving links that held the key and whose own timing estimate
+did not fit. A decline made on swarm-wide estimates or on the buffer charges no
+holder: a `projected-late` decision while some link held the key, or a request
+skipped because no recent transfer could finish. A link that was never asked is
+left alone. When no link held the key, every serving link takes a miss, as before: at
 a `wait-expired` outcome (or a `wait-aborted` outcome that the deadline timer
 itself caused, which keeps its row reason) and at an entry-stage `projected-late`
 decision. Holding the key at entry or after the wait no longer clears a link
@@ -403,9 +405,12 @@ demanded key and may replace it. The count is kept per `main` or `audio`
 context, only from loads that reached the HAVE check (zero-budget,
 aborted-before-eligibility and no-longer-eligible loads neither count nor
 reset). A load that is aborted by the caller (an hls.js abort) or by `stop()`, an
-unavailable, rejected or expired commitment, and an integrity failure (the link
-is banned and closed) do not count. A segment that arrives after the deadline
-goes to origin and is a to-origin outcome like the others. A link's history is dropped only when a verified segment from that
+unavailable, rejected or expired commitment do not count. A corrupt payload is
+never charged to the link that sent it: that link is banned and closed, and the
+size and digest check is made first even when the deadline has passed, though
+another holder asked by a later step of the same load can still be charged. A
+payload that would have verified but arrives after the deadline goes to origin
+and charges the link that was asked. A link's history is dropped only when a verified segment from that
 link reaches this viewer's loader in time, when the link closes, when the
 rendition changes, or when the context sees no demand for 30 seconds. A stale
 link is still asked for any segment it does hold.

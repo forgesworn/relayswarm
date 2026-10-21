@@ -6,15 +6,19 @@ Not field-tested. These changes make a receiver try more neighbours when its
 linked holders do not deliver; they do not show that high-quality peer delivery
 improves, and field acceptance remains open. See [Status](docs/STATUS.md).
 
-- Count a linked holder that held the demanded segment but did not deliver it
-  in time as a miss. Previously a holder whose HAVE held the key was treated as
+- Count a linked holder that was asked for a segment and did not deliver it in
+  time as a miss. Previously a holder whose HAVE held the key was treated as
   ahead and cleared, so one that was ahead but too slow was never stale and kept
   neighbour discovery off. Each peer-first load is now decided once, when it
   ends. A verified delivery clears only the link it came from. A load that goes
-  to origin gives a held miss to the serving links that held the key, and a miss
-  to every serving link only when no link held it. Loader aborts, `stop()`,
-  commitment failures and integrity failures record nothing. The thresholds
-  (four misses on distinct segments over at least ten seconds) are unchanged.
+  to origin charges only the links that were judged: those that were asked and
+  did not deliver in time, and at `peerNoFit` those whose own estimate did not
+  fit. Declines made on swarm-wide estimates or the buffer charge no holder, and
+  every serving link takes a miss only when no link held the key. A stale link's
+  HAVE no longer keeps a context met or the link protected as a victim. Loader
+  aborts, `stop()`, commitment failures and integrity failures record nothing
+  against the link concerned. The thresholds (four misses on distinct segments
+  over at least ten seconds) are unchanged.
 - Let a spent replacement re-arm once, at most every twenty seconds per context,
   when no verified peer delivery has happened since it was spent and every link
   serving that rendition is stale or none serves it. The 15-second discovery

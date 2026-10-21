@@ -3060,7 +3060,7 @@ function keyedCommitments(bytes) {
 // the current rendition but never announces any segment. A separate candidate
 // presents each demanded key. Date.now is shifted to control elapsed time
 // without waiting; every shift stays under the 30 s freshness windows.
-async function staleHolderFixture(t, { maxPeers = 2, answering = false, sibling = false, loader = Loader, serve = null, firstServes = false, ...options } = {}) {
+async function staleHolderFixture(t, { maxPeers = 2, answering = false, sibling = false, loader = Loader, serve = null, firstServes = false, firstServe = null, ...options } = {}) {
   const playback = peerPlaybackOptions(150), realNow = Date.now.bind(Date), shift = { ms: 0 };
   t.mock.method(Date, "now", () => realNow() + shift.ms);
   // With `serve`, the holder is a ServingChannel (its delayMs may be changed
@@ -3072,7 +3072,9 @@ async function staleHolderFixture(t, { maxPeers = 2, answering = false, sibling 
     admit: async () => true, maxPeers, minLinkLifeMs: 1, idleEvictMs: 1, evictionCooldownMs: 1, ...options }, loader);
   const own = f.swarm.metrics().pubkey;
   // The first link is idle, or with `sibling` serves the audio rendition only.
-  const first = await f.addPeer(); const holder = await f.addPeer(holderChannel);
+  // With `firstServe` the first link is a second holder (same trace, labelled "other").
+  const otherChannel = firstServe ? new HolderChannel(firstServe.bytes, firstServe.delayMs, requests, "other") : null;
+  const first = await f.addPeer(otherChannel ?? undefined); const holder = await f.addPeer(holderChannel);
   holder.receive(serving());
   if (sibling) first.receive(serving("audio:0"));
   if (firstServes) first.receive(serving());
@@ -3223,16 +3225,29 @@ test("a stale holder that keeps advertising the demanded key neither keeps disco
   } finally { await f.close(); }
 });
 
-test("a non-stale holder that advertises a demanded key still keeps discovery off", async t => {
+test("a non-stale link that holds a demanded key but does not serve the rendition keeps discovery off", async t => {
+  // Only the HAVE branch can meet the context: the holder serves nothing and has no history.
   const f = await staleHolderFixture(t, { serve: { bytes: bytes32, delayMs: null } });
   try {
     const via = f.candidate();
-    // Three held misses over more than ten seconds are not four.
-    for (let i = 0; i < 3; i++) await f.fail(via, { keepHave: true });
-    f.shift.ms += 10_001; f.touch();
-    const segment = f.next(); via.announce(segment.key); await sleep(30);
-    await f.load(segment.name); await sleep(30);
+    f.holderChannel.receive(JSON.stringify({ t: "contribution", serving: false, rendition: "main:0" }));
+    const demand = async () => {
+      const segment = f.next(); via.announce(segment.key); await sleep(30);
+      await f.load(segment.name); await sleep(30); return segment;
+    };
+    const held = f.next(); via.announce(held.key); await sleep(30);
+    f.holderChannel.receive(haveFrame(held.key));
+    await f.load(held.name); await sleep(30);
+    // The next demand keeps the held key as its previous one, and the holder still advertises it.
+    await demand();
     assert.equal(f.discovery().checks, 0); assert.equal(via.offers.length, 0);
+    assert.equal(f.counters()["no-have-no-wait"] >= 1, true, "no link serves the rendition");
+    // Without that HAVE nothing meets the context, and the same demand starts discovery.
+    f.holderChannel.receive(haveFrame());
+    const segment = f.next(); via.announce(segment.key); await sleep(30);
+    const pending = f.load(segment.name);
+    await until(() => via.offers.length === 1); await pending;
+    assert.equal(f.discovery().checks, 1);
   } finally { await f.close(); }
 });
 
@@ -3358,11 +3373,11 @@ test("holding a key does not clear a holder entry; only a verified delivery does
   } finally { await f.close(); }
 });
 
-test("a projected-late decision charges only a holder that held the key, at either stage", async t => {
+test("a projected-late decision judged on swarm-wide estimates charges no holder, at either stage", async t => {
   const f = await staleHolderFixture(t, { originFallbackMs: 1000, serve: { bytes: bytes32, delayMs: 20 } });
   try {
-    const via = f.candidate(), label = f.label(f.holderKey);
-    // A holder with a quick first byte and a slow body: 20 ms to the first chunk, about 250 ms in all.
+    const via = f.candidate();
+    // A holder with a quick first chunk and a slow body: 20 ms to the first chunk, about 250 ms in all.
     f.holderChannel.bodyDelayMs = 250;
     await f.deliver(via);
     // 150 ms of room: the first byte fits, the transfer does not.
@@ -3372,14 +3387,43 @@ test("a projected-late decision charges only a holder that held the key, at eith
     await f.fail(via, { level: 1 });
     let late = f.rows().filter(row => row.reason === "projected-late");
     assert.equal(late.length, 1); assert.equal(late[0].projection.stage, "commitment"); assert.equal(late[0].matchingHave, true);
-    assert.deepEqual(late[0].heldMissHolders, [label]); assert.equal(f.discovery().heldMiss, 1);
     // Now the size is known, so the same decision is made at entry.
     f.touch(); f.holderChannel.receive(serving("main:1"));
     await f.fail(via, { level: 1 });
     late = f.rows().filter(row => row.reason === "projected-late");
     assert.deepEqual(late.map(row => row.projection.stage), ["commitment", "entry"]);
-    assert.deepEqual(late[1].heldMissHolders, [label]); assert.equal(f.discovery().heldMiss, 2);
+    assert.ok(late.every(row => row.heldMissHolders.length === 0), "the holder was never asked, so it is not charged");
+    assert.equal(f.discovery().heldMiss, 0);
     assert.equal(f.requests.length, 1, "only the first delivery was requested");
+  } finally { await f.close(); }
+});
+
+test("two holders that hold every key: aggregate declines never make the unasked one stale and it stays protected", async t => {
+  // A and B both hold every key. A delivers while it is measured; then loads are declined on the
+  // buffer alone, so neither link is asked, and neither is judged.
+  const f = await staleHolderFixture(t, { originFallbackMs: 1000, serve: { bytes: bytes32, delayMs: 20 }, firstServe: { bytes: bytes32, delayMs: 20 } });
+  try {
+    const via = f.candidate();
+    const both = key => { f.holderChannel.receive(haveFrame(key)); f.siblingChannel.receive(haveFrame(key)); };
+    const run = async () => {
+      const segment = f.next(); via.announce(segment.key); await sleep(30); f.touch(); f.siblingChannel.receive(serving()); both(segment.key);
+      await f.load(segment.name); await sleep(5); both(); return segment;
+    };
+    await run(); await run();
+    assert.equal(f.swarm.metrics().segments.peerFirstLoaded, 2, "sometimes a holder delivers");
+    // 10 ms of room: even a measured first byte cannot fit, so these loads go to origin unasked.
+    f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 12.01 } };
+    const asked = f.requests.length;
+    for (let i = 0; i < 5; i++) await run();
+    assert.equal(f.counters()["projected-late"], 5); assert.equal(f.requests.length, asked, "no holder was asked");
+    f.hls.media = undefined; f.shift.ms += 10_001; f.touch(); f.siblingChannel.receive(serving());
+    assert.equal(f.discovery().heldMiss, 0);
+    assert.ok(f.rows().every(row => !row.staleHolders?.length), "neither holder is ever stale");
+    // And discovery stays off, so neither is offered up as a victim.
+    const wait = await f.trigger(via);
+    assert.deepEqual(wait.staleHolders, []); assert.equal(wait.holders.length, 2);
+    assert.equal(f.discovery().checks, 0); assert.equal(via.offers.length, 0);
+    assert.equal(f.holderChannel.readyState, "open"); assert.equal(f.siblingChannel.readyState, "open");
   } finally { await f.close(); }
 });
 
@@ -3438,17 +3482,49 @@ test("loads that end for the viewer's own reasons record nothing against a holde
   } finally { await f.close(); }
 });
 
-test("stop() and an integrity failure record nothing against a holder", async t => {
-  const stopping = await staleHolderFixture(t, { originFallbackMs: 400, serve: { bytes: bytes32, delayMs: null } });
+// stop() is not tested here: it clears discovery, so a held miss recorded after it could not
+// be observed through the counters. The loader guards on stopped are the only protection.
+// The deadline lands while the payload is being hashed: hashing of the 32-byte payload is
+// held past the origin timer, so the load has already fallen back when the digest returns.
+function slowPayloadDigest(t, delayMs) {
+  const real = globalThis.crypto.subtle.digest.bind(globalThis.crypto.subtle);
+  t.mock.method(globalThis.crypto.subtle, "digest", async (algorithm, data) => {
+    if (data.byteLength === 32) await sleep(delayMs);
+    return real(algorithm, data);
+  });
+}
+
+test("a payload that would have verified but lands after the deadline during hashing charges the asked holder", async t => {
+  slowPayloadDigest(t, 400);
+  const f = await staleHolderFixture(t, { originFallbackMs: 150, serve: { bytes: bytes32, delayMs: 20 } });
   try {
-    const via = stopping.candidate(), segment = stopping.next();
-    via.announce(segment.key); await sleep(30); stopping.touch(); stopping.holderChannel.receive(haveFrame(segment.key));
-    const pending = stopping.load(segment.name);
-    await until(() => stopping.holderChannel.sent.some(frame => frame.t === "want"));
-    stopping.swarm.stop(); await sleep(20);
-    assert.equal(stopping.discovery().heldMiss, 0);
-    void pending;
-  } finally { await stopping.close(); }
+    const via = f.candidate(), label = f.label(f.holderKey);
+    const segment = f.next(); via.announce(segment.key); await sleep(30); f.touch();
+    f.holderChannel.receive(haveFrame(segment.key));
+    await f.load(segment.name); await sleep(450);
+    const metrics = f.swarm.metrics();
+    assert.equal(f.requests.length, 1); assert.equal(metrics.segments.peerFirstLoaded, 0); assert.equal(metrics.segments.originFallbacks, 1);
+    assert.equal(metrics.segments.peerCorrupt, 0);
+    assert.equal(f.discovery().heldMiss, 1);
+    assert.deepEqual(f.rows().filter(row => row.heldMissHolders?.length).map(row => row.heldMissHolders), [[label]]);
+  } finally { await f.close(); }
+});
+
+test("a mismatched payload that lands after the deadline is banned and closed, with no held miss", async t => {
+  slowPayloadDigest(t, 400);
+  const f = await staleHolderFixture(t, { originFallbackMs: 150, serve: { bytes: new Uint8Array(32).fill(1), commitmentBytes: bytes32, delayMs: 20 } });
+  try {
+    const via = f.candidate();
+    const segment = f.next(); via.announce(segment.key); await sleep(30); f.touch();
+    f.holderChannel.receive(haveFrame(segment.key));
+    await f.load(segment.name); await sleep(450);
+    const metrics = f.swarm.metrics();
+    assert.equal(metrics.segments.peerCorrupt, 1); assert.equal(f.holderChannel.readyState, "closed", "banned and closed as on the normal path");
+    assert.equal(f.discovery().heldMiss, 0);
+  } finally { await f.close(); }
+});
+
+test("an integrity failure is never charged to the corrupt link", async t => {
   const corrupt = await staleHolderFixture(t, { originFallbackMs: 400, serve: { bytes: new Uint8Array(32).fill(1), commitmentBytes: bytes32, delayMs: 1 } });
   try {
     const via = corrupt.candidate(), segment = corrupt.next();

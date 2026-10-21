@@ -983,35 +983,33 @@ class HlsSwarm {
     return { holders: small(holders), haveHolders: small(haveHolders), staleHolders: small(staleHolders), heldMissHolders: [] };
   }
 
-  // The serving links whose HAVE holds the demanded key right now, as pubkeys.
-  #heldBy({ key, rendition }) {
-    return new Set([...this.links.values()].filter((link) => this.#servesRendition(link, rendition) && link.have.has(key)).map((link) => link.pubkey));
-  }
-
-  // The outcome of a load that went to origin, recorded once per load. A serving
-  // link whose HAVE held the key (at the HAVE check or now) gets a held miss; a
-  // link that did not hold it was never asked and is left alone. Only when no
-  // link at all held the key, and the caller says so, is every serving link
-  // charged (the wait or the entry projection ended with nobody ahead).
+  // The outcome of a load that went to origin, recorded once per load.
+  //  - Nobody held the key (and the caller says the wait or entry projection ended
+  //    with nobody ahead): every serving link takes a miss.
+  //  - Otherwise only a link that was judged takes a held miss: one that was asked
+  //    and did not deliver a verified segment in time, or one named in `unfit`
+  //    (it held the key and its own estimate did not fit the room). A decline made
+  //    on swarm-wide estimates or on the buffer (projected-late, skipped-late)
+  //    charges no holder, and a link that was never asked is left alone.
   // Delivered, aborted and other neutral outcomes never reach here. Advisory.
-  #recordOutcome(demand, { everyServing = false } = {}) {
+  #recordOutcome(demand, { everyServing = false, unfit = [] } = {}) {
     const { key, rendition, context } = demand;
     if (!context || demand.recorded) return;
     demand.recorded = true;
     try {
       const serving = [...this.links.values()].filter((link) => this.#servesRendition(link, rendition));
-      const held = serving.filter((link) => demand.held.has(link.pubkey) || link.have.has(key));
-      if (held.length) {
-        const labels = [];
-        for (const link of held) {
-          if (!this.discovery.holderMiss(context, link.pubkey, key)) continue;
-          this.discovery.counters.heldMiss++;
-          labels.push(this.#holderLabel(link.pubkey));
-        }
-        if (demand.row?.heldMissHolders) demand.row.heldMissHolders = labels.sort((a, b) => a - b).slice(0, 8);
-      } else if (everyServing && ![...this.links.values()].some((link) => link.have.has(key))) {
+      if (everyServing && ![...this.links.values()].some((link) => link.have.has(key))) {
         for (const link of serving) this.discovery.holderMiss(context, link.pubkey, key);
+        return;
       }
+      const judged = serving.filter((link) => demand.asked.has(link.pubkey) || unfit.includes(link.pubkey));
+      const labels = [];
+      for (const link of judged) {
+        if (!this.discovery.holderMiss(context, link.pubkey, key)) continue;
+        this.discovery.counters.heldMiss++;
+        labels.push(this.#holderLabel(link.pubkey));
+      }
+      if (labels.length && demand.row?.heldMissHolders) demand.row.heldMissHolders = labels.sort((a, b) => a - b).slice(0, 8);
     } catch {}
   }
 
@@ -1131,7 +1129,7 @@ class HlsSwarm {
       try { this.#noteStaleBlocked(holderContext, checks); } catch {}
     }
     // What the diagnostic rows and the holder bookkeeping below refer to.
-    const demand = { key, rendition, context: holderContext, recorded: false, held: new Set(), row: null };
+    const demand = { key, rendition, context: holderContext, recorded: false, asked: new Set(), row: null };
     const coordinated = ![...this.links.values()].some((peer) => peer.have.has(key));
     if (coordinated && !this.#shouldWaitForOrigin(key, rendition)) {
       this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry, undefined, demand);
@@ -1186,9 +1184,8 @@ class HlsSwarm {
       }
     }
     this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry, undefined, demand);
-    // Holding the key is not a delivery: remember who held it at this decision
-    // and leave every holder entry alone until a verified segment arrives.
-    try { demand.held = this.#heldBy(demand); } catch {}
+    // Holding the key is not a delivery: leave every holder entry alone until a
+    // verified segment arrives.
     let commitment;
     try {
       const result = await commitmentResult;
@@ -1207,8 +1204,8 @@ class HlsSwarm {
     const transfer = this.peerSelection.projectMs(commitment.size);
     const known = this.#projection(transfer, 0, plan);
     if (known === "late") {
+      // Judged on swarm-wide estimates, not on any link's own: no holder is charged.
       this.#peerEligibility(context, budgetMs, "projected-late", true, budgetGeometry, this.#projectionDetail("commitment", transfer, 0, plan), demand);
-      this.#recordOutcome(demand);
       this.counters.peerProjectedLate += 1;
       return null;
     }
@@ -1224,7 +1221,6 @@ class HlsSwarm {
       const firstByte = this.peerSelection.firstByteMs();
       if (this.peerSelection.minimumMs(commitment.size) > room || (firstByte ?? 0) > room) {
         this.counters.peerSkippedLate += 1;
-        this.#recordOutcome(demand);
         return null;
       }
       const fits = (peer, ms) => this.peerSelection.estimate(peer, commitment.size) === null || this.peerSelection.estimate(peer, commitment.size) * 1.25 + 25 <= ms;
@@ -1232,13 +1228,14 @@ class HlsSwarm {
       if (!link) {
         if (![...this.links.values()].some((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, room))) {
           this.counters.peerNoFit += 1;
-          this.#recordOutcome(demand);
+          // Holders whose own estimate does not fit, and links already asked and failed.
+          this.#recordOutcome(demand, { unfit: [...this.links.values()].filter((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key) && !fits(peer, room)).map((peer) => peer.pubkey) });
           return null;
         }
         await this.#waitForHave(key, Math.min(100, plan.deadline - now()), signal);
         continue;
       }
-      tried.add(link.pubkey);
+      tried.add(link.pubkey); demand.asked.add(link.pubkey);
       const estimateMs = this.peerSelection.estimate(link, commitment.size);
       if (estimateMs !== null && plan.extend(now() + estimateMs * 1.25 + 25)) this.counters.peerWaitExtended += 1;
       const requestedAt = now();
@@ -1270,17 +1267,21 @@ class HlsSwarm {
         continue;
       }
       const digest = await sha256Hex(bytes);
-      if (signal.aborted || this.stopped) {
-        // The whole payload arrived but the origin timer's deadline had passed: a to-origin outcome.
-        if (!this.stopped && plan.expired) this.#recordOutcome(demand);
-        return null;
-      }
+      if (this.stopped) return null;
       if (bytes.byteLength !== commitment.size || digest !== commitment.sha256) {
+        // Checked before the abort: a bad payload is banned and closed, and never charged as a held miss.
         this.peerSelection.record(link, now() - requestedAt);
         this.counters.peerCorrupt += 1;
         this.banned.add(link.pubkey);
+        demand.asked.delete(link.pubkey);
         link.close("integrity");
+        if (signal.aborted) return null;
         continue;
+      }
+      if (signal.aborted) {
+        // The payload would have verified but the origin timer's deadline had passed: a to-origin outcome.
+        if (plan.expired) this.#recordOutcome(demand);
+        return null;
       }
       if (commitment.expiresAt <= Math.floor(Date.now() / 1000)) return null;
       this.peerSelection.record(link, now() - requestedAt, bytes.byteLength);
@@ -1763,9 +1764,9 @@ class HlsSwarm {
   }
 
   #unmetDiscovery(context) {
-    // A serving link that has repeatedly lacked this viewer's segments at the
-    // deadline no longer meets the context, unless it holds a demanded key.
-    // A stale link's HAVE does not count either: it may still advertise a key it never delivers.
+    // A link meets the context when it serves the rendition or its HAVE holds a
+    // demanded key, but only while it is not stale for that context: a stale link
+    // may still advertise a key it never delivers.
     return ![...this.links.values()].some(link => !this.discovery.stale(context, link.pubkey)
       && (this.#servesRendition(link, context.rendition) || context.keys.some(key => link.have.has(key))));
   }
