@@ -3,14 +3,14 @@
 [Documentation](README.md) · [API](API.md) · [hls.js integration](../INTEGRATION.md)
 
 The supported release is an experimental
-[v0.2.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0).
+[v0.2.1 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1).
 Node 22+ is required; CI runs Node 24. `npm install relayswarm` is not the
 documented distribution path: the npm registry is unpublished.
 
 ## Install for a host application
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/relayswarm-0.2.0.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.1/relayswarm-0.2.1.tgz
 npm install hls.js
 ```
 
@@ -29,17 +29,17 @@ this hls.js loader.
 A Git dependency can also be pinned to the immutable release tag:
 
 ```sh
-npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.2.0'
+npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.2.1'
 ```
 
 ## Use the standalone browser bundle
 
 Download
-[`relayswarm-hls-swarm-0.2.0.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/relayswarm-hls-swarm-0.2.0.mjs)
+[`relayswarm-hls-swarm-0.2.1.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.1/relayswarm-hls-swarm-0.2.1.mjs)
 and serve it from your own application:
 
 ```js
-import { createHlsSwarm } from './relayswarm-hls-swarm-0.2.0.mjs';
+import { createHlsSwarm } from './relayswarm-hls-swarm-0.2.1.mjs';
 ```
 
 The bundle contains the loader's runtime dependencies; hls.js remains the
@@ -47,7 +47,7 @@ host's dependency. Prefer vendoring the verified file to relying on GitHub
 release-download URLs as a JavaScript CDN. The separate publisher helper uses
 Node filesystem/crypto APIs and does not belong in a browser bundle.
 
-The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/SHA256SUMS)
+The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.1/SHA256SUMS)
 covers both assets. Download all three into one directory and verify:
 
 ```sh
@@ -57,7 +57,7 @@ shasum -a 256 -c SHA256SUMS
 ## Run the source demo
 
 ```sh
-git clone --branch v0.2.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.2.1 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -108,7 +108,7 @@ Current evidence and remaining device/network gates are in [STATUS.md](STATUS.md
 
 ## Development source
 
-The published commands above install v0.2.0. Later development lands on
+The published commands above install v0.2.1. Later development lands on
 `main`, a mutable reference; its
 [production features](PRODUCTION-FEATURES.md) and
 [delivery requirements](PRODUCTION-READINESS.md) have separate evidence.

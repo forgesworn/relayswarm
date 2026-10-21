@@ -5,7 +5,7 @@
   "branch": "fix/holder-discovery",
   "pr": 9,
   "productionComplete": false,
-  "scope": "Source, CI, consumption, deployment, P05, P07 and a short fourteen-role qualifier pass on this source. The sustained 7,200 s run (Item 5) and the P06 3 MB both-quality shared-cap lifecycle are RED and open. Desktop installed-browser journeys are macOS arm64 desktop scope only. Nothing is merged, tagged or released; no version has been chosen.",
+  "scope": "Source, CI, consumption, deployment, P05, P07 and a short fourteen-role qualifier pass on this source. The sustained 7,200 s run (Item 5) and the P06 3 MB both-quality shared-cap lifecycle are RED and open. Desktop installed-browser journeys are macOS arm64 desktop scope only. v0.2.1 is the experimental prerelease of this source after PR 9 merges, released by owner decision while Item 5, P06 and Safari 17.6 are RED and open.",
   "code": {
     "commits": [
       "368b860 feat: add local holder labels to peer diagnostics",
@@ -28,7 +28,7 @@
   },
   "release": {
     "published": "v0.2.0",
-    "versionChosenForThisSource": null,
+    "preparedVersion": "v0.2.1",
     "merged": false,
     "tagged": false,
     "npmPublished": false

@@ -1,6 +1,6 @@
 # RelaySwarm full documentation context
 
-> Generated from maintained Markdown. Source package 0.2.0; release and deployment evidence is recorded in docs/STATUS.md.
+> Generated from maintained Markdown. Source package 0.2.1; release and deployment evidence is recorded in docs/STATUS.md.
 
 Canonical repository: https://github.com/forgesworn/relayswarm. Main-branch documentation can correct released documentation. Historical spike evidence is indexed separately in llms.txt.
 
@@ -16,8 +16,9 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.2.0 is the published experimental GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0).
-It adds the broadcaster and production feature work to v0.1.0; its
+**Status:** [v0.2.1 is the published experimental GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1).
+It follows v0.2.0, which added the broadcaster and production feature work to
+v0.1.0, and adds holder-discovery changes; its
 [delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) remain open. MIT licensed,
 Node 22.13+; CI uses Node 24. The npm registry is unpublished.
 
@@ -34,7 +35,7 @@ receivers obtained high-quality peer media and one contributor uploaded nothing
 during measurement; its cleanup passed. The pilot uses the explicit
 900-request address budget; the default remains 600. Matching capacity, two-hour/churn,
 natural expiry, physical/browser breadth, difficult networks, measured wire/cost
-benefit and downloaded-release acceptance remain open. v0.2.0 is published as
+benefit and downloaded-release acceptance remain open. v0.2.1 is published as
 an experimental prerelease. See the
 [P01–P12 checklist](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md#delivery-checklist).
 
@@ -48,7 +49,7 @@ an experimental prerelease. See the
 Install ffmpeg with libx264 for synthetic media, then:
 
 ```sh
-git clone --branch v0.2.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.2.1 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -70,11 +71,11 @@ See [the field-test guide](https://raw.githubusercontent.com/forgesworn/relayswa
 HTTPS access from separate devices and receipt interpretation. Synthetic
 media requires ffmpeg; serving an existing directory does not.
 
-v0.2.0 includes a **broadcaster**: live
+v0.2.1 includes a **broadcaster**: live
 RTMP-to-HLS ingest, persistent publisher identity, cumulative viewer upload
 allowances, measured peer choice and authenticated operator controls.
 Optional RTMPS forwarding can send the source to an external platform
-independently of RelaySwarm delivery. These features are in v0.2.0 and absent from the
+independently of RelaySwarm delivery. These features are in v0.2.1 and absent from the
 immutable v0.1.0 downloads. The [production feature guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md)
 also describes wider media, delegation, admission, durable budgets/reports and
 native fallback. See [broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md),
@@ -86,7 +87,7 @@ The release supplies an installable tarball, a standalone browser ESM bundle
 and SHA-256 checksums:
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/relayswarm-0.2.0.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.1/relayswarm-0.2.1.tgz
 ```
 
 ```js
@@ -250,7 +251,7 @@ The canonical public repository is
 [`llms.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms.txt)
 is a short index with direct Markdown links;
 [`llms-full.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms-full.txt)
-is generated from the maintained guides. Published code is pinned at `v0.2.0`;
+is generated from the maintained guides. Published code is pinned at `v0.2.1`;
 documentation on `main` can include later corrections. [Maintaining the docs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/MAINTAINING-DOCS.md)
 explains regeneration and publication checks. Release assets are never
 replaced after publication. [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md) records
@@ -273,11 +274,11 @@ comes from the origin, and the swarm only measures what peer delivery would
 have achieved. That is the mode to deploy first.
 
 The module is browser ESM with a direct runtime dependency on `nostr-tools`.
-The published [v0.2.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0)
+The published [v0.2.1 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1)
 supplies an installable tarball and a standalone bundle containing the browser
 runtime dependencies. The host supplies hls.js. The npm registry is unpublished;
 [Getting started](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) gives exact asset and pinned-Git commands.
-v0.2.0 adds the
+v0.2.1 adds the
 [production feature work](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md); those additions are
 absent from v0.1.0 assets and retain separate delivery/acceptance gates.
 
@@ -855,10 +856,15 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 # RelaySwarm changelog
 
-## Unreleased
+## v0.2.1 (21 October 2026)
 
-No version has been chosen for these changes ([PR 9](https://github.com/forgesworn/relayswarm/pull/9),
-not merged).
+Experimental [GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) of the source from
+[PR 9](https://github.com/forgesworn/relayswarm/pull/9), following v0.2.0. Field
+acceptance remains open: the sustained 7,200 s run, the 3 MB both-quality
+shared-cap lifecycle and Safari 17.6 desktop are RED, and physical-device,
+difficult-network and downloaded-release gates have not passed. The prerelease
+was published by owner decision with those open. See
+[Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md).
 
 - Add local holder labels to the peer diagnostics. Labels are session-local
   counters, not keys, and are for local diagnostics only.
@@ -1044,7 +1050,7 @@ Source: [docs/README.md](https://raw.githubusercontent.com/forgesworn/relayswarm
 # RelaySwarm documentation
 
 RelaySwarm is an experimental peer-assisted HLS library and transfer proof of
-concept. The [published v0.2.0 prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0)
+concept. The [published v0.2.1 prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1)
 adds broadcaster and production features to the earlier v0.1.0 release.
 The repository and GitHub release are the public distribution surfaces; the
 npm registry is unpublished. The operated
@@ -1089,14 +1095,14 @@ Source: [docs/GETTING-STARTED.md](https://raw.githubusercontent.com/forgesworn/r
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [API](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) · [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md)
 
 The supported release is an experimental
-[v0.2.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0).
+[v0.2.1 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1).
 Node 22+ is required; CI runs Node 24. `npm install relayswarm` is not the
 documented distribution path: the npm registry is unpublished.
 
 ## Install for a host application
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/relayswarm-0.2.0.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.1/relayswarm-0.2.1.tgz
 npm install hls.js
 ```
 
@@ -1115,17 +1121,17 @@ this hls.js loader.
 A Git dependency can also be pinned to the immutable release tag:
 
 ```sh
-npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.2.0'
+npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.2.1'
 ```
 
 ## Use the standalone browser bundle
 
 Download
-[`relayswarm-hls-swarm-0.2.0.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/relayswarm-hls-swarm-0.2.0.mjs)
+[`relayswarm-hls-swarm-0.2.1.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.1/relayswarm-hls-swarm-0.2.1.mjs)
 and serve it from your own application:
 
 ```js
-import { createHlsSwarm } from './relayswarm-hls-swarm-0.2.0.mjs';
+import { createHlsSwarm } from './relayswarm-hls-swarm-0.2.1.mjs';
 ```
 
 The bundle contains the loader's runtime dependencies; hls.js remains the
@@ -1133,7 +1139,7 @@ host's dependency. Prefer vendoring the verified file to relying on GitHub
 release-download URLs as a JavaScript CDN. The separate publisher helper uses
 Node filesystem/crypto APIs and does not belong in a browser bundle.
 
-The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.0/SHA256SUMS)
+The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.1/SHA256SUMS)
 covers both assets. Download all three into one directory and verify:
 
 ```sh
@@ -1143,7 +1149,7 @@ shasum -a 256 -c SHA256SUMS
 ## Run the source demo
 
 ```sh
-git clone --branch v0.2.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.2.1 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -1194,7 +1200,7 @@ Current evidence and remaining device/network gates are in [STATUS.md](https://r
 
 ## Development source
 
-The published commands above install v0.2.0. Later development lands on
+The published commands above install v0.2.1. Later development lands on
 `main`, a mutable reference; its
 [production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md) and
 [delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) have separate evidence.
@@ -1233,8 +1239,8 @@ Source: [docs/API.md](https://raw.githubusercontent.com/forgesworn/relayswarm/ma
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Installation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) ·
 [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md)
 
-This describes v0.2.0, the published experimental prerelease. The earlier v0.1.0
-assets do not include the newer production feature work. Package version `0.2.0`,
+This describes v0.2.1, the published experimental prerelease. The earlier v0.1.0
+assets do not include the newer production feature work. Package version `0.2.1`,
 session wire version `3`, segment-commitment schemas `1`/`2` and metrics snapshot
 version `2` are different version numbers. Source exports and protocol fields
 are not a stable interoperability promise.
@@ -1717,8 +1723,9 @@ Source: [docs/STATUS.md](https://raw.githubusercontent.com/forgesworn/relayswarm
 [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md)
 
 Checkpoint: 21 October 2026. The published experimental prerelease is
-[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0), built from `main` after PR 8 merged; field
-acceptance remains open. The earlier
+[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1), built from `main` after PR 9 merged; field
+acceptance remains open. The previous prerelease,
+[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0), was built after PR 8 merged. The earlier
 [v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0) points to
 `3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. Later documentation corrections
 on `main` do not change either tag or its immutable downloaded assets.
@@ -1729,8 +1736,9 @@ Checkpoint: 21 October 2026. This is source `140c256` on `fix/holder-discovery`
 ([PR 9](https://github.com/forgesworn/relayswarm/pull/9), open and unmerged). It
 adds local holder labels to the peer diagnostics (`368b860`) and stops a linked
 holder that is never ahead from suppressing neighbour discovery (`140c256`).
-No version has been chosen; nothing is merged, tagged or released. The
-published experimental prerelease remains v0.2.0.
+v0.2.1 is the experimental prerelease of this source after PR 9 merges. It is
+released as an experimental prerelease by owner decision while field acceptance
+remains open: Item 5, P06 and Safari 17.6 are RED.
 
 **Passed on this source.**
 
@@ -1796,8 +1804,8 @@ Nostr signalling bytes were not separable.
 - Physical iPhone (unavailable), physical Android and device Safari or Firefox
   (these need the owner), hard NAT and a separate network (these need another
   network) remain open and unverified. npm publication is out of scope.
-- Release: no version has been chosen. The goal's definition of done is not met
-  while Item 5 and P06 are open.
+- Release: v0.2.1 is released as an experimental prerelease by owner decision
+  while field acceptance remains open: Item 5, P06 and Safari 17.6 are RED.
 
 Run-by-run evidence is in [Goals and agent handover](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/AGENT-GOALS.md). See the
 [checkpoint record](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/140c256-current-delivery-checkpoint-20261021.json)
@@ -3187,6 +3195,15 @@ no 37-item completion is asserted. PR 8 remains open; no new release is publishe
 
 ## Release verification
 
+### v0.2.1 (21 October 2026)
+
+[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) is the
+experimental GitHub prerelease of the source in PR 9, published by owner
+decision with Item 5, P06 and Safari 17.6 RED and open. Its assets
+(`relayswarm-0.2.1.tgz`, `relayswarm-hls-swarm-0.2.1.mjs` and `SHA256SUMS`) and
+their checksums and download verification are recorded here after publication.
+The v0.2.0 record below is unchanged.
+
 ### v0.2.0 (21 October 2026)
 
 [v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0) is an
@@ -4375,7 +4392,7 @@ Source: [docs/FIELD-TEST.md](https://raw.githubusercontent.com/forgesworn/relays
 
 The demo is a runnable publisher and an hls.js player with origin-only,
 shadow and authenticated peer-first modes. Uploading starts **off**. Receipts
-are downloaded locally. Reporting is disabled by default; v0.2.0
+are downloaded locally. Reporting is disabled by default; v0.2.1
 can offer explicitly opted-in numeric reports and authenticated
 operator controls. See [operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md). The publisher's signing
 key stays on the server. v0.1.0 release assets retain their original behaviour.
@@ -5382,7 +5399,7 @@ Source: [docs/THREAT-MODEL.md](https://raw.githubusercontent.com/forgesworn/rela
 [Integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md)
 
 This describes the implemented experimental boundaries and the remaining
-adversarial work at v0.2.0. Passing named regression cases does not establish
+adversarial work at v0.2.1. Passing named regression cases does not establish
 production security or completion of the threat model. The original CLI,
 browser loader and native path have different trust assumptions.
 
@@ -5545,7 +5562,7 @@ Source: [docs/FAQ.md](https://raw.githubusercontent.com/forgesworn/relayswarm/ma
 
 ## What is released?
 
-[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0) is an
+[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) is an
 experimental GitHub prerelease with an installable tarball, a standalone browser
 ESM bundle and checksums. It includes the browser loader, local publisher/player
 and native transfer PoC, plus the live broadcaster, private publisher state and
@@ -5580,14 +5597,14 @@ It does not remove ingest, origin hosting or operator costs.
 
 No. The host selects trusted authors, allowed media origins, the swarm id, relays
 and ICE servers. The released loader accepts the selected event. An optional
-adapter in v0.2.0 filters a host-supplied query using those explicit
+adapter in v0.2.1 filters a host-supplied query using those explicit
 allowlists; it does not choose infrastructure or establish trust in arbitrary
 publishers. NIP-53 can carry relay information; the redistribution tag and
 commitment kind are RelaySwarm's experimental contract.
 
 ## Can it send a broadcast to YouTube?
 
-The v0.2.0 broadcaster can send the same H.264/AAC source to a separately
+The v0.2.1 broadcaster can send the same H.264/AAC source to a separately
 configured RTMPS endpoint while producing HLS for RelaySwarm viewers. That
 forwarder has its own process and retries. A valid platform stream key, account
 configuration and an actual platform playback test are still needed. YouTube
@@ -5667,7 +5684,7 @@ their own integration and distribution work.
 
 ## Does RelaySwarmKit interoperate with this release?
 
-v0.2.0 passes author, delegated-signing and
+v0.2.1 passes author, delegated-signing and
 adversarial transfer journeys with the published RelaySwarmKit v0.5.0 public
 SDK. These are macOS arm64/Chrome loopback checks, not physical iPhone
 acceptance. The earlier version-2 Kit baseline is incompatible with the
@@ -5823,7 +5840,7 @@ when updating them, rather than trusting an old comparison date.
 
 ## Release versus current documentation
 
-Each immutable release tag (v0.1.0, v0.2.0) and its downloadable assets contain
+Each immutable release tag (v0.1.0, v0.2.0, v0.2.1) and its downloadable assets contain
 release-time documentation.
 Main-branch guides can correct examples and claims after a release.
 Use [Getting started](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) for pinned installation and
@@ -6971,13 +6988,12 @@ Findings for the next agent:
 Position on 21 October 2026: v0.2.0 is a published experimental GitHub
 prerelease of `bf43940`. Source `140c256` (PR 9, unmerged) has passed CI,
 consumption, guarded deployment and its review, P05, P07 and the short
-qualifier R66 (GREEN, 16 of 16). The goal's definition of done is not met while
-Item 5 and P06 are open. No version has been chosen; nothing is merged, tagged
-or released.
+qualifier R66 (GREEN, 16 of 16). The owner decided to publish v0.2.1 as an
+experimental prerelease of this source with Item 5, P06 and Safari 17.6 RED and
+open, as v0.2.0 shipped with its qualifier RED. Those items stay RED and open.
 
-1. **Reconcile and review PR 9.** Apply the updated PR description, keep the
-   code description, and obtain the host's merge decision. Do not merge, tag or
-   release while required acceptance remains open.
+1. **Reconcile and merge PR 9.** Apply the updated PR description and keep the
+   code description. Merging and tagging are the host's actions.
 2. **Item 5, the sustained 7,200 s run (RED, open).** Fix the harness `rejoin()`
    race and prove the fix in its own review cycle, then run on the same qualified
    source, topology and profile: 7,200 seconds, 22 churn events, two
@@ -6995,10 +7011,11 @@ or released.
 5. **Cost.** Marginal cost on the hosts' plans is not determined. Record the
    plan terms before any cost statement; distinguish saved traffic from actual
    marginal cost.
-6. **Version and release.** The user chooses the version. Obtain all required
-   checks on the final source, complete fresh consumption, then merge, release
-   and deploy, and verify immutable downloaded assets and the served build.
-   Keep earlier release assets unchanged. npm publication is out of scope.
+6. **Release v0.2.1.** Obtain all required checks on the final source and fresh
+   consumption, merge PR 9, then tag, publish the experimental prerelease and
+   deploy. Verify immutable downloaded assets and the served build, and record
+   their checksums in [Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md#release-verification). Keep earlier
+   release assets unchanged. npm publication is out of scope.
 
 The short and long builders are prepared source. Review their changes and pure
 checks before materialising them. Frozen source manifests must remain intact:
@@ -7101,7 +7118,7 @@ Source: [docs/BROADCASTING.md](https://raw.githubusercontent.com/forgesworn/rela
 
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md) · [Container deployment](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md) · [Evidence](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md)
 
-This guide describes the v0.2.0 broadcaster workflow, persistent publisher state and operator/reporting controls. Install [v0.2.0](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md); the immutable v0.1.0 assets do not include these additions. Publication of a guide does not establish deployed playback or platform acceptance.
+This guide describes the v0.2.1 broadcaster workflow, persistent publisher state and operator/reporting controls. Install [v0.2.1](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md); the immutable v0.1.0 assets do not include these additions. Publication of a guide does not establish deployed playback or platform acceptance.
 
 ## Local source and dependencies
 
@@ -7502,7 +7519,7 @@ Source: [docs/OPERATIONS.md](https://raw.githubusercontent.com/forgesworn/relays
 
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Broadcaster](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md) · [Container deployment](https://raw.githubusercontent.com/forgesworn/relayswarm/main/deploy/README.md) · [API](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) · [Evidence](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md)
 
-These controls belong to **v0.2.0** and are absent from v0.1.0 assets. It adds bounded admission, durable reporting and crash supervision; final production acceptance remains open. See [production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md) and [Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md).
+These controls belong to **v0.2.1** and are absent from v0.1.0 assets. It adds bounded admission, durable reporting and crash supervision; final production acceptance remains open. See [production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md) and [Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md).
 
 Before the first broadcast is ready, the root returns an HTTP 200 waiting page with a three-second refresh. Other endpoints return HTTP 503 with `Retry-After: 3`, including the authenticated status route; the waiting listener exposes no session, relay or operator API. The launcher replaces it with the player on the same port when both renditions publish. Waiting-page reachability does not establish fresh media, successful decoding or a verified public deployment.
 
@@ -7530,7 +7547,7 @@ Unconfigured operator controls return 503; absent/incorrect credentials return 4
 
 The page checks policy and publisher session every two seconds, with at most
 three independent checks pending. Authority expires five seconds after a
-check was issued; response arrival cannot extend it. v0.2.0
+check was issued; response arrival cannot extend it. v0.2.1
 advertises `deliveryPolicySession: "inline-v1"` and returns both public snapshots
 in one response from `/delivery-policy.json?session=1`. Older server descriptors
 retain the two parallel requests. Missing or malformed advertised session data
@@ -7562,7 +7579,7 @@ Publisher metrics include signing/hashing/cache activity, concurrent work and re
 
 ## Diagnosing control-path timeouts
 
-v0.2.0 adds a numeric `Server-Timing: rs-app;dur=...` header to
+v0.2.1 adds a numeric `Server-Timing: rs-app;dur=...` header to
 session, policy, admission, report and commitment responses. It measures handler
 entry to response headers. It excludes queueing before the handler, network
 transport and response-body receipt. Media responses are not instrumented.
@@ -7634,7 +7651,7 @@ Source: [docs/PRODUCTION-FEATURES.md](https://raw.githubusercontent.com/forgeswo
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) ·
 [Evidence](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md) · [Protocol draft](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md)
 
-These changes belong to v0.2.0, the published experimental prerelease. They are
+These changes belong to v0.2.1, the published experimental prerelease. They are
 absent from the earlier v0.1.0 assets. Production acceptance remains a separate
 gate; consult the delivery checklist for its current state.
 
@@ -8599,7 +8616,7 @@ requirements for production acceptance.
 | P08 | Delegated signing and stream advertisements | Author-scoped expiring delegation, rejection/revocation tests, complete signed NIP-53 live/ended advertisements and host endpoint policy | Scope/revocation/discovery and exact-source CI evidence pass; caller-owned author trust/revocation freshness and operational advertisement policy remain explicit host responsibilities |
 | P09 | Native application delivery | Installable executable entry point, independent-process native transfer, verified HTTP fallback and clean-consumer package test | Exact `140c256` fresh 286-member consumption/install/import/native/HTTP smoke checks pass. Consumer semver resolutions differ from root lock; standalone ESM is root-lock bound. Final publication and downloaded-release acceptance remain open |
 | P10 | Protocol compatibility | Maintained wire/commitment specification, conformance fixtures and successful independent-client journeys | Published Kit v0.5.0 and actual independent public-SDK/browser author/delegate/adversarial journeys pass, including exact-source CI; standards acceptance is not claimed and physical integration is recorded under P12 |
-| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact `140c256` nine-job CI, 286-member consumption, guarded deployment/HTTPS with independent review, P05 and P07 pass; private state, permanent leases and proxy preserved. PR 9 is unmerged and no version is chosen, tagged or released, so merge, release, downloaded-asset acceptance and final acceptance remain open |
+| P11 | Current release and production deployment | All required checks on the final source, immutable release assets/checksums, exact deployed revision, fresh media and rollback/restart verification | Exact `140c256` nine-job CI, 286-member consumption, guarded deployment/HTTPS with independent review, P05 and P07 pass; private state, permanent leases and proxy preserved. v0.2.1 is the experimental prerelease of this source after PR 9 merges, released by owner decision while Item 5, P06 and Safari 17.6 are RED; downloaded-asset acceptance and final acceptance remain open |
 | P12 | Real-world acceptance | Physical Android/iPhone, Safari/Firefox, separate networks/hard NAT, hours of load/churn/cost measurements and authorised OBS/external-platform playback | 21 October, `140c256`, macOS arm64 desktop scope (one 1,800 s finite source, three owned Chrome 155 actors per browser, relay-only TURN over TLS/TCP): Firefox 152.0.6 PASS and Safari 26.6.2 PASS (first Safari pass), all six checkpoints each; Safari 17.6 RED (no verified peer download in 45 s, no selected candidate pair, cause not determined, not retried). R66 short qualifier GREEN. Sustained 7,200 s/churn/natural-expiry (Item 5) RED and open; marginal cost not determined. Physical iPhone (unavailable), physical Android and device Safari/Firefox (need the owner), hard NAT and a separate network (need another network) remain open. Prior Simulator/account/LOW lifecycle/Internet TURN passes retain original scopes |
 
 ## Evidence rules

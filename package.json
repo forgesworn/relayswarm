@@ -1,6 +1,6 @@
 {
   "name": "relayswarm",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Experimental peer-assisted HLS video over WebRTC and Nostr relays, with signed segment commitments and a native HyperDHT proof of concept",
   "scripts": {
     "poc": "node poc.mjs",

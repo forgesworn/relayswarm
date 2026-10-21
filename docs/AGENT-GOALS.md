@@ -963,13 +963,12 @@ Findings for the next agent:
 Position on 21 October 2026: v0.2.0 is a published experimental GitHub
 prerelease of `bf43940`. Source `140c256` (PR 9, unmerged) has passed CI,
 consumption, guarded deployment and its review, P05, P07 and the short
-qualifier R66 (GREEN, 16 of 16). The goal's definition of done is not met while
-Item 5 and P06 are open. No version has been chosen; nothing is merged, tagged
-or released.
+qualifier R66 (GREEN, 16 of 16). The owner decided to publish v0.2.1 as an
+experimental prerelease of this source with Item 5, P06 and Safari 17.6 RED and
+open, as v0.2.0 shipped with its qualifier RED. Those items stay RED and open.
 
-1. **Reconcile and review PR 9.** Apply the updated PR description, keep the
-   code description, and obtain the host's merge decision. Do not merge, tag or
-   release while required acceptance remains open.
+1. **Reconcile and merge PR 9.** Apply the updated PR description and keep the
+   code description. Merging and tagging are the host's actions.
 2. **Item 5, the sustained 7,200 s run (RED, open).** Fix the harness `rejoin()`
    race and prove the fix in its own review cycle, then run on the same qualified
    source, topology and profile: 7,200 seconds, 22 churn events, two
@@ -987,10 +986,11 @@ or released.
 5. **Cost.** Marginal cost on the hosts' plans is not determined. Record the
    plan terms before any cost statement; distinguish saved traffic from actual
    marginal cost.
-6. **Version and release.** The user chooses the version. Obtain all required
-   checks on the final source, complete fresh consumption, then merge, release
-   and deploy, and verify immutable downloaded assets and the served build.
-   Keep earlier release assets unchanged. npm publication is out of scope.
+6. **Release v0.2.1.** Obtain all required checks on the final source and fresh
+   consumption, merge PR 9, then tag, publish the experimental prerelease and
+   deploy. Verify immutable downloaded assets and the served build, and record
+   their checksums in [Status](STATUS.md#release-verification). Keep earlier
+   release assets unchanged. npm publication is out of scope.
 
 The short and long builders are prepared source. Review their changes and pure
 checks before materialising them. Frozen source manifests must remain intact:

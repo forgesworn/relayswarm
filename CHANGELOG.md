@@ -1,9 +1,14 @@
 # RelaySwarm changelog
 
-## Unreleased
+## v0.2.1 (21 October 2026)
 
-No version has been chosen for these changes ([PR 9](https://github.com/forgesworn/relayswarm/pull/9),
-not merged).
+Experimental [GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) of the source from
+[PR 9](https://github.com/forgesworn/relayswarm/pull/9), following v0.2.0. Field
+acceptance remains open: the sustained 7,200 s run, the 3 MB both-quality
+shared-cap lifecycle and Safari 17.6 desktop are RED, and physical-device,
+difficult-network and downloaded-release gates have not passed. The prerelease
+was published by owner decision with those open. See
+[Status](docs/STATUS.md).
 
 - Add local holder labels to the peer diagnostics. Labels are session-local
   counters, not keys, and are for local diagnostics only.

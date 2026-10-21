@@ -3,8 +3,8 @@
 [Documentation](README.md) · [Installation](GETTING-STARTED.md) ·
 [hls.js integration](../INTEGRATION.md)
 
-This describes v0.2.0, the published experimental prerelease. The earlier v0.1.0
-assets do not include the newer production feature work. Package version `0.2.0`,
+This describes v0.2.1, the published experimental prerelease. The earlier v0.1.0
+assets do not include the newer production feature work. Package version `0.2.1`,
 session wire version `3`, segment-commitment schemas `1`/`2` and metrics snapshot
 version `2` are different version numbers. Source exports and protocol fields
 are not a stable interoperability promise.

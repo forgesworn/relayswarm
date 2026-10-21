@@ -3,7 +3,7 @@
 [Documentation](README.md) · [Delivery requirements](PRODUCTION-READINESS.md) ·
 [Evidence](STATUS.md) · [Protocol draft](NIP-DRAFT.md)
 
-These changes belong to v0.2.0, the published experimental prerelease. They are
+These changes belong to v0.2.1, the published experimental prerelease. They are
 absent from the earlier v0.1.0 assets. Production acceptance remains a separate
 gate; consult the delivery checklist for its current state.
 

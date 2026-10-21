@@ -5,7 +5,7 @@
 
 ## What is released?
 
-[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0) is an
+[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) is an
 experimental GitHub prerelease with an installable tarball, a standalone browser
 ESM bundle and checksums. It includes the browser loader, local publisher/player
 and native transfer PoC, plus the live broadcaster, private publisher state and
@@ -40,14 +40,14 @@ It does not remove ingest, origin hosting or operator costs.
 
 No. The host selects trusted authors, allowed media origins, the swarm id, relays
 and ICE servers. The released loader accepts the selected event. An optional
-adapter in v0.2.0 filters a host-supplied query using those explicit
+adapter in v0.2.1 filters a host-supplied query using those explicit
 allowlists; it does not choose infrastructure or establish trust in arbitrary
 publishers. NIP-53 can carry relay information; the redistribution tag and
 commitment kind are RelaySwarm's experimental contract.
 
 ## Can it send a broadcast to YouTube?
 
-The v0.2.0 broadcaster can send the same H.264/AAC source to a separately
+The v0.2.1 broadcaster can send the same H.264/AAC source to a separately
 configured RTMPS endpoint while producing HLS for RelaySwarm viewers. That
 forwarder has its own process and retries. A valid platform stream key, account
 configuration and an actual platform playback test are still needed. YouTube
@@ -127,7 +127,7 @@ their own integration and distribution work.
 
 ## Does RelaySwarmKit interoperate with this release?
 
-v0.2.0 passes author, delegated-signing and
+v0.2.1 passes author, delegated-signing and
 adversarial transfer journeys with the published RelaySwarmKit v0.5.0 public
 SDK. These are macOS arm64/Chrome loopback checks, not physical iPhone
 acceptance. The earlier version-2 Kit baseline is incompatible with the

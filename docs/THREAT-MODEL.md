@@ -4,7 +4,7 @@
 [Integration](../INTEGRATION.md)
 
 This describes the implemented experimental boundaries and the remaining
-adversarial work at v0.2.0. Passing named regression cases does not establish
+adversarial work at v0.2.1. Passing named regression cases does not establish
 production security or completion of the threat model. The original CLI,
 browser loader and native path have different trust assumptions.
 

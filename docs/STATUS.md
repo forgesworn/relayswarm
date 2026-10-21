@@ -4,8 +4,9 @@
 [Changelog](../CHANGELOG.md)
 
 Checkpoint: 21 October 2026. The published experimental prerelease is
-[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0), built from `main` after PR 8 merged; field
-acceptance remains open. The earlier
+[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1), built from `main` after PR 9 merged; field
+acceptance remains open. The previous prerelease,
+[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0), was built after PR 8 merged. The earlier
 [v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0) points to
 `3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. Later documentation corrections
 on `main` do not change either tag or its immutable downloaded assets.
@@ -16,8 +17,9 @@ Checkpoint: 21 October 2026. This is source `140c256` on `fix/holder-discovery`
 ([PR 9](https://github.com/forgesworn/relayswarm/pull/9), open and unmerged). It
 adds local holder labels to the peer diagnostics (`368b860`) and stops a linked
 holder that is never ahead from suppressing neighbour discovery (`140c256`).
-No version has been chosen; nothing is merged, tagged or released. The
-published experimental prerelease remains v0.2.0.
+v0.2.1 is the experimental prerelease of this source after PR 9 merges. It is
+released as an experimental prerelease by owner decision while field acceptance
+remains open: Item 5, P06 and Safari 17.6 are RED.
 
 **Passed on this source.**
 
@@ -83,8 +85,8 @@ Nostr signalling bytes were not separable.
 - Physical iPhone (unavailable), physical Android and device Safari or Firefox
   (these need the owner), hard NAT and a separate network (these need another
   network) remain open and unverified. npm publication is out of scope.
-- Release: no version has been chosen. The goal's definition of done is not met
-  while Item 5 and P06 are open.
+- Release: v0.2.1 is released as an experimental prerelease by owner decision
+  while field acceptance remains open: Item 5, P06 and Safari 17.6 are RED.
 
 Run-by-run evidence is in [Goals and agent handover](AGENT-GOALS.md). See the
 [checkpoint record](../spikes/results/140c256-current-delivery-checkpoint-20261021.json)
@@ -1473,6 +1475,15 @@ no 37-item completion is asserted. PR 8 remains open; no new release is publishe
 | AI documentation | Curated `llms.txt`, generated `llms-full.txt`, public Markdown and repository/package metadata | Publication does not establish crawler discovery, indexing or recommendations |
 
 ## Release verification
+
+### v0.2.1 (21 October 2026)
+
+[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) is the
+experimental GitHub prerelease of the source in PR 9, published by owner
+decision with Item 5, P06 and Safari 17.6 RED and open. Its assets
+(`relayswarm-0.2.1.tgz`, `relayswarm-hls-swarm-0.2.1.mjs` and `SHA256SUMS`) and
+their checksums and download verification are recorded here after publication.
+The v0.2.0 record below is unchanged.
 
 ### v0.2.0 (21 October 2026)
 

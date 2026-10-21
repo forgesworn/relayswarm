@@ -1,7 +1,7 @@
 # RelaySwarm documentation
 
 RelaySwarm is an experimental peer-assisted HLS library and transfer proof of
-concept. The [published v0.2.0 prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0)
+concept. The [published v0.2.1 prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1)
 adds broadcaster and production features to the earlier v0.1.0 release.
 The repository and GitHub release are the public distribution surfaces; the
 npm registry is unpublished. The operated
