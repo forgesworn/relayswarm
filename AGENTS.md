@@ -50,6 +50,7 @@ bounded peer-first mode using author-signed segment commitments.
 | `npm run proto:vectors` | Regenerate `core/vectors/commitments.json` (new signatures each run) |
 | `npm run proto:traces` | Write seeded selection/discovery sequences for the Rust tests (`core/target/`) |
 | `cargo test` (in `core/`) | Rust core tests, including the shared vectors and traces |
+| `npm run core:wasm` | Rebuild `src/browser/relayswarm-core.wasm` from `core/` (paths remapped) |
 | `npm run check:docs` | Links, AI-index format and generated-context freshness |
 | `npm run docs:generate` | Regenerate `llms-full.txt` from maintained Markdown |
 
@@ -64,6 +65,7 @@ The native tests do not need the network; they bootstrap a local DHT.
 src/relay-session.mjs          RelayPool, RelaySwarmSession, ticket validation (main export)
 src/browser/hls-swarm.mjs      hls.js shadow and peer-first integration (./hls-swarm export)
 src/browser/segment-commitment.mjs  experimental signed media commitment contract
+src/browser/core-wasm.mjs      loader for the Rust core's verifier (relayswarm-core.wasm, committed)
 src/browser/peer-link.mjs      browser WebRTC peer link
 src/hls-publisher.mjs          Node-only local HLS publisher and signed commitments
 demo/                         runnable publisher/player with consent and local receipts
@@ -120,7 +122,10 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 - The demo keeps its author key on the server and receipts in the browser.
   Preserve playlist-bound signing and explicit upload consent. Chrome fixture
   tests are loopback; do not describe them as physical-device/NAT validation.
-- The Rust core under `core/` is unreleased and not used by the loader yet.
+- The Rust core under `core/` is unreleased. Its commitment verifier is used
+  only when a host passes `coreWasm`; the demo does. Rebuild and commit
+  `src/browser/relayswarm-core.wasm` with `npm run core:wasm` after any change
+  under `core/` that affects verification.
   It must match the JavaScript verifier on every vector; change the JavaScript,
   regenerate the vectors, then make Rust agree. Its toolchain is pinned in
   `core/rust-toolchain.toml`; reuse `core/target/`.

@@ -55,6 +55,7 @@ const swarm = useSwarm
       relays: [params.get("relay")],
       iceServers: [],
       originFallbackMs: Number(params.get("fallbackMs") || 1500),
+      ...(params.get("core") === "1" ? { coreWasm: "/relayswarm-core.wasm" } : {}),
       metricsIntervalMs: 5000,
       onMetrics: (metrics) => {
         const atMs = Math.round(performance.now());

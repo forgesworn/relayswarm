@@ -13,5 +13,3 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 relayswarm-proto = { path = "../relayswarm-proto" }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
-# Must equal the wasm-bindgen CLI version exactly.
-wasm-bindgen = "=0.2.129"

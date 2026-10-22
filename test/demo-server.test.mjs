@@ -51,8 +51,13 @@ test("demo serves exact HTTP ranges and matching signed commitments without expo
   query.set("cc", "1"); assert.equal((await fetch(`${demo.base}/commitment?${query}`)).status, 404);
   assert.equal((await fetch(`${demo.base}/session.json`, { method: "POST" })).status, 405);
   const page = await fetch(demo.base);
-  assert.ok(!page.headers.get("content-security-policy").includes("unsafe-inline"));
+  const policy = page.headers.get("content-security-policy");
+  assert.ok(!policy.includes("unsafe-inline") && !/'unsafe-eval'/u.test(policy));
+  assert.match(policy, /script-src 'self' 'wasm-unsafe-eval';/u);
   assert.match(await page.text(), /id="upload" type="checkbox"/u);
+  const core = await fetch(`${demo.base}/relayswarm-core.wasm`);
+  assert.equal(core.headers.get("content-type"), "application/wasm");
+  assert.ok(WebAssembly.validate(new Uint8Array(await core.arrayBuffer())));
 });
 
 test("demo refuses insecure remote bindings and invalid external configuration", async () => {

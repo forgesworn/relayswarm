@@ -34,6 +34,7 @@ import { PeerSelection } from "./peer-selection.mjs";
 import { NeighbourDiscovery } from "./neighbour-discovery.mjs";
 import { boundedOperation } from "./bounded-operation.mjs";
 import { validStreamAuthorisation, verifySegmentCommitment, segmentMediaContext } from "./segment-commitment.mjs";
+import { loadCoreVerifier } from "./core-wasm.mjs";
 
 export const HLS_SWARM_METRICS_VERSION = 2;
 
@@ -92,6 +93,10 @@ const DEFAULTS = Object.freeze({
   minReannounceGapMs: 12_000,
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
   iceTransportPolicy: "all",
+  // Opt-in: the Rust core's verifier (relayswarm-core.wasm) as a URL, bytes
+  // or a compiled WebAssembly.Module. Peer-first only. Until it loads, or if
+  // it fails to load or traps, the JavaScript verifier decides.
+  coreWasm: undefined,
 });
 const SAMPLE_LIMIT = 500;
 
@@ -313,6 +318,9 @@ class HlsSwarm {
     this.timers = new Set();
     this.links = new Map();
     this.peerSelection = new PeerSelection();
+    this.coreVerifier = null;
+    this.coreState = "off";
+    this.coreFallbacks = 0;
     this.dials = new Map();
     this.receivedOffers = new Set();
     this.cooldowns = new Map();
@@ -418,6 +426,9 @@ class HlsSwarm {
     if (mode !== "shadow" && mode !== "peer-first") return "invalid-mode";
     if (mode === "peer-first" && !validStreamAuthorisation(this.options.streamEvent)) return "invalid-stream-authorisation";
     if (mode === "peer-first" && typeof this.options.getCommitment !== "function") return "missing-commitment-provider";
+    const core = this.options.coreWasm;
+    if (core !== undefined && !(typeof core === "string" || core instanceof URL || core instanceof ArrayBuffer || ArrayBuffer.isView(core)
+      || (typeof WebAssembly === "object" && core instanceof WebAssembly.Module))) return "invalid-core-wasm";
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (this.options.reserveUploadBytes !== undefined && typeof this.options.reserveUploadBytes !== "function") return "invalid-upload-reservation";
     if (typeof this.options.serve !== "boolean" || typeof this.options.serveOnCellular !== "boolean") return "invalid-serve-option";
@@ -441,6 +452,7 @@ class HlsSwarm {
       const BaseLoader = hls.config.fLoader || hls.config.loader;
       hls.config.fLoader = this.options.mode === "peer-first" ? this.#peerFirstLoader(BaseLoader) : this.#shadowLoader(BaseLoader);
       this.#guard("start", () => this.#start());
+      if (this.options.mode === "peer-first" && this.options.coreWasm !== undefined) this.#guard("core", () => this.#loadCore());
       if (typeof this.options.onMetrics === "function") {
         this.#every(this.options.metricsIntervalMs, 0, () => this.options.onMetrics(this.metrics()));
       }
@@ -635,6 +647,8 @@ class HlsSwarm {
         publishErrors: c.publishErrors,
       },
       errors: { total: c.errors, byStage: { ...this.errorsByStage } },
+      // Additive metrics-v2 field: which commitment verifier is deciding.
+      core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", fallbacks: this.coreFallbacks },
       config: {
         originFallbackMs: this.options.originFallbackMs,
         maxPeerWaitMs: this.options.maxPeerWaitMs,
@@ -1167,7 +1181,7 @@ class HlsSwarm {
     try {
       const result = await commitmentResult;
       if (!result.ok) throw new Error("Commitment unavailable.");
-      commitment = verifySegmentCommitment(result.event, {
+      commitment = this.#verifyCommitment(result.event, {
         streamEvent: this.options.streamEvent, swarmId: this.options.swarmId, key, context,
         maxSegmentBytes: this.options.maxSegmentBytes,
         delegation: this.options.delegation, revokedDelegationIds: this.options.revokedDelegationIds, delegationRevocations: this.options.delegationRevocations,
@@ -1660,6 +1674,35 @@ class HlsSwarm {
   #refuseUpload(reason) {
     this.counters.uploadsRefused += 1;
     this.uploadRefusalCounters[reason] = increment(this.uploadRefusalCounters[reason]);
+  }
+
+  // --- the Rust core ---------------------------------------------------------
+
+  async #loadCore() {
+    this.coreState = "loading";
+    try {
+      const verifier = await loadCoreVerifier(this.options.coreWasm);
+      if (this.stopped) return;
+      this.coreVerifier = verifier;
+      this.coreState = "ready";
+    } catch (error) {
+      this.coreState = "failed";
+      this.#noteError("core", error);
+    }
+  }
+
+  // A null result is a verdict and stands; only a trap hands over to the
+  // JavaScript verifier, for the rest of the session.
+  #verifyCommitment(event, options) {
+    if (this.coreVerifier) {
+      try { return this.coreVerifier.verifySegmentCommitment(event, options); } catch (error) {
+        this.coreVerifier = null;
+        this.coreState = "failed";
+        this.coreFallbacks += 1;
+        this.#noteError("core", error);
+      }
+    }
+    return verifySegmentCommitment(event, options);
   }
 
   // --- rendezvous -----------------------------------------------------------

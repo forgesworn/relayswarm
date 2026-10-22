@@ -55,6 +55,8 @@ const MAX_PEERS = Number(flag("maxPeers", 6));
 // it. Useful for the integrity assertion, noise for the rotation one, so a
 // saturation run turns it off.
 const CORRUPT_PEER = flag("corruptPeer", "1") !== "0";
+// Peer-first viewers verify commitments with the Rust core unless --core js.
+const CORE = flag("core", "wasm");
 const FALLBACK_MS = Number(flag("fallback", 1500));
 const CHROME = flag("chrome", process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -98,6 +100,7 @@ try {
     logLevel: "silent",
   });
   const bundleText = bundle.outputFiles[0].text;
+  const coreModule = await readFile(join(here, "../src/browser/relayswarm-core.wasm"));
   const page = `<!doctype html><meta charset="utf-8"><video playsinline muted autoplay width="320"></video><script type="module" src="/viewer.js"></script>`;
 
   const server = createServer(async (req, res) => {
@@ -120,6 +123,7 @@ try {
         return res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify(event));
       } catch { return res.writeHead(404).end(); }
     }
+    if (url.pathname === "/relayswarm-core.wasm") return res.writeHead(200, { "content-type": "application/wasm" }).end(coreModule);
     if (url.pathname === "/viewer.js") return res.writeHead(200, { "content-type": "text/javascript" }).end(bundleText);
     if (url.pathname.startsWith("/hls/")) {
       const file = normalize(join(hlsDir, url.pathname.slice(5)));
@@ -190,6 +194,7 @@ try {
       swarmId, relay: relay.url, src: `${base}/hls/index.m3u8`, fallbackMs: String(FALLBACK_MS), unlockInterfaces: "1",
       rotation: process.env.RELAYSWARM_NO_ROTATION === "1" ? "0" : "1",
       maxPeers: String(MAX_PEERS),
+      core: CORE === "wasm" ? "1" : "0",
     });
     const network = { originSegmentRequests: 0 };
     tab.on("request", (request) => { if (/\/hls\/seg[0-9]+\.ts/.test(request.url())) network.originSegmentRequests++; });
@@ -330,6 +335,7 @@ try {
       swarmErrors: reports.filter((r) => r.swarm).reduce((t, r) => t + r.swarm.errors.total, 0),
       relayEventsPublished: reports.filter((r) => r.swarm).reduce((t, r) => t + r.swarm.relays.published, 0),
       corruptPeerBannedBy: honest.filter((r) => r.swarm.peers.banned > 0).length,
+      coreVerifiers: Object.fromEntries(["wasm", "js"].map((kind) => [kind, honest.filter((r) => r.swarm.core?.verifier === kind).length])),
     },
     player: {
       withSwarm: honest.map((r) => ({ viewer: r.viewer, observedSeconds: r.observedSeconds, stalls: r.player.stalls, fatalErrors: r.player.fatalErrors, currentTime: Number(r.player.currentTime.toFixed(1)) })),
@@ -362,6 +368,7 @@ try {
     // Fresh segments still need origin seeders. A viewer that uploads those
     // bytes to consumers can legitimately receive every own segment by HTTP.
   }
+  if (MODE === "peer-first" && CORE === "wasm" && honest.some((report) => report.swarm.core?.verifier !== "wasm" || report.swarm.core.fallbacks)) failures.push("a peer-first viewer did not verify with the Rust core");
   if (MODE === "peer-first" && VIEWERS >= 2) {
     const faulted = honest.find((report) => report.viewer === "v1");
     if (!faulted?.swarm.segments.commitmentRejected || !faulted?.swarm.segments.commitmentUnavailable) failures.push("invalid and stalled commitments were not exercised");

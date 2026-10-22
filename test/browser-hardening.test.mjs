@@ -728,6 +728,60 @@ test("a peer request is skipped for origin when the time left is below the faste
   } finally { await fixture.close(); }
 });
 
+const coreWasm = await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url));
+// Exports the core's five names; rs_call traps.
+const trappingCore = Uint8Array.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 1, 0x16, 4, 0x60, 1, 0x7f, 1, 0x7f, 0x60, 2, 0x7f, 0x7f, 0,
+  0x60, 3, 0x7f, 0x7f, 0x7f, 1, 0x7f, 0x60, 0, 1, 0x7f, 3, 5, 4, 0, 1, 2, 3, 5, 3, 1, 0, 1, 7, 0x39, 5,
+  6, ...Buffer.from("memory"), 2, 0, 8, ...Buffer.from("rs_alloc"), 0, 0, 7, ...Buffer.from("rs_free"), 0, 1,
+  7, ...Buffer.from("rs_call"), 0, 2, 13, ...Buffer.from("rs_result_ptr"), 0, 3,
+  0x0a, 0x12, 4, 4, 0, 0x41, 0, 0x0b, 2, 0, 0x0b, 3, 0, 0, 0x0b, 4, 0, 0x41, 0, 0x0b]);
+
+test("the Rust core verifies peer-first commitments, and its rejection stands", async () => {
+  const playback = peerPlaybackOptions(1000);
+  const forged = signedFixture({ key: playback.key, sha256: createHash("sha256").update(playback.bytes).digest("hex") }, generateSecretKey());
+  let commitment = playback.options.getCommitment();
+  const fixture = await linkedFixture({ ...playback.options, getCommitment: () => commitment, coreWasm, WebSocketImpl: memoryRelaySocket() });
+  try {
+    await until(() => fixture.swarm.metrics().core.state === "ready");
+    const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder"));
+    channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+    assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 1);
+    commitment = forged.event;
+    await fixture.load();
+    const metrics = fixture.swarm.metrics();
+    assert.equal(metrics.segments.commitmentRejected, 1);
+    assert.equal(metrics.segments.peerFirstLoaded, 1);
+    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", fallbacks: 0 });
+  } finally { await fixture.close(); }
+});
+
+test("a trapping or unloadable core hands verification to JavaScript", async () => {
+  for (const [source, fallbacks] of [[trappingCore, 1], [Uint8Array.from([1, 2, 3]), 0]]) {
+    const playback = peerPlaybackOptions(1000);
+    const fixture = await linkedFixture({ ...playback.options, coreWasm: source, WebSocketImpl: memoryRelaySocket() });
+    try {
+      await until(() => ["ready", "failed"].includes(fixture.swarm.metrics().core.state));
+      const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder"));
+      channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+      assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+      const metrics = fixture.swarm.metrics();
+      assert.equal(metrics.segments.peerFirstLoaded, 1);
+      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", fallbacks });
+      assert.equal(metrics.errors.byStage.core, 1);
+    } finally { await fixture.close(); }
+  }
+});
+
+test("the core option is checked and ignored outside peer-first", () => {
+  for (const coreWasm of [1, {}, null, true]) {
+    assert.equal(createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm }).metrics().disabledReason, "invalid-core-wasm");
+  }
+  const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm });
+  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", fallbacks: 0 });
+  swarm.stop();
+});
+
 test("peer eligibility distinguishes zero budget with HAVE from positive budget without HAVE, without extra work", async () => {
   const playback = peerPlaybackOptions(120);
   let keyCalls = 0, commitments = 0, admissions = 0, deliveries = 0;

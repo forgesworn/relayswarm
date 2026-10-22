@@ -41,30 +41,38 @@ Known difference: a JSON string containing an unpaired UTF-16 surrogate escape
 fails to parse in Rust, so such an event is rejected and such a control
 message closes the link as `protocol`; JavaScript parses both.
 
-`relayswarm-wasm` exposes the commitment verifiers to JavaScript through
-`wasm-bindgen` (pinned to `=0.2.129`, which must equal the CLI). Values cross
-as JSON text. It is not wired into the loader yet. Measured on 22 October 2026
-with the release profile, `wasm-bindgen --target web` and `wasm-opt -Oz`
-(version 133):
+`relayswarm-wasm` builds the commitment verifiers as a WebAssembly module with
+no imports and a plain C ABI, so any WebAssembly host can call it without
+generated glue: `rs_alloc` and `rs_free` manage input bytes, `rs_call(op, ptr,
+len)` takes `[event, options, atMs]` as JSON and returns the result's length
+(-1 for rejection), and `rs_result_ptr` locates the result. The browser loader
+is `src/browser/core-wasm.mjs`; hosts opt in with `coreWasm` (see
+`INTEGRATION.md`).
+
+`npm run core:wasm` builds it with the release profile and writes
+`src/browser/relayswarm-core.wasm`, which is committed so Git installs need no
+Rust. Source paths are remapped, and the script fails if the module names a
+local directory. `npm run test:proto` runs all 120 vectors through the
+committed module; CI also builds a fresh one and runs them through that. A
+fresh module's bytes may differ by host; its verdicts may not.
+
+Measured on 22 October 2026:
 
 | Build | Raw bytes | gzip -9 |
 |---|---|---|
-| `relayswarm_wasm_bg.wasm` after `wasm-opt` | 159,136 | 81,720 |
-| The same without the BIP-340 verifier (`k256`) | 131,918 | 69,125 |
-| Glue (`relayswarm_wasm.js`, unminified) | 8,799 | |
-| Demo client bundle (esbuild, minified) | 787,462 | 250,814 |
-| Demo client with the module inlined as base64 | 1,002,411 | 352,844 |
+| `relayswarm-core.wasm` (committed, no `wasm-opt`) | 200,458 | 87,373 |
+| The same after `wasm-opt -Oz` (version 133) | 165,047 | 84,193 |
+| Earlier `wasm-bindgen` build after `wasm-opt`, for comparison | 159,136 | 81,720 |
+| Demo client bundle (esbuild, minified), before the loader change | 787,462 | 250,814 |
 
-Through the WebAssembly build, all 120 commitment vectors match the
-JavaScript.
+The module is fetched separately rather than inlined: inlining it as base64
+measured 1,002,411 bytes (352,844 gzip) for the demo client.
 
 ```sh
 cd core
 cargo test
 cargo build --target wasm32-unknown-unknown -p relayswarm-proto
-cargo build --release --target wasm32-unknown-unknown -p relayswarm-wasm
-wasm-bindgen --target web --out-dir target/js-wasm --no-typescript \
-  target/wasm32-unknown-unknown/release/relayswarm_wasm.wasm
+cd .. && npm run core:wasm
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. Builds use `core/target/`.

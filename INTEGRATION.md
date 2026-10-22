@@ -110,6 +110,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
+| `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The JavaScript verifier decides until the module loads, and for the rest of the session if it fails to load or traps. A rejection from the module stands. See `core` in the metrics. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 
@@ -189,7 +190,11 @@ not an identity), `uptimeMs`, `serving`, plus:
   a timestamp), `sinceDropped` (events dropped only by the subscription `since`
   filter, unverified and so unauthenticated; a device clock ahead of its peers
   raises it), `publishErrors`.
-- `errors`: `total` and `byStage`.
+- `errors`: `total` and `byStage`. A module named by `coreWasm` that fails to
+  load or traps counts once under `core`.
+- `core`: `state` (`off`, `loading`, `ready` or `failed`), `verifier` (`wasm`
+  or `js`, whichever decides the next commitment) and `fallbacks` (traps that
+  handed verification to JavaScript). An additive metrics-v2 field.
 - `config`: the effective settings, so a receipt says what produced it.
 
 Snapshots contain no IP addresses, user agent or long-term key, but the

@@ -1,14 +1,9 @@
 // Shared by scripts/generate-proto-vectors.mjs and test/proto-vectors.test.mjs.
-import { segmentMediaContext, validStreamAuthorisation, verifyCommitmentDelegation,
-  verifySegmentCommitment } from "../src/browser/segment-commitment.mjs";
+import { validStreamAuthorisation, verifyCommitmentDelegation, verifySegmentCommitment } from "../src/browser/segment-commitment.mjs";
+import { reduceFragmentContext } from "../src/browser/core-wasm.mjs";
 
 /** The reduced fragment context the Rust core receives from its shell. */
-export function normaliseContext(context) {
-  const media = segmentMediaContext(structuredClone(context));
-  return { sequence: context.frag.sn ?? null, discontinuity: context.frag.cc ?? 0, part: context.part?.index ?? null,
-    level: String(context.frag.level), fragType: context.frag.type ?? null,
-    decryptMethod: context.frag.decryptdata?.method ?? null, media };
-}
+export const normaliseContext = (context) => reduceFragmentContext(structuredClone(context));
 
 /** The JavaScript verifier's result for one vector: content, `true`, or null. */
 export function runVectorCase(entry, at) {

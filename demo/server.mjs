@@ -62,8 +62,8 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
   const state = publisherState ? await loadPublisherState(publisherState, { manifest }) : {};
   const publisher = await createHlsPublisher({ mediaDir, manifest, ...state, allowEncryptedMedia, commitmentSecretKey, delegation, revokedDelegationIds, delegationRevocations });
   const playlistReload = createBlockingPlaylistReload({ publisher, enabled: blockingPlaylistReload });
-  const [page, css, bundle] = await Promise.all([
-    readFile(join(here, "index.html")), readFile(join(here, "style.css")),
+  const [page, css, coreWasm, bundle] = await Promise.all([
+    readFile(join(here, "index.html")), readFile(join(here, "style.css")), readFile(join(here, "../src/browser/relayswarm-core.wasm")),
     build({ entryPoints: [join(here, "client.mjs")], bundle: true, format: "esm", platform: "browser", write: false, minify: true, logLevel: "silent" }),
   ]);
   const admission = createAdmissionControls({ ...admissionOptions, swarmId: publisher.swarmId });
@@ -82,7 +82,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
     const requestStartedAt = performance.now();
     requestDiagnostics.observe(request, response);
     const connect = ["'self'", ...relays.map((value) => new URL(value).origin), base?.replace(/^http/u, "ws")].filter(Boolean).join(" ");
-    response.setHeader("content-security-policy", `default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; connect-src ${connect}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`);
+    response.setHeader("content-security-policy", `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; connect-src ${connect}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`);
     response.setHeader("x-content-type-options", "nosniff");
     response.setHeader("referrer-policy", "no-referrer");
     response.setHeader("cache-control", "no-store");
@@ -106,6 +106,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
       if (url.pathname === "/") return send("text/html; charset=utf-8", page);
       if (url.pathname === "/style.css") return send("text/css; charset=utf-8", css);
       if (url.pathname === "/client.js") return send("text/javascript; charset=utf-8", bundle.outputFiles[0].contents);
+      if (url.pathname === "/relayswarm-core.wasm") return send("application/wasm", coreWasm);
       if (url.pathname === "/stream.json") return send("application/json", JSON.stringify(advertisement));
       if (url.pathname === "/session.json") return send("application/json", JSON.stringify(publicSession()));
       if (url.pathname === "/commitment") {

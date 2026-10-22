@@ -16,6 +16,13 @@
 - Port peer selection and neighbour discovery to `relayswarm_proto::selection`
   and `relayswarm_proto::discovery`. Seeded random and scripted operation
   sequences from the JavaScript check every output and state after each step.
+- Add the opt-in `coreWasm` loader option: peer-first viewers verify segment
+  commitments with the Rust core compiled to WebAssembly
+  (`src/browser/relayswarm-core.wasm`, 200,458 bytes, 87,373 gzip). The
+  JavaScript verifier decides until it loads, and for the rest of the session
+  if it fails to load or traps. A new metrics field, `core`, reports which
+  verifier decided. The demo serves the module, uses it, and allows
+  `'wasm-unsafe-eval'` in its Content Security Policy.
 
 ## v0.2.1 (21 October 2026)
 
