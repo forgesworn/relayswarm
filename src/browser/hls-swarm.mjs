@@ -223,7 +223,13 @@ function randomRequestId() {
  *
  * Exported for tests; the swarm calls it with its own links.
  */
-export function rotationCandidate(links, { minLinkLifeMs, idleEvictMs, banned = new Set(), tier } = {}, at = Date.now()) {
+export function rotationCandidate(links, options, at = Date.now()) {
+  return rotationChoice(links, options, at)?.link ?? null;
+}
+
+// The same choice with the tier it was ordered by, so a caller that counts the
+// victim's tier counts the value that decided, not a second reading.
+function rotationChoice(links, { minLinkLifeMs, idleEvictMs, banned = new Set(), tier } = {}, at = Date.now()) {
   let worst = null, worstTier = 0;
   for (const link of links) {
     if (link.transferring || banned.has(link.pubkey)) continue;
@@ -232,7 +238,7 @@ export function rotationCandidate(links, { minLinkLifeMs, idleEvictMs, banned = 
     const rank = tier ? tier(link) : 0;
     if (!worst || rank < worstTier || (rank === worstTier && link.lastUsefulAt < worst.lastUsefulAt)) { worst = link; worstTier = rank; }
   }
-  return worst;
+  return worst && { link: worst, tier: worstTier };
 }
 
 /**
@@ -1850,11 +1856,12 @@ class HlsSwarm {
       && (this.retries.get(candidate.pubkey) || 0) <= this.options.maxRetriesPerPeer;
   }
 
+  // The victim and the tier it was ordered by, or null.
   #discoveryVictim(context) {
     if (this.discovery.spent(context) || this.links.size < 2 || Date.now() - this.lastEvictionAt < this.options.evictionCooldownMs) return null;
     // Preserve a useful sibling audio/video neighbour as well as the target.
     const contexts = [...this.discovery.contexts.values()].filter(value => Date.now() - value.activityAt < 30_000);
-    return rotationCandidate([...this.links.values()].filter(link => !contexts.some(value =>
+    return rotationChoice([...this.links.values()].filter(link => !contexts.some(value =>
       !this.discovery.stale(value, link.pubkey) && (this.#servesRendition(link, value.rendition) || value.keys.some(key => link.have.has(key))))),
     { ...this.options, banned: this.banned, tier: link => this.#rotationTier(link) });
   }
@@ -1913,8 +1920,9 @@ class HlsSwarm {
       .map(([pubkey]) => pubkey);
   }
 
+  // The link to drop for an offer and the tier it was ordered by, or null.
   #rotationCandidate() {
-    return rotationCandidate(this.links.values(), { ...this.options, banned: this.banned, tier: link => this.#rotationTier(link) });
+    return rotationChoice(this.links.values(), { ...this.options, banned: this.banned, tier: link => this.#rotationTier(link) });
   }
 
   // The order in which rotation may drop links it could already drop:
@@ -1936,8 +1944,7 @@ class HlsSwarm {
     return 0;
   }
 
-  #noteVictimTier(counters, link, prefix = "") {
-    const tier = this.#rotationTier(link);
+  #noteVictimTier(counters, tier, prefix) {
     const name = ["Unhelpful", "Serving", "Consumer"][tier];
     counters[`${prefix}${name}`]++;
   }
@@ -1970,11 +1977,12 @@ class HlsSwarm {
     if (askerPeers !== 0 && !heldRepair) return null;
     if (this.links.size < 2) return null;
     if (Date.now() - this.lastEvictionAt < this.options.evictionCooldownMs) return null;
-    const link = this.#rotationCandidate();
-    if (!link) return null;
+    const choice = this.#rotationCandidate();
+    if (!choice) return null;
+    const link = choice.link;
     this.lastEvictionAt = Date.now();
     this.counters.evicted += 1;
-    this.#noteVictimTier(this.counters, link, "evicted");
+    this.#noteVictimTier(this.counters, choice.tier, "evicted");
     link.close("rotation");
     return link;
   }
@@ -2280,10 +2288,10 @@ class HlsSwarm {
       return;
     }
     if (discovery && this.links.size + this.dials.size >= this.options.maxPeers) {
-      const victim = this.#discoveryVictim(discovery.window.context);
+      const choice = this.#discoveryVictim(discovery.window.context), victim = choice?.link;
       if (!victim || !this.discovery.replaced(discovery, victim.pubkey)) { this.discovery.abandoned(discovery); return; }
       this.lastEvictionAt = Date.now(); this.counters.evicted++;
-      this.#noteVictimTier(this.discovery.counters, victim, "victim");
+      this.#noteVictimTier(this.discovery.counters, choice.tier, "victim");
       this.cooldowns.set(victim.pubkey, discovery.window.expiresAt);
       victim.close("rotation");
     }

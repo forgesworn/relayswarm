@@ -231,8 +231,8 @@ after the decision and change no decision, timer or deadline; if reading them
 fails the row is still written with the arrays null. The `have-at-entry` row of
 a load that was granted an untested-holder trial (see
 [peer-first loading](#authenticated-peer-first-loading)) also carries
-`trial: true` and the `projection` detail of the stage that was late; no other
-row has a `trial` field. A holder label is a positive integer that this instance assigns to each
+`trial: true` and the `projection` detail of the later late stage (the commitment
+detail when both stages were late); no other row has a `trial` field. A holder label is a positive integer that this instance assigns to each
 remote peer when it first becomes a link, in first-link order, kept across
 connection replacement in a map of at most 64 peers (oldest evicted; `0` means
 unknown). It is a local counter, not a key or address: it is never derived from
@@ -455,7 +455,10 @@ no room or victim, no outgoing slot, an attempt in flight) began no attempt;
 counts, at most once per candidate search, a current unmet context for which no
 fresh candidate hinted a demanded key, and `unmetIneligible` one for which fresh
 candidates did but every one was ineligible (cooldown, retries, already
-dialling); neither changes the search. All are local
+dialling); neither changes the search. They count only contexts that also pass
+discovery's existing room, reservation or victim condition, so an unmet context
+with no room and no victim is not counted, and they count per context, so one
+search can count a context and still return a candidate for another. All are local
 counts in the local snapshot, are not added to the numeric operator report, and
 do not show that delivery improved. A stale link's HAVE does not count: a link
 that still advertises a demanded key but is stale for that context neither keeps
@@ -596,8 +599,8 @@ first byte, the loader looks for an untested holder: an open, free, unbanned
 link whose HAVE holds the key, that has no recorded attempt, and that is not
 stale for the load's context. If there is one, the load waits to the buffer
 limit as a nearly fitting projection does, and its first request goes to that
-link (the first in link order, since an untested link has no observation to
-rank by). `peerUntestedTrial` counts the request and `peerUntestedTrialLoaded`
+link if it still qualifies at that moment (the first in link order, since an
+untested link has no observation to rank by), otherwise to the ordinary choice. `peerUntestedTrial` counts the request and `peerUntestedTrialLoaded`
 a request that returned a segment verified against its commitment. For that
 decision no `projected-late` row is written and `peerProjectedLate` is not
 counted. A load gets at most one trial and a link is untested only until its

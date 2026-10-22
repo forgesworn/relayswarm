@@ -4405,3 +4405,51 @@ test("a discovery replacement drops a consumer when every eligible link is one",
     assert.deepEqual([counters.victimUnhelpful, counters.victimServing, counters.victimConsumer], [0, 0, 1]);
   } finally { await f.close(); }
 });
+
+test("a granted trial whose room then shrinks below the median first byte goes to origin without asking the holder", async t => {
+  // A's first byte takes about 300 ms. Once primed, the commitment fetch is made slow, so the room left after it
+  // is shorter than that first byte although the grant, made at entry before the fetch, saw more.
+  let slowMs = 0, fixture;
+  fixture = await trialFixture(t, { serve: { bytes: bigSegment, delayMs: 300, Channel: ChunkedHolder },
+    getCommitment: async context => { if (slowMs) await sleep(slowMs); return fixture.f.commitments.getCommitment(context); } });
+  const { f, run, prime, measured, segments, pubkeys } = fixture;
+  try {
+    await prime();
+    assert.ok(f.swarm.metrics().peerEligibilityDiagnostics.records.at(-1).projection.firstByteMs >= 250, "the median first byte is about 300 ms");
+    slowMs = 750;
+    const asked = f.requests.length, late = segments().peerProjectedLate;
+    await run("A", "B");
+    assert.equal(f.requests.length, asked, "the untested holder was not asked");
+    assert.equal(segments().peerSkippedLate, 1, "stopped by the pre-request first-byte check");
+    assert.equal(segments().peerUntestedTrial, 0); assert.equal(segments().peerProjectedLate, late, "no projected-late is counted for the grant");
+    assert.equal(measured(pubkeys.B).attempts, 0, "B is still untested");
+    const row = f.rows().at(-1);
+    assert.equal(row.reason, "have-at-entry"); assert.equal(row.trial, true);
+    assert.equal(f.discovery().heldMiss, 0, "a load that asked nobody charges nobody");
+  } finally { await f.close(); }
+});
+
+test("a holder that failed verification as a trial is banned and closed, and is never given a trial or asked again", async t => {
+  // A ban always follows a recorded attempt (the corrupt payload is recorded first), so a banned link is
+  // never untested; this pins the outcome a banned holder must have, whichever check excludes it.
+  const { f, run, prime, segments, measured, pubkeys } = await trialFixture(t);
+  try {
+    await prime();
+    f.siblingChannel.bytes = new Uint8Array(bigSegment.byteLength).fill(6);
+    const asked = f.requests.length;
+    await run("B");
+    assert.deepEqual(f.requests.slice(asked), ["other"]);
+    assert.equal(segments().peerUntestedTrial, 1); assert.equal(segments().peerUntestedTrialLoaded, 0);
+    assert.equal(segments().peerCorrupt, 1); assert.equal(f.swarm.metrics().peers.banned, 1);
+    assert.equal(f.siblingChannel.readyState, "closed"); assert.equal(f.swarm.metrics().peers.connected, 1);
+    assert.equal(measured(pubkeys.B), undefined, "the link is gone");
+    // The banned peer offers again and is refused, so it cannot become an untested holder.
+    const links = f.swarm.metrics().peers.linksOpened;
+    f.peers[0].sendSignal(f.swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: "banned-relink", payload: { sdp: "fixture-offer" } });
+    await sleep(100);
+    assert.equal(f.swarm.metrics().peers.linksOpened, links); assert.equal(f.swarm.metrics().peers.connected, 1);
+    const trials = segments().peerUntestedTrial;
+    await run("A");
+    assert.equal(segments().peerUntestedTrial, trials); assert.equal(f.requests.filter(value => value === "other").length, 1);
+  } finally { await f.close(); }
+});
