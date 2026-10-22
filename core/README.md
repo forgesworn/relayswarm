@@ -41,10 +41,30 @@ Known difference: a JSON string containing an unpaired UTF-16 surrogate escape
 fails to parse in Rust, so such an event is rejected and such a control
 message closes the link as `protocol`; JavaScript parses both.
 
+`relayswarm-wasm` exposes the commitment verifiers to JavaScript through
+`wasm-bindgen` (pinned to `=0.2.129`, which must equal the CLI). Values cross
+as JSON text. It is not wired into the loader yet. Measured on 22 October 2026
+with the release profile, `wasm-bindgen --target web` and `wasm-opt -Oz`
+(version 133):
+
+| Build | Raw bytes | gzip -9 |
+|---|---|---|
+| `relayswarm_wasm_bg.wasm` after `wasm-opt` | 159,136 | 81,720 |
+| The same without the BIP-340 verifier (`k256`) | 131,918 | 69,125 |
+| Glue (`relayswarm_wasm.js`, unminified) | 8,799 | |
+| Demo client bundle (esbuild, minified) | 787,462 | 250,814 |
+| Demo client with the module inlined as base64 | 1,002,411 | 352,844 |
+
+Through the WebAssembly build, all 120 commitment vectors match the
+JavaScript.
+
 ```sh
 cd core
 cargo test
 cargo build --target wasm32-unknown-unknown -p relayswarm-proto
+cargo build --release --target wasm32-unknown-unknown -p relayswarm-wasm
+wasm-bindgen --target web --out-dir target/js-wasm --no-typescript \
+  target/wasm32-unknown-unknown/release/relayswarm_wasm.wasm
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. Builds use `core/target/`.
