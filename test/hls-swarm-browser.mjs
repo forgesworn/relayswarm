@@ -368,7 +368,7 @@ try {
     // Fresh segments still need origin seeders. A viewer that uploads those
     // bytes to consumers can legitimately receive every own segment by HTTP.
   }
-  if (MODE === "peer-first" && CORE === "wasm" && honest.some((report) => report.swarm.core?.verifier !== "wasm" || report.swarm.core.fallbacks)) failures.push("a peer-first viewer did not verify with the Rust core");
+  if (MODE === "peer-first" && CORE === "wasm" && honest.some((report) => report.swarm.core?.verifier !== "wasm" || report.swarm.core.fallbacks || !report.swarm.core.decided.wasm)) failures.push("a peer-first viewer did not verify with the Rust core");
   if (MODE === "peer-first" && VIEWERS >= 2) {
     const faulted = honest.find((report) => report.viewer === "v1");
     if (!faulted?.swarm.segments.commitmentRejected || !faulted?.swarm.segments.commitmentUnavailable) failures.push("invalid and stalled commitments were not exercised");

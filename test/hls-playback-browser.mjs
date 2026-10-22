@@ -119,7 +119,12 @@ try {
   const consumerReport = receipt.viewers.find((viewer) => viewer.name === "consumer").receipt;
   const peerFirstSessions = [...consumerReport.sessions, ...(consumerReport.current ? [consumerReport.current] : [])].filter((session) => session.metrics.mode === "peer-first");
   assert.ok(peerFirstSessions.length > 0, "the consumer never ran peer-first");
-  for (const session of peerFirstSessions) assert.deepEqual(session.metrics.core, { state: "ready", verifier: "wasm", fallbacks: 0 }, "the consumer did not verify with the Rust core");
+  for (const session of peerFirstSessions) {
+    // JavaScript may decide a commitment that arrives before the module loads.
+    const { state, verifier, fallbacks, decided } = session.metrics.core;
+    assert.deepEqual({ state, verifier, fallbacks }, { state: "ready", verifier: "wasm", fallbacks: 0 }, "the consumer did not verify with the Rust core");
+    assert.ok(decided.wasm > 0, "the module decided no commitments");
+  }
   assert.ok(measured.stalls <= reference.stalls, `consumer stalled ${measured.stalls} times vs baseline ${reference.stalls}`);
   assert.ok(measured.startupMs <= reference.startupMs + 2000, "peer mode added more than two seconds to startup");
   assert.ok(measured.seeks >= 2 && measured.seekRecoveryMs.length >= 2, "seek recovery was not recorded");

@@ -752,7 +752,7 @@ test("the Rust core verifies peer-first commitments, and its rejection stands", 
     const metrics = fixture.swarm.metrics();
     assert.equal(metrics.segments.commitmentRejected, 1);
     assert.equal(metrics.segments.peerFirstLoaded, 1);
-    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", fallbacks: 0 });
+    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", fallbacks: 0, decided: { wasm: 2, js: 0 } });
   } finally { await fixture.close(); }
 });
 
@@ -767,7 +767,7 @@ test("a trapping or unloadable core hands verification to JavaScript", async () 
       assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
       const metrics = fixture.swarm.metrics();
       assert.equal(metrics.segments.peerFirstLoaded, 1);
-      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", fallbacks });
+      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", fallbacks, decided: { wasm: 0, js: 1 } });
       assert.equal(metrics.errors.byStage.core, 1);
     } finally { await fixture.close(); }
   }
@@ -778,7 +778,7 @@ test("the core option is checked and ignored outside peer-first", () => {
     assert.equal(createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm }).metrics().disabledReason, "invalid-core-wasm");
   }
   const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm });
-  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", fallbacks: 0 });
+  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", fallbacks: 0, decided: { wasm: 0, js: 0 } });
   swarm.stop();
 });
 

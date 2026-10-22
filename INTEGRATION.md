@@ -193,8 +193,9 @@ not an identity), `uptimeMs`, `serving`, plus:
 - `errors`: `total` and `byStage`. A module named by `coreWasm` that fails to
   load or traps counts once under `core`.
 - `core`: `state` (`off`, `loading`, `ready` or `failed`), `verifier` (`wasm`
-  or `js`, whichever decides the next commitment) and `fallbacks` (traps that
-  handed verification to JavaScript). An additive metrics-v2 field.
+  or `js`, whichever decides the next commitment), `fallbacks` (traps that
+  handed verification to JavaScript) and `decided` (`wasm` and `js`: how many
+  commitments each verifier decided). An additive metrics-v2 field.
 - `config`: the effective settings, so a receipt says what produced it.
 
 Snapshots contain no IP addresses, user agent or long-term key, but the

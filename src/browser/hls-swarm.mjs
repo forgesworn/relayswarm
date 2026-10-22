@@ -321,6 +321,7 @@ class HlsSwarm {
     this.coreVerifier = null;
     this.coreState = "off";
     this.coreFallbacks = 0;
+    this.coreDecided = { wasm: 0, js: 0 };
     this.dials = new Map();
     this.receivedOffers = new Set();
     this.cooldowns = new Map();
@@ -648,7 +649,7 @@ class HlsSwarm {
       },
       errors: { total: c.errors, byStage: { ...this.errorsByStage } },
       // Additive metrics-v2 field: which commitment verifier is deciding.
-      core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", fallbacks: this.coreFallbacks },
+      core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", fallbacks: this.coreFallbacks, decided: { ...this.coreDecided } },
       config: {
         originFallbackMs: this.options.originFallbackMs,
         maxPeerWaitMs: this.options.maxPeerWaitMs,
@@ -1695,13 +1696,18 @@ class HlsSwarm {
   // JavaScript verifier, for the rest of the session.
   #verifyCommitment(event, options) {
     if (this.coreVerifier) {
-      try { return this.coreVerifier.verifySegmentCommitment(event, options); } catch (error) {
+      try {
+        const result = this.coreVerifier.verifySegmentCommitment(event, options);
+        this.coreDecided.wasm += 1;
+        return result;
+      } catch (error) {
         this.coreVerifier = null;
         this.coreState = "failed";
         this.coreFallbacks += 1;
         this.#noteError("core", error);
       }
     }
+    this.coreDecided.js += 1;
     return verifySegmentCommitment(event, options);
   }
 
