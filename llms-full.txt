@@ -486,12 +486,14 @@ not distinct segments. Budget is the initial allowance, not remaining request
 time. Rows contain no segment keys, hashes, URLs, peer public keys or addresses.
 Rows for decisions made after the key computation and link inspection (every
 positive-budget reason except `aborted-before-eligibility`; never `no-budget`)
-also carry three sorted arrays of at most eight holder labels: `holders`
+also carry four sorted arrays of at most eight holder labels: `holders`
 (links serving this rendition now), `haveHolders` (links whose HAVE contains
-the demanded key now) and `staleHolders` (the serving links that neighbour
-discovery treats as stale for this rendition, see below). They are read after the decision and change no decision, timer
-or deadline; if reading them fails the row is still written with the arrays
-null. A holder label is a positive integer that this instance assigns to each
+the demanded key now), `staleHolders` (the serving links that neighbour
+discovery treats as stale for this rendition, see below) and `heldMissHolders`
+(the links recorded as a held miss on this decision, see below; empty until the
+load ends, then filled on the decision's last row). The first three are read
+after the decision and change no decision, timer or deadline; if reading them
+fails the row is still written with the arrays null. A holder label is a positive integer that this instance assigns to each
 remote peer when it first becomes a link, in first-link order, kept across
 connection replacement in a map of at most 64 peers (oldest evicted; `0` means
 unknown). It is a local counter, not a key or address: it is never derived from
@@ -644,11 +646,22 @@ minimum link life, bidirectional idle time, the shared rotation cooldown and
 useful sibling audio/video neighbours. At least one established link remains.
 
 A serving link normally counts as a neighbour for its rendition even before it
-holds any segment, which keeps discovery off. A link that serves the current
-rendition but lacks this viewer's demanded segment is given a miss when the wait
-reaches its deadline (a `wait-expired` outcome, or a `wait-aborted` outcome that
-the deadline timer itself caused, which keeps its row reason) and when an
-entry-stage `projected-late` decision finds that no link held the key. Four
+holds any segment, which keeps discovery off. Each load that reached the HAVE
+check is decided once, when it ends. If a verified segment came from a link, that
+link's history is dropped and no other link is changed. If the load went to
+origin, only the links that were judged are charged, with a miss called a held
+miss. These are the serving links that were asked and did not deliver a verified
+segment in time (the request was abandoned, timed out or failed, or the payload
+arrived after the deadline), and, when no link could fit the time left
+(`peerNoFit`), the serving links that held the key and whose own timing estimate
+did not fit. A decline made on swarm-wide estimates or on the buffer charges no
+holder: a `projected-late` decision while some link held the key, or a request
+skipped because no recent transfer could finish. A link that was never asked is
+left alone. When no link held the key, every serving link takes a miss, as before: at
+a `wait-expired` outcome (or a `wait-aborted` outcome that the deadline timer
+itself caused, which keeps its row reason) and at an entry-stage `projected-late`
+decision. Holding the key at entry or after the wait no longer clears a link
+by itself. Four
 misses on distinct segments, "distinct" meaning a different key from the last
 missed key (consecutive keys), at least ten seconds after the first, make the
 link stale for that context: it no longer meets the context and is no longer
@@ -656,22 +669,33 @@ protected as a useful neighbour, so discovery may seek a peer hinting the exact
 demanded key and may replace it. The count is kept per `main` or `audio`
 context, only from loads that reached the HAVE check (zero-budget,
 aborted-before-eligibility and no-longer-eligible loads neither count nor
-reset). A load that is aborted by the caller (an hls.js abort) or by `stop()`
-does not count. A link's history is dropped when one of this viewer's loads
-finds the demanded key in that link's HAVE at entry or before the wait deadline,
-when the link closes, when the rendition changes, or when the context sees no
-demand for 30 seconds. A stale link is still asked for any segment it does hold.
+reset). A load that is aborted by the caller (an hls.js abort) or by `stop()`, an
+unavailable, rejected or expired commitment do not count. A corrupt payload is
+never charged to the link that sent it: that link is banned and closed, and the
+size and digest check is made first even when the deadline has passed, though
+another holder asked by a later step of the same load can still be charged. A
+payload that would have verified but arrives after the deadline goes to origin
+and charges the link that was asked. A link's history is dropped only when a verified segment from that
+link reaches this viewer's loader in time, when the link closes, when the
+rendition changes, or when the context sees no demand for 30 seconds. A stale
+link is still asked for any segment it does hold.
 The thresholds are internal constants, not options, and the wait, deadlines,
-HTTP fallback, `maxPeers`, the single 15-second window, the one-replacement
-allowance, the rotation cooldown and every upload limit are unchanged. In a full
+HTTP fallback, `maxPeers`, the single 15-second window, the rotation cooldown
+and every upload limit are unchanged. In a full
 neighbourhood the allowance still bounds this to one replacement per context
-generation until a verified delivery renews it, so a replacement that is also
-never ahead leaves the viewer on origin for that rendition. The additive
+generation until a verified delivery or the twenty-second re-arm below renews
+it, so a replacement that is also never ahead or never delivers leaves the
+viewer on origin for that rendition between attempts. The additive
 `neighbourDiscovery.counters.staleHolder` counts attempts that began because
 every serving link was stale; `staleBlocked` counts loads where a fresh eligible
 candidate hinted a demanded key for such a context but a bound (spent allowance,
-no room or victim, no outgoing slot, an attempt in flight) began no attempt. Both
-are local counts and do not show that delivery improved.
+no room or victim, no outgoing slot, an attempt in flight) began no attempt;
+`heldMiss` counts one per link and demanded key for a held miss. All are local
+counts in the local snapshot, are not added to the numeric operator report, and
+do not show that delivery improved. A stale link's HAVE does not count: a link
+that still advertises a demanded key but is stale for that context neither keeps
+the context met nor is protected as a useful neighbour. A link that is not stale
+still counts through its HAVE, as before.
 
 Discovery retains at most two requested keys for each selected `main` and
 `audio` context, 64 candidate hints of at most eight hashes, and one opportunity
@@ -679,10 +703,17 @@ with an absolute maximum of 15 seconds. Quality changes invalidate only that
 media type, including zero-budget loads; those loads add no key hashing or HAVE
 lookup. A refused attempt may reuse its single vacancy before that same deadline.
 The reservation and scoped victim reconnect suppression then expire even if
-loads continue. Only an accepted commitment/hash-verified delivery for the exact
+loads continue. An accepted commitment/hash-verified delivery for the exact
 selected context generation renews its one-replacement allowance; PC-open,
-HAVE, sibling progress and inactivity do not. Per-piece origin fallback remains
-unchanged.
+HAVE, sibling progress and inactivity do not. Without a delivery, a spent
+allowance also renews once at least twenty seconds (an internal constant,
+`neighbourDiscovery.replacementRearmMs`) after it was spent, if the context is
+still current and every link serving its rendition is stale or none serves it;
+`neighbourDiscovery.counters.rearmed` counts these. That allows at most one
+replacement per twenty seconds per context. The single 15-second window, one
+attempt at a time, the rotation cooldown, `maxPeers` and ticket gating still
+apply, so two contexts that re-arm together do not rotate links in quick
+succession. Per-piece origin fallback remains unchanged.
 
 A still-current discovery offer can include the exact demanded `requestedKey`
 inside its existing pairwise NIP-44 payload, alongside the truthful peer count.
@@ -855,6 +886,37 @@ decide its own mode.
 Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md)
 
 # RelaySwarm changelog
+
+## Unreleased
+
+Not field-tested. These changes make a receiver try more neighbours when its
+linked holders do not deliver; they do not show that high-quality peer delivery
+improves, and field acceptance remains open. See [Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md).
+
+- Count a linked holder that was asked for a segment and did not deliver it in
+  time as a miss. Previously a holder whose HAVE held the key was treated as
+  ahead and cleared, so one that was ahead but too slow was never stale and kept
+  neighbour discovery off. Each peer-first load is now decided once, when it
+  ends. A verified delivery clears only the link it came from. A load that goes
+  to origin charges only the links that were judged: those that were asked and
+  did not deliver in time, and at `peerNoFit` those whose own estimate did not
+  fit. Declines made on swarm-wide estimates or the buffer charge no holder, and
+  every serving link takes a miss only when no link held the key. A stale link's
+  HAVE no longer keeps a context met or the link protected as a victim. Loader
+  aborts, `stop()`, commitment failures and integrity failures record nothing
+  against the link concerned. The thresholds (four misses on distinct segments
+  over at least ten seconds) are unchanged.
+- Let a spent replacement re-arm once, at most every twenty seconds per context,
+  when no verified peer delivery has happened since it was spent and every link
+  serving that rendition is stale or none serves it. The 15-second discovery
+  window, one attempt at a time, the eviction cooldown, `maxPeers` and ticket
+  gating are unchanged. The interval is an internal constant, not an option.
+- Add local diagnostics: `neighbourDiscovery.counters.heldMiss` and `rearmed`,
+  `neighbourDiscovery.replacementRearmMs`, and `heldMissHolders` on the
+  eligibility rows that carry holder labels. They sit in the local snapshot and
+  are not part of the numeric operator report.
+- The late-arrival projection, deadlines, abandonment, bounded peer work,
+  admission and HTTP fallback are unchanged.
 
 ## v0.2.1 (21 October 2026)
 
