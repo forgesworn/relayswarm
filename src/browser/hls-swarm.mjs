@@ -216,15 +216,21 @@ function randomRequestId() {
  * `minLinkLifeMs` (including the one a newcomer was just given) and a banned
  * one are never candidates.
  *
+ * With an optional `tier(link)` (a number), the lowest tier among the eligible
+ * links goes first and idle longest decides within it. A tier only orders links
+ * that are already eligible; it never makes one eligible or exempt. Without it
+ * the choice is exactly the one above.
+ *
  * Exported for tests; the swarm calls it with its own links.
  */
-export function rotationCandidate(links, { minLinkLifeMs, idleEvictMs, banned = new Set() } = {}, at = Date.now()) {
-  let worst = null;
+export function rotationCandidate(links, { minLinkLifeMs, idleEvictMs, banned = new Set(), tier } = {}, at = Date.now()) {
+  let worst = null, worstTier = 0;
   for (const link of links) {
     if (link.transferring || banned.has(link.pubkey)) continue;
     if (at - link.openedAt < minLinkLifeMs) continue;
     if (at - link.lastUsefulAt < idleEvictMs) continue;
-    if (!worst || link.lastUsefulAt < worst.lastUsefulAt) worst = link;
+    const rank = tier ? tier(link) : 0;
+    if (!worst || rank < worstTier || (rank === worstTier && link.lastUsefulAt < worst.lastUsefulAt)) { worst = link; worstTier = rank; }
   }
   return worst;
 }
@@ -1849,7 +1855,8 @@ class HlsSwarm {
     // Preserve a useful sibling audio/video neighbour as well as the target.
     const contexts = [...this.discovery.contexts.values()].filter(value => Date.now() - value.activityAt < 30_000);
     return rotationCandidate([...this.links.values()].filter(link => !contexts.some(value =>
-      !this.discovery.stale(value, link.pubkey) && (this.#servesRendition(link, value.rendition) || value.keys.some(key => link.have.has(key))))), { ...this.options, banned: this.banned });
+      !this.discovery.stale(value, link.pubkey) && (this.#servesRendition(link, value.rendition) || value.keys.some(key => link.have.has(key))))),
+    { ...this.options, banned: this.banned, tier: link => this.#rotationTier(link) });
   }
 
   #endDiscovery(window = this.discovery.window, closePending = true) {
@@ -1907,7 +1914,32 @@ class HlsSwarm {
   }
 
   #rotationCandidate() {
-    return rotationCandidate(this.links.values(), { ...this.options, banned: this.banned });
+    return rotationCandidate(this.links.values(), { ...this.options, banned: this.banned, tier: link => this.#rotationTier(link) });
+  }
+
+  // The order in which rotation may drop links it could already drop:
+  //   0 unhelpful  a non-serving remote that is not a consumer of this viewer;
+  //   1 serving    the remote is serving;
+  //   2 consumer   this viewer is serving, the remote is not, and the remote announced
+  //                (within two presence intervals) a rendition this viewer plays now,
+  //                so it is playing what this viewer can give it.
+  // An ordering, never an exemption: it changes which eligible link goes first only.
+  #rotationTier(link) {
+    if (link.contribution?.serving === true) return 1;
+    if (!this.#servingAllowed()) return 0;
+    const at = Date.now(), recently = 2 * this.options.presenceIntervalMs;
+    for (const [rendition, announcedAt] of link.announced ?? []) {
+      if (at - announcedAt > recently) continue;
+      const played = this.renditions.get(rendition);
+      if (played !== undefined && at - played <= 30_000) return 2;
+    }
+    return 0;
+  }
+
+  #noteVictimTier(counters, link, prefix = "") {
+    const tier = this.#rotationTier(link);
+    const name = ["Unhelpful", "Serving", "Consumer"][tier];
+    counters[`${prefix}${name}`]++;
   }
 
   /** Room now, or a rotation a caller with no peers at all could trigger. */
@@ -1942,6 +1974,7 @@ class HlsSwarm {
     if (!link) return null;
     this.lastEvictionAt = Date.now();
     this.counters.evicted += 1;
+    this.#noteVictimTier(this.counters, link, "evicted");
     link.close("rotation");
     return link;
   }
@@ -2250,6 +2283,7 @@ class HlsSwarm {
       const victim = this.#discoveryVictim(discovery.window.context);
       if (!victim || !this.discovery.replaced(discovery, victim.pubkey)) { this.discovery.abandoned(discovery); return; }
       this.lastEvictionAt = Date.now(); this.counters.evicted++;
+      this.#noteVictimTier(this.discovery.counters, victim, "victim");
       this.cooldowns.set(victim.pubkey, discovery.window.expiresAt);
       victim.close("rotation");
     }

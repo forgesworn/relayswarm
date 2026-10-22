@@ -193,6 +193,31 @@ test("rotation drops the longest-idle link, and nothing it should not", () => {
   assert.equal(rotationCandidate([], POLICY, NOW), null);
 });
 
+test("rotation tiers order the links it could already drop, and never make one droppable", () => {
+  const tiers = { unhelpful: 0, serving: 1, consumer: 2 };
+  const tier = (value) => tiers[value.pubkey.split("-")[0]];
+  const links = [link("consumer-90s", { idle: 90_000 }), link("serving-60s", { idle: 60_000 }), link("unhelpful-30s", { idle: 30_000 })];
+  // Without a tier, or with an undefined one, the choice is the existing one: idle longest.
+  assert.equal(rotationCandidate(links, POLICY, NOW).pubkey, "consumer-90s");
+  assert.equal(rotationCandidate(links, { ...POLICY, tier: undefined }, NOW).pubkey, "consumer-90s");
+  // With one, the lowest tier goes first, even though an older-idle link of a higher tier is also eligible.
+  assert.equal(rotationCandidate(links, { ...POLICY, tier }, NOW).pubkey, "unhelpful-30s", "an older-idle link of a higher tier waits");
+  assert.equal(rotationCandidate(links.slice(0, 2), { ...POLICY, tier }, NOW).pubkey, "serving-60s");
+  assert.equal(rotationCandidate(links.slice(0, 1), { ...POLICY, tier }, NOW).pubkey, "consumer-90s", "the only eligible link goes, as before");
+  // Within a tier, idle longest.
+  const twins = [link("unhelpful-40s", { idle: 40_000 }), link("unhelpful-70s", { idle: 70_000 }), link("serving-99s", { idle: 99_000 })];
+  assert.equal(rotationCandidate(twins, { ...POLICY, tier }, NOW).pubkey, "unhelpful-70s");
+  // Ineligible links stay ineligible whatever their tier.
+  const guarded = [link("unhelpful-sending", { idle: 80_000, transferring: true }), link("unhelpful-banned", { idle: 80_000 }),
+    link("unhelpful-new", { age: 3_000, idle: 80_000 }), link("unhelpful-busy", { idle: 5_000 }), link("consumer-ok", { idle: 25_000 })];
+  assert.equal(rotationCandidate(guarded, { ...POLICY, tier, banned: new Set(["unhelpful-banned"]) }, NOW).pubkey, "consumer-ok");
+  assert.equal(rotationCandidate(guarded.slice(0, 4), { ...POLICY, tier, banned: new Set(["unhelpful-banned"]) }, NOW), null);
+  // The tier function is consulted only for links that pass the filters.
+  const seen = [];
+  rotationCandidate(guarded, { ...POLICY, banned: new Set(["unhelpful-banned"]), tier: (value) => { seen.push(value.pubkey); return 0; } }, NOW);
+  assert.deepEqual(seen, ["consumer-ok"]);
+});
+
 test("a refused newcomer is told when coming back is worth it", () => {
   // Nothing rotatable for another 12s, and nothing is more urgent than that.
   const soon = retryAfterFor([link("young", { age: 3_000, idle: 3_000 })], POLICY, 0, NOW);

@@ -4254,3 +4254,154 @@ test("a trial load with less room than the fastest completed transfer still goes
     assert.equal(f.counters()["projected-late"], 0);
   } finally { await f.close(); }
 });
+
+test("a link remembers what the remote announced, serving or not, bounded to eight renditions", () => {
+  const channel = new RecordedChannel(), link = new PeerLink({ pubkey: "a".repeat(64), pc: new PC(), channel, maxSegmentBytes: 1024 });
+  const announce = (rendition, isServing) => channel.receive(JSON.stringify({ t: "contribution", serving: isServing, rendition }));
+  assert.equal(link.announced.size, 0);
+  announce("main:0", true);
+  assert.deepEqual([...link.announced.keys()], ["main:0"]); assert.deepEqual([...link.renditions.keys()], ["main:0"]);
+  // A non-serving announcement clears `renditions` and the serving flag as before, and keeps `announced`.
+  announce("main:0", false);
+  assert.equal(link.contribution.serving, false); assert.equal(link.renditions.size, 0);
+  assert.deepEqual([...link.announced.keys()], ["main:0"]);
+  announce("main:1", false);
+  assert.deepEqual([...link.announced.keys()], ["main:0", "main:1"]); assert.equal(link.renditions.size, 0);
+  // A serving announcement still fills `renditions` as it did.
+  announce("main:2", true);
+  assert.deepEqual([...link.renditions.keys()], ["main:2"]); assert.equal(link.contribution.serving, true);
+  // No rendition is not recorded, and invalid messages change nothing.
+  announce(null, false); channel.receive(JSON.stringify({ t: "contribution", serving: "yes", rendition: "x" })); channel.receive(JSON.stringify({ t: "contribution", serving: false, rendition: 7 }));
+  assert.deepEqual([...link.announced.keys()], ["main:0", "main:1", "main:2"]);
+  // Eight at most: the oldest goes first, and a repeat refreshes its place.
+  for (let i = 3; i < 8; i++) announce(`main:${i}`, false);
+  assert.equal(link.announced.size, 8);
+  announce("main:0", false);
+  announce("audio:0", false);
+  assert.equal(link.announced.size, 8);
+  assert.equal(link.announced.has("main:0"), true, "refreshed, so not the oldest"); assert.equal(link.announced.has("main:1"), false, "the oldest was dropped");
+  announce("audio:1", false);
+  assert.equal(link.announced.size, 8); assert.equal(link.announced.has("main:2"), false);
+  assert.ok([...link.announced.values()].every(value => Number.isFinite(value)));
+  link.close();
+  assert.equal(link.announced.size, 0);
+});
+
+// A serving viewer that plays main:0, with links of known age: the first link is the oldest. Time can be shifted.
+async function tierFixture(t, kinds, { serve = true, ...options } = {}) {
+  const realNow = Date.now.bind(Date), shift = { ms: 0 };
+  t.mock.method(Date, "now", () => realNow() + shift.ms);
+  const f = await linkedFixture({ WebSocketImpl: memoryRelaySocket(), serve, maxPeers: kinds.length, minLinkLifeMs: 1, idleEvictMs: 1, evictionCooldownMs: 1, ...options });
+  const channels = [];
+  for (const kind of kinds) {
+    const channel = await f.addPeer(); channels.push(channel); await sleep(5);
+    if (kind === "serving") channel.receive(serving("main:0"));
+    else if (kind === "consumer") channel.receive(JSON.stringify({ t: "contribution", serving: false, rendition: "main:0" }));
+    else if (kind === "other") channel.receive(JSON.stringify({ t: "contribution", serving: false, rendition: "audio:9" }));
+  }
+  await f.load();
+  const counters = () => f.swarm.metrics().peers;
+  let n = 0;
+  // An incoming offer from a peerless newcomer that finds the viewer full.
+  const offer = async () => {
+    const before = counters().evicted, peer = new RelaySwarmSession({ pool: f.pool, swarmId: base.swarmId }); peer.start(); f.peers.push(peer);
+    peer.sendSignal(f.swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: `tier-offer-${n++}`, payload: { sdp: "fixture-offer", peers: 0 } });
+    await until(() => counters().evicted === before + 1, 2_000);
+    await sleep(5);
+    return channels.map(channel => channel.readyState);
+  };
+  return { ...f, channels, shift, counters, offer };
+}
+const tiersOf = peers => [peers.evictedUnhelpful, peers.evictedServing, peers.evictedConsumer];
+
+test("an offer eviction drops an unhelpful link, then a serving one, before the consumer that has been idle longest", async t => {
+  // The consumer is the oldest link, so without tiers it would go first.
+  const f = await tierFixture(t, ["consumer", "serving", "unhelpful"]);
+  try {
+    assert.deepEqual(tiersOf(f.counters()), [0, 0, 0]);
+    assert.deepEqual(await f.offer(), ["open", "open", "closed"]);
+    assert.deepEqual(tiersOf(f.counters()), [1, 0, 0]); assert.equal(f.counters().evicted, 1);
+    assert.deepEqual(await f.offer(), ["open", "closed", "closed"]);
+    assert.deepEqual(tiersOf(f.counters()), [1, 1, 0]); assert.equal(f.counters().evicted, 2);
+    assert.equal(f.channels[0].readyState, "open", "the consumer is still linked");
+  } finally { await f.close(); }
+});
+
+test("a consumer link that is the only eligible one is dropped exactly as before, and counted as a consumer", async t => {
+  const f = await tierFixture(t, ["consumer", "consumer"]);
+  try {
+    assert.deepEqual(await f.offer(), ["closed", "open"], "the one idle longest");
+    assert.deepEqual(tiersOf(f.counters()), [0, 0, 1]); assert.equal(f.counters().evicted, 1);
+  } finally { await f.close(); }
+});
+
+test("only an announcement within two presence intervals of a rendition played within thirty seconds makes a consumer", async t => {
+  // A fresh announcement, one just inside and one just outside 2 * 20 s, a rendition no longer played, and a viewer not serving.
+  let f = await tierFixture(t, ["consumer", "other"]);
+  try {
+    assert.deepEqual(await f.offer(), ["open", "closed"], "fresh and played: a consumer outlasts an unhelpful link");
+    assert.deepEqual(tiersOf(f.counters()), [1, 0, 0]);
+  } finally { await f.close(); }
+  f = await tierFixture(t, ["consumer", "other"]);
+  try {
+    f.shift.ms += 39_000; await f.load();
+    assert.deepEqual(await f.offer(), ["open", "closed"], "just under two intervals old still counts");
+    assert.deepEqual(tiersOf(f.counters()), [1, 0, 0]);
+  } finally { await f.close(); }
+  f = await tierFixture(t, ["consumer", "other"]);
+  try {
+    f.shift.ms += 40_001; await f.load();
+    assert.deepEqual(await f.offer(), ["closed", "open"], "an older announcement is ignored, so the oldest idle goes");
+    assert.deepEqual(tiersOf(f.counters()), [1, 0, 0]);
+  } finally { await f.close(); }
+  f = await tierFixture(t, ["consumer", "other"]);
+  try {
+    f.shift.ms += 30_001;
+    assert.deepEqual(await f.offer(), ["closed", "open"], "the viewer has not played that rendition for thirty seconds");
+    assert.deepEqual(tiersOf(f.counters()), [1, 0, 0]);
+  } finally { await f.close(); }
+  f = await tierFixture(t, ["consumer", "other"], { serve: false });
+  try {
+    assert.deepEqual(await f.offer(), ["closed", "open"], "a viewer that is not serving has no consumers");
+    assert.deepEqual(tiersOf(f.counters()), [1, 0, 0]);
+  } finally { await f.close(); }
+});
+
+test("a non-serving announcement does not stop a link counting as a consumer, and a serving remote is never one", async t => {
+  const f = await tierFixture(t, ["serving", "consumer", "other"]);
+  try {
+    // The serving link withdraws, then is a non-serving remote that announced main:0 earlier: now a consumer.
+    f.channels[0].receive(JSON.stringify({ t: "contribution", serving: false, rendition: "main:0" }));
+    assert.deepEqual(await f.offer(), ["open", "open", "closed"]);
+    assert.deepEqual(tiersOf(f.counters()), [1, 0, 0]);
+    // Back to serving: tier one, below the consumer.
+    f.channels[0].receive(serving("main:0"));
+    assert.deepEqual(await f.offer(), ["closed", "open", "closed"]);
+    assert.deepEqual(tiersOf(f.counters()), [1, 1, 0]);
+  } finally { await f.close(); }
+});
+
+test("a discovery replacement drops an unhelpful link before the consumer that has been idle longest, and counts the tier", async t => {
+  const f = await discoveryFixture({ serve: true });
+  try {
+    // The oldest link plays what this viewer can give it; the rest are receivers that announced nothing.
+    f.channels[0].receive(JSON.stringify({ t: "contribution", serving: false, rendition: "main:0" }));
+    f.announce(); await until(() => f.offers.length === 1, 2_500);
+    assert.deepEqual(f.channels.map(channel => channel.readyState), ["open", "closed", "open", "open", "open", "open"]);
+    const counters = f.swarm.metrics().neighbourDiscovery.counters;
+    assert.deepEqual([counters.victimUnhelpful, counters.victimServing, counters.victimConsumer, counters.replacements], [1, 0, 0, 1]);
+    const peers = f.swarm.metrics().peers;
+    assert.equal(peers.evicted, 1, "evicted still counts every eviction"); assert.deepEqual(tiersOf(peers), [0, 0, 0], "the offer-eviction tiers count offers only");
+  } finally { await f.close(); }
+});
+
+test("a discovery replacement drops a consumer when every eligible link is one", async t => {
+  const f = await discoveryFixture({ serve: true });
+  try {
+    for (const channel of f.channels) channel.receive(JSON.stringify({ t: "contribution", serving: false, rendition: "main:0" }));
+    f.announce(); await until(() => f.offers.length === 1, 2_500);
+    assert.deepEqual(f.channels.map(channel => channel.readyState), ["closed", "open", "open", "open", "open", "open"]);
+    const counters = f.swarm.metrics().neighbourDiscovery.counters;
+    assert.deepEqual([counters.victimUnhelpful, counters.victimServing, counters.victimConsumer], [0, 0, 1]);
+  } finally { await f.close(); }
+});
