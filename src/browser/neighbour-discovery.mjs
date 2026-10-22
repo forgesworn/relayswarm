@@ -17,7 +17,8 @@ export class NeighbourDiscovery {
     this.contexts = new Map();
     this.candidates = new Map();
     this.window = null;
-    this.counters = { checks: 0, replacements: 0, expired: 0, opened: 0, verified: 0, staleHolder: 0, staleBlocked: 0, heldMiss: 0, rearmed: 0 };
+    this.counters = { checks: 0, replacements: 0, expired: 0, opened: 0, verified: 0, staleHolder: 0, staleBlocked: 0, heldMiss: 0, rearmed: 0,
+      victimUnhelpful: 0, victimServing: 0, victimConsumer: 0, unmetNoHint: 0, unmetIneligible: 0 };
   }
 
   context(mediaType, rendition) {
@@ -106,12 +107,27 @@ export class NeighbourDiscovery {
   choose(eligible, unmet, room) {
     if (this.window?.attempt) return null;
     const contexts = this.window ? [this.window.context] : [...this.contexts.values()];
+    // Local diagnostics only: each counts at most once per call, for the first
+    // context that reached the candidate search and found none to return.
+    let noHint = false, ineligible = false;
     for (const context of contexts) {
       if (!this.current(context) || !unmet(context) || (!room && this.spent(context) && !this.window?.vacant)) continue;
       const found = this.hinted(context, eligible);
       if (found) return found;
+      if (this.#hinting(context)) {
+        if (!ineligible) { ineligible = true; this.counters.unmetIneligible++; }
+      } else if (!noHint) { noHint = true; this.counters.unmetNoHint++; }
     }
     return null;
+  }
+
+  // Whether any fresh candidate hints a demanded key, eligible or not.
+  #hinting(context) {
+    for (const candidate of this.candidates.values()) {
+      if (this.clock() < candidate.at || this.clock() - candidate.at >= 60_000) continue;
+      if (context.keys.some(value => candidate.have.includes(value))) return true;
+    }
+    return false;
   }
 
   // A fresh eligible candidate hinting a key this context demands, or null.

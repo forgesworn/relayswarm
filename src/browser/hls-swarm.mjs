@@ -348,6 +348,8 @@ class HlsSwarm {
       peerWaitExtended: 0,
       peerAbandoned: 0,
       peerNoFit: 0,
+      peerUntestedTrial: 0,
+      peerUntestedTrialLoaded: 0,
       commitmentRequests: 0,
       commitmentRejected: 0,
       commitmentUnavailable: 0,
@@ -377,6 +379,9 @@ class HlsSwarm {
       offersRefused: 0,
       admitRefused: 0,
       evicted: 0,
+      evictedUnhelpful: 0,
+      evictedServing: 0,
+      evictedConsumer: 0,
       evictionsUnavailable: 0,
       retriesScheduled: 0,
       referralsSent: 0,
@@ -522,6 +527,9 @@ class HlsSwarm {
         offersRefused: c.offersRefused,
         admitRefused: c.admitRefused,
         evicted: c.evicted,
+        evictedUnhelpful: c.evictedUnhelpful,
+        evictedServing: c.evictedServing,
+        evictedConsumer: c.evictedConsumer,
         evictionsUnavailable: c.evictionsUnavailable,
         retriesScheduled: c.retriesScheduled,
         referralsSent: c.referralsSent,
@@ -604,6 +612,8 @@ class HlsSwarm {
         peerWaitExtended: c.peerWaitExtended,
         peerAbandoned: c.peerAbandoned,
         peerNoFit: c.peerNoFit,
+        peerUntestedTrial: c.peerUntestedTrial,
+        peerUntestedTrialLoaded: c.peerUntestedTrialLoaded,
         commitmentRequests: c.commitmentRequests,
         commitmentRejected: c.commitmentRejected,
         commitmentUnavailable: c.commitmentUnavailable,
@@ -1023,7 +1033,7 @@ class HlsSwarm {
     if (this.discovery.hinted(context, (candidate) => this.#discoveryEligible(candidate))) this.discovery.counters.staleBlocked++;
   }
 
-  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry, projection, demand) {
+  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry, projection, demand, trial = false) {
     // Observe only decisions already made. In particular a zero budget must
     // not hash a key or inspect HAVE merely to fill this local diagnostic.
     try {
@@ -1037,6 +1047,8 @@ class HlsSwarm {
         cc, level, budgetMs: Number.isFinite(budgetMs) && budgetMs >= 0 ? budgetMs : null,
         reason, matchingHave: typeof matchingHave === "boolean" ? matchingHave : null, budgetGeometry: { ...budgetGeometry } };
       if (projection) record.projection = { ...projection };
+      // Set only on the row that records an untested-holder trial grant.
+      if (trial === true) record.trial = true;
       // Only decisions that already computed the key and inspected links.
       if (demand) {
         try { Object.assign(record, this.#holderDiagnostics(demand)); }

@@ -3933,3 +3933,55 @@ test("a caller abort during the wait is not a miss", async t => {
     await until(() => via.offers.length === 1); await pending;
   } finally { await f.close(); }
 });
+
+test("untested-holder trial and rotation-tier diagnostics start at zero and stay out of the operator report", async () => {
+  const swarm = createHlsSwarm({ ...base, relays: ["wss://memory-relay.example"] });
+  const metrics = swarm.metrics();
+  assert.equal(metrics.segments.peerUntestedTrial, 0); assert.equal(metrics.segments.peerUntestedTrialLoaded, 0);
+  assert.equal(metrics.peers.evictedUnhelpful, 0); assert.equal(metrics.peers.evictedServing, 0); assert.equal(metrics.peers.evictedConsumer, 0);
+  for (const name of ["victimUnhelpful", "victimServing", "victimConsumer", "unmetNoHint", "unmetIneligible"]) {
+    assert.equal(metrics.neighbourDiscovery.counters[name], 0, name);
+  }
+  assert.ok(metrics.peerEligibilityDiagnostics.records.every(row => !("trial" in row)));
+  // Local diagnostics only: the numeric operator report builder never names them.
+  const source = await readFile(new URL("../demo/client.mjs", import.meta.url), "utf8");
+  for (const name of ["peerUntestedTrial", "evictedUnhelpful", "evictedServing", "evictedConsumer", "victim", "unmet"]) assert.ok(!source.includes(name), name);
+  swarm.stop();
+});
+
+test("an unmet current context with no hinting candidate counts unmetNoHint and choose returns null", () => {
+  const f = advisoryFixture(), { state } = f;
+  state.candidates.clear(); state.hint(f.pubkey, ["c".repeat(64)], "fixture-ticket");
+  assert.equal(state.choose(() => true, () => true, true), null);
+  assert.deepEqual([state.counters.unmetNoHint, state.counters.unmetIneligible], [1, 0]);
+  // Once per call, however many contexts reach the search.
+  state.demand("audio", "audio:0", "d".repeat(64));
+  assert.equal(state.choose(() => true, () => true, true), null);
+  assert.deepEqual([state.counters.unmetNoHint, state.counters.unmetIneligible], [2, 0]);
+  // A candidate seen over sixty seconds ago is not fresh, so it is no hint.
+  state.candidates.clear(); state.hint(f.pubkey, [f.key], "fixture-ticket"); f.advance(60_000);
+  state.demand("main", "main:0", f.key); state.demand("audio", "audio:0", "d".repeat(64));
+  assert.equal(state.choose(() => true, () => true, true), null);
+  assert.deepEqual([state.counters.unmetNoHint, state.counters.unmetIneligible], [3, 0]);
+});
+
+test("an unmet current context whose hinting candidates are all ineligible counts unmetIneligible and choose returns null", () => {
+  const f = advisoryFixture(), { state } = f;
+  assert.equal(state.choose(() => false, () => true, true), null);
+  assert.deepEqual([state.counters.unmetNoHint, state.counters.unmetIneligible], [0, 1]);
+  state.demand("audio", "audio:0", f.key);
+  assert.equal(state.choose(() => false, () => true, true), null);
+  assert.deepEqual([state.counters.unmetNoHint, state.counters.unmetIneligible], [0, 2], "once per call");
+});
+
+test("neither unmet counter moves when the context is met or choose returns a candidate", () => {
+  const f = advisoryFixture(), { state } = f;
+  assert.equal(state.choose(() => true, () => false, true), null, "a met context");
+  assert.equal(state.choose(() => true, () => true, false)?.candidate.pubkey, f.pubkey, "a candidate is returned");
+  f.advance(30_001);
+  assert.equal(state.choose(() => true, () => true, true), null, "a context that is no longer current");
+  const idle = advisoryFixture();
+  assert.ok(idle.begin());
+  assert.equal(idle.state.choose(() => true, () => true, true), null, "an attempt is already in flight");
+  for (const value of [state, idle.state]) assert.deepEqual([value.counters.unmetNoHint, value.counters.unmetIneligible], [0, 0]);
+});
