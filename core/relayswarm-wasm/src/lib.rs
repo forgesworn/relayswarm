@@ -228,3 +228,224 @@ pub extern "C" fn rs_sel_summary(link: u32) -> *const f64 {
         value.last_selected as f64,
     ])
 }
+
+// --- peer links -------------------------------------------------------------
+
+use relayswarm_proto::link::{Link, LinkConfig, LinkEvent};
+use std::collections::HashMap;
+
+thread_local! {
+    static LINKS: RefCell<HashMap<u32, Link>> = RefCell::new(HashMap::new());
+    static NEXT_LINK: RefCell<u32> = const { RefCell::new(1) };
+}
+
+pub const LINK_TEXT: u32 = 0;
+pub const LINK_BINARY: u32 = 1;
+pub const LINK_REQUEST: u32 = 2;
+pub const LINK_ABORT: u32 = 3;
+pub const LINK_CLOSE: u32 = 4;
+pub const LINK_TICK: u32 = 5;
+pub const LINK_SERVE: u32 = 6;
+pub const LINK_BUFFERED_LOW: u32 = 7;
+pub const LINK_SEND_HAVE: u32 = 8;
+pub const LINK_SEND_HAVE_CHANGE: u32 = 9;
+pub const LINK_SEND_CONTRIBUTION: u32 = 10;
+pub const LINK_SEND_FETCHING: u32 = 11;
+pub const LINK_STATE: u32 = 12;
+pub const LINK_SETS: u32 = 13;
+
+const EVENT_SEND_TEXT: u8 = 1;
+const EVENT_SEND_BINARY: u8 = 2;
+const EVENT_CLOSED: u8 = 3;
+const EVENT_REPORT: u8 = 4;
+const EVENT_RESOLVED: u8 = 5;
+const EVENT_HAVE_CHANGED: u8 = 6;
+const EVENT_SCHEDULE_CHANGED: u8 = 7;
+const EVENT_SERVE_REQUEST: u8 = 8;
+const EVENT_UPLOAD_CANCELLED: u8 = 9;
+const EVENT_PROGRESS: u8 = 10;
+
+/// Scalars at the start of every link frame, as little-endian doubles.
+pub const LINK_HEADER: usize = 12;
+
+fn push_event(out: &mut Vec<u8>, tag: u8, payload: &[u8]) {
+    out.push(tag);
+    out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    out.extend_from_slice(payload);
+}
+
+fn doubles(values: &[f64]) -> Vec<u8> {
+    values.iter().flat_map(|value| value.to_le_bytes()).collect()
+}
+
+fn opt(value: Option<u64>) -> f64 {
+    value.map_or(f64::NAN, |value| value as f64)
+}
+
+/// A frame: the header scalars, then events as tag, u32 length, payload.
+fn frame(link: &mut Link, request: Option<u64>) -> Vec<u8> {
+    let mut out = doubles(&[
+        link.version() as f64,
+        f64::from(u8::from(link.closed())),
+        f64::from(u8::from(link.busy())),
+        f64::from(u8::from(link.transferring())),
+        link.outbound_in_flight() as f64,
+        link.bytes_in() as f64,
+        link.bytes_out() as f64,
+        link.opened_at() as f64,
+        link.last_served_at() as f64,
+        link.last_delivered_at() as f64,
+        opt(link.next_deadline()),
+        opt(request),
+    ]);
+    for event in link.drain_events() {
+        match event {
+            LinkEvent::SendText(text) => push_event(&mut out, EVENT_SEND_TEXT, text.as_bytes()),
+            LinkEvent::SendBinary(bytes) => push_event(&mut out, EVENT_SEND_BINARY, &bytes),
+            LinkEvent::Closed(reason) => push_event(&mut out, EVENT_CLOSED, reason.as_bytes()),
+            LinkEvent::Report(report) => {
+                let json = serde_json::json!({
+                    "id": report.id, "outcome": report.outcome.as_str(), "receivedBytes": report.received_bytes,
+                    "metadataReceived": report.metadata_received, "draining": report.draining, "closeReason": report.close_reason,
+                });
+                push_event(&mut out, EVENT_REPORT, json.to_string().as_bytes());
+            }
+            LinkEvent::Resolved { id, bytes } => {
+                let mut payload = doubles(&[opt(id)]);
+                payload.push(u8::from(bytes.is_some()));
+                payload.extend_from_slice(bytes.as_deref().unwrap_or_default());
+                push_event(&mut out, EVENT_RESOLVED, &payload);
+            }
+            LinkEvent::HaveChanged(keys) => push_event(&mut out, EVENT_HAVE_CHANGED, Value::from(keys).to_string().as_bytes()),
+            LinkEvent::ScheduleChanged => push_event(&mut out, EVENT_SCHEDULE_CHANGED, &[]),
+            LinkEvent::ServeRequest(key) => push_event(&mut out, EVENT_SERVE_REQUEST, key.as_bytes()),
+            LinkEvent::UploadCancelled(bytes) => push_event(&mut out, EVENT_UPLOAD_CANCELLED, &doubles(&[bytes as f64])),
+            LinkEvent::Progress { received, size } => push_event(&mut out, EVENT_PROGRESS, &doubles(&[received as f64, size as f64])),
+        }
+    }
+    out
+}
+
+fn sets(link: &Link) -> Vec<u8> {
+    let fetching: Vec<Value> = link.fetching().iter().map(|(key, at)| serde_json::json!([key, at])).collect();
+    let renditions: Vec<Value> = link.renditions().iter().map(|(key, at)| serde_json::json!([key, at])).collect();
+    let (serving, rendition, at) = link.contribution();
+    serde_json::json!({
+        "have": link.have().iter().collect::<Vec<_>>(),
+        "fetching": fetching,
+        "renditions": renditions,
+        "serving": serving, "rendition": rendition, "at": at,
+        "closeReason": link.close_reason(),
+    })
+    .to_string()
+    .into_bytes()
+}
+
+/// A whole number of milliseconds from a double; NaN and negatives are 0.
+fn ms(value: f64) -> u64 {
+    value as u64
+}
+
+/// A new link; returns its handle, never reused.
+#[no_mangle]
+pub extern "C" fn rs_link_new(max_segment_bytes: f64, max_queued_requests: f64, drain_timeout_ms: f64, reliable: u32, now: f64) -> u32 {
+    let config = LinkConfig {
+        max_segment_bytes: ms(max_segment_bytes),
+        max_queued_requests: ms(max_queued_requests) as usize,
+        drain_timeout_ms: ms(drain_timeout_ms),
+        reliable: reliable != 0,
+    };
+    let handle = NEXT_LINK.with(|next| {
+        let mut next = next.borrow_mut();
+        let handle = *next;
+        *next += 1;
+        handle
+    });
+    LINKS.with(|links| links.borrow_mut().insert(handle, Link::new(config, ms(now))));
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn rs_link_free(handle: u32) {
+    LINKS.with(|links| links.borrow_mut().remove(&handle));
+}
+
+/// One operation on a link; returns the frame's length at `rs_result_ptr`,
+/// or -1 for an unknown handle or operation. `open` is the channel's state
+/// before the call. `bytes`/`len` carry the operation's text or bytes, and
+/// `a`/`b` its numbers.
+///
+/// # Safety
+/// `bytes` must address `len` initialised bytes from `rs_alloc` (or `len` 0).
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn rs_link_call(handle: u32, op: u32, now: f64, open: u32, a: f64, b: f64, bytes: *const u8, len: usize) -> i32 {
+    let input = if len == 0 {
+        &[][..]
+    } else {
+        std::slice::from_raw_parts(bytes, len)
+    };
+    let text = || std::str::from_utf8(input).ok();
+    let json = || serde_json::from_slice::<Value>(input).ok();
+    let strings = |value: Option<&Value>| -> Vec<String> {
+        value
+            .and_then(Value::as_array)
+            .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
+            .unwrap_or_default()
+    };
+    let now = ms(now);
+    let out = LINKS.with(|links| {
+        let mut links = links.borrow_mut();
+        let link = links.get_mut(&handle)?;
+        link.set_channel_open(open != 0);
+        let mut request = None;
+        match op {
+            LINK_TEXT => link.handle_text(now, text()?),
+            LINK_BINARY => link.handle_binary(now, input),
+            LINK_REQUEST => {
+                // b: NaN for no expected size; a negative never matches.
+                let expected = if b.is_nan() {
+                    None
+                } else if b < 0.0 {
+                    Some(u64::MAX)
+                } else {
+                    Some(ms(b))
+                };
+                request = link.request(now, text()?, ms(a), expected);
+            }
+            LINK_ABORT => link.abort(now, ms(a), b != 0.0),
+            LINK_CLOSE => link.close(text()?),
+            LINK_TICK => link.tick(now),
+            LINK_SERVE => {
+                link.observe_buffered(ms(b));
+                link.serve_response(now, (a != 0.0).then(|| input.to_vec()));
+            }
+            LINK_BUFFERED_LOW => link.buffered_amount_low(now, ms(a)),
+            LINK_SEND_HAVE => link.send_have(&strings(json().as_ref())),
+            LINK_SEND_HAVE_CHANGE => {
+                let change = json()?;
+                link.send_have_change(&strings(change.get("add")), &strings(change.get("del")));
+            }
+            LINK_SEND_CONTRIBUTION => {
+                let rendition = json()?;
+                link.send_contribution(a != 0.0, rendition.as_str());
+            }
+            LINK_SEND_FETCHING => link.send_fetching(text()?, ms(a)),
+            LINK_STATE => {}
+            LINK_SETS => return Some(sets(link)),
+            _ => return None,
+        }
+        Some(frame(link, request))
+    });
+    RESULT.with(|cell| {
+        let mut buffer = cell.borrow_mut();
+        buffer.clear();
+        match out {
+            Some(bytes) => {
+                buffer.extend_from_slice(&bytes);
+                buffer.len() as i32
+            }
+            None => -1,
+        }
+    })
+}

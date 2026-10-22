@@ -318,6 +318,7 @@ class HlsSwarm {
     this.timers = new Set();
     this.links = new Map();
     this.peerSelection = new PeerSelection();
+    this.core = null;
     this.coreVerifier = null;
     this.coreState = "off";
     this.coreFallbacks = 0;
@@ -1682,12 +1683,13 @@ class HlsSwarm {
   async #loadCore() {
     this.coreState = "loading";
     try {
-      const core = await loadCore(this.options.coreWasm);
+      const core = await loadCore(this.options.coreWasm, { onFailure: (error) => this.#coreTrapped(error) });
       if (this.stopped) return;
+      this.core = core;
       this.coreVerifier = core.verifier;
       // Selection state is not transferred: the core takes over only before
       // the first choice, which is normally well after the module loads.
-      if (this.peerSelection.order === 0) this.peerSelection = core.peerSelection((error) => this.#coreTrapped(error));
+      if (this.peerSelection.order === 0) this.peerSelection = core.peerSelection();
       this.coreState = "ready";
     } catch (error) {
       this.coreState = "failed";
@@ -1695,10 +1697,10 @@ class HlsSwarm {
     }
   }
 
-  // A trap anywhere in the module retires it for the rest of the session.
-  // Selection has already moved to a fresh JavaScript PeerSelection.
+  // A trap anywhere in the module retires it for the rest of the session:
+  // selection moves to a fresh JavaScript PeerSelection and core links close.
   #coreTrapped(error) {
-    this.peerSelection.retire?.();
+    this.core?.retire();
     this.coreVerifier = null;
     this.coreState = "failed";
     this.coreFallbacks += 1;

@@ -16,6 +16,9 @@ export const CORE_FUNCTIONS = {
   rs_sel_minimum: [[F64], [F64]],
   rs_sel_estimate: [[I32, F64], [F64]],
   rs_sel_summary: [[I32], [I32]],
+  rs_link_new: [[F64, F64, F64, I32, F64], [I32]],
+  rs_link_free: [[I32], []],
+  rs_link_call: [[I32, I32, F64, I32, F64, F64, I32, I32], [I32]],
 };
 
 const leb = (value) => { const out = []; do { let byte = value & 0x7f; value >>>= 7; if (value) byte |= 0x80; out.push(byte); } while (value); return out; };

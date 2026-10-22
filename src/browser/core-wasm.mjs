@@ -6,6 +6,7 @@
 // Peer selection crosses as plain numbers; peer-selection.mjs is its
 // reference. One instance holds one selection state, so load one per swarm.
 
+import { CorePeerLink } from "./core-peer-link.mjs";
 import { PeerSelection } from "./peer-selection.mjs";
 import { segmentMediaContext } from "./segment-commitment.mjs";
 
@@ -43,7 +44,8 @@ async function instantiate(source) {
 }
 
 const SELECTION_EXPORTS = ["rs_sel_observe", "rs_sel_record", "rs_sel_forget", "rs_sel_select", "rs_sel_state",
-  "rs_sel_project", "rs_sel_minimum", "rs_sel_estimate", "rs_sel_summary"];
+  "rs_sel_project", "rs_sel_minimum", "rs_sel_estimate", "rs_sel_summary", "rs_link_new", "rs_link_free", "rs_link_call"];
+const LINK_SETS = 13;
 const orNull = (value) => Number.isNaN(value) ? null : value;
 // Read memory only after the call: a call can grow it, detaching the old buffer.
 const numbers = (core, pointer) => new Float64Array(core.memory.buffer, pointer, 6);
@@ -61,9 +63,9 @@ class CorePeerSelection {
   #ids = new WeakMap();
   #next = 0;
 
-  constructor(exports, onFailure) {
+  constructor(exports, fail) {
     this.#exports = exports;
-    this.#onFailure = onFailure;
+    this.#onFailure = fail;
   }
 
   get kind() { return this.#fallback ? "js" : "wasm"; }
@@ -157,14 +159,66 @@ class CorePeerSelection {
 /**
  * Load the core. `source` is a URL, the module's bytes or a compiled
  * WebAssembly.Module. `verifier` mirrors segment-commitment.mjs: a trap
- * inside the module throws; rejection returns null. `peerSelection(onFailure)`
- * returns this instance's selection, once.
+ * inside the module throws; rejection returns null. `peerSelection()` returns
+ * this instance's selection, once, and `peerLink(options)` a PeerLink backed
+ * by the core. A trap in selection or a link retires the whole instance:
+ * selection moves to a fresh JavaScript PeerSelection, every core link
+ * closes as `host`, and `onFailure(error)` runs once. `retire()` does the
+ * same without the callback, for a trap the caller caught itself.
  */
-export async function loadCore(source) {
+export async function loadCore(source, { onFailure } = {}) {
   const exports = (await instantiate(source)).exports;
   for (const name of ["memory", "rs_alloc", "rs_free", "rs_call", "rs_result_ptr", ...SELECTION_EXPORTS]) {
     if (!exports[name]) throw new Error(`Core module lacks ${name}.`);
   }
+  let retired = false, selection = null;
+  const retire = () => {
+    if (retired) return;
+    retired = true;
+    selection?.retire();
+    for (const link of [...host.links]) link.die();
+  };
+  const fail = (error) => {
+    if (retired) return;
+    retire();
+    try { onFailure?.(error); } catch {}
+  };
+  // What CorePeerLink needs from the instance. Results are copied out before
+  // any callback runs, since a callback may call in again.
+  const host = {
+    links: new Set(),
+    newLink(maxSegmentBytes, maxQueuedRequests, drainTimeoutMs, reliable, now) {
+      if (retired) throw new Error("The core has been retired.");
+      return exports.rs_link_new(maxSegmentBytes, maxQueuedRequests, drainTimeoutMs, reliable ? 1 : 0, now);
+    },
+    free(handle) {
+      if (retired) return;
+      try { exports.rs_link_free(handle); } catch (error) { fail(error); }
+    },
+    call(handle, op, now, open, a, b, bytes) {
+      if (retired) return null;
+      try {
+        const length = bytes.byteLength, pointer = exports.rs_alloc(length);
+        let size;
+        try {
+          new Uint8Array(exports.memory.buffer, pointer, length).set(bytes);
+          size = exports.rs_link_call(handle, op, now, open ? 1 : 0, a, b, pointer, length);
+        } finally {
+          exports.rs_free(pointer, length);
+        }
+        if (size < 0) throw new Error(`Core link ${handle} refused operation ${op}.`);
+        return new Uint8Array(exports.memory.buffer, exports.rs_result_ptr(), size).slice();
+      } catch (error) {
+        fail(error);
+        return null;
+      }
+    },
+    sets(handle) {
+      const bytes = host.call(handle, LINK_SETS, 0, false, 0, 0, new Uint8Array(0));
+      return bytes ? JSON.parse(decoder.decode(bytes)) : null;
+    },
+  };
+
   function call(op, input) {
     let bytes;
     try { bytes = encoder.encode(JSON.stringify(input)); } catch { return null; }
@@ -193,12 +247,16 @@ export async function loadCore(source) {
         maxSegmentBytes: options.maxSegmentBytes, delegation: options.delegation ?? null }, at]);
     },
   });
-  let selection = null;
   return Object.freeze({
     verifier,
-    peerSelection(onFailure) {
+    retire,
+    get retired() { return retired; },
+    peerSelection() {
       if (selection) throw new Error("This core instance already has a peer selection.");
-      return selection = new CorePeerSelection(exports, onFailure);
+      return selection = new CorePeerSelection(exports, fail);
+    },
+    peerLink(options) {
+      return new CorePeerLink(options, host);
     },
   });
 }

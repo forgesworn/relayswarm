@@ -58,7 +58,7 @@ class FakeChannel {
 const flush = async () => { for (let index = 0; index < 20; index++) await new Promise((resolve) => setImmediate(resolve)); };
 
 /** Run one trace and return the per-step logs and state snapshots. */
-export async function runLinkTrace(trace) {
+export async function runLinkTrace(trace, create = (options) => new PeerLink(options)) {
   const clock = new FakeClock();
   const saved = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout, now: Date.now };
   const log = [], resolutions = [], serveQueue = [];
@@ -69,7 +69,7 @@ export async function runLinkTrace(trace) {
   globalThis.clearTimeout = clock.clearTimeout;
   Date.now = () => clock.now;
   try {
-    const link = new PeerLink({ pubkey: "f".repeat(64), pc, channel, maxSegmentBytes: trace.config.maxSegmentBytes,
+    const link = create({ pubkey: "f".repeat(64), pc, channel, maxSegmentBytes: trace.config.maxSegmentBytes,
       maxQueuedRequests: trace.config.maxQueuedRequests, drainTimeoutMs: trace.config.drainTimeoutMs,
       onRequest: (_link, key) => new Promise((resolve) => { log.push({ serveRequest: key }); serveQueue.push(resolve); }),
       onHaveChange: (_link, added) => log.push({ haveChanged: [...added] }),

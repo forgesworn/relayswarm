@@ -196,6 +196,12 @@ pub struct Link {
     /// The latest time an input carried.
     clock: u64,
     events: Vec<LinkEvent>,
+    /// The shell's channel is open; a closed or closing channel sends
+    /// nothing and cannot drain an abandoned response.
+    channel_open: bool,
+    /// Bumped whenever have, fetching, renditions, contribution or closed
+    /// may have changed, so a shell mirrors them only when needed.
+    version: u64,
 }
 
 fn is_hex64(value: &Value) -> bool {
@@ -253,6 +259,8 @@ impl Link {
             bytes_out: 0,
             clock: now,
             events: Vec::new(),
+            channel_open: true,
+            version: 0,
         }
     }
 
@@ -300,9 +308,37 @@ impl Link {
     pub fn bytes_out(&self) -> u64 {
         self.bytes_out
     }
+    pub fn opened_at(&self) -> u64 {
+        self.opened_at
+    }
+    pub fn last_served_at(&self) -> u64 {
+        self.last_served_at
+    }
+    pub fn last_delivered_at(&self) -> u64 {
+        self.last_delivered_at
+    }
+    /// The pending request's ID, including one that is draining.
+    pub fn pending_id(&self) -> Option<u64> {
+        self.pending.as_ref().map(|pending| pending.id)
+    }
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// Whether the shell's channel is open, as `readyState === "open"`.
+    pub fn set_channel_open(&mut self, open: bool) {
+        self.channel_open = open;
+    }
+
+    /// The channel's queued bytes, read before a response is sent. Responses
+    /// below the low-water mark never fire `bufferedamountlow`, so the count
+    /// kept from sends alone would only grow.
+    pub fn observe_buffered(&mut self, buffered: u64) {
+        self.buffered = buffered;
+    }
 
     fn send_text(&mut self, message: &[(&str, &Value)]) -> bool {
-        if self.closed {
+        if self.closed || !self.channel_open {
             return false;
         }
         self.events.push(LinkEvent::SendText(js::stringify_fields(message)));
@@ -418,7 +454,7 @@ impl Link {
         } else {
             Outcome::Abort
         };
-        if !self.config.reliable {
+        if !(self.config.reliable && self.channel_open) {
             let pending = self.finish(None, Some(outcome), false);
             self.close(reason);
             if let Some(mut pending) = pending {
@@ -487,6 +523,7 @@ impl Link {
             return;
         }
         self.closed = true;
+        self.version += 1;
         let reason = close_reason(reason);
         self.close_reason = Some(reason);
         self.fetching.clear();
@@ -682,6 +719,7 @@ impl Link {
                 self.renditions.insert(rendition, now);
             }
         }
+        self.version += 1;
         self.events.push(LinkEvent::ScheduleChanged);
     }
 
@@ -702,6 +740,7 @@ impl Link {
         } else if self.serving && (self.fetching.contains_key(key) || self.fetching.len() < MAX_FETCHING) {
             self.fetching.insert(key.to_owned(), now + ms as u64);
         }
+        self.version += 1;
         self.events.push(LinkEvent::ScheduleChanged);
     }
 
@@ -722,6 +761,7 @@ impl Link {
         for key in valid_keys(message.get("del")) {
             self.have.shift_remove(&key);
         }
+        self.version += 1;
         if !added.is_empty() {
             self.events.push(LinkEvent::HaveChanged(added));
         }

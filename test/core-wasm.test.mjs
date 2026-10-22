@@ -73,7 +73,7 @@ test("repeated calls give the same answers", () => {
 
 // One selection state per instance: a fresh instance for every sequence.
 const compiled = await WebAssembly.compile(bytes);
-const coreSelection = async () => (await loadCore(compiled)).peerSelection(() => { throw new Error("core selection trapped"); });
+const coreSelection = async () => (await loadCore(compiled, { onFailure: () => { throw new Error("core selection trapped"); } })).peerSelection();
 
 test("seeded selection sequences match the JavaScript through WebAssembly", async () => {
   for (let seed = 1; seed <= 24; seed++) {
@@ -110,7 +110,7 @@ test("selection arguments the loader can pass match the JavaScript", async () =>
 test("a selection trap hands over to a fresh JavaScript selection", async () => {
   const failures = [];
   const traps = Object.keys(CORE_FUNCTIONS).filter((name) => name.startsWith("rs_sel_"));
-  const selection = (await loadCore(stubCore(traps))).peerSelection((error) => failures.push(error));
+  const selection = (await loadCore(stubCore(traps), { onFailure: (error) => failures.push(error) })).peerSelection();
   const link = { pubkey: "a", closed: false, busy: false, have: new Set(["k"]) };
   assert.equal(selection.kind, "wasm");
   selection.record(link, 100, 1000);

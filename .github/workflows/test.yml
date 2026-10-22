@@ -186,7 +186,7 @@ jobs:
       - name: Fresh WebAssembly module against the shared vectors
         run: |
           node scripts/build-core-wasm.mjs --out "$RUNNER_TEMP/relayswarm-core.wasm"
-          RELAYSWARM_CORE_WASM="$RUNNER_TEMP/relayswarm-core.wasm" node --test test/core-wasm.test.mjs
+          RELAYSWARM_CORE_WASM="$RUNNER_TEMP/relayswarm-core.wasm" node --test test/core-wasm.test.mjs test/core-link.test.mjs
           sha256sum "$RUNNER_TEMP/relayswarm-core.wasm" src/browser/relayswarm-core.wasm
 
   live-relays:

@@ -10,7 +10,7 @@
     "check": "node scripts/check-syntax.mjs",
     "audit": "npm audit --audit-level=high",
     "test:browser": "node test/hls-swarm-browser.mjs",
-    "test:proto": "node --test test/proto-vectors.test.mjs test/core-wasm.test.mjs",
+    "test:proto": "node --test test/proto-vectors.test.mjs test/core-wasm.test.mjs test/core-link.test.mjs",
     "core:wasm": "node scripts/build-core-wasm.mjs",
     "proto:vectors": "node scripts/generate-proto-vectors.mjs",
     "proto:traces": "node scripts/generate-selection-traces.mjs",
