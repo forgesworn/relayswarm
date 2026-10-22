@@ -437,8 +437,8 @@ not an identity), `uptimeMs`, `serving`, plus:
   `peerUnverified`, `inTimeShare`, `sampledInTimeShare`, `observedInTimeShare`,
   `sampledInTimeByteShare`, `observedInTimeByteShare`, `peerFirstLoaded`,
   `originFallbacks`, `peerSkippedLate`, `peerProjectedLate`, `peerWaitExtended`,
-  `peerAbandoned`, `peerNoFit`, `commitmentRequests`, `commitmentRejected`,
-  `commitmentUnavailable`, `peerFirstShare`, `peerFirstByteShare`, `peerLatencyMedianMs`,
+  `peerAbandoned`, `peerNoFit`, `peerUntestedTrial`, `peerUntestedTrialLoaded`,
+  `commitmentRequests`, `commitmentRejected`, `commitmentUnavailable`, `peerFirstShare`, `peerFirstByteShare`, `peerLatencyMedianMs`,
   `peerLatencyP90Ms`, `originLatencyMedianMs`.
 - `bytes`: `fromOrigin`, `fromPeers`, `peerFirst`, `uploaded`, `uploadsServed`,
   `uploadsRefused`, `uploadsCancelled`, `uploadCancelledBytes`, `held`,
@@ -493,7 +493,11 @@ discovery treats as stale for this rendition, see below) and `heldMissHolders`
 (the links recorded as a held miss on this decision, see below; empty until the
 load ends, then filled on the decision's last row). The first three are read
 after the decision and change no decision, timer or deadline; if reading them
-fails the row is still written with the arrays null. A holder label is a positive integer that this instance assigns to each
+fails the row is still written with the arrays null. The `have-at-entry` row of
+a load that was granted an untested-holder trial (see
+[peer-first loading](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md#authenticated-peer-first-loading)) also carries
+`trial: true` and the `projection` detail of the stage that was late; no other
+row has a `trial` field. A holder label is a positive integer that this instance assigns to each
 remote peer when it first becomes a link, in first-link order, kept across
 connection replacement in a map of at most 64 peers (oldest evicted; `0` means
 unknown). It is a local counter, not a key or address: it is never derived from
@@ -645,6 +649,28 @@ Victim selection protects active receiving, draining and queued/active uploads,
 minimum link life, bidirectional idle time, the shared rotation cooldown and
 useful sibling audio/video neighbours. At least one established link remains.
 
+Among the links that rotation could already drop (not mid-transfer, not banned,
+at least `minLinkLifeMs` old and idle for `idleEvictMs`), both this victim choice
+and the idle rotation for an incoming offer now go in tier order before idle
+time. Tier 0 (unhelpful) is a non-serving remote that is not a consumer. Tier 1
+(serving) is a remote that is serving. Tier 2 (consumer) is a non-serving remote
+when this viewer is serving, if that remote announced, in a contribution message
+within two `presenceIntervalMs`, a rendition this viewer plays within 30 s: it
+plays what this viewer can give it, though it may not have asked yet. The lowest
+tier goes first, and idle longest within it. A discovery replacement still
+leaves out the links useful to an active context before it orders the rest.
+This is an ordering, not an exemption. If the link to a consumer is the only
+eligible link it is dropped exactly as before, so a receiver that never asks
+still cannot hold a slot indefinitely, and the ordering does not make discovery
+run when no candidate hints a demanded key. Rotation cadence, the number of
+rotations, `minLinkLifeMs`, `idleEvictMs` and `evictionCooldownMs` are
+unchanged. Each link keeps, for at most eight renditions, when the remote last
+announced each one, serving or not; this is local state and no message
+changes. `peers.evictedUnhelpful`, `evictedServing` and `evictedConsumer` count
+offer evictions by the victim's tier, `neighbourDiscovery.counters.victimUnhelpful`,
+`victimServing` and `victimConsumer` count discovery replacements, and
+`peers.evicted` still counts every eviction.
+
 A serving link normally counts as a neighbour for its rendition even before it
 holds any segment, which keeps discovery off. Each load that reached the HAVE
 check is decided once, when it ends. If a verified segment came from a link, that
@@ -690,7 +716,11 @@ viewer on origin for that rendition between attempts. The additive
 every serving link was stale; `staleBlocked` counts loads where a fresh eligible
 candidate hinted a demanded key for such a context but a bound (spent allowance,
 no room or victim, no outgoing slot, an attempt in flight) began no attempt;
-`heldMiss` counts one per link and demanded key for a held miss. All are local
+`heldMiss` counts one per link and demanded key for a held miss. `unmetNoHint`
+counts, at most once per candidate search, a current unmet context for which no
+fresh candidate hinted a demanded key, and `unmetIneligible` one for which fresh
+candidates did but every one was ineligible (cooldown, retries, already
+dialling); neither changes the search. All are local
 counts in the local snapshot, are not added to the numeric operator report, and
 do not show that delivery improved. A stale link's HAVE does not count: a link
 that still advertises a demanded key but is stale for that context neither keeps
@@ -821,6 +851,36 @@ from two first-byte times in, when neither double its latest rate nor the best
 recent rate would finish in time. `peerAbandoned` counts these. The holder is
 asked to stop and returns the unsent bytes to its per-second rate.
 
+A holder that has never been asked gets one request. The projection rests on one
+pool of timing evidence for the whole viewer, so a single slow holder's partial
+transfers can make every decision late, including the decision about a holder
+that has not been tried. When the entry or the commitment projection would send
+a load to origin as `projected-late`, some link held the key at entry (the load
+is not coordinated), and the room to the buffer limit is longer than the median
+first byte, the loader looks for an untested holder: an open, free, unbanned
+link whose HAVE holds the key, that has no recorded attempt, and that is not
+stale for the load's context. If there is one, the load waits to the buffer
+limit as a nearly fitting projection does, and its first request goes to that
+link (the first in link order, since an untested link has no observation to
+rank by). `peerUntestedTrial` counts the request and `peerUntestedTrialLoaded`
+a request that returned a segment verified against its commitment. For that
+decision no `projected-late` row is written and `peerProjectedLate` is not
+counted. A load gets at most one trial and a link is untested only until its
+first recorded attempt, so it gets at most one in its life. A stale link, a busy
+or banned one, and a coordinated load get none. The rest of the attempt is
+unchanged: the pre-request checks above still send a load to origin
+(`peerSkippedLate`), the attempt is abandoned on its own progress, a link that
+was asked and did not deliver is charged as a held miss, and later requests in
+the same load use the ordinary choice. There is no completion-rate condition. The
+option considered was to allow a trial only when the median completed transfer
+time fits the room, but a receiver whose only evidence is partial transfers has
+no completed transfer to take a median of, so that condition would not apply in
+the case the trial is for. The safeguards are the existing ones: the buffer
+limit, the pre-request first-byte and fastest-completion checks, and abandonment
+on the attempt's own progress. This gives an untested holder one chance. It does
+not make a segment fit a room shorter than a relayed transfer needs, and a load
+with less room than that still goes to origin.
+
 When an eligible same-rendition contributor is fetching a new segment, the
 loader requests its signed commitment while waiting for availability. It
 verifies the commitment after availability arrives, before requesting peer
@@ -865,7 +925,9 @@ decide its own mode.
   of its own, at most one per `evictionCooldownMs`, and never a link that is
   mid-transfer or younger than `minLinkLifeMs`. Rotating for anyone who asked
   was measured to cost late joiners more than it won, because an evicted peer
-  re-dials at once and displaces a third. Other refusals carry a
+  re-dials at once and displaces a third. Among the links it may drop it takes
+  the lowest tier first, so a link to a receiver that plays what it can give goes
+  last, not never. Other refusals carry a
   `retryAfterMs` and up to two referrals instead. `peers.evicted`,
   `peers.evictionsUnavailable`, `peers.retriesScheduled`,
   `peers.referralsFollowed`, `offersRefused` and `segments.noPeers` show what
@@ -915,6 +977,27 @@ improves, and field acceptance remains open. See [Status](https://raw.githubuser
   `neighbourDiscovery.replacementRearmMs`, and `heldMissHolders` on the
   eligibility rows that carry holder labels. They sit in the local snapshot and
   are not part of the numeric operator report.
+- Give a linked holder that holds the demanded key but has never been asked one
+  request when the viewer's shared projection is late. One slow holder's partial
+  transfers set the projected rate for every link, so a later holder could be
+  declined unasked. Only when some link held the key at entry, the room exceeds
+  the median first byte and the holder is open, free, unbanned and not stale. At
+  most one trial per load and per link; the pre-request checks, abandonment and
+  held-miss charging apply as before. There is no completion-rate condition,
+  because a receiver whose only evidence is partial transfers has no completed
+  transfer to measure. This is one chance, not a promise that the segment fits.
+- Order rotation victims by tier before idle time: a non-serving remote that is
+  not a consumer, then a serving remote, then a non-serving remote that announced
+  a rendition this serving viewer plays. This is an ordering of links rotation
+  could already drop, not an exemption, so a consumer link is still dropped when
+  it is the only eligible one. Rotation cadence, `minLinkLifeMs`, `idleEvictMs`,
+  `evictionCooldownMs` and the wire messages are unchanged.
+- Add local diagnostics: `segments.peerUntestedTrial` and
+  `peerUntestedTrialLoaded`, `peers.evictedUnhelpful`, `evictedServing` and
+  `evictedConsumer`, `neighbourDiscovery.counters.victimUnhelpful`,
+  `victimServing`, `victimConsumer`, `unmetNoHint` and `unmetIneligible`, and
+  `trial: true` on the eligibility row of a granted trial. They sit in the local
+  snapshot and are not part of the numeric operator report.
 - The late-arrival projection, deadlines, abandonment, bounded peer work,
   admission and HTTP fallback are unchanged.
 

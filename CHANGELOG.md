@@ -28,6 +28,27 @@ improves, and field acceptance remains open. See [Status](docs/STATUS.md).
   `neighbourDiscovery.replacementRearmMs`, and `heldMissHolders` on the
   eligibility rows that carry holder labels. They sit in the local snapshot and
   are not part of the numeric operator report.
+- Give a linked holder that holds the demanded key but has never been asked one
+  request when the viewer's shared projection is late. One slow holder's partial
+  transfers set the projected rate for every link, so a later holder could be
+  declined unasked. Only when some link held the key at entry, the room exceeds
+  the median first byte and the holder is open, free, unbanned and not stale. At
+  most one trial per load and per link; the pre-request checks, abandonment and
+  held-miss charging apply as before. There is no completion-rate condition,
+  because a receiver whose only evidence is partial transfers has no completed
+  transfer to measure. This is one chance, not a promise that the segment fits.
+- Order rotation victims by tier before idle time: a non-serving remote that is
+  not a consumer, then a serving remote, then a non-serving remote that announced
+  a rendition this serving viewer plays. This is an ordering of links rotation
+  could already drop, not an exemption, so a consumer link is still dropped when
+  it is the only eligible one. Rotation cadence, `minLinkLifeMs`, `idleEvictMs`,
+  `evictionCooldownMs` and the wire messages are unchanged.
+- Add local diagnostics: `segments.peerUntestedTrial` and
+  `peerUntestedTrialLoaded`, `peers.evictedUnhelpful`, `evictedServing` and
+  `evictedConsumer`, `neighbourDiscovery.counters.victimUnhelpful`,
+  `victimServing`, `victimConsumer`, `unmetNoHint` and `unmetIneligible`, and
+  `trial: true` on the eligibility row of a granted trial. They sit in the local
+  snapshot and are not part of the numeric operator report.
 - The late-arrival projection, deadlines, abandonment, bounded peer work,
   admission and HTTP fallback are unchanged.
 
