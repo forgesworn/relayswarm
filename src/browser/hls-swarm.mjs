@@ -1275,7 +1275,11 @@ class HlsSwarm {
         this.banned.add(link.pubkey);
         demand.asked.delete(link.pubkey);
         link.close("integrity");
-        if (signal.aborted) return null;
+        if (signal.aborted) {
+          // An earlier asked link may still have failed in time: record once, as at the loop's end.
+          if (plan.expired) this.#recordOutcome(demand);
+          return null;
+        }
         continue;
       }
       if (signal.aborted) {

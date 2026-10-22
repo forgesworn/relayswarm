@@ -3484,6 +3484,85 @@ test("loads that end for the viewer's own reasons record nothing against a holde
 
 // stop() is not tested here: it clears discovery, so a held miss recorded after it could not
 // be observed through the counters. The loader guards on stopped are the only protection.
+// Two holders, each measured once so that selection is by estimate rather than exploration.
+// The fixture's holder is A and its first link is B; both hold every key they are given.
+async function measuredPair(t, { aDelay, bDelay, bBody, ...options }) {
+  const f = await staleHolderFixture(t, { originFallbackMs: 2000, serve: { bytes: bytes32, delayMs: aDelay }, firstServe: { bytes: bytes32, delayMs: bDelay }, ...options });
+  if (bBody) f.siblingChannel.bodyDelayMs = bBody;
+  const via = f.candidate();
+  const hold = (key, ...who) => {
+    const frame = held => held ? haveFrame(key) : haveFrame();
+    f.holderChannel.receive(frame(key && who.includes("A"))); f.siblingChannel.receive(frame(key && who.includes("B")));
+  };
+  const run = async (...who) => {
+    const segment = f.next(); via.announce(segment.key); await sleep(30); f.touch(); f.siblingChannel.receive(serving());
+    hold(segment.key, ...who); await f.load(segment.name); await sleep(5); hold(undefined); return segment;
+  };
+  for (let i = 0; i < 12 && !(f.requests.includes("holder") && f.requests.includes("other")); i++) await run("A", "B");
+  assert.ok(f.requests.includes("holder") && f.requests.includes("other"), "both holders have been measured");
+  return { f, via, run, labels: { A: f.label(f.holderKey), B: f.label(f.peers[0].pubkey) } };
+}
+
+test("an asked and abandoned holder is charged while another holder of the key that was not asked is not", async t => {
+  const { f, run, labels } = await measuredPair(t, { aDelay: 20, bDelay: 150 });
+  try {
+    f.holderChannel.delayMs = null;
+    const asked = f.requests.length;
+    await run("A", "B");
+    assert.deepEqual(f.requests.slice(asked), ["holder"], "A, the faster, is asked and B is not");
+    assert.equal(f.swarm.metrics().segments.peerAbandoned, 1);
+    assert.equal(f.discovery().heldMiss, 1);
+    assert.deepEqual(f.rows().filter(row => row.heldMissHolders?.length).map(row => row.heldMissHolders), [[labels.A]]);
+  } finally { await f.close(); }
+});
+
+test("at peerNoFit an untried holder whose own estimate does not fit is charged and a serving link without the key is not", async t => {
+  // B is slow on its own link (quick first chunk, 800 ms body); A is fast. Only B holds the key, with 500 ms of room.
+  const { f, run, labels } = await measuredPair(t, { aDelay: 20, bDelay: 20, bBody: 800 });
+  try {
+    f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 12.5 } };
+    const asked = f.requests.length;
+    await run("B");
+    assert.equal(f.requests.length, asked, "nothing was asked");
+    assert.equal(f.swarm.metrics().segments.peerNoFit, 1);
+    assert.equal(f.discovery().heldMiss, 1);
+    assert.deepEqual(f.rows().filter(row => row.heldMissHolders?.length).map(row => row.heldMissHolders), [[labels.B]], "A serves but lacks the key");
+  } finally { await f.close(); }
+});
+
+test("a request skipped because no recent transfer could finish charges no holder", async t => {
+  const f = await staleHolderFixture(t, { originFallbackMs: 1000, serve: { bytes: bytes32, delayMs: 20 } });
+  try {
+    const via = f.candidate();
+    f.holderChannel.bodyDelayMs = 250;
+    await f.deliver(via);
+    // 220 ms of room against a transfer of about 250 ms: nearly fits, but the fastest completion is slower.
+    f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 12.22 } };
+    await f.fail(via);
+    assert.equal(f.swarm.metrics().segments.peerSkippedLate, 1);
+    assert.equal(f.requests.length, 1, "the holder was not asked");
+    assert.equal(f.discovery().heldMiss, 0);
+    assert.ok(f.rows().every(row => !row.heldMissHolders?.length));
+  } finally { await f.close(); }
+});
+
+test("a corrupt payload hashed past the deadline is not charged but an earlier asked link that failed is", async t => {
+  slowPayloadDigest(t, 400);
+  // B (tried first) answers `none`; A then returns a payload that does not match its commitment.
+  const f = await staleHolderFixture(t, { originFallbackMs: 150, serve: { bytes: new Uint8Array(32).fill(1), commitmentBytes: bytes32, delayMs: 20 },
+    firstServe: { bytes: null, delayMs: 5 } });
+  try {
+    const via = f.candidate(), failed = f.label(f.peers[0].pubkey);
+    const segment = f.next(); via.announce(segment.key); await sleep(30); f.touch(); f.siblingChannel.receive(serving());
+    f.holderChannel.receive(haveFrame(segment.key)); f.siblingChannel.receive(haveFrame(segment.key));
+    await f.load(segment.name); await sleep(450);
+    assert.deepEqual(f.requests, ["other", "holder"], "B failed first, then A was asked");
+    assert.equal(f.swarm.metrics().segments.peerCorrupt, 1); assert.equal(f.holderChannel.readyState, "closed");
+    assert.equal(f.discovery().heldMiss, 1);
+    assert.deepEqual(f.rows().filter(row => row.heldMissHolders?.length).map(row => row.heldMissHolders), [[failed]]);
+  } finally { await f.close(); }
+});
+
 // The deadline lands while the payload is being hashed: hashing of the 32-byte payload is
 // held past the origin timer, so the load has already fallen back when the digest returns.
 function slowPayloadDigest(t, delayMs) {
