@@ -3043,13 +3043,15 @@ class HolderChannel extends ServingChannel {
 // load in a sequence can be delivered and verified. `unavailable` makes the
 // commitment fetch fail.
 function keyedCommitments(bytes) {
-  const secret = generateSecretKey(), sha256 = createHash("sha256").update(bytes).digest("hex");
+  const secret = generateSecretKey();
   const streamEvent = finalizeEvent({ kind: 30311, created_at: Math.floor(Date.now() / 1000), tags: [["d", "test"], ["relayswarm", "redistribute", "1"]], content: "" }, secret);
-  const state = { unavailable: false, streamEvent };
+  // `bytes` may be replaced between loads to change the committed size.
+  const state = { unavailable: false, streamEvent, bytes };
   state.getCommitment = (ctx) => {
     if (state.unavailable) throw new Error("commitment unavailable");
+    const sha256 = createHash("sha256").update(state.bytes).digest("hex");
     const key = createHash("sha256").update(`${base.swarmId}\n${new URL(ctx.url).pathname}`).digest("hex");
-    const fields = { streamEventId: streamEvent.id, swarmId: base.swarmId, key, rendition: String(ctx.frag?.level ?? 0), sequence: 1, discontinuity: 0, part: null, sha256, size: bytes.byteLength,
+    const fields = { streamEventId: streamEvent.id, swarmId: base.swarmId, key, rendition: String(ctx.frag?.level ?? 0), sequence: 1, discontinuity: 0, part: null, sha256, size: state.bytes.byteLength,
       expiresAt: Math.floor(Date.now() / 1000) + 60 };
     return finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: Math.floor(Date.now() / 1000), tags: [["x", fields.swarmId], ["e", fields.streamEventId]], content: commitmentContent(fields) }, secret);
   };
@@ -3066,14 +3068,14 @@ async function staleHolderFixture(t, { maxPeers = 2, answering = false, sibling 
   // With `serve`, the holder is a ServingChannel (its delayMs may be changed
   // between loads; null never answers) and every segment key has a signed commitment.
   const requests = [], commitments = serve ? keyedCommitments(serve.commitmentBytes ?? serve.bytes) : null;
-  const holderChannel = serve ? new HolderChannel(serve.bytes, serve.delayMs, requests, "holder") : new RecordedChannel();
+  const holderChannel = serve ? new (serve.Channel ?? HolderChannel)(serve.bytes, serve.delayMs, requests, "holder") : new RecordedChannel();
   const f = await linkedFixture({ ...playback.options, ...(commitments ? { streamEvent: commitments.streamEvent, getCommitment: commitments.getCommitment } : {}),
     WebSocketImpl: memoryRelaySocket(), ticket: "own-ticket",
     admit: async () => true, maxPeers, minLinkLifeMs: 1, idleEvictMs: 1, evictionCooldownMs: 1, ...options }, loader);
   const own = f.swarm.metrics().pubkey;
   // The first link is idle, or with `sibling` serves the audio rendition only.
   // With `firstServe` the first link is a second holder (same trace, labelled "other").
-  const otherChannel = firstServe ? new HolderChannel(firstServe.bytes, firstServe.delayMs, requests, "other") : null;
+  const otherChannel = firstServe ? new (firstServe.Channel ?? HolderChannel)(firstServe.bytes, firstServe.delayMs, requests, "other") : null;
   const first = await f.addPeer(otherChannel ?? undefined); const holder = await f.addPeer(holderChannel);
   holder.receive(serving());
   if (sibling) first.receive(serving("audio:0"));
@@ -3984,4 +3986,271 @@ test("neither unmet counter moves when the context is met or choose returns a ca
   assert.ok(idle.begin());
   assert.equal(idle.state.choose(() => true, () => true, true), null, "an attempt is already in flight");
   for (const value of [state, idle.state]) assert.deepEqual([value.counters.unmetNoHint, value.counters.unmetIneligible], [0, 0]);
+});
+
+// A holder that sends its segment in 16 KiB chunks `gapMs` apart and goes quiet after `stallAfter` of them.
+// A tested link that stalls leaves only partial-flow rate evidence behind, as in the field failure.
+class ChunkedHolder extends HolderChannel {
+  gapMs = 0; stallAfter = Infinity; started = new Set();
+  send(data) {
+    const frame = typeof data === "string" ? JSON.parse(data) : null;
+    // After metadata a holder ends a cancelled response with eof, never `none`.
+    if (frame?.t === "cancel" && this.started.has(frame.id)) {
+      RecordedChannel.prototype.send.call(this, data);
+      return void setTimeout(() => { if (this.readyState === "open") this.receive(JSON.stringify({ t: "eof", id: frame.id })); }, 1);
+    }
+    if (frame?.t !== "want" || this.delayMs === null || !this.bytes) return super.send(data);
+    RecordedChannel.prototype.send.call(this, data); this.trace.push(this.label);
+    const chunks = Math.ceil(this.bytes.byteLength / 16384);
+    setTimeout(() => {
+      if (this.readyState !== "open") return;
+      this.started.add(frame.id);
+      this.receive(JSON.stringify({ t: "meta", id: frame.id, size: this.bytes.byteLength }));
+      for (let i = 0; i < Math.min(chunks, this.stallAfter); i++) setTimeout(() => {
+        if (this.readyState !== "open") return;
+        this.receive(this.bytes.slice(i * 16384, (i + 1) * 16384).buffer);
+        if (i === chunks - 1) this.receive(JSON.stringify({ t: "eof", id: frame.id }));
+      }, i * this.gapMs);
+    }, this.delayMs);
+  }
+}
+
+// Link A (`holder`) is slow: it completes a small segment, which is its only rate evidence, and no completed
+// transfer is as large as the big segment that follows. Link B (`other`, first in link order) has never been
+// asked and serves at once. Both are serving links of the current rendition.
+const bigSegment = new Uint8Array(10 * 16384).fill(5), smallSegment = new Uint8Array(3 * 16384).fill(5);
+async function trialFixture(t, { gapMs = 200, stallAfter = Infinity, ...options } = {}) {
+  const f = await staleHolderFixture(t, { originFallbackMs: 1000, firstServes: true,
+    serve: { bytes: bigSegment, delayMs: 5, Channel: ChunkedHolder }, firstServe: { bytes: bigSegment, delayMs: 20, Channel: ChunkedHolder }, ...options });
+  Object.assign(f.holderChannel, { gapMs, stallAfter });
+  const holds = (key, who, channel, name) => channel.receive(key && who.includes(name) ? haveFrame(key) : haveFrame());
+  const hold = (key, ...who) => { holds(key, who, f.holderChannel, "A"); holds(key, who, f.siblingChannel, "B"); };
+  const run = async (...who) => {
+    const segment = f.next(); f.touch(); f.siblingChannel.receive(serving());
+    hold(segment.key, ...who); await f.load(segment.name); await sleep(5); hold(undefined); return segment;
+  };
+  const setBytes = bytes => { f.commitments.bytes = bytes; for (const channel of [f.holderChannel, f.siblingChannel]) if (channel.bytes) channel.bytes = bytes; };
+  // A delivers the small segment slowly (rate evidence, one recorded attempt); the next committed size is large.
+  const learn = async () => { setBytes(smallSegment); await run("A"); setBytes(bigSegment); };
+  // Then A is declined at the commitment stage for the big segment, which makes 160 KiB the size hint.
+  const prime = async () => { await learn(); await run("A"); };
+  const measured = pubkey => f.swarm.metrics().peers.deliveryMeasurements.find(value => value.pubkey === pubkey);
+  const segments = () => f.swarm.metrics().segments;
+  const labels = { A: f.label(f.holderKey), B: f.label(f.peers[0].pubkey) };
+  const pubkeys = { A: f.holderKey, B: f.peers[0].pubkey };
+  return { f, run, hold, learn, prime, measured, segments, labels, pubkeys };
+}
+
+test("an untested holder is asked once when the shared projection is late, and delivers", async t => {
+  const { f, run, prime, measured, segments, pubkeys, labels } = await trialFixture(t);
+  try {
+    await prime();
+    assert.equal(measured(pubkeys.A).attempts, 1, "A is tested; its slow small delivery is the rate evidence");
+    assert.equal(measured(pubkeys.B).attempts, 0);
+    assert.equal(segments().peerUntestedTrial, 0);
+    const asked = f.requests.length, charged = f.discovery().heldMiss;
+    await run("A", "B");
+    assert.deepEqual(f.requests.slice(asked), ["other"], "the untested holder, not the tested one");
+    assert.equal(segments().peerUntestedTrial, 1); assert.equal(segments().peerUntestedTrialLoaded, 1);
+    assert.equal(segments().peerFirstLoaded, 2, "the small delivery while priming and the trial");
+    assert.equal(segments().peerProjectedLate, 1, "only the priming decline: none is counted for a trial");
+    assert.deepEqual(f.rows().filter(row => row.reason === "projected-late").map(row => row.projection.stage), ["commitment"]);
+    assert.equal(measured(pubkeys.B).attempts, 1, "after its recorded attempt it is no longer untested");
+    assert.equal(f.discovery().heldMiss, charged, "a delivery charges nobody");
+    const row = f.rows().at(-1);
+    assert.equal(row.reason, "have-at-entry"); assert.equal(row.trial, true);
+    assert.deepEqual(row.haveHolders, [labels.A, labels.B].sort((a, b) => a - b));
+  } finally { await f.close(); }
+});
+
+test("a trial that fails charges the asked holder, which is then no longer untested and gets no second trial", async t => {
+  const { f, run, prime, measured, segments, pubkeys, labels } = await trialFixture(t, { firstServe: { bytes: bigSegment, delayMs: null } });
+  try {
+    await prime();
+    const asked = f.requests.length, charged = f.discovery().heldMiss;
+    await run("B");
+    assert.deepEqual(f.requests.slice(asked), ["other"]);
+    assert.equal(segments().peerUntestedTrial, 1); assert.equal(segments().peerUntestedTrialLoaded, 0);
+    assert.equal(segments().peerAbandoned, 1, "silence on a link with a known first byte is abandoned early");
+    assert.equal(segments().peerFirstLoaded, 1, "only the small delivery while priming");
+    assert.equal(measured(pubkeys.B).attempts, 1);
+    assert.equal(f.discovery().heldMiss, charged + 1, "the trial link was asked, so it is charged as an asked holder");
+    assert.deepEqual(f.rows().filter(row => row.heldMissHolders?.length).map(row => row.heldMissHolders).at(-1), [labels.B]);
+    // With an attempt on record, the same holder gets the ordinary decision.
+    const before = f.requests.length;
+    await run("B");
+    assert.equal(f.requests.length, before, "not asked again");
+    assert.equal(segments().peerUntestedTrial, 1); assert.equal(segments().peerProjectedLate, 2, "the priming decline and this one");
+    const late = f.rows().filter(row => row.reason === "projected-late");
+    assert.deepEqual(late.map(row => row.projection.stage), ["commitment", "entry"]); assert.ok(!("trial" in late.at(-1)));
+  } finally { await f.close(); }
+});
+
+test("a trial row carries the entry projection when the committed size then fits", async t => {
+  const { f, run, prime, segments } = await trialFixture(t);
+  try {
+    await prime();
+    // The size hint is 160 KiB, so the entry projection is late; the committed size is 48 KiB, which fits.
+    for (const channel of [f.commitments, f.siblingChannel, f.holderChannel]) channel.bytes = smallSegment;
+    await run("A", "B");
+    const row = f.rows().at(-1);
+    assert.equal(row.reason, "have-at-entry"); assert.equal(row.trial, true);
+    assert.equal(row.projection.stage, "entry"); assert.ok(row.projection.transferMs > 1500, JSON.stringify(row.projection));
+    assert.deepEqual(Object.keys(row.projection).sort(), ["firstByteMs", "holderWaitMs", "rateBytesPerSecond", "roomMs", "stage", "transferMs"]);
+    assert.equal(segments().peerUntestedTrial, 1); assert.equal(segments().peerProjectedLate, 1, "only the priming decline");
+    assert.equal(f.rows().filter(value => "trial" in value).length, 1, "only the trial row carries the field");
+  } finally { await f.close(); }
+});
+
+test("a commitment-stage late projection grants the trial and replaces the detail on the have row", async t => {
+  const { f, run, learn, segments } = await trialFixture(t);
+  try {
+    // The size hint is the small segment, so the entry projection fits; the large committed size is late once it is in.
+    await learn();
+    const asked = f.requests.length;
+    await run("A", "B");
+    assert.deepEqual(f.requests.slice(asked), ["other"]);
+    const row = f.rows().filter(value => value.reason === "have-at-entry").at(-1);
+    assert.equal(row.trial, true); assert.equal(row.projection.stage, "commitment"); assert.equal(row.projection.holderWaitMs, 0);
+    assert.equal(segments().peerUntestedTrial, 1); assert.equal(segments().peerUntestedTrialLoaded, 1); assert.equal(segments().peerProjectedLate, 0);
+    assert.equal(f.rows().filter(value => value.reason === "projected-late").length, 0);
+    assert.equal(f.rows().filter(value => "trial" in value).length, 1);
+  } finally { await f.close(); }
+});
+
+test("an entry grant followed by a commitment-stage late projection is one grant and one trial", async t => {
+  const { f, run, prime, segments } = await trialFixture(t);
+  try {
+    await prime();
+    await run("A", "B");
+    // The size hint and the committed size agree, so both stages are late; the row ends with the commitment detail.
+    const rows = f.rows().filter(row => row.reason === "have-at-entry");
+    assert.equal(rows.length, 3);
+    assert.ok(!("trial" in rows[0]) && !("trial" in rows[1]));
+    assert.equal(rows[2].trial, true); assert.equal(rows[2].projection.stage, "commitment");
+    assert.equal(segments().peerUntestedTrial, 1, "a single trial");
+    assert.equal(f.requests.filter(value => value === "other").length, 1);
+  } finally { await f.close(); }
+});
+
+test("rows of loads without a trial have no trial field and keep their ordinary projected-late path", async t => {
+  const { f, run, prime, segments } = await trialFixture(t);
+  try {
+    await prime();
+    // The only holder has an attempt on record: the ordinary decision, exactly as without a trial rule.
+    const asked = f.requests.length;
+    await run("A");
+    assert.equal(f.requests.length, asked); assert.equal(segments().peerUntestedTrial, 0);
+    assert.equal(segments().peerProjectedLate, 2, "once while priming, once here");
+    const late = f.rows().filter(row => row.reason === "projected-late");
+    assert.deepEqual(late.map(row => row.projection.stage), ["commitment", "entry"]);
+    assert.equal(late[1].matchingHave, true);
+    assert.ok(f.rows().every(row => !("trial" in row)));
+    assert.equal(f.discovery().heldMiss, 0, "a declined load charges nobody");
+  } finally { await f.close(); }
+});
+
+test("a stale untested holder gets no trial", async t => {
+  const { f, run, prime, segments, measured, pubkeys } = await trialFixture(t);
+  try {
+    // Four loads nobody can serve end at origin over more than ten seconds: every serving link is stale.
+    f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 12.5 } };
+    for (let i = 0; i < 4; i++) {
+      const segment = f.next(); f.touch(); f.siblingChannel.receive(serving());
+      await f.load(segment.name); await sleep(5);
+    }
+    assert.equal(f.discovery().heldMiss, 0); assert.equal(f.outcomes(), 4);
+    f.hls.media = undefined; f.shift.ms += 10_001;
+    // Fresh rate evidence after the shift, so the projection is late rather than stale-evidence stretch.
+    await prime();
+    assert.equal(measured(pubkeys.B).attempts, 0);
+    const asked = f.requests.length;
+    await run("A", "B");
+    assert.equal(segments().peerUntestedTrial, 0);
+    assert.equal(f.requests.length, asked, "the stale untested holder was not asked");
+    assert.ok(f.rows().at(-1).staleHolders.includes(f.label(pubkeys.B)), "B was stale at the decision");
+    assert.equal(f.rows().filter(row => row.reason === "projected-late").length, 2, "the priming decline and this one");
+    assert.ok(f.rows().every(row => !("trial" in row)));
+  } finally { await f.close(); }
+});
+
+test("a busy untested holder gets no trial", async t => {
+  const { f, prime, segments } = await trialFixture(t, { firstServe: { bytes: bigSegment, delayMs: 600, Channel: ChunkedHolder } });
+  try {
+    await prime();
+    // B is held by a first load's trial request while a second load wants it as well.
+    const first = f.next(), second = f.next();
+    f.touch(); f.siblingChannel.receive(serving()); f.siblingChannel.receive(haveFrame(first.key, second.key));
+    const one = f.load(first.name);
+    await until(() => f.requests.includes("other"), 2_000);
+    const two = f.load(second.name);
+    await Promise.all([one, two]);
+    assert.equal(f.requests.filter(value => value === "other").length, 1, "B was asked once");
+    assert.equal(segments().peerUntestedTrial, 1); assert.equal(segments().peerProjectedLate, 2, "the priming decline and the second load's ordinary decision");
+    const late = f.rows().filter(row => row.reason === "projected-late");
+    assert.equal(late.length, 2); assert.ok(late.every(row => !("trial" in row)));
+  } finally { await f.close(); }
+});
+
+test("a coordinated load gets no trial at either stage", async t => {
+  const { f, run, prime, segments, measured, pubkeys } = await trialFixture(t);
+  try {
+    await prime();
+    // Entry: nobody holds the key and the size is known, so the late projection ends the load as before.
+    const asked = f.requests.length;
+    await run();
+    assert.equal(f.requests.length, asked); assert.equal(segments().peerUntestedTrial, 0);
+    const late = f.rows().filter(row => row.reason === "projected-late");
+    assert.deepEqual(late.map(row => [row.projection.stage, row.matchingHave]), [["commitment", true], ["entry", false]]);
+    // Commitment: rendition 1 has no size hint, so the load waits, and B then announces the key.
+    f.holderChannel.receive(serving("main:1")); f.siblingChannel.receive(serving("main:1"));
+    const segment = f.next(), waits = f.counters()["no-have-wait"];
+    const done = f.load(segment.name, 1);
+    await until(() => f.counters()["no-have-wait"] === waits + 1, 2_000);
+    f.siblingChannel.receive(haveFrame(segment.key)); await done; f.siblingChannel.receive(haveFrame());
+    assert.equal(f.requests.length, asked, "B was not asked");
+    assert.equal(measured(pubkeys.B).attempts, 0);
+    assert.equal(segments().peerUntestedTrial, 0); assert.equal(segments().peerProjectedLate, 3);
+    assert.deepEqual(f.rows().filter(row => row.reason === "projected-late").map(row => row.projection.stage), ["commitment", "entry", "commitment"]);
+    assert.ok(f.rows().every(row => !("trial" in row)));
+  } finally { await f.close(); }
+});
+
+test("only one trial per load: a second untested holder is reached by the ordinary choice, not counted as a trial", async t => {
+  // B answers `none` at once; C is a second untested holder that serves quickly.
+  const { f, prime, segments, measured, pubkeys } = await trialFixture(t, { maxPeers: 3, firstServe: { bytes: null, delayMs: 5 } });
+  try {
+    const third = await f.addPeer(new ChunkedHolder(bigSegment, 20, f.requests, "third"));
+    third.receive(serving());
+    await prime();
+    const asked = f.requests.length, segment = f.next();
+    f.touch(); f.siblingChannel.receive(serving());
+    f.siblingChannel.receive(haveFrame(segment.key)); third.receive(haveFrame(segment.key));
+    await f.load(segment.name); await sleep(5);
+    assert.deepEqual(f.requests.slice(asked), ["other", "third"], "B first in link order, then C by the ordinary choice");
+    assert.equal(segments().peerUntestedTrial, 1, "only B was a trial");
+    assert.equal(segments().peerUntestedTrialLoaded, 0, "C delivered, but not as a trial");
+    assert.equal(segments().peerFirstLoaded, 2); assert.equal(segments().peerProjectedLate, 1, "only the priming decline");
+    assert.equal(measured(pubkeys.B).attempts, 1);
+  } finally { await f.close(); }
+});
+
+test("a trial load with less room than the fastest completed transfer still goes to origin at the pre-request check", async t => {
+  const { f, run, segments, measured, pubkeys } = await trialFixture(t, { originFallbackMs: 2500, stallAfter: 10, gapMs: 100 });
+  try {
+    // A completes the whole segment in about a second: a recorded completion, so a floor of about 1 s.
+    await run("A");
+    assert.equal(segments().peerFirstLoaded, 1);
+    // 700 ms of room: the entry projection is late; the first byte fits, so B is granted a trial, but no
+    // completed transfer of this size took under a second, so the pre-request check sends the load to origin.
+    f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 12.7 } };
+    const asked = f.requests.length;
+    await run("A", "B");
+    assert.equal(f.requests.length, asked, "nobody was asked");
+    assert.equal(segments().peerSkippedLate, 1); assert.equal(segments().peerUntestedTrial, 0);
+    assert.equal(measured(pubkeys.B).attempts, 0);
+    const row = f.rows().at(-1);
+    assert.equal(row.reason, "have-at-entry"); assert.equal(row.trial, true);
+    assert.equal(f.counters()["projected-late"], 0);
+  } finally { await f.close(); }
 });

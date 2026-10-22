@@ -1120,6 +1120,24 @@ class HlsSwarm {
       firstByteMs: ms(this.peerSelection.firstByteMs()), rateBytesPerSecond: Number.isFinite(rate) ? Math.round(rate * 1000) : null };
   }
 
+  // A link that is open, free, not banned, holds the key, has never had an
+  // attempt recorded and is not stale for this context. The first such link in
+  // link order: an untested link has no observation to order by.
+  #untestedHolder(key, context) {
+    for (const link of this.links.values()) {
+      if (link.closed || link.busy || this.banned.has(link.pubkey) || !link.have.has(key)) continue;
+      if (this.peerSelection.summary(link).attempts !== 0) continue;
+      if (context && this.discovery.stale(context, link.pubkey)) continue;
+      return link;
+    }
+    return null;
+  }
+
+  // A trial needs an untested holder and room for at least a typical first byte.
+  #trialAvailable(demand, plan) {
+    return plan.limit - now() > (this.peerSelection.firstByteMs() ?? 0) && Boolean(this.#untestedHolder(demand.key, demand.context));
+  }
+
   async #peerFirst(context, signal, plan, budgetMs, budgetGeometry) {
     // The initial deadline; plan.deadline may grow from it. Test availability
     // instrumentation (test/support/broadcast-availability-transform.mjs)
@@ -1152,7 +1170,14 @@ class HlsSwarm {
     const sizeHint = this.renditionSizes.get(rendition);
     const holderWait = coordinated ? this.#holderWaitMs(key, rendition) : 0;
     const entryTransfer = sizeHint ? this.peerSelection.projectMs(sizeHint) : null;
-    const entry = this.#projection(entryTransfer, holderWait, plan);
+    let entry = this.#projection(entryTransfer, holderWait, plan);
+    // One try for a holder that has never been asked (see #untestedHolder). The
+    // detail is kept for the have-at-entry row, which is the row this load writes next.
+    let trial = null;
+    if (entry === "late" && !coordinated && this.#trialAvailable(demand, plan)) {
+      trial = this.#projectionDetail("entry", entryTransfer, holderWait, plan);
+      entry = "stretch";
+    }
     if (entry === "late") {
       this.#peerEligibility(context, budgetMs, "projected-late", !coordinated, budgetGeometry, this.#projectionDetail("entry", entryTransfer, holderWait, plan), demand);
       // Nobody held the key at entry: a miss for every serving link. Otherwise
@@ -1195,7 +1220,7 @@ class HlsSwarm {
         return null;
       }
     }
-    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry, undefined, demand);
+    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry, trial ?? undefined, demand, trial !== null);
     // Holding the key is not a delivery: leave every holder entry alone until a
     // verified segment arrives.
     let commitment;
@@ -1214,7 +1239,15 @@ class HlsSwarm {
     this.renditionSizes.set(rendition, commitment.size);
     // The committed size is now known and a holder has it.
     const transfer = this.peerSelection.projectMs(commitment.size);
-    const known = this.#projection(transfer, 0, plan);
+    let known = this.#projection(transfer, 0, plan);
+    // The same single trial: a grant made at entry continues here, and otherwise one is
+    // granted if available. The latest row of this decision takes the commitment detail.
+    // An entry grant is not a second grant; the request loop re-checks the holder.
+    if (known === "late" && !coordinated && (trial !== null || this.#trialAvailable(demand, plan))) {
+      trial = this.#projectionDetail("commitment", transfer, 0, plan);
+      known = "stretch";
+      if (demand.row) { demand.row.projection = { ...trial }; demand.row.trial = true; }
+    }
     if (known === "late") {
       // Judged on swarm-wide estimates, not on any link's own: no holder is charged.
       this.#peerEligibility(context, budgetMs, "projected-late", true, budgetGeometry, this.#projectionDetail("commitment", transfer, 0, plan), demand);
@@ -1236,7 +1269,10 @@ class HlsSwarm {
         return null;
       }
       const fits = (peer, ms) => this.peerSelection.estimate(peer, commitment.size) === null || this.peerSelection.estimate(peer, commitment.size) * 1.25 + 25 <= ms;
-      const link = this.peerSelection.select(this.links.values(), key, tried, commitment.size, room);
+      // The first request of a load granted a trial goes to an untested holder.
+      const trialLink = trial && tried.size === 0 ? this.#untestedHolder(key, demand.context) : null;
+      if (trialLink) this.peerSelection.markSelected(trialLink);
+      const link = trialLink ?? this.peerSelection.select(this.links.values(), key, tried, commitment.size, room);
       if (!link) {
         if (![...this.links.values()].some((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, room))) {
           this.counters.peerNoFit += 1;
@@ -1248,6 +1284,7 @@ class HlsSwarm {
         continue;
       }
       tried.add(link.pubkey); demand.asked.add(link.pubkey);
+      if (trialLink) this.counters.peerUntestedTrial += 1;
       const estimateMs = this.peerSelection.estimate(link, commitment.size);
       if (estimateMs !== null && plan.extend(now() + estimateMs * 1.25 + 25)) this.counters.peerWaitExtended += 1;
       const requestedAt = now();
@@ -1302,6 +1339,7 @@ class HlsSwarm {
       if (commitment.expiresAt <= Math.floor(Date.now() / 1000)) return null;
       this.peerSelection.record(link, now() - requestedAt, bytes.byteLength);
       if (coordinated) this.counters.coordinatedPeerLoads += 1;
+      if (trialLink) this.counters.peerUntestedTrialLoaded += 1;
       return { key, bytes, discoveryContext, holderContext, pubkey: link.pubkey, demand };
     }
     // The deadline passed or every holder tried failed. The origin timer's abort

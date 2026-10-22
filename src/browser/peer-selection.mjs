@@ -118,10 +118,15 @@ export class PeerSelection {
       return (this.estimate(link, size) ?? 1000) * (1 + value.failureRate * 4);
     };
     const selected = candidates.reduce((best, link) => score(link) < score(best) ? link : best);
-    const value = this.summary(selected);
-    value.lastSelected = ++this.order;
-    this.observations.set(selected, value);
+    this.markSelected(selected);
     return selected;
+  }
+
+  /** Record that a link was chosen for a request, as select() does for its pick. */
+  markSelected(link) {
+    const value = this.summary(link);
+    value.lastSelected = ++this.order;
+    this.observations.set(link, value);
   }
 
   record(link, elapsedMs, bytes = 0) {
