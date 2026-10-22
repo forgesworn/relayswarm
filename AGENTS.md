@@ -46,6 +46,9 @@ bounded peer-first mode using author-signed segment commitments.
 | `npm run test:playback` | Two-rendition Chrome playback and field-test demo regression |
 | `npm run demo` | Local publisher/player, synthetic live media unless `--media-dir` supplied |
 | `npm run audit` | `npm audit --audit-level=high` |
+| `npm run test:proto` | Check committed shared vectors against the JavaScript verifier |
+| `npm run proto:vectors` | Regenerate `core/vectors/commitments.json` (new signatures each run) |
+| `cargo test` (in `core/`) | Rust core tests, including the shared vectors |
 | `npm run check:docs` | Links, AI-index format and generated-context freshness |
 | `npm run docs:generate` | Regenerate `llms-full.txt` from maintained Markdown |
 
@@ -68,6 +71,8 @@ src/native-dht-transport.mjs   NativeDhtTransport, HyperDHT wiring
 src/object-transfer.mjs        framing, hashing and object transfer primitives
 poc.mjs                        two-peer WebRTC proof of concept (CLI)
 native-poc.mjs                 two-peer native HyperDHT proof of concept (CLI)
+core/relayswarm-proto/         Rust port of commitment/delegation/revocation verification (no I/O)
+core/vectors/                  JavaScript-generated vectors the Rust and JS suites both check
 test/                          e2e and unit tests
 spikes/                        throwaway measurement code, see spikes/RESULTS.md
 docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.md, FAQ.md
@@ -114,6 +119,10 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 - The demo keeps its author key on the server and receipts in the browser.
   Preserve playlist-bound signing and explicit upload consent. Chrome fixture
   tests are loopback; do not describe them as physical-device/NAT validation.
+- The Rust core under `core/` is unreleased and not used by the loader yet.
+  It must match the JavaScript verifier on every vector; change the JavaScript,
+  regenerate the vectors, then make Rust agree. Its toolchain is pinned in
+  `core/rust-toolchain.toml`; reuse `core/target/`.
 - Package version 0.2.1, session wire version 3, commitment schemas 1/2 and metrics
   version 2 are distinct. Published RelaySwarmKit v0.5.0 supports wire version 3
   and signed media; current SDK/browser interoperability is measured on macOS

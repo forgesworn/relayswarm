@@ -1,5 +1,16 @@
 # RelaySwarm changelog
 
+## Unreleased
+
+- Add `core/relayswarm-proto`, a Rust port of signed segment commitment,
+  scoped delegation and revocation verification (schemas 1 and 2). It performs
+  no I/O and builds for WebAssembly. It is not used by the browser loader or
+  the native path yet.
+- Add 120 shared vectors generated from the JavaScript verifier
+  (`core/vectors/commitments.json`). The Rust and JavaScript test suites both
+  check them, and a new CI job runs both with the Rust lint and WebAssembly
+  build.
+
 ## v0.2.1 (21 October 2026)
 
 Experimental [GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) of the source from
