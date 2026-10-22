@@ -78,6 +78,7 @@ fn replay_selection(sequence: &Value) -> Vec<String> {
         match op["op"].as_str().unwrap() {
             "advance" => now += op["ms"].as_u64().unwrap(),
             "observe" => selection.observe(now, f("firstByteMs"), f("bytes").unwrap(), f("flowMs").unwrap(), f("totalFlowMs")),
+            "forget" => selection.forget(LINKS.iter().position(|name| *name == op["link"]).unwrap() as u64),
             "record" => {
                 let link = LINKS.iter().position(|name| *name == op["link"]).unwrap() as u64;
                 selection.record(now, link, f("elapsedMs").unwrap(), f("bytes").unwrap());

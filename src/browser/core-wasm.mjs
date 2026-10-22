@@ -3,7 +3,10 @@
 // The module has no imports. Each call passes `[event, options, atMs]` as
 // JSON and reads JSON back; a rejection is null, exactly as in
 // segment-commitment.mjs, which remains the reference implementation.
+// Peer selection crosses as plain numbers; peer-selection.mjs is its
+// reference. One instance holds one selection state, so load one per swarm.
 
+import { PeerSelection } from "./peer-selection.mjs";
 import { segmentMediaContext } from "./segment-commitment.mjs";
 
 const OP_STREAM = 0;
@@ -39,17 +42,129 @@ async function instantiate(source) {
   return (await WebAssembly.instantiate(await response.arrayBuffer(), {})).instance;
 }
 
+const SELECTION_EXPORTS = ["rs_sel_observe", "rs_sel_record", "rs_sel_forget", "rs_sel_select", "rs_sel_state",
+  "rs_sel_project", "rs_sel_minimum", "rs_sel_estimate", "rs_sel_summary"];
+const orNull = (value) => Number.isNaN(value) ? null : value;
+// Read memory only after the call: a call can grow it, detaching the old buffer.
+const numbers = (core, pointer) => new Float64Array(core.memory.buffer, pointer, 6);
+
 /**
- * Load the core verifiers. `source` is a URL, the module's bytes or a
- * compiled WebAssembly.Module. The result mirrors segment-commitment.mjs.
- * A trap inside the module throws; rejection returns null.
+ * PeerSelection backed by the core. Arguments cross as WebAssembly doubles,
+ * so they coerce exactly as the JavaScript's arithmetic does, and NaN comes
+ * back as null. A trap hands over to a fresh JavaScript PeerSelection for
+ * the rest of the session, which starts without link history.
  */
-export async function loadCoreVerifier(source) {
-  const exports = (await instantiate(source)).exports;
-  for (const name of ["memory", "rs_alloc", "rs_free", "rs_call", "rs_result_ptr"]) {
-    if (!exports[name]) throw new Error(`Core module lacks ${name}.`);
+class CorePeerSelection {
+  #exports;
+  #onFailure;
+  #fallback = null;
+  #ids = new WeakMap();
+  #next = 0;
+
+  constructor(exports, onFailure) {
+    this.#exports = exports;
+    this.#onFailure = onFailure;
   }
 
+  get kind() { return this.#fallback ? "js" : "wasm"; }
+
+  /** Stop using the core, as after a trap elsewhere in the same instance. */
+  retire() {
+    this.#fallback ??= new PeerSelection();
+  }
+
+  #run(wasm, js) {
+    if (this.#fallback) return js(this.#fallback);
+    try {
+      return wasm(this.#exports);
+    } catch (error) {
+      this.#fallback = new PeerSelection();
+      this.#onFailure?.(error);
+      return js(this.#fallback);
+    }
+  }
+
+  #id(link) {
+    let id = this.#ids.get(link);
+    if (id === undefined) this.#ids.set(link, id = this.#next++);
+    return id;
+  }
+
+  #state(index) {
+    return this.#run((core) => numbers(core, core.rs_sel_state())[index],
+      (js) => [js.firstByteMs(), js.rate(), js.lastObservedAt, js.turn, js.order][index] ?? NaN);
+  }
+
+  get lastObservedAt() { return this.#state(2); }
+  get turn() { return this.#state(3); }
+  get order() { return this.#state(4); }
+  firstByteMs() { return orNull(this.#state(0)); }
+  rate() { return orNull(this.#state(1)); }
+
+  observe({ firstByteMs = null, bytes = 0, flowMs = 0, totalFlowMs = flowMs } = {}) {
+    this.#run((core) => core.rs_sel_observe(Date.now(), Number.isFinite(firstByteMs) ? firstByteMs : NaN, bytes, flowMs, totalFlowMs || 0),
+      (js) => js.observe({ firstByteMs, bytes, flowMs, totalFlowMs }));
+  }
+
+  record(link, elapsedMs, bytes = 0) {
+    this.#run((core) => core.rs_sel_record(Date.now(), this.#id(link), elapsedMs, bytes), (js) => js.record(link, elapsedMs, bytes));
+  }
+
+  forget(link) {
+    const id = this.#ids.get(link);
+    this.#run((core) => { if (id !== undefined) core.rs_sel_forget(id); }, (js) => js.forget(link));
+  }
+
+  projectMs(size) {
+    return this.#run((core) => orNull(core.rs_sel_project(size)), (js) => js.projectMs(size));
+  }
+
+  minimumMs(size) {
+    return this.#run((core) => core.rs_sel_minimum(size), (js) => js.minimumMs(size));
+  }
+
+  estimate(link, size) {
+    return this.#run((core) => orNull(core.rs_sel_estimate(this.#id(link), size)), (js) => js.estimate(link, size));
+  }
+
+  summary(link) {
+    return this.#run((core) => {
+      const [attempts, latencyMs, throughputBytesPerSecond, failureRate, consecutiveFailures, lastSelected] =
+        numbers(core, core.rs_sel_summary(this.#id(link)));
+      return { attempts, latencyMs: orNull(latencyMs), throughputBytesPerSecond: orNull(throughputBytesPerSecond), failureRate, consecutiveFailures, lastSelected };
+    }, (js) => js.summary(link));
+  }
+
+  select(links, key, tried, size, deadlineMs = Infinity) {
+    return this.#run((core) => {
+      // Link state stays on the JavaScript objects; the core sees handles.
+      const eligible = [...links].filter((link) => !link.closed && !link.busy && !tried.has(link.pubkey) && link.have.has(key));
+      const ids = eligible.map((link) => this.#id(link));
+      const length = ids.length * 4;
+      const pointer = core.rs_alloc(length);
+      try {
+        const view = new DataView(core.memory.buffer, pointer, length);
+        ids.forEach((id, index) => view.setUint32(index * 4, id, true));
+        const chosen = core.rs_sel_select(pointer, ids.length, size, deadlineMs);
+        return chosen < 0 ? null : eligible[ids.indexOf(chosen)];
+      } finally {
+        core.rs_free(pointer, length);
+      }
+    }, (js) => js.select(links, key, tried, size, deadlineMs));
+  }
+}
+
+/**
+ * Load the core. `source` is a URL, the module's bytes or a compiled
+ * WebAssembly.Module. `verifier` mirrors segment-commitment.mjs: a trap
+ * inside the module throws; rejection returns null. `peerSelection(onFailure)`
+ * returns this instance's selection, once.
+ */
+export async function loadCore(source) {
+  const exports = (await instantiate(source)).exports;
+  for (const name of ["memory", "rs_alloc", "rs_free", "rs_call", "rs_result_ptr", ...SELECTION_EXPORTS]) {
+    if (!exports[name]) throw new Error(`Core module lacks ${name}.`);
+  }
   function call(op, input) {
     let bytes;
     try { bytes = encoder.encode(JSON.stringify(input)); } catch { return null; }
@@ -67,7 +182,7 @@ export async function loadCoreVerifier(source) {
   const trust = ({ streamEvent, swarmId, revokedDelegationIds = [], delegationRevocations = [] }) =>
     ({ streamEvent, swarmId, revokedDelegationIds, delegationRevocations });
 
-  return Object.freeze({
+  const verifier = Object.freeze({
     kind: "wasm",
     validStreamAuthorisation: (event) => call(OP_STREAM, [event]) === true,
     verifyCommitmentDelegation: (event, options, at = Date.now()) => call(OP_DELEGATION, [event ?? null, trust(options), at]),
@@ -78,4 +193,17 @@ export async function loadCoreVerifier(source) {
         maxSegmentBytes: options.maxSegmentBytes, delegation: options.delegation ?? null }, at]);
     },
   });
+  let selection = null;
+  return Object.freeze({
+    verifier,
+    peerSelection(onFailure) {
+      if (selection) throw new Error("This core instance already has a peer selection.");
+      return selection = new CorePeerSelection(exports, onFailure);
+    },
+  });
+}
+
+/** Load the core's commitment verifiers only. */
+export async function loadCoreVerifier(source) {
+  return (await loadCore(source)).verifier;
 }

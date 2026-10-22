@@ -122,10 +122,11 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 - The demo keeps its author key on the server and receipts in the browser.
   Preserve playlist-bound signing and explicit upload consent. Chrome fixture
   tests are loopback; do not describe them as physical-device/NAT validation.
-- The Rust core under `core/` is unreleased. Its commitment verifier is used
-  only when a host passes `coreWasm`; the demo does. Rebuild and commit
-  `src/browser/relayswarm-core.wasm` with `npm run core:wasm` after any change
-  under `core/` that affects verification.
+- The Rust core under `core/` is unreleased. Its commitment verifier and peer
+  selection are used only when a host passes `coreWasm`; the demo does.
+  Rebuild and commit `src/browser/relayswarm-core.wasm` with
+  `npm run core:wasm` after any change under `core/` that affects
+  verification or selection.
   It must match the JavaScript verifier on every vector; change the JavaScript,
   regenerate the vectors, then make Rust agree. Its toolchain is pinned in
   `core/rust-toolchain.toml`; reuse `core/target/`.

@@ -336,6 +336,7 @@ try {
       relayEventsPublished: reports.filter((r) => r.swarm).reduce((t, r) => t + r.swarm.relays.published, 0),
       corruptPeerBannedBy: honest.filter((r) => r.swarm.peers.banned > 0).length,
       coreVerifiers: Object.fromEntries(["wasm", "js"].map((kind) => [kind, honest.filter((r) => r.swarm.core?.verifier === kind).length])),
+      coreSelections: Object.fromEntries(["wasm", "js"].map((kind) => [kind, honest.filter((r) => (r.swarm.core?.selection ?? "js") === kind).length])),
     },
     player: {
       withSwarm: honest.map((r) => ({ viewer: r.viewer, observedSeconds: r.observedSeconds, stalls: r.player.stalls, fatalErrors: r.player.fatalErrors, currentTime: Number(r.player.currentTime.toFixed(1)) })),
@@ -368,7 +369,7 @@ try {
     // Fresh segments still need origin seeders. A viewer that uploads those
     // bytes to consumers can legitimately receive every own segment by HTTP.
   }
-  if (MODE === "peer-first" && CORE === "wasm" && honest.some((report) => report.swarm.core?.verifier !== "wasm" || report.swarm.core.fallbacks || !report.swarm.core.decided.wasm)) failures.push("a peer-first viewer did not verify with the Rust core");
+  if (MODE === "peer-first" && CORE === "wasm" && honest.some((report) => report.swarm.core?.verifier !== "wasm" || report.swarm.core.selection !== "wasm" || report.swarm.core.fallbacks || !report.swarm.core.decided.wasm)) failures.push("a peer-first viewer did not verify or select with the Rust core");
   if (MODE === "peer-first" && VIEWERS >= 2) {
     const faulted = honest.find((report) => report.viewer === "v1");
     if (!faulted?.swarm.segments.commitmentRejected || !faulted?.swarm.segments.commitmentUnavailable) failures.push("invalid and stalled commitments were not exercised");

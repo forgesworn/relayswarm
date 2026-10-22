@@ -375,7 +375,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
-| `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The JavaScript verifier decides until the module loads, and for the rest of the session if it fails to load or traps. A rejection from the module stands. See `core` in the metrics. |
+| `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier and peer selection, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The JavaScript verifier decides until the module loads, and for the rest of the session if it fails to load or traps. A rejection from the module stands. See `core` in the metrics. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 
@@ -458,9 +458,12 @@ not an identity), `uptimeMs`, `serving`, plus:
 - `errors`: `total` and `byStage`. A module named by `coreWasm` that fails to
   load or traps counts once under `core`.
 - `core`: `state` (`off`, `loading`, `ready` or `failed`), `verifier` (`wasm`
-  or `js`, whichever decides the next commitment), `fallbacks` (traps that
-  handed verification to JavaScript) and `decided` (`wasm` and `js`: how many
-  commitments each verifier decided). An additive metrics-v2 field.
+  or `js`, whichever decides the next commitment), `selection` (`wasm` or
+  `js`, whichever chooses peers), `fallbacks` (traps that handed the core's
+  work to JavaScript) and `decided` (`wasm` and `js`: how many commitments
+  each verifier decided). Selection moves to the core when it loads only if
+  no peer has been chosen yet, and back to a fresh JavaScript selection,
+  without link history, after a trap. An additive metrics-v2 field.
 - `config`: the effective settings, so a receipt says what produced it.
 
 Snapshots contain no IP addresses, user agent or long-term key, but the
@@ -880,11 +883,17 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
   sequences from the JavaScript check every output and state after each step.
 - Add the opt-in `coreWasm` loader option: peer-first viewers verify segment
   commitments with the Rust core compiled to WebAssembly
-  (`src/browser/relayswarm-core.wasm`, 200,458 bytes, 87,373 gzip). The
+  (`src/browser/relayswarm-core.wasm`, then 200,458 bytes, 87,373 gzip). The
   JavaScript verifier decides until it loads, and for the rest of the session
   if it fails to load or traps. A new metrics field, `core`, reports which
   verifier decided. The demo serves the module, uses it, and allows
   `'wasm-unsafe-eval'` in its Content Security Policy.
+- With `coreWasm`, peer selection also runs in the Rust core: each swarm
+  binds it when the module loads, provided no peer has been chosen yet. A
+  trap anywhere in the module hands both selection and verification to
+  JavaScript, and selection starts again without link history. The module is
+  now 227,541 bytes (94,900 gzip). `core.selection` in the metrics reports
+  which one chooses peers.
 
 ## v0.2.1 (21 October 2026)
 

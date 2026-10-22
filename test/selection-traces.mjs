@@ -34,7 +34,8 @@ export function selectionOps(seed, count) {
     else if (roll < 0.35) {
       ops.push({ op: "observe", firstByteMs: next() < 0.2 ? null : next() < 0.05 ? -1 : number(3000), bytes: next() < 0.3 ? number(40000, false) : number(800000, false),
         flowMs: next() < 0.2 ? number(400) : number(8000), totalFlowMs: next() < 0.3 ? undefined : number(12000) });
-    } else if (roll < 0.6) ops.push({ op: "record", link: pick(LINKS), elapsedMs: next() < 0.05 ? 0 : next() < 0.05 ? 90000 : number(9000), bytes: next() < 0.4 ? 0 : number(900000, false) });
+    } else if (roll < 0.37) ops.push({ op: "forget", link: pick(LINKS) });
+    else if (roll < 0.6) ops.push({ op: "record", link: pick(LINKS), elapsedMs: next() < 0.05 ? 0 : next() < 0.05 ? 90000 : number(9000), bytes: next() < 0.4 ? 0 : number(900000, false) });
     else {
       ops.push({ op: "select", key: pick(KEYS), size: next() < 0.1 ? 0 : number(900000, false), deadlineMs: next() < 0.2 ? null : next() < 0.1 ? number(100) : number(10000),
         links: LINKS.filter(() => next() < 0.85).map((name) => ({ name, closed: next() < 0.1, busy: next() < 0.15, has: KEYS.filter(() => next() < 0.7) })),
@@ -44,19 +45,20 @@ export function selectionOps(seed, count) {
   return ops;
 }
 
-/** Run selection operations and record every output. */
-export function runSelectionOps(ops) {
+/** Run selection operations and record every output. `create` makes the PeerSelection. */
+export function runSelectionOps(ops, create = () => new PeerSelection()) {
   let now = SELECTION_EPOCH_MS;
   const saved = Date.now;
   Date.now = () => now;
   try {
-    const selection = new PeerSelection();
+    const selection = create();
     const links = new Map(LINKS.map((name) => [name, { name, pubkey: pubkeyOf(name), closed: false, busy: false, have: new Set() }]));
     const out = [];
     for (const op of ops) {
       let result = null;
       if (op.op === "advance") now += op.ms;
       else if (op.op === "observe") selection.observe({ firstByteMs: op.firstByteMs, bytes: op.bytes, flowMs: op.flowMs, ...(op.totalFlowMs === undefined ? {} : { totalFlowMs: op.totalFlowMs }) });
+      else if (op.op === "forget") selection.forget(links.get(op.link));
       else if (op.op === "record") selection.record(links.get(op.link), op.elapsedMs, op.bytes);
       else {
         const view = op.links.map((state) => Object.assign(links.get(state.name), { closed: state.closed, busy: state.busy, have: new Set(state.has) }));

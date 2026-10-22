@@ -1,4 +1,5 @@
 import test from "node:test";
+import { CORE_FUNCTIONS, stubCore } from "./core-stub.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
@@ -729,12 +730,8 @@ test("a peer request is skipped for origin when the time left is below the faste
 });
 
 const coreWasm = await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url));
-// Exports the core's five names; rs_call traps.
-const trappingCore = Uint8Array.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 1, 0x16, 4, 0x60, 1, 0x7f, 1, 0x7f, 0x60, 2, 0x7f, 0x7f, 0,
-  0x60, 3, 0x7f, 0x7f, 0x7f, 1, 0x7f, 0x60, 0, 1, 0x7f, 3, 5, 4, 0, 1, 2, 3, 5, 3, 1, 0, 1, 7, 0x39, 5,
-  6, ...Buffer.from("memory"), 2, 0, 8, ...Buffer.from("rs_alloc"), 0, 0, 7, ...Buffer.from("rs_free"), 0, 1,
-  7, ...Buffer.from("rs_call"), 0, 2, 13, ...Buffer.from("rs_result_ptr"), 0, 3,
-  0x0a, 0x12, 4, 4, 0, 0x41, 0, 0x0b, 2, 0, 0x0b, 3, 0, 0, 0x0b, 4, 0, 0x41, 0, 0x0b]);
+// Every export the loader requires; rs_call traps.
+const trappingCore = stubCore(["rs_call"]);
 
 test("the Rust core verifies peer-first commitments, and its rejection stands", async () => {
   const playback = peerPlaybackOptions(1000);
@@ -752,7 +749,7 @@ test("the Rust core verifies peer-first commitments, and its rejection stands", 
     const metrics = fixture.swarm.metrics();
     assert.equal(metrics.segments.commitmentRejected, 1);
     assert.equal(metrics.segments.peerFirstLoaded, 1);
-    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", fallbacks: 0, decided: { wasm: 2, js: 0 } });
+    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", fallbacks: 0, decided: { wasm: 2, js: 0 } });
   } finally { await fixture.close(); }
 });
 
@@ -767,10 +764,29 @@ test("a trapping or unloadable core hands verification to JavaScript", async () 
       assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
       const metrics = fixture.swarm.metrics();
       assert.equal(metrics.segments.peerFirstLoaded, 1);
-      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", fallbacks, decided: { wasm: 0, js: 1 } });
+      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", fallbacks, decided: { wasm: 0, js: 1 } });
       assert.equal(metrics.errors.byStage.core, 1);
     } finally { await fixture.close(); }
   }
+});
+
+test("a selection trap retires the whole core, verifier included", async () => {
+  // The stub rejects every commitment, so a peer load proves JavaScript verified it.
+  const selectionTraps = Object.keys(CORE_FUNCTIONS).filter((name) => name.startsWith("rs_sel_"));
+  const playback = peerPlaybackOptions(1000);
+  const fixture = await linkedFixture({ ...playback.options, coreWasm: stubCore(selectionTraps, { rs_call: -1 }), WebSocketImpl: memoryRelaySocket() });
+  try {
+    await until(() => fixture.swarm.metrics().core.state === "ready");
+    assert.equal(fixture.swarm.metrics().core.selection, "wasm");
+    // Metrics read each link's summary, which traps.
+    const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder"));
+    channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+    const metrics = fixture.swarm.metrics();
+    assert.equal(metrics.segments.peerFirstLoaded, 1);
+    assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", fallbacks: 1, decided: { wasm: 0, js: 1 } });
+    assert.equal(metrics.errors.byStage.core, 1);
+  } finally { await fixture.close(); }
 });
 
 test("the core option is checked and ignored outside peer-first", () => {
@@ -778,7 +794,7 @@ test("the core option is checked and ignored outside peer-first", () => {
     assert.equal(createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm }).metrics().disabledReason, "invalid-core-wasm");
   }
   const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm });
-  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", fallbacks: 0, decided: { wasm: 0, js: 0 } });
+  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", fallbacks: 0, decided: { wasm: 0, js: 0 } });
   swarm.stop();
 });
 

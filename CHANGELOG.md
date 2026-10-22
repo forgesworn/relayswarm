@@ -18,11 +18,17 @@
   sequences from the JavaScript check every output and state after each step.
 - Add the opt-in `coreWasm` loader option: peer-first viewers verify segment
   commitments with the Rust core compiled to WebAssembly
-  (`src/browser/relayswarm-core.wasm`, 200,458 bytes, 87,373 gzip). The
+  (`src/browser/relayswarm-core.wasm`, then 200,458 bytes, 87,373 gzip). The
   JavaScript verifier decides until it loads, and for the rest of the session
   if it fails to load or traps. A new metrics field, `core`, reports which
   verifier decided. The demo serves the module, uses it, and allows
   `'wasm-unsafe-eval'` in its Content Security Policy.
+- With `coreWasm`, peer selection also runs in the Rust core: each swarm
+  binds it when the module loads, provided no peer has been chosen yet. A
+  trap anywhere in the module hands both selection and verification to
+  JavaScript, and selection starts again without link history. The module is
+  now 227,541 bytes (94,900 gzip). `core.selection` in the metrics reports
+  which one chooses peers.
 
 ## v0.2.1 (21 October 2026)
 

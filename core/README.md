@@ -45,9 +45,21 @@ message closes the link as `protocol`; JavaScript parses both.
 no imports and a plain C ABI, so any WebAssembly host can call it without
 generated glue: `rs_alloc` and `rs_free` manage input bytes, `rs_call(op, ptr,
 len)` takes `[event, options, atMs]` as JSON and returns the result's length
-(-1 for rejection), and `rs_result_ptr` locates the result. The browser loader
-is `src/browser/core-wasm.mjs`; hosts opt in with `coreWasm` (see
-`INTEGRATION.md`).
+(-1 for rejection), and `rs_result_ptr` locates the result.
+
+Peer selection uses plain numbers instead, so doubles and infinities cross
+unchanged and NaN stands for JavaScript `null`: `rs_sel_observe`,
+`rs_sel_record`, `rs_sel_forget`, `rs_sel_select` (little-endian u32 link
+handles in, the chosen handle or -1 out), `rs_sel_project`, `rs_sel_minimum`
+and `rs_sel_estimate` return a double, and `rs_sel_state` and
+`rs_sel_summary` return the address of six doubles. Each instance holds one
+selection state, so each swarm instantiates its own. The caller filters
+links for open, idle, untried and holding the key; the core does the rest.
+
+The browser loader is `src/browser/core-wasm.mjs`; hosts opt in with
+`coreWasm` (see `INTEGRATION.md`). Its `PeerSelection` stand-in replays
+the seeded selection sequences through the committed module and matches the
+JavaScript at every step.
 
 `npm run core:wasm` builds it with the release profile and writes
 `src/browser/relayswarm-core.wasm`, which is committed so Git installs need no
@@ -60,8 +72,10 @@ Measured on 22 October 2026:
 
 | Build | Raw bytes | gzip -9 |
 |---|---|---|
-| `relayswarm-core.wasm` (committed, no `wasm-opt`) | 200,458 | 87,373 |
-| The same after `wasm-opt -Oz` (version 133) | 165,047 | 84,193 |
+| `relayswarm-core.wasm` with selection (committed, no `wasm-opt`) | 227,541 | 94,900 |
+| The same after `wasm-opt -Oz` (version 133, current features enabled) | 186,384 | 92,203 |
+| Verifiers only (committed before selection) | 200,458 | 87,373 |
+| Verifiers only after `wasm-opt -Oz` | 165,047 | 84,193 |
 | Earlier `wasm-bindgen` build after `wasm-opt`, for comparison | 159,136 | 81,720 |
 | Demo client bundle (esbuild, minified), before the loader change | 787,462 | 250,814 |
 

@@ -34,7 +34,7 @@ import { PeerSelection } from "./peer-selection.mjs";
 import { NeighbourDiscovery } from "./neighbour-discovery.mjs";
 import { boundedOperation } from "./bounded-operation.mjs";
 import { validStreamAuthorisation, verifySegmentCommitment, segmentMediaContext } from "./segment-commitment.mjs";
-import { loadCoreVerifier } from "./core-wasm.mjs";
+import { loadCore } from "./core-wasm.mjs";
 
 export const HLS_SWARM_METRICS_VERSION = 2;
 
@@ -648,8 +648,8 @@ class HlsSwarm {
         publishErrors: c.publishErrors,
       },
       errors: { total: c.errors, byStage: { ...this.errorsByStage } },
-      // Additive metrics-v2 field: which commitment verifier is deciding.
-      core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", fallbacks: this.coreFallbacks, decided: { ...this.coreDecided } },
+      // Additive metrics-v2 field: which commitment verifier and peer selection run.
+      core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", selection: this.peerSelection.kind ?? "js", fallbacks: this.coreFallbacks, decided: { ...this.coreDecided } },
       config: {
         originFallbackMs: this.options.originFallbackMs,
         maxPeerWaitMs: this.options.maxPeerWaitMs,
@@ -1682,14 +1682,27 @@ class HlsSwarm {
   async #loadCore() {
     this.coreState = "loading";
     try {
-      const verifier = await loadCoreVerifier(this.options.coreWasm);
+      const core = await loadCore(this.options.coreWasm);
       if (this.stopped) return;
-      this.coreVerifier = verifier;
+      this.coreVerifier = core.verifier;
+      // Selection state is not transferred: the core takes over only before
+      // the first choice, which is normally well after the module loads.
+      if (this.peerSelection.order === 0) this.peerSelection = core.peerSelection((error) => this.#coreTrapped(error));
       this.coreState = "ready";
     } catch (error) {
       this.coreState = "failed";
       this.#noteError("core", error);
     }
+  }
+
+  // A trap anywhere in the module retires it for the rest of the session.
+  // Selection has already moved to a fresh JavaScript PeerSelection.
+  #coreTrapped(error) {
+    this.peerSelection.retire?.();
+    this.coreVerifier = null;
+    this.coreState = "failed";
+    this.coreFallbacks += 1;
+    this.#noteError("core", error);
   }
 
   // A null result is a verdict and stands; only a trap hands over to the
@@ -1701,10 +1714,7 @@ class HlsSwarm {
         this.coreDecided.wasm += 1;
         return result;
       } catch (error) {
-        this.coreVerifier = null;
-        this.coreState = "failed";
-        this.coreFallbacks += 1;
-        this.#noteError("core", error);
+        this.#coreTrapped(error);
       }
     }
     this.coreDecided.js += 1;
@@ -2446,6 +2456,7 @@ class HlsSwarm {
       onClose: (closed) => {
         dial.pc.removeEventListener("datachannel", rejectExtraChannel);
         this.#endTransport(dial.pc, "link-close", closed.closeReason);
+        this.peerSelection.forget(closed);
         if (this.links.get(closed.pubkey) === closed) {
           this.links.delete(closed.pubkey);
           this.discovery.forget(closed.pubkey);
