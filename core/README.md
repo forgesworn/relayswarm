@@ -11,13 +11,25 @@ no I/O and reads no clock; callers pass the time. It reproduces the JavaScript
 semantics the verifier relies on, including `JSON.stringify` output, strict
 equality and `Number.isSafeInteger`.
 
-The contract is [`vectors/commitments.json`](vectors/commitments.json),
-generated from the JavaScript verifier by `npm run proto:vectors`. Both
-`npm run test:proto` and `cargo test` must reproduce every recorded result.
+`relayswarm_proto::link` is the browser data-channel protocol from
+[`peer-link.mjs`](../src/browser/peer-link.mjs) as a state machine: requests
+with `meta`/chunks/`eof`/`none`, timeout and abandonment with `cancel` and
+bounded draining, the serialised upload queue with backpressure, and the
+`have`, `contribution` and `fetching` controls. The shell sends what it emits,
+answers its serve requests and reports timers and channel draining. The native
+HyperDHT framing in `object-transfer.mjs` stays with the Node adapter.
+
+The contracts are [`vectors/commitments.json`](vectors/commitments.json) and
+[`vectors/link-traces.json`](vectors/link-traces.json), the second recorded by
+driving the real `PeerLink` with a fake channel and clock. Both are
+generated from the JavaScript by `npm run proto:vectors`. Both
+`npm run test:proto` and `cargo test` must reproduce every recorded result,
+including the link's events and state after each step.
 Change the JavaScript first, regenerate, then make Rust agree.
 
 Known difference: a JSON string containing an unpaired UTF-16 surrogate escape
-fails to parse in Rust, so such an event is rejected; JavaScript parses it.
+fails to parse in Rust, so such an event is rejected and such a control
+message closes the link as `protocol`; JavaScript parses both.
 
 ```sh
 cd core

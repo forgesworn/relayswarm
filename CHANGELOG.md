@@ -10,6 +10,9 @@
   (`core/vectors/commitments.json`). The Rust and JavaScript test suites both
   check them, and a new CI job runs both with the Rust lint and WebAssembly
   build.
+- Port the browser data-channel protocol (`peer-link.mjs`) to
+  `relayswarm_proto::link`, a state machine with no I/O. 48 traces recorded
+  from the real `PeerLink` check its events and state step by step.
 
 ## v0.2.1 (21 October 2026)
 

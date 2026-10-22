@@ -7,3 +7,4 @@
 pub mod commitment;
 pub mod event;
 pub mod js;
+pub mod link;

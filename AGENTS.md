@@ -71,8 +71,8 @@ src/native-dht-transport.mjs   NativeDhtTransport, HyperDHT wiring
 src/object-transfer.mjs        framing, hashing and object transfer primitives
 poc.mjs                        two-peer WebRTC proof of concept (CLI)
 native-poc.mjs                 two-peer native HyperDHT proof of concept (CLI)
-core/relayswarm-proto/         Rust port of commitment/delegation/revocation verification (no I/O)
-core/vectors/                  JavaScript-generated vectors the Rust and JS suites both check
+core/relayswarm-proto/         Rust port of commitment verification and the peer-link protocol (no I/O)
+core/vectors/                  JavaScript-generated vectors and link traces both suites check
 test/                          e2e and unit tests
 spikes/                        throwaway measurement code, see spikes/RESULTS.md
 docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.md, FAQ.md
