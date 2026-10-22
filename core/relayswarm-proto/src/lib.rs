@@ -5,6 +5,8 @@
 //! `core/vectors/` are generated from it and checked by both test suites.
 
 pub mod commitment;
+pub mod discovery;
 pub mod event;
 pub mod js;
 pub mod link;
+pub mod selection;

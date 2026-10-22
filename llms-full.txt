@@ -869,6 +869,9 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 - Port the browser data-channel protocol (`peer-link.mjs`) to
   `relayswarm_proto::link`, a state machine with no I/O. 48 traces recorded
   from the real `PeerLink` check its events and state step by step.
+- Port peer selection and neighbour discovery to `relayswarm_proto::selection`
+  and `relayswarm_proto::discovery`. Seeded random and scripted operation
+  sequences from the JavaScript check every output and state after each step.
 
 ## v0.2.1 (21 October 2026)
 

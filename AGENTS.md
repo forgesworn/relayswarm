@@ -48,7 +48,8 @@ bounded peer-first mode using author-signed segment commitments.
 | `npm run audit` | `npm audit --audit-level=high` |
 | `npm run test:proto` | Check committed shared vectors against the JavaScript verifier |
 | `npm run proto:vectors` | Regenerate `core/vectors/commitments.json` (new signatures each run) |
-| `cargo test` (in `core/`) | Rust core tests, including the shared vectors |
+| `npm run proto:traces` | Write seeded selection/discovery sequences for the Rust tests (`core/target/`) |
+| `cargo test` (in `core/`) | Rust core tests, including the shared vectors and traces |
 | `npm run check:docs` | Links, AI-index format and generated-context freshness |
 | `npm run docs:generate` | Regenerate `llms-full.txt` from maintained Markdown |
 
@@ -71,7 +72,7 @@ src/native-dht-transport.mjs   NativeDhtTransport, HyperDHT wiring
 src/object-transfer.mjs        framing, hashing and object transfer primitives
 poc.mjs                        two-peer WebRTC proof of concept (CLI)
 native-poc.mjs                 two-peer native HyperDHT proof of concept (CLI)
-core/relayswarm-proto/         Rust port of commitment verification and the peer-link protocol (no I/O)
+core/relayswarm-proto/         Rust port: commitments, peer-link protocol, selection, discovery (no I/O)
 core/vectors/                  JavaScript-generated vectors and link traces both suites check
 test/                          e2e and unit tests
 spikes/                        throwaway measurement code, see spikes/RESULTS.md

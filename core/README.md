@@ -19,12 +19,22 @@ bounded draining, the serialised upload queue with backpressure, and the
 answers its serve requests and reports timers and channel draining. The native
 HyperDHT framing in `object-transfer.mjs` stays with the Node adapter.
 
+`relayswarm_proto::selection` (from `peer-selection.mjs`) chooses a link and
+projects transfer times from recent first-byte times, rates and completions,
+with the same double-precision arithmetic. `relayswarm_proto::discovery` (from
+`neighbour-discovery.mjs`) keeps demand, hints, holder misses and the single
+replacement window, with IDs where the JavaScript compares object identity.
+
 The contracts are [`vectors/commitments.json`](vectors/commitments.json) and
 [`vectors/link-traces.json`](vectors/link-traces.json), the second recorded by
 driving the real `PeerLink` with a fake channel and clock. Both are
 generated from the JavaScript by `npm run proto:vectors`. Both
 `npm run test:proto` and `cargo test` must reproduce every recorded result,
-including the link's events and state after each step.
+including the link's events and state after each step. Selection and
+discovery are checked against seeded random and scripted operation sequences
+that `npm run proto:traces` regenerates deterministically under
+`core/target/js-traces/`; they are too large to commit. Without that file the
+Rust test skips locally; CI sets `RELAYSWARM_REQUIRE_JS_TRACES` so it cannot.
 Change the JavaScript first, regenerate, then make Rust agree.
 
 Known difference: a JSON string containing an unpaired UTF-16 surrogate escape
