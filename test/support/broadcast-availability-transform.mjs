@@ -13,6 +13,11 @@ export const SEAMS = Object.freeze({
     ['      this.channel.send(JSON.stringify(message));', '\n      availabilityObservation.queued(this, message);'],
     ['    if (added.length) this.onHaveChange?.(this, added);', '    availabilityObservation.accepted(this, added);\n'],
   ],
+  // The same two seams in the PeerLink backed by the Rust core.
+  corePeer: [
+    ['        try { this.channel.send(text);', ' availabilityObservation.queued(this, JSON.parse(text));'],
+    ['        this.onHaveChange?.(this, added);', '        availabilityObservation.accepted(this, added);\n'],
+  ],
 });
 export function transform(kind, original) {
   assert.ok(Object.hasOwn(SEAMS, kind));
@@ -26,7 +31,7 @@ export function transform(kind, original) {
     if (!addition) continue;
     let replacement;
     if (kind === "swarm") { const at = needle.indexOf("\n") + 1; replacement = needle.slice(0, at) + addition + needle.slice(at); }
-    else if (kind === "peer" && needle.startsWith("    if (added")) replacement = addition + needle;
+    else if ((kind === "peer" && needle.startsWith("    if (added")) || (kind === "corePeer" && needle.includes("onHaveChange"))) replacement = addition + needle;
     else replacement = needle + addition;
     value = value.replace(needle, replacement); changes.push([replacement, needle]);
   }

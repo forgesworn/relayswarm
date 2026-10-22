@@ -110,7 +110,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
-| `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier and peer selection, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The JavaScript verifier decides until the module loads, and for the rest of the session if it fails to load or traps. A rejection from the module stands. See `core` in the metrics. |
+| `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 
@@ -194,7 +194,9 @@ not an identity), `uptimeMs`, `serving`, plus:
   load or traps counts once under `core`.
 - `core`: `state` (`off`, `loading`, `ready` or `failed`), `verifier` (`wasm`
   or `js`, whichever decides the next commitment), `selection` (`wasm` or
-  `js`, whichever chooses peers), `fallbacks` (traps that handed the core's
+  `js`, whichever chooses peers), `links` (`wasm` and `js`: how many links
+  each opened; links opened before the module loads are JavaScript),
+  `fallbacks` (traps that handed the core's
   work to JavaScript) and `decided` (`wasm` and `js`: how many commitments
   each verifier decided). Selection moves to the core when it loads only if
   no peer has been chosen yet, and back to a fresh JavaScript selection,

@@ -266,7 +266,7 @@ const EVENT_UPLOAD_CANCELLED: u8 = 9;
 const EVENT_PROGRESS: u8 = 10;
 
 /// Scalars at the start of every link frame, as little-endian doubles.
-pub const LINK_HEADER: usize = 12;
+pub const LINK_HEADER: usize = 13;
 
 fn push_event(out: &mut Vec<u8>, tag: u8, payload: &[u8]) {
     out.push(tag);
@@ -297,6 +297,7 @@ fn frame(link: &mut Link, request: Option<u64>) -> Vec<u8> {
         link.last_delivered_at() as f64,
         opt(link.next_deadline()),
         opt(request),
+        f64::from(u8::from(link.upload_waiting())),
     ]);
     for event in link.drain_events() {
         match event {
@@ -372,7 +373,7 @@ pub extern "C" fn rs_link_free(handle: u32) {
 
 /// One operation on a link; returns the frame's length at `rs_result_ptr`,
 /// or -1 for an unknown handle or operation. `open` is the channel's state
-/// before the call. `bytes`/`len` carry the operation's text or bytes, and
+/// before the call: bit 0 open, bit 1 ordered and fully reliable. `bytes`/`len` carry the operation's text or bytes, and
 /// `a`/`b` its numbers.
 ///
 /// # Safety
@@ -397,7 +398,11 @@ pub unsafe extern "C" fn rs_link_call(handle: u32, op: u32, now: f64, open: u32,
     let out = LINKS.with(|links| {
         let mut links = links.borrow_mut();
         let link = links.get_mut(&handle)?;
-        link.set_channel_open(open != 0);
+        if op == LINK_SETS {
+            return Some(sets(link));
+        }
+        link.set_channel_open(open & 1 != 0);
+        link.set_reliable(open & 2 != 0);
         let mut request = None;
         match op {
             LINK_TEXT => link.handle_text(now, text()?),
@@ -432,7 +437,6 @@ pub unsafe extern "C" fn rs_link_call(handle: u32, op: u32, now: f64, open: u32,
             }
             LINK_SEND_FETCHING => link.send_fetching(text()?, ms(a)),
             LINK_STATE => {}
-            LINK_SETS => return Some(sets(link)),
             _ => return None,
         }
         Some(frame(link, request))

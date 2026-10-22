@@ -324,10 +324,26 @@ impl Link {
     pub fn version(&self) -> u64 {
         self.version
     }
+    /// A response is paused until the channel drains.
+    pub fn upload_waiting(&self) -> bool {
+        matches!(
+            self.active,
+            Some(Active {
+                stage: Stage::Draining { .. },
+                ..
+            })
+        )
+    }
 
     /// Whether the shell's channel is open, as `readyState === "open"`.
     pub fn set_channel_open(&mut self, open: bool) {
         self.channel_open = open;
+    }
+
+    /// Whether the channel is ordered and fully reliable, read by the shell
+    /// as `peer-link.mjs` reads it when a request is abandoned.
+    pub fn set_reliable(&mut self, reliable: bool) {
+        self.config.reliable = reliable;
     }
 
     /// The channel's queued bytes, read before a response is sent. Responses

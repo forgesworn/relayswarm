@@ -9,7 +9,8 @@ const OP = { text: 0, binary: 1, request: 2, abort: 3, close: 4, tick: 5, serve:
   sendHave: 8, sendHaveChange: 9, sendContribution: 10, sendFetching: 11, state: 12, sets: 13 };
 const EVENT = { sendText: 1, sendBinary: 2, closed: 3, report: 4, resolved: 5, haveChanged: 6,
   scheduleChanged: 7, serveRequest: 8, uploadCancelled: 9, progress: 10 };
-const HEADER = 12;
+const HEADER = 13;
+const HIGH_WATER_BYTES = 128 * 1024;
 const LOW_WATER_BYTES = 32 * 1024;
 const CLOSE_REASONS = new Set([
   "host", "host-stop", "admission", "rotation", "integrity", "request-timeout", "request-abort",
@@ -67,11 +68,7 @@ export class CorePeerLink {
     this.bytesOut = 0;
     this.#host = host;
     this.#floor = this.openedAt;
-    // The fixed part of "ordered and fully reliable"; readyState is passed
-    // with every call. Read as peer-link.mjs reads it, tolerating odd channels.
-    let reliable = false;
-    try { reliable = channel.ordered === true && channel.maxRetransmits === null && channel.maxPacketLifeTime === null; } catch {}
-    this.#handle = host.newLink(maxSegmentBytes, maxQueuedRequests, drainTimeoutMs, reliable, this.openedAt);
+    this.#handle = host.newLink(maxSegmentBytes, maxQueuedRequests, drainTimeoutMs, this.#reliable(), this.openedAt);
     host.links.add(this);
     channel.binaryType = "arraybuffer";
     channel.bufferedAmountLowThreshold = LOW_WATER_BYTES;
@@ -84,9 +81,7 @@ export class CorePeerLink {
     channel.addEventListener("close", () => this.close("channel-close"));
     channel.addEventListener("error", () => this.close("channel-error"));
     channel.addEventListener("bufferedamountlow", () => {
-      let buffered = 0;
-      try { buffered = Math.max(0, Number(channel.bufferedAmount) || 0); } catch {}
-      if (!this.closed) this.#call(OP.bufferedLow, { a: buffered });
+      if (!this.closed) this.#call(OP.bufferedLow, { a: this.#buffered() });
     });
     pc.addEventListener("connectionstatechange", () => {
       const state = pc.connectionState;
@@ -199,8 +194,13 @@ export class CorePeerLink {
     this.onClose?.(this);
   }
 
+  // Read before every call, as peer-link.mjs reads them when it needs them.
   #channelOpen() {
     try { return this.channel.readyState === "open"; } catch { return false; }
+  }
+
+  #reliable() {
+    try { return this.channel.ordered === true && this.channel.maxRetransmits === null && this.channel.maxPacketLifeTime === null; } catch { return false; }
   }
 
   #now() {
@@ -210,14 +210,14 @@ export class CorePeerLink {
 
   #call(op, { a = 0, b = 0, bytes = EMPTY, now = this.#now() } = {}) {
     if (this.#handle === null) return;
-    const frame = this.#host.call(this.#handle, op, now, this.#channelOpen(), a, b, bytes);
+    const frame = this.#host.call(this.#handle, op, now, (this.#channelOpen() ? 1 : 0) | (this.#reliable() ? 2 : 0), a, b, bytes);
     if (frame) this.#process(frame);
   }
 
   #process(bytes) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const header = Array.from({ length: HEADER }, (_, index) => view.getFloat64(index * 8, true));
-    const [version, closed, busy, transferring, inFlight, bytesIn, bytesOut, openedAt, lastServedAt, lastDeliveredAt, deadline, requestId] = header;
+    const [version, closed, busy, transferring, inFlight, bytesIn, bytesOut, openedAt, lastServedAt, lastDeliveredAt, deadline, requestId, waiting] = header;
     this.closed = closed === 1;
     this.#busy = busy === 1;
     this.#transferring = transferring === 1;
@@ -240,7 +240,12 @@ export class CorePeerLink {
       this.#event(tag, payload);
     }
     // A call made from a callback has already scheduled from a later frame.
-    if (frame === this.#frames && this.#handle !== null) this.#schedule(deadline);
+    if (frame === this.#frames && this.#handle !== null) {
+      this.#schedule(deadline);
+      // The core counts what it sends; peer-link.mjs waits only while the
+      // channel itself reports more than the high-water mark queued.
+      if (waiting === 1 && this.#buffered() <= HIGH_WATER_BYTES) return this.#call(OP.bufferedLow, { a: this.#buffered() });
+    }
     if (this.closed && !this.#transferring && this.#handle !== null) {
       this.#host.free(this.#handle);
       this.#handle = null;
@@ -270,7 +275,8 @@ export class CorePeerLink {
     switch (tag) {
       case EVENT.sendText: {
         if (this.#sendFailed) return;
-        try { this.channel.send(decoder.decode(payload)); } catch { this.#sendFailed = true; this.close("send-error"); }
+        const text = decoder.decode(payload);
+        try { this.channel.send(text); } catch { this.#sendFailed = true; this.close("send-error"); }
         return;
       }
       case EVENT.sendBinary: {
@@ -302,7 +308,8 @@ export class CorePeerLink {
         return;
       }
       case EVENT.haveChanged: {
-        this.onHaveChange?.(this, JSON.parse(decoder.decode(payload)));
+        const added = JSON.parse(decoder.decode(payload));
+        this.onHaveChange?.(this, added);
         return;
       }
       case EVENT.scheduleChanged: {
@@ -336,10 +343,13 @@ export class CorePeerLink {
     }
   }
 
+  #buffered() {
+    try { return Math.max(0, Number(this.channel.bufferedAmount) || 0); } catch { return 0; }
+  }
+
   #serve(bytes) {
     if (this.#handle === null) return;
-    let buffered = 0;
-    try { buffered = Math.max(0, Number(this.channel.bufferedAmount) || 0); } catch {}
+    const buffered = this.#buffered();
     const view = !bytes ? null : bytes instanceof Uint8Array ? bytes : ArrayBuffer.isView(bytes)
       ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) : bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : null;
     if (bytes && !view) { this.close("serve-error"); return this.#call(OP.serve, { a: 0, b: buffered }); }

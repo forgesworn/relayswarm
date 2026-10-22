@@ -36,6 +36,7 @@ bounded peer-first mode using author-signed segment commitments.
 | `npm run poc:native` | Two-peer native HyperDHT PoC (`native-poc.mjs`) |
 | `npm run test:native` | Native path tests, local relay + local DHT bootstrap |
 | `npm run test:swarm` | `src/browser/hls-swarm.mjs` unit tests |
+| `npm run test:swarm:core` | Loader hardening suite with peer-first fixtures on the Rust core |
 | `npm run test:browser` | hls.js browser test (`--mode shadow` or `--mode peer-first`) |
 | `npm run test:publisher` | Publisher context/range and demo HTTP/relay tests |
 | `npm run test:operator` | Chrome upload allowance, remote policy and opt-in reports |
@@ -65,7 +66,8 @@ The native tests do not need the network; they bootstrap a local DHT.
 src/relay-session.mjs          RelayPool, RelaySwarmSession, ticket validation (main export)
 src/browser/hls-swarm.mjs      hls.js shadow and peer-first integration (./hls-swarm export)
 src/browser/segment-commitment.mjs  experimental signed media commitment contract
-src/browser/core-wasm.mjs      loader for the Rust core's verifier (relayswarm-core.wasm, committed)
+src/browser/core-wasm.mjs      loader for the Rust core (relayswarm-core.wasm, committed): verifier, selection
+src/browser/core-peer-link.mjs PeerLink with its protocol in the Rust core
 src/browser/peer-link.mjs      browser WebRTC peer link
 src/hls-publisher.mjs          Node-only local HLS publisher and signed commitments
 demo/                         runnable publisher/player with consent and local receipts
@@ -122,11 +124,13 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 - The demo keeps its author key on the server and receipts in the browser.
   Preserve playlist-bound signing and explicit upload consent. Chrome fixture
   tests are loopback; do not describe them as physical-device/NAT validation.
-- The Rust core under `core/` is unreleased. Its commitment verifier and peer
-  selection are used only when a host passes `coreWasm`; the demo does.
-  Rebuild and commit `src/browser/relayswarm-core.wasm` with
+- The Rust core under `core/` is unreleased. Its commitment verifier, peer
+  selection and peer link are used only when a host passes `coreWasm`; the
+  demo does. Rebuild and commit `src/browser/relayswarm-core.wasm` with
   `npm run core:wasm` after any change under `core/` that affects
-  verification or selection.
+  verification, selection or links. A change to `peer-link.mjs` needs the
+  same change in `core/relayswarm-proto/src/link.rs`, regenerated traces and
+  `npm run test:proto` and `npm run test:swarm:core`.
   It must match the JavaScript verifier on every vector; change the JavaScript,
   regenerate the vectors, then make Rust agree. Its toolchain is pinned in
   `core/rust-toolchain.toml`; reuse `core/target/`.

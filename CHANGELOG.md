@@ -29,6 +29,13 @@
   JavaScript, and selection starts again without link history. The module is
   now 227,541 bytes (94,900 gzip). `core.selection` in the metrics reports
   which one chooses peers.
+- With `coreWasm`, links opened once the module is ready run the peer link
+  protocol in the Rust core (`src/browser/core-peer-link.mjs` keeps the
+  channel, timer and callbacks). All 48 committed link traces match through
+  the module. A trap closes the links it ran, and later links are
+  JavaScript. `core.links` counts links of each kind. The module is now
+  274,837 bytes (112,644 gzip). `npm run test:swarm:core` runs the loader
+  hardening suite with every peer-first fixture on the module.
 
 ## v0.2.1 (21 October 2026)
 

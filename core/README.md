@@ -56,10 +56,30 @@ and `rs_sel_estimate` return a double, and `rs_sel_state` and
 selection state, so each swarm instantiates its own. The caller filters
 links for open, idle, untried and holding the key; the core does the rest.
 
+Peer links live behind handles that are never reused: `rs_link_new` and
+`rs_link_free`, and `rs_link_call(handle, op, now, channel, a, b, ptr, len)`
+for every input, where `channel` carries whether the channel is open (bit 0)
+and ordered and fully reliable (bit 1), read before each call as
+`peer-link.mjs` reads them. A call returns a frame: thirteen doubles (state
+version, closed, busy, transferring, uploads in flight, bytes in and out,
+opened, last served and last delivered times, next deadline, a new request's
+ID and whether an upload waits for the channel to drain), then events as a
+tag, a u32 length and a payload. The shell copies the frame out before
+running any callback, since a callback may call in again.
+
 The browser loader is `src/browser/core-wasm.mjs`; hosts opt in with
 `coreWasm` (see `INTEGRATION.md`). Its `PeerSelection` stand-in replays
 the seeded selection sequences through the committed module and matches the
-JavaScript at every step.
+JavaScript at every step. `src/browser/core-peer-link.mjs` is a `PeerLink`
+that owns the channel, the one timer and the callbacks and leaves the
+protocol to the core; all 48 committed link traces match through it.
+
+Known differences in the link: the core counts a response in `bytesOut` as
+it emits the chunks, so a channel that refuses a chunk leaves the closed
+link's `bytesOut` higher than `peer-link.mjs` would; and the core paces
+uploads by the bytes it has sent since the channel last reported its queue,
+resuming at once when the channel reports little queued, which matches
+`peer-link.mjs` whenever `bufferedAmount` grows with each send.
 
 `npm run core:wasm` builds it with the release profile and writes
 `src/browser/relayswarm-core.wasm`, which is committed so Git installs need no
@@ -72,8 +92,10 @@ Measured on 22 October 2026:
 
 | Build | Raw bytes | gzip -9 |
 |---|---|---|
-| `relayswarm-core.wasm` with selection (committed, no `wasm-opt`) | 227,541 | 94,900 |
-| The same after `wasm-opt -Oz` (version 133, current features enabled) | 186,384 | 92,203 |
+| `relayswarm-core.wasm` with selection and links (committed, no `wasm-opt`) | 274,837 | 112,644 |
+| The same after `wasm-opt -Oz` (version 133, current features enabled) | 223,262 | 109,259 |
+| With selection, before links | 227,541 | 94,900 |
+| With selection after `wasm-opt -Oz` | 186,384 | 92,203 |
 | Verifiers only (committed before selection) | 200,458 | 87,373 |
 | Verifiers only after `wasm-opt -Oz` | 165,047 | 84,193 |
 | Earlier `wasm-bindgen` build after `wasm-opt`, for comparison | 159,136 | 81,720 |

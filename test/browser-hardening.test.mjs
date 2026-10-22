@@ -61,7 +61,13 @@ class RecordedChannel extends Channel {
 
 // Exercise the real relay/session admission and PeerLink paths, with only the
 // browser connection replaced. No private swarm state is exposed to tests.
+// RELAYSWARM_TEST_CORE=1 runs every peer-first fixture without its own
+// coreWasm on the committed module, with links opened after it is ready.
+const testCore = process.env.RELAYSWARM_TEST_CORE === "1"
+  ? await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url))) : null;
+
 async function linkedFixture(options = {}, LoaderImpl = Loader) {
+  if (testCore && options.mode === "peer-first" && options.coreWasm === undefined) options = { ...options, coreWasm: testCore };
   const relay = options.WebSocketImpl ? { url: "wss://memory-relay.example", close: async () => {} } : await startLocalRelay();
   const connections = [], peers = [];
   let peakLiveConnections = 0;
@@ -71,6 +77,7 @@ async function linkedFixture(options = {}, LoaderImpl = Loader) {
   swarm.attach(hls);
   const pool = new RelayPool([relay.url], { WebSocketImpl: options.WebSocketImpl }); await pool.connect();
   await until(() => swarm.metrics().pubkey);
+  if (testCore && options.coreWasm === testCore) await until(() => swarm.metrics().core.state === "ready");
   const addPeer = async (channel = new RecordedChannel(), peerPool = pool) => {
     const peer = new RelaySwarmSession({ pool: peerPool, swarmId: base.swarmId }); peer.start(); peers.push(peer);
     const count = connections.length, accepted = swarm.metrics().peers.offersAccepted;
@@ -730,8 +737,8 @@ test("a peer request is skipped for origin when the time left is below the faste
 });
 
 const coreWasm = await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url));
-// Every export the loader requires; rs_call traps.
-const trappingCore = stubCore(["rs_call"]);
+// Every export the loader requires, each trapping.
+const trappingCore = stubCore(Object.keys(CORE_FUNCTIONS));
 
 test("the Rust core verifies peer-first commitments, and its rejection stands", async () => {
   const playback = peerPlaybackOptions(1000);
@@ -749,11 +756,11 @@ test("the Rust core verifies peer-first commitments, and its rejection stands", 
     const metrics = fixture.swarm.metrics();
     assert.equal(metrics.segments.commitmentRejected, 1);
     assert.equal(metrics.segments.peerFirstLoaded, 1);
-    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", fallbacks: 0, decided: { wasm: 2, js: 0 } });
+    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 } });
   } finally { await fixture.close(); }
 });
 
-test("a trapping or unloadable core hands verification to JavaScript", async () => {
+test("a trapping or unloadable core hands its links and verification to JavaScript", async () => {
   for (const [source, fallbacks] of [[trappingCore, 1], [Uint8Array.from([1, 2, 3]), 0]]) {
     const playback = peerPlaybackOptions(1000);
     const fixture = await linkedFixture({ ...playback.options, coreWasm: source, WebSocketImpl: memoryRelaySocket() });
@@ -764,28 +771,27 @@ test("a trapping or unloadable core hands verification to JavaScript", async () 
       assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
       const metrics = fixture.swarm.metrics();
       assert.equal(metrics.segments.peerFirstLoaded, 1);
-      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", fallbacks, decided: { wasm: 0, js: 1 } });
+      // The trapping core fails on the first link it opens, which then runs in JavaScript.
+      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 } });
       assert.equal(metrics.errors.byStage.core, 1);
     } finally { await fixture.close(); }
   }
 });
 
-test("a selection trap retires the whole core, verifier included", async () => {
-  // The stub rejects every commitment, so a peer load proves JavaScript verified it.
-  const selectionTraps = Object.keys(CORE_FUNCTIONS).filter((name) => name.startsWith("rs_sel_"));
+test("a core whose links answer malformed frames retires before the first request", async () => {
+  // The stub returns empty frames from every link call; verification would
+  // reject everything, so a peer load proves JavaScript took over.
   const playback = peerPlaybackOptions(1000);
-  const fixture = await linkedFixture({ ...playback.options, coreWasm: stubCore(selectionTraps, { rs_call: -1 }), WebSocketImpl: memoryRelaySocket() });
+  const fixture = await linkedFixture({ ...playback.options, coreWasm: stubCore([], { rs_call: -1, rs_link_new: 1 }), WebSocketImpl: memoryRelaySocket() });
   try {
     await until(() => fixture.swarm.metrics().core.state === "ready");
     assert.equal(fixture.swarm.metrics().core.selection, "wasm");
-    // Metrics read each link's summary, which traps.
-    const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder"));
-    channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
-    assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+    await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder")).catch(() => {});
+    await until(() => fixture.swarm.metrics().core.state === "failed");
     const metrics = fixture.swarm.metrics();
-    assert.equal(metrics.segments.peerFirstLoaded, 1);
-    assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", fallbacks: 1, decided: { wasm: 0, js: 1 } });
+    assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", links: { wasm: 1, js: 0 }, fallbacks: 1, decided: { wasm: 0, js: 0 } });
     assert.equal(metrics.errors.byStage.core, 1);
+    assert.equal(metrics.peers.linksClosed, 1);
   } finally { await fixture.close(); }
 });
 
@@ -794,7 +800,7 @@ test("the core option is checked and ignored outside peer-first", () => {
     assert.equal(createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm }).metrics().disabledReason, "invalid-core-wasm");
   }
   const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm });
-  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", fallbacks: 0, decided: { wasm: 0, js: 0 } });
+  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 } });
   swarm.stop();
 });
 
@@ -2781,7 +2787,7 @@ async function overlapControlledFixture(t, { expiresAt, wrongRendition = false, 
   }
 }
 
-test("cold delivery retains deadline time when measured alternatives cannot fit", async t => {
+test("cold delivery retains deadline time when measured alternatives cannot fit", { skip: testCore ? "patches PeerSelection.prototype, which core selection does not use" : false }, async t => {
   const f = await overlapControlledFixture(t, { extraPeers: 2 });
   const originalSelect = PeerSelection.prototype.select;
   let seeded = false;

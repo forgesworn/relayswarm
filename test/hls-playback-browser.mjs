@@ -123,8 +123,8 @@ try {
     // JavaScript may decide a commitment that arrives before the module loads.
     // Selection binds to the module only before the first choice, which
     // needs a peer link and so comes well after the module loads.
-    const { state, verifier, selection, fallbacks, decided } = session.metrics.core;
-    assert.deepEqual({ state, verifier, selection, fallbacks }, { state: "ready", verifier: "wasm", selection: "wasm", fallbacks: 0 }, "the consumer did not verify and select with the Rust core");
+    const { state, verifier, selection, links, fallbacks, decided } = session.metrics.core;
+    assert.deepEqual({ state, verifier, selection, fallbacks, jsLinks: links.js }, { state: "ready", verifier: "wasm", selection: "wasm", fallbacks: 0, jsLinks: 0 }, "the consumer did not link, verify and select with the Rust core");
     assert.ok(decided.wasm > 0, "the module decided no commitments");
   }
   assert.ok(measured.stalls <= reference.stalls, `consumer stalled ${measured.stalls} times vs baseline ${reference.stalls}`);

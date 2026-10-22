@@ -157,6 +157,8 @@ jobs:
       - run: npm run check
       - run: npm run test:native
       - run: npm run test:swarm
+      - name: Loader suite with links, selection and verification in the Rust core
+        run: npm run test:swarm:core
       - run: npm run test:publisher
 
   rust-core:

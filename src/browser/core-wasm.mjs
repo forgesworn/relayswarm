@@ -46,6 +46,7 @@ async function instantiate(source) {
 const SELECTION_EXPORTS = ["rs_sel_observe", "rs_sel_record", "rs_sel_forget", "rs_sel_select", "rs_sel_state",
   "rs_sel_project", "rs_sel_minimum", "rs_sel_estimate", "rs_sel_summary", "rs_link_new", "rs_link_free", "rs_link_call"];
 const LINK_SETS = 13;
+const LINK_HEADER_BYTES = 13 * 8;
 const orNull = (value) => Number.isNaN(value) ? null : value;
 // Read memory only after the call: a call can grow it, detaching the old buffer.
 const numbers = (core, pointer) => new Float64Array(core.memory.buffer, pointer, 6);
@@ -195,18 +196,18 @@ export async function loadCore(source, { onFailure } = {}) {
       if (retired) return;
       try { exports.rs_link_free(handle); } catch (error) { fail(error); }
     },
-    call(handle, op, now, open, a, b, bytes) {
+    call(handle, op, now, channel, a, b, bytes) {
       if (retired) return null;
       try {
         const length = bytes.byteLength, pointer = exports.rs_alloc(length);
         let size;
         try {
           new Uint8Array(exports.memory.buffer, pointer, length).set(bytes);
-          size = exports.rs_link_call(handle, op, now, open ? 1 : 0, a, b, pointer, length);
+          size = exports.rs_link_call(handle, op, now, channel, a, b, pointer, length);
         } finally {
           exports.rs_free(pointer, length);
         }
-        if (size < 0) throw new Error(`Core link ${handle} refused operation ${op}.`);
+        if (size < 0 || (op !== LINK_SETS && size < LINK_HEADER_BYTES)) throw new Error(`Core link ${handle} refused operation ${op}.`);
         return new Uint8Array(exports.memory.buffer, exports.rs_result_ptr(), size).slice();
       } catch (error) {
         fail(error);
@@ -214,8 +215,9 @@ export async function loadCore(source, { onFailure } = {}) {
       }
     },
     sets(handle) {
-      const bytes = host.call(handle, LINK_SETS, 0, false, 0, 0, new Uint8Array(0));
-      return bytes ? JSON.parse(decoder.decode(bytes)) : null;
+      const bytes = host.call(handle, LINK_SETS, 0, 0, 0, 0, new Uint8Array(0));
+      if (!bytes) return null;
+      try { return JSON.parse(decoder.decode(bytes)); } catch (error) { fail(error); return null; }
     },
   };
 

@@ -323,6 +323,7 @@ class HlsSwarm {
     this.coreState = "off";
     this.coreFallbacks = 0;
     this.coreDecided = { wasm: 0, js: 0 };
+    this.coreLinks = { wasm: 0, js: 0 };
     this.dials = new Map();
     this.receivedOffers = new Set();
     this.cooldowns = new Map();
@@ -650,7 +651,7 @@ class HlsSwarm {
       },
       errors: { total: c.errors, byStage: { ...this.errorsByStage } },
       // Additive metrics-v2 field: which commitment verifier and peer selection run.
-      core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", selection: this.peerSelection.kind ?? "js", fallbacks: this.coreFallbacks, decided: { ...this.coreDecided } },
+      core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", selection: this.peerSelection.kind ?? "js", links: { ...this.coreLinks }, fallbacks: this.coreFallbacks, decided: { ...this.coreDecided } },
       config: {
         originFallbackMs: this.options.originFallbackMs,
         maxPeerWaitMs: this.options.maxPeerWaitMs,
@@ -1707,6 +1708,20 @@ class HlsSwarm {
     this.#noteError("core", error);
   }
 
+  // Links opened once the core is ready run its protocol; earlier links, and
+  // every link after a trap, are JavaScript.
+  #createLink(options) {
+    if (this.core && !this.core.retired) {
+      try {
+        const link = this.core.peerLink(options);
+        this.coreLinks.wasm += 1;
+        return link;
+      } catch (error) { this.#coreTrapped(error); }
+    }
+    this.coreLinks.js += 1;
+    return new PeerLink(options);
+  }
+
   // A null result is a verdict and stands; only a trap hands over to the
   // JavaScript verifier, for the rest of the session.
   #verifyCommitment(event, options) {
@@ -2438,7 +2453,7 @@ class HlsSwarm {
     if (dial.outgoing) this.counters.dialsAccepted += 1;
     this.counters.linksOpened += 1;
     if (dial.offerSentAt) pushSample(this.signallingSamples, now() - dial.offerSentAt);
-    const link = new PeerLink({
+    const link = this.#createLink({
       pubkey: dial.pubkey,
       pc: dial.pc,
       channel,
