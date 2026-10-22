@@ -3128,6 +3128,14 @@ async function staleHolderFixture(t, { maxPeers = 2, answering = false, sibling 
     if (!keepHave) holder.receive(haveFrame());
     return segment;
   };
+  // Fail until the holder has taken `target` held misses. A slow runner can end
+  // a load through a decline that asks nobody and so charges nobody, which is
+  // correct; the bound keeps the loop finite and the message shows the path.
+  const failUntil = async (via, target, options = {}) => {
+    for (let i = 0; i < 12 && discovery().heldMiss < target; i++) await fail(via, options);
+    assert.equal(discovery().heldMiss, target, `held misses reached the target: ${JSON.stringify({ counters: counters(), discovery: discovery(),
+      rows: rows().map(row => [row.reason, row.projection?.stage ?? null, row.haveHolders, row.heldMissHolders]) })}`);
+  };
   // The holder holds the key and delivers it: a verified peer segment.
   const deliver = async via => {
     const segment = next(), loaded = f.swarm.metrics().segments.peerFirstLoaded;
@@ -3143,7 +3151,7 @@ async function staleHolderFixture(t, { maxPeers = 2, answering = false, sibling 
     await load(segment.name); await sleep(30);
     return rows().filter(row => row.reason === "no-have-wait").at(-1);
   };
-  return { ...f, shift, holderKey, holderChannel: holder, siblingChannel: first, requests, commitments, candidate, next, load, rows, counters, outcomes, discovery, touch, label, miss, fail, deliver, trigger };
+  return { ...f, shift, holderKey, holderChannel: holder, siblingChannel: first, requests, commitments, candidate, next, load, rows, counters, outcomes, discovery, touch, label, miss, fail, failUntil, deliver, trigger };
 }
 
 test("a linked holder that is never ahead stops suppressing discovery after four misses over ten seconds", async t => {
@@ -3274,8 +3282,7 @@ test("an undelivering stale holder that still advertises a key is the rotation v
   const f = await staleHolderFixture(t, { sibling: true, serve: { bytes: bytes32, delayMs: null } });
   try {
     const via = f.candidate();
-    for (let i = 0; i < 4; i++) await f.fail(via, { keepHave: true });
-    assert.equal(f.discovery().heldMiss, 4);
+    await f.failUntil(via, 4, { keepHave: true });
     f.shift.ms += 10_001; f.touch(); f.siblingChannel.receive(serving("audio:0"));
     // The candidate still hints the last demanded key.
     const audio = new Promise(resolve => new f.hls.config.fLoader({}).load({ ...context, url: "https://origin.example/audio-1.ts",
