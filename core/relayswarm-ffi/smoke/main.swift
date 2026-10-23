@@ -60,6 +60,68 @@ func transfer(_ field: [Substring]) {
     print(json(["log": log, "delivered": orNull(delivered?.base64EncodedString())]))
 }
 
+func frames(_ events: [PeerLinkEvent]) -> [PeerLinkEvent] {
+    events.filter {
+        switch $0 {
+        case .sendText, .sendBinary: return true
+        default: return false
+        }
+    }
+}
+
+// A requester asks a holder for a run of pieces; then the channel-state calls.
+func range(_ field: [Substring]) {
+    let size = number(field[1])
+    let object = bytes(field[2])!
+    let key = String(field[3])
+    let span = PieceSpan(start: UInt32(field[4])!, end: UInt32(field[5])!)
+    let settings = LinkSettings(maxSegmentBytes: 8_388_608, maxQueuedRequests: 4, drainTimeoutMs: 1_000, reliable: true)
+    let requester = PeerLink(settings: settings, now: 0)
+    let holder = PeerLink(settings: settings, now: 0)
+    var toHolder = frames(requester.requestRange(now: 0, key: key, timeoutMs: 5_000, span: span, objectSize: size).events)
+    var toRequester: [PeerLinkEvent] = []
+    var resolved: Data? = nil
+    var done = false
+    for _ in 0..<64 where !done {
+        for case let .sendText(text) in toHolder {
+            let update = holder.handleText(now: 0, text: text)
+            if update.events.contains(where: { if case .serveRange = $0 { return true }; return false }) {
+                holder.observeBuffered(buffered: 0)
+                toRequester += frames(holder.serveResponse(now: 0, bytes: object).events)
+            }
+        }
+        toHolder = []
+        if toRequester.isEmpty { toRequester += frames(holder.bufferedAmountLow(now: 0, buffered: 0).events) }
+        for frame in toRequester {
+            let update: LinkUpdate
+            switch frame {
+            case let .sendText(text): update = requester.handleText(now: 0, text: text)
+            case let .sendBinary(bytes): update = requester.handleBinary(now: 0, chunk: bytes)
+            default: fatalError("not a frame")
+            }
+            for case let .resolved(_, bytes) in update.events {
+                resolved = bytes
+                done = true
+            }
+        }
+        toRequester = []
+    }
+
+    let quiet = PeerLink(settings: settings, now: 0)
+    quiet.setChannelOpen(open: false)
+    let closedSends = quiet.sendHave(keys: ["a"]).events.count
+    quiet.setChannelOpen(open: true)
+    let openSends = quiet.sendHave(keys: ["a"]).events.count
+    func abortCloses(_ reliable: Bool) -> Bool {
+        let link = PeerLink(settings: settings, now: 0)
+        link.setReliable(reliable: reliable)
+        let id = link.request(now: 0, key: "k", timeoutMs: 5_000, expectedSize: nil).requestId!
+        return link.abort(now: 0, id: id, abandoned: false).closed
+    }
+    print(json(["range": orNull(resolved?.base64EncodedString()), "closedSends": closedSends, "openSends": openSends,
+                "unreliableAbortCloses": abortCloses(false), "reliableAbortCloses": abortCloses(true)]))
+}
+
 func event(_ event: PeerLinkEvent) -> [Any] {
     switch event {
     case let .sendText(text): return ["sendText", text]
@@ -104,6 +166,8 @@ for field in lines {
     case "transfer":
         print("{\"vectors\":[\(verdicts.joined(separator: ","))]}")
         transfer(field)
+    case "range":
+        range(field)
     case "trace":
         now = number(field[1])
         link = PeerLink(settings: LinkSettings(maxSegmentBytes: number(field[2]), maxQueuedRequests: UInt32(field[3])!,

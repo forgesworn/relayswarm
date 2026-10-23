@@ -179,7 +179,9 @@ the facade, and replays a scripted transfer and a piece range exchange through
 both the facade and the core, expecting the same commands and events.
 `npm run test:ffi:swift` and `npm run test:ffi:kotlin` build the debug
 library, generate bindings, compile a small program against them and check
-every vector, every link trace and one transfer; CI runs both on Linux. The
+every vector, every link trace, one transfer and a piece range exchanged
+between two links, and that the channel's open and reliable flags change
+what the link sends and how an abort ends; CI runs both on Linux. The
 Kotlin check downloads JNA 5.14.0 from Maven Central into `core/target/` and
 verifies its SHA-256. Generate bindings from an unstripped build: the release
 profile strips symbols, and on Linux that removes the UniFFI metadata. Peer

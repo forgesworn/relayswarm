@@ -990,8 +990,8 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
   Kotlin: the commitment verifiers (JSON in and out), the schema 3 piece
   helpers, the multi-holder transfer scheduler and the peer link protocol.
   `npm run test:ffi:swift` and `npm run test:ffi:kotlin` check all 140
-  vectors, all 48 recorded link traces and a transfer through generated
-  bindings, and CI runs both. RelaySwarmKit does not use it yet.
+  vectors, all 48 recorded link traces, a transfer and a piece range
+  exchange through generated bindings, and CI runs both. RelaySwarmKit does not use it yet.
 
 ## v0.2.1 (21 October 2026)
 

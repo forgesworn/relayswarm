@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Build the core's UniFFI library, generate Swift or Kotlin bindings, compile
 // a small program against them and check its answers: every shared commitment
-// vector, one transfer from a holder and origin, and every recorded peer link
-// trace. Swift needs swiftc; Kotlin needs kotlinc and java, and downloads a
+// vector, one transfer from a holder and origin, a piece range exchanged
+// between two peer links, the link's channel-state calls, and every recorded
+// peer link trace. Swift needs swiftc; Kotlin needs kotlinc and java, and downloads a
 // pinned JNA jar into core/target.
 //
 //   node scripts/ffi-smoke.mjs swift|kotlin
@@ -17,6 +18,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { commitmentPieceSize } from "../src/browser/segment-commitment.mjs";
 
 const language = process.argv[2];
 if (language !== "swift" && language !== "kotlin") throw new Error("usage: ffi-smoke.mjs swift|kotlin");
@@ -66,6 +68,8 @@ const piece = 65_536, size = 6 * piece + 1_000;
 const object = Buffer.from(Array.from({ length: size }, (_, i) => (i * 7 + 1) & 255));
 const pieces = [];
 for (let at = 0; at < size; at += piece) pieces.push(sha256(object.subarray(at, at + piece)));
+// Pieces 2 to 6, the last one short.
+const span = { start: 2, end: 7 };
 
 function step(input) {
   const [[op, value]] = Object.entries(input);
@@ -97,6 +101,7 @@ function input() {
     lines.push(`case ${entry.op} ${str(JSON.stringify(entry.event ?? null))} ${str(JSON.stringify(options))}`);
   }
   lines.push(`transfer ${size} ${raw(object)} ${sha256(object)} ${pieces.join(",")}`);
+  lines.push(`range ${size} ${raw(object)} ${sha256(object)} ${span.start} ${span.end}`);
   for (const trace of traces) {
     const { maxSegmentBytes, maxQueuedRequests, drainTimeoutMs, reliable } = trace.config;
     lines.push(`trace ${EPOCH} ${maxSegmentBytes} ${maxQueuedRequests} ${drainTimeoutMs} ${flag(reliable)}`);
@@ -147,7 +152,7 @@ function state([have, fetching, renditions, serving, rendition, busy, outboundIn
 }
 
 function check(output) {
-  const [first, second, ...links] = output.trim().split("\n").map((line) => JSON.parse(line));
+  const [first, second, third, ...links] = output.trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(first.vectors.length, vectors.cases.length);
   const differ = vectors.cases.filter((entry, index) => JSON.stringify(first.vectors[index]) !== JSON.stringify(entry.expected));
   for (const entry of differ) console.error(entry.name, JSON.stringify(first.vectors[vectors.cases.indexOf(entry)]), JSON.stringify(entry.expected));
@@ -155,6 +160,13 @@ function check(output) {
 
   assert.equal(Buffer.from(second.delivered, "base64").equals(object), true, "the transfer delivers the object");
   assert.ok(second.log.some((line) => line.startsWith("request 1 ")), "the holder is asked for pieces");
+
+  const pieceSize = commitmentPieceSize(size);
+  const wanted = object.subarray(span.start * pieceSize, Math.min(span.end * pieceSize, size));
+  const { range, ...channel } = third;
+  assert.ok(range !== null && Buffer.from(range, "base64").equals(wanted), "the holder serves the piece range");
+  assert.deepEqual(channel, { closedSends: 0, openSends: 1, unreliableAbortCloses: true, reliableAbortCloses: false },
+    "channel state reaches the link");
 
   assert.equal(links.length, traces.length, "one result per link trace");
   const differences = [];
@@ -171,7 +183,7 @@ function check(output) {
   });
   assert.deepEqual(differences, [], `link traces differ through ${language}:\n${differences.join("\n")}`);
   const steps = traces.reduce((sum, trace) => sum + trace.steps.length, 0);
-  console.log(`${language} bindings: ${vectors.cases.length} vectors match; ${traces.length} link traces (${steps} steps) match; transfer ${second.log.join(", ")}`);
+  console.log(`${language} bindings: ${vectors.cases.length} vectors match; ${traces.length} link traces (${steps} steps) match; transfer ${second.log.join(", ")}; range of ${wanted.length} bytes`);
 }
 
 // --- build and run -----------------------------------------------------------

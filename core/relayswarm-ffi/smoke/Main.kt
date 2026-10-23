@@ -63,6 +63,61 @@ fun transfer(field: List<String>) {
     println(json(mapOf("log" to log, "delivered" to delivered?.let(::base64))))
 }
 
+fun frames(events: List<PeerLinkEvent>) = events.filter { it is PeerLinkEvent.SendText || it is PeerLinkEvent.SendBinary }
+
+// A requester asks a holder for a run of pieces; then the channel-state calls.
+fun range(field: List<String>) {
+    val size = number(field[1])
+    val objectBytes = bytes(field[2])!!
+    val key = field[3]
+    val span = PieceSpan(field[4].toUInt(), field[5].toUInt())
+    val settings = LinkSettings(8_388_608uL, 4u, 1_000uL, true)
+    val requester = PeerLink(settings, 0uL)
+    val holder = PeerLink(settings, 0uL)
+    var toHolder = frames(requester.requestRange(0uL, key, 5_000uL, span, size).events)
+    val toRequester = mutableListOf<PeerLinkEvent>()
+    var resolved: ByteArray? = null
+    var done = false
+    for (round in 0 until 64) {
+        if (done) break
+        for (frame in toHolder) {
+            val update = holder.handleText(0uL, (frame as PeerLinkEvent.SendText).text)
+            if (update.events.any { it is PeerLinkEvent.ServeRange }) {
+                holder.observeBuffered(0uL)
+                toRequester += frames(holder.serveResponse(0uL, objectBytes).events)
+            }
+        }
+        toHolder = emptyList()
+        if (toRequester.isEmpty()) toRequester += frames(holder.bufferedAmountLow(0uL, 0uL).events)
+        for (frame in toRequester) {
+            val update = when (frame) {
+                is PeerLinkEvent.SendText -> requester.handleText(0uL, frame.text)
+                is PeerLinkEvent.SendBinary -> requester.handleBinary(0uL, frame.bytes)
+                else -> error("not a frame")
+            }
+            for (event in update.events) if (event is PeerLinkEvent.Resolved) { resolved = event.bytes; done = true }
+        }
+        toRequester.clear()
+    }
+    requester.close()
+    holder.close()
+
+    val quiet = PeerLink(settings, 0uL)
+    quiet.setChannelOpen(false)
+    val closedSends = quiet.sendHave(listOf("a")).events.size
+    quiet.setChannelOpen(true)
+    val openSends = quiet.sendHave(listOf("a")).events.size
+    quiet.close()
+    fun abortCloses(reliable: Boolean): Boolean {
+        val link = PeerLink(settings, 0uL)
+        link.setReliable(reliable)
+        val id = link.request(0uL, "k", 5_000uL, null).requestId!!
+        return link.abort(0uL, id, false).closed.also { link.close() }
+    }
+    println(json(mapOf("range" to resolved?.let(::base64), "closedSends" to closedSends, "openSends" to openSends,
+        "unreliableAbortCloses" to abortCloses(false), "reliableAbortCloses" to abortCloses(true))))
+}
+
 fun event(event: PeerLinkEvent): List<Any?> = when (event) {
     is PeerLinkEvent.SendText -> listOf("sendText", event.text)
     is PeerLinkEvent.SendBinary -> listOf("sendBinary", base64(event.bytes))
@@ -110,6 +165,7 @@ fun main() {
                 println("{\"vectors\":[${verdicts.joinToString(",")}]}")
                 transfer(field)
             }
+            "range" -> range(field)
             "trace" -> {
                 link?.close() // frees the previous trace's link
                 now = number(field[1])
