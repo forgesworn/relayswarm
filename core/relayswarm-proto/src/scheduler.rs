@@ -6,9 +6,10 @@
 //! issues ranged requests, verifies every piece against the signed
 //! commitment, bans a holder that sends a bad piece, reassigns failed work,
 //! hands outstanding pieces to origin at the deadline and duplicates the last
-//! pieces of a lagging source. It delivers only a fully verified object.
-//!
-//! Nothing here is wired into the loader yet.
+//! pieces of a lagging source. A peer that stays silent, or whose flow
+//! cannot finish its range by the floor, is abandoned early and its pieces
+//! move, as the single-holder loader abandons a hopeless request. It
+//! delivers only a fully verified object.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -26,6 +27,17 @@ pub const DEFAULT_LOOKAHEAD_SEGMENTS: usize = 2;
 pub const DEFAULT_ORIGIN_RESERVE_MS: f64 = 2_000.0;
 /// At most this many unverified pieces left starts the endgame.
 pub const ENDGAME_PIECES: usize = 2;
+/// A request is never abandoned for silence sooner than this
+/// (`SILENCE_FLOOR_MS` in the loader).
+pub const SILENCE_FLOOR_MS: f64 = 250.0;
+/// The flow rate is judged over about this much of the latest flow, and not
+/// on less than `MIN_FLOW_MS` of it (the loader's single-holder window).
+const RATE_WINDOW_MS: u64 = 400;
+const MIN_FLOW_MS: u64 = 150;
+/// A flowing request that sends nothing new is checked again this often.
+pub const STALL_CHECK_MS: u64 = 250;
+/// Flow points kept per request.
+const FLOW_POINTS: usize = 256;
 /// The rate floor when nothing is measured, in bytes per millisecond
 /// (`MIN_RATE_BYTES` per second in peer selection).
 pub const MIN_RATE: f64 = 32.0 * 1024.0 / 1000.0;
@@ -330,6 +342,9 @@ pub enum Command {
     FetchOrigin { range: PieceRange },
     /// Abort the peer's request for this object; it takes no more of it.
     Cancel { peer: u64 },
+    /// As `Cancel`, because the request was hopeless: silent, or too slow to
+    /// finish by the floor. The shell may count it as abandoned.
+    Abandon { peer: u64 },
     /// The peer sent a piece that failed its hash: ban it for this object
     /// and charge it under the existing ban rules.
     Ban { peer: u64 },
@@ -349,6 +364,12 @@ struct Lane {
     /// Projected absolute time this lane finishes its work.
     finish_at: f64,
     retired: bool,
+    /// For a peer's in-flight request: when its first progress came, and
+    /// `(time, bytes received)` since.
+    first_byte_at: Option<u64>,
+    flow: VecDeque<(u64, u64)>,
+    /// When a tick last judged the request.
+    checked_at: u64,
 }
 
 impl Lane {
@@ -359,6 +380,9 @@ impl Lane {
             in_flight: Vec::new(),
             finish_at: now as f64,
             retired: false,
+            first_byte_at: None,
+            flow: VecDeque::new(),
+            checked_at: now,
         }
     }
 
@@ -468,7 +492,103 @@ impl Transfer {
             .values()
             .filter(|lane| !lane.in_flight.is_empty() && left.iter().any(|index| lane.holds(*index)))
             .map(|lane| lane.finish_at.ceil() as u64);
-        floor.into_iter().chain(lag).min()
+        let watch = self.lanes.iter().filter_map(|(source, _)| self.watch_at(*source));
+        floor.into_iter().chain(lag).chain(watch).min()
+    }
+
+    /// When a peer's in-flight request should next be judged: its silence
+    /// limit before the first byte, then a stall check after its latest bytes.
+    fn watch_at(&self, source: Source) -> Option<u64> {
+        let lane = self.lanes.get(&source)?;
+        if !matches!(source, Source::Peer(_)) || lane.retired || self.floor_reached {
+            return None;
+        }
+        let &(range, sent) = lane.in_flight.first()?;
+        match lane.first_byte_at {
+            None => Some(self.silence_at(sent, range)?.ceil() as u64),
+            Some(_) => {
+                let last = lane.flow.back().map_or(sent, |(at, _)| *at);
+                Some(last.max(lane.checked_at) + STALL_CHECK_MS)
+            }
+        }
+    }
+
+    /// No first byte by then abandons the request: three recent first-byte
+    /// times and at least `SILENCE_FLOOR_MS`, or later while the range could
+    /// still finish by the floor at the best recent rate. Unknown without a
+    /// shared first-byte time, as in the loader.
+    fn silence_at(&self, sent: u64, range: PieceRange) -> Option<f64> {
+        let first_byte = non_negative(self.shared_first_byte_ms)?;
+        let (from, to) = self.piece_range_bytes(range);
+        let hopeless = positive(self.shared_rate).map_or(f64::NEG_INFINITY, |best| self.floor_at() as f64 - (to - from) as f64 / best);
+        Some(sent as f64 + SILENCE_FLOOR_MS.max(first_byte * 3.0).max(hopeless - sent as f64))
+    }
+
+    /// The peer's in-flight request cannot finish its range by the floor,
+    /// even at twice its recent rate or the best shared rate, or it has been
+    /// silent too long. The window ends now, so a stall lowers the rate.
+    /// Never sooner than one first-byte time after the first byte.
+    fn hopeless(&self, now: u64, source: Source) -> bool {
+        let Some(lane) = self.lanes.get(&source) else { return false };
+        let Some(&(range, sent)) = lane.in_flight.first() else {
+            return false;
+        };
+        if lane.retired || !matches!(source, Source::Peer(_)) {
+            return false;
+        }
+        let Some(first) = lane.first_byte_at else {
+            return self.silence_at(sent, range).is_some_and(|at| now as f64 >= at);
+        };
+        if now.saturating_sub(sent) < 2 * first.saturating_sub(sent) {
+            return false;
+        }
+        let Some(&(_, received)) = lane.flow.back() else { return false };
+        let start = lane
+            .flow
+            .iter()
+            .rev()
+            .find(|(at, _)| *at + RATE_WINDOW_MS <= now)
+            .or(lane.flow.front())
+            .copied()
+            .unwrap_or((now, received));
+        let span = now.saturating_sub(start.0);
+        if span < MIN_FLOW_MS {
+            return false;
+        }
+        let recent = received.saturating_sub(start.1) as f64 / span as f64;
+        let rate = (2.0 * recent).max(positive(self.shared_rate).unwrap_or(0.0));
+        let (from, to) = self.piece_range_bytes(range);
+        let left = (to - from) as f64 - received as f64;
+        rate <= 0.0 || now as f64 + left.max(0.0) / rate > self.floor_at() as f64
+    }
+
+    /// Cancel a hopeless request and move its pieces to the other sources.
+    fn abandon(&mut self, now: u64, source: Source) {
+        let Source::Peer(peer) = source else { return };
+        self.commands.push(Command::Abandon { peer });
+        let pieces = self.retire(source);
+        let pieces: Vec<u32> = pieces.into_iter().filter(|index| !self.covered(*index)).collect();
+        self.assign(now, &pieces);
+    }
+
+    /// Bytes received so far on the peer's in-flight request. Abandons it
+    /// when it cannot finish by the floor.
+    pub fn progress(&mut self, now: u64, source: Source, received: u64) {
+        if self.finished || self.floor_reached {
+            return;
+        }
+        let Some(lane) = self.lanes.get_mut(&source) else { return };
+        if lane.retired || lane.in_flight.is_empty() || !matches!(source, Source::Peer(_)) {
+            return;
+        }
+        lane.first_byte_at.get_or_insert(now);
+        lane.flow.push_back((now, received));
+        if lane.flow.len() > FLOW_POINTS {
+            lane.flow.pop_front();
+        }
+        if self.hopeless(now, source) {
+            self.abandon(now, source);
+        }
     }
 
     /// Unverified pieces the endgame may still duplicate.
@@ -562,6 +682,9 @@ impl Transfer {
             }
             lane.queue.pop_front();
             lane.in_flight.push((range, now));
+            lane.first_byte_at = None;
+            lane.flow.clear();
+            lane.checked_at = now;
             self.commands.push(match source {
                 Source::Peer(peer) => Command::Request { peer, range },
                 Source::Origin => Command::FetchOrigin { range },
@@ -734,6 +857,22 @@ impl Transfer {
                 self.queue_origin(now, range);
             }
             return;
+        }
+        let watched: Vec<Source> = self
+            .lanes
+            .keys()
+            .copied()
+            .filter(|source| self.watch_at(*source).is_some())
+            .collect();
+        for source in watched {
+            if self.finished {
+                return;
+            }
+            if self.hopeless(now, source) {
+                self.abandon(now, source);
+            } else if let Some(lane) = self.lanes.get_mut(&source) {
+                lane.checked_at = now;
+            }
         }
         self.endgame(now);
     }

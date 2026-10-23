@@ -126,6 +126,20 @@ test("peers that would be late hand the tail to a ranged origin fetch", async ()
   assert.deepEqual(delivered, bytes);
 });
 
+test("progress too slow for the floor abandons the peer and moves its pieces", async () => {
+  const core = await loadCore(compiled);
+  const bytes = object(6 * 65_536);
+  const { transfer } = setup(core, bytes, { deadline: 1_000 + 4_000 });
+  const state = transfer.core.start(1_000, { peers: [[1, null, 200], [2, null, 200]], origin: [100, 500], sharedFirstByteMs: 50 });
+  const slow = state.commands.find((command) => command.t === "request" && command.peer === 2);
+  assert.ok(slow, JSON.stringify(state.commands));
+  const commands = [];
+  for (const [at, received] of [[1_050, 1_000], [1_300, 2_000], [1_500, 3_000]]) commands.push(...transfer.core.progress(at, 2, received).commands);
+  assert.ok(commands.some((command) => command.t === "abandon" && command.peer === 2), JSON.stringify(commands));
+  assert.ok(!commands.some((command) => command.t === "request" && command.peer === 2), "no more work for the slow peer");
+  transfer.core.free();
+});
+
 test("a module without a scheduler offers no transfer", async () => {
   const core = await loadCore(await WebAssembly.compile(stubCore([])));
   assert.equal(core.transfer({ size: 1, sha256: "a".repeat(64), pieces: ["a".repeat(64)], deadline: 1, maxHolders: 3, originReserveMs: 0 }), null);

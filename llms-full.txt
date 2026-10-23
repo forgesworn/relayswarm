@@ -376,7 +376,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
 | `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The relay session starts once the module has loaded or failed, after at most 2 seconds; fragments loaded meanwhile go to origin. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
-| `multiHolder` | `false` | Experimental; needs `coreWasm`. A schema 3 segment (signed with the publisher's `pieceCommitments`) is fetched from several holders at once by piece range, with an HTTP `Range` fetch from origin for any tail the peers are projected to miss; every piece is verified against the commitment before the segment is delivered. Used only with holders whose presence advertises object framing 2, and the viewer advertises it only while every one of its links runs in the core. Origin must answer `Range` with 206; a 200 is never sliced. Ranged origin requests use `fetch` with same-origin credentials, not the player's loader, so headers added through hls.js `xhrSetup` or `fetchSetup` are not sent; a refused range sends the segment to the whole-segment origin load. A ranged upload is charged by the bytes it sends. |
+| `multiHolder` | `false` | Experimental; needs `coreWasm`. A schema 3 segment (signed with the publisher's `pieceCommitments`) is fetched from several holders at once by piece range, with an HTTP `Range` fetch from origin for any tail the peers are projected to miss; every piece is verified against the commitment before the segment is delivered. A holder that stays silent or whose flow cannot finish its range in time is abandoned early, by the single-holder rules, and its pieces move to the other sources; unlike the single-holder path, a flow that stops after its first byte is also checked every 250 ms rather than left to its timeout. Used only with holders whose presence advertises object framing 2, and the viewer advertises it only while every one of its links runs in the core. Origin must answer `Range` with 206; a 200 is never sliced. Ranged origin requests use `fetch` with same-origin credentials, not the player's loader, so headers added through hls.js `xhrSetup` or `fetchSetup` are not sent; a refused range sends the segment to the whole-segment origin load. A ranged upload is charged by the bytes it sends. |
 | `maxHoldersPerObject` | `3` | Holders per segment under `multiHolder`, 1 to 8. Provisional: not yet set from a replayed field trace. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
@@ -472,7 +472,8 @@ not an identity), `uptimeMs`, `serving`, plus:
   it holds no context, hint or window, and after a trap to a fresh JavaScript
   instance that keeps its counters. `multiHolder` reports whether framing 2
   is advertised (`enabled`) and counts `transfers`, `delivered`, `late`
-  (planned past the deadline even with origin), `failed`, `bans`, and the
+  (planned past the deadline even with origin), `failed`, `bans`,
+  `abandoned` (holders dropped early as silent or too slow), and the
   bytes from peers and origin (`peerBytes`, `originBytes`, `originRanges`).
   `timings` gives p50 and p90 over the last 128 delivered transfers of their
   duration, their slowest single request and their request count.
@@ -950,6 +951,10 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
   the deadline. Presence carries `obj: 2` only while every link runs in the
   core. Off by default. A ranged upload is charged against upload allowances
   and `reserveUploadBytes` by the bytes it sends, not the whole segment.
+- Under `multiHolder`, abandon a silent or too-slow holder early, by the
+  single-holder rules, and move its pieces, instead of waiting for the
+  deadline; counted as `core.multiHolder.abandoned`. Unlike the single-holder
+  path, a flow that stops after its first byte is also rechecked every 250 ms.
 
 ## v0.2.1 (21 October 2026)
 

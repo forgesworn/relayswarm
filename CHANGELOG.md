@@ -71,6 +71,10 @@
   the deadline. Presence carries `obj: 2` only while every link runs in the
   core. Off by default. A ranged upload is charged against upload allowances
   and `reserveUploadBytes` by the bytes it sends, not the whole segment.
+- Under `multiHolder`, abandon a silent or too-slow holder early, by the
+  single-holder rules, and move its pieces, instead of waiting for the
+  deadline; counted as `core.multiHolder.abandoned`. Unlike the single-holder
+  path, a flow that stops after its first byte is also rechecked every 250 ms.
 
 ## v0.2.1 (21 October 2026)
 

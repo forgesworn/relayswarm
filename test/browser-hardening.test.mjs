@@ -807,7 +807,7 @@ test("the Rust core verifies peer-first commitments, and its rejection stands", 
     const metrics = fixture.swarm.metrics();
     assert.equal(metrics.segments.commitmentRejected, 1);
     assert.equal(metrics.segments.peerFirstLoaded, 1);
-    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", discovery: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, peerBytes: 0, originBytes: 0, originRanges: 0, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", discovery: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, originRanges: 0, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
   } finally { await fixture.close(); }
 });
 
@@ -823,7 +823,7 @@ test("a trapping or unloadable core hands its links and verification to JavaScri
       const metrics = fixture.swarm.metrics();
       assert.equal(metrics.segments.peerFirstLoaded, 1);
       // The trapping core fails on the first link it opens, which then runs in JavaScript.
-      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, peerBytes: 0, originBytes: 0, originRanges: 0, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, originRanges: 0, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
       assert.equal(metrics.errors.byStage.core, 1);
     } finally { await fixture.close(); }
   }
@@ -839,7 +839,7 @@ test("a core that answers malformed results retires and the loader carries on in
     const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder")).catch(() => null);
     await until(() => fixture.swarm.metrics().core.state === "failed");
     const { core, errors } = fixture.swarm.metrics();
-    assert.deepEqual({ ...core, links: core.links.wasm + core.links.js }, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: 1, fallbacks: 1, decided: { wasm: 0, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, peerBytes: 0, originBytes: 0, originRanges: 0, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+    assert.deepEqual({ ...core, links: core.links.wasm + core.links.js }, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: 1, fallbacks: 1, decided: { wasm: 0, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, originRanges: 0, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
     assert.equal(errors.byStage.core, 1);
     if (channel && core.links.js === 1) {
       channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
@@ -882,7 +882,7 @@ test("the core option is checked and ignored outside peer-first", () => {
     assert.equal(createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm }).metrics().disabledReason, "invalid-core-wasm");
   }
   const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm });
-  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, peerBytes: 0, originBytes: 0, originRanges: 0, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, originRanges: 0, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
   swarm.stop();
 });
 
@@ -3507,11 +3507,13 @@ const multiContext = { url: "https://origin.example/media/seg.ts",
 /** A holder that answers framing 2 ranges by slicing its object. */
 class RangedChannel extends RecordedChannel {
   wants = [];
-  constructor(bytes, { corrupt = false, silent = false, delayMs = 0 } = {}) { super(); Object.assign(this, { bytes, corrupt, silent, delayMs }); }
+  cancels = 0;
+  constructor(bytes, { corrupt = false, silent = false, delayMs = 0, trickleMs = 0 } = {}) { super(); Object.assign(this, { bytes, corrupt, silent, delayMs, trickleMs }); }
   send(data) {
     super.send(data);
     if (typeof data !== "string") return;
     const frame = JSON.parse(data);
+    if (frame.t === "cancel") this.cancels += 1;
     if (frame.t !== "want") return;
     this.wants.push(frame.p ?? null);
     if (this.silent) return;
@@ -3522,6 +3524,16 @@ class RangedChannel extends RecordedChannel {
       const body = this.bytes.slice(from, to);
       if (this.corrupt) body[0] ^= 0xff;
       this.receive(JSON.stringify({ t: "meta", id: frame.id, size: body.length, ...(frame.p ? { p: frame.p } : {}) }));
+      if (this.trickleMs) {
+        // 512 bytes per tick, until the requester cancels or the link closes.
+        const cancels = this.cancels;
+        const drip = (at) => {
+          if (this.readyState !== "open" || this.cancels !== cancels || at >= body.length) return;
+          this.receive(body.slice(at, at + 512).buffer);
+          setTimeout(drip, this.trickleMs, at + 512);
+        };
+        return drip(0);
+      }
       for (let at = 0; at < body.length; at += 16_384) this.receive(body.slice(at, at + 16_384).buffer);
       this.receive(JSON.stringify({ t: "eof", id: frame.id }));
     }, this.delayMs);
@@ -3606,6 +3618,25 @@ test("multi-holder: a silent holder's pieces come from origin by range at the de
     assert.ok(f.channels[1].wants.length > 0, "the silent holder was asked");
     assert.equal(multiHolder.originBytes + multiHolder.peerBytes, f.bytes.length);
     assert.equal(f.swarm.metrics().bytes.fromPeers, multiHolder.peerBytes);
+  } finally { await f.close(); }
+});
+
+test("multi-holder: a holder too slow for the deadline is abandoned early and its pieces move", async (t) => {
+  // About 10 bytes/ms against 64 KiB pieces: hopeless long before the 3 s
+  // deadline, which is where the transfer alone would otherwise rescue it.
+  const f = await multiFixture(t, { holders: [{}, { trickleMs: 50 }], size: 12 * 65_536, originFallbackMs: 3_000 });
+  try {
+    const started = performance.now();
+    sameBytes(await f.load(), f.bytes);
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed < 1_500, `finished early, not at the deadline (${Math.round(elapsed)} ms)`);
+    const { multiHolder } = f.swarm.metrics().core;
+    assert.equal(multiHolder.abandoned, 1);
+    // A reliable channel is asked to cancel; this fixture's channel is not,
+    // so the link closes, as for an abandoned single-holder request.
+    assert.ok(f.channels[1].cancels === 1 || f.channels[1].readyState === "closed", "the slow holder's request was stopped");
+    assert.equal(f.channels[1].wants.length, 1, "and it was given no more work");
+    assert.equal(multiHolder.peerBytes + multiHolder.originBytes, f.bytes.length);
   } finally { await f.close(); }
 });
 

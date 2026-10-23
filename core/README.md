@@ -36,9 +36,14 @@ takes the rest of the tail. `Transfer` issues the ranged requests, verifies each
 against the commitment, bans a holder that sends a bad piece, reassigns
 failed work, moves outstanding pieces to origin at the deadline less
 `originReserveMs`, duplicates the last two pieces of a lagging source, and
-delivers only when the whole object matches. `DEFAULT_MAX_HOLDERS` (3) and
+delivers only when the whole object matches. Fed each request's progress, it
+abandons a peer early by the single-holder loader's rules: no first byte
+within three recent first-byte times (and 250 ms), or a flow that cannot
+finish its range by the floor even at twice its recent rate or the best
+shared rate; a tick catches a flow that stops. `DEFAULT_MAX_HOLDERS` (3) and
 `DEFAULT_LOOKAHEAD_SEGMENTS` (2) are the spec's proposals, not yet set from a
-replayed field trace. It is not wired into the loader.
+replayed field trace. The loader uses it only under the experimental
+`multiHolder` option.
 
 The module exposes it as `rs_xfer_new`, `rs_xfer_call` and `rs_xfer_free`
 (commands as JSON, a delivered object's bytes after them), and ranged link
@@ -136,7 +141,8 @@ Measured on 22 and 23 October 2026:
 
 | Build | Raw bytes | gzip -9 |
 |---|---|---|
-| `relayswarm-core.wasm` with selection, links and discovery (committed, no `wasm-opt`) | 315,803 | 122,029 |
+| `relayswarm-core.wasm` with selection, links, discovery and the scheduler (committed, no `wasm-opt`) | 399,967 | 147,752 |
+| With selection, links and discovery, before the scheduler | 315,803 | 122,029 |
 | The same after `wasm-opt -Oz` (version 133, current features enabled) | 253,619 | 120,570 |
 | With selection and links, before discovery | 274,837 | 112,644 |
 | With selection and links after `wasm-opt -Oz` | 223,262 | 109,259 |

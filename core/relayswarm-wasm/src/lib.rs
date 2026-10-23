@@ -671,7 +671,8 @@ pub unsafe extern "C" fn rs_disc_call(op: u32, now: f64, pointer: *const u8, len
 // b, pointer, len)` returns the length at `rs_result_ptr` of a u32 JSON
 // length, the JSON `{"c": commands, "next": ms|null, "late", "finished"}` and
 // then the delivered object's bytes, if a command is `deliver`. `source` is a
-// peer handle, or -1 for origin; `a`/`b` are a piece range.
+// peer handle, or -1 for origin; `a`/`b` are a piece range, or for progress
+// `a` is the bytes received so far on the peer's in-flight request.
 
 use relayswarm_proto::scheduler::{Command, Estimate, Source, Transfer, TransferConfig};
 
@@ -685,6 +686,7 @@ pub const XFER_DELIVERED: u32 = 1;
 pub const XFER_FAILED: u32 = 2;
 pub const XFER_TICK: u32 = 3;
 pub const XFER_STATE: u32 = 4;
+pub const XFER_PROGRESS: u32 = 5;
 
 fn number(value: Option<&Value>) -> Option<f64> {
     value.and_then(Value::as_f64)
@@ -724,6 +726,7 @@ fn transfer_frame(transfer: &mut Transfer) -> Vec<u8> {
             Command::Request { peer, range } => serde_json::json!({ "t": "request", "peer": peer, "p": [range.start, range.end] }),
             Command::FetchOrigin { range } => serde_json::json!({ "t": "origin", "p": [range.start, range.end] }),
             Command::Cancel { peer } => serde_json::json!({ "t": "cancel", "peer": peer }),
+            Command::Abandon { peer } => serde_json::json!({ "t": "abandon", "peer": peer }),
             Command::Ban { peer } => serde_json::json!({ "t": "ban", "peer": peer }),
             Command::Deliver(bytes) => {
                 payload = bytes;
@@ -811,6 +814,7 @@ pub unsafe extern "C" fn rs_xfer_call(handle: u32, op: u32, now: f64, source: f6
             XFER_FAILED => transfer.failed(now, source),
             XFER_TICK => transfer.tick(now),
             XFER_STATE => {}
+            XFER_PROGRESS => transfer.progress(now, source, ms(a)),
             _ => return None,
         }
         Some(transfer_frame(transfer))

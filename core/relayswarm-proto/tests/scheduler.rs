@@ -244,6 +244,10 @@ fn delivered(commands: &[Command]) -> Option<&Vec<u8>> {
 /// Answer every request honestly, except from `bad` (one flipped byte) and
 /// from `silent` (never answers), until nothing more is asked.
 fn run(transfer: &mut Transfer, bytes: &[u8], bad: Option<u64>, silent: Option<u64>) -> Vec<Command> {
+    run_at(transfer, bytes, bad, silent, NOW + 10)
+}
+
+fn run_at(transfer: &mut Transfer, bytes: &[u8], bad: Option<u64>, silent: Option<u64>, at: u64) -> Vec<Command> {
     let mut log = Vec::new();
     let mut commands = transfer.drain_commands();
     for _ in 0..64 {
@@ -260,7 +264,7 @@ fn run(transfer: &mut Transfer, bytes: &[u8], bad: Option<u64>, silent: Option<u
             if bad.is_some_and(|id| source == Source::Peer(id)) {
                 answer[0] ^= 0xff;
             }
-            transfer.delivered(NOW + 10, source, range, &answer);
+            transfer.delivered(at, source, range, &answer);
         }
         commands = transfer.drain_commands();
     }
@@ -475,4 +479,127 @@ fn an_untested_peer_gets_one_trial_piece_even_when_projected_late() {
     let planned = plan(&input(size, &all(size), &peers, Some(origin(5.0, 100_000.0)), 500.0));
     assert_eq!(pieces_of(&planned, Source::Peer(1)), vec![0]);
     assert_eq!(pieces_of(&planned, Source::Origin), vec![1, 2, 3]);
+}
+
+// --- Early abandonment --------------------------------------------------------
+
+fn two_peers(bytes: &[u8], deadline: u64, shared_first_byte_ms: Option<f64>) -> (Transfer, Vec<Command>) {
+    let mut transfer = transfer(bytes, deadline);
+    transfer.start(
+        NOW,
+        &[peer(1, None, Some(200.0)), peer(2, None, Some(200.0))],
+        origin(100.0, 500.0),
+        shared_first_byte_ms,
+        None,
+    );
+    let first = transfer.drain_commands();
+    (transfer, first)
+}
+
+fn range_of(commands: &[Command], source: Source) -> PieceRange {
+    requests(commands).into_iter().find(|(s, _)| *s == source).unwrap().1
+}
+
+/// Answer the requests in `commands` (but not from `silent`), then keep
+/// answering whatever follows.
+fn answer(transfer: &mut Transfer, bytes: &[u8], commands: &[Command], silent: u64, at: u64) -> Vec<Command> {
+    for (source, range) in requests(commands) {
+        if source != Source::Peer(silent) {
+            transfer.delivered(at, source, range, slice(bytes, range));
+        }
+    }
+    run_at(transfer, bytes, None, Some(silent), at)
+}
+
+#[test]
+fn a_silent_peer_is_abandoned_at_its_silence_limit_before_the_floor() {
+    let bytes = object();
+    let (mut transfer, first) = two_peers(&bytes, NOW + 10_000, Some(50.0));
+    let mut log = first.clone();
+    log.extend(answer(&mut transfer, &bytes, &first, 2, NOW + 10));
+    assert!(delivered(&log).is_none());
+    // max(250 ms, three first-byte times) after the request, far before the floor.
+    assert_eq!(transfer.next_deadline(), Some(NOW + 250));
+    transfer.tick(NOW + 249);
+    assert!(!transfer.drain_commands().contains(&Command::Abandon { peer: 2 }));
+    transfer.tick(NOW + 250);
+    let abandoned = transfer.drain_commands();
+    assert!(abandoned.contains(&Command::Abandon { peer: 2 }), "{abandoned:?}");
+    let log = [abandoned.clone(), answer(&mut transfer, &bytes, &abandoned, 2, NOW + 300)].concat();
+    assert!(
+        !requests(&log).iter().any(|(s, _)| *s == Source::Peer(2)),
+        "an abandoned peer gets no more work"
+    );
+    assert_eq!(delivered(&log), Some(&bytes));
+}
+
+#[test]
+fn without_a_shared_first_byte_time_silence_waits_for_the_floor() {
+    let bytes = object();
+    let (transfer, _) = two_peers(&bytes, NOW + 10_000, None);
+    assert_eq!(transfer.next_deadline(), Some(NOW + 8_000));
+}
+
+#[test]
+fn a_flow_too_slow_for_the_floor_is_abandoned_and_its_pieces_move() {
+    let bytes = object();
+    let (mut transfer, first) = two_peers(&bytes, NOW + 4_000, Some(50.0));
+    let slow = range_of(&first, Source::Peer(2));
+    let mut log = first.clone();
+    for (at, received) in [(50, 1_000), (300, 2_000), (500, 3_000)] {
+        transfer.progress(NOW + at, Source::Peer(2), received);
+        log.extend(transfer.drain_commands());
+    }
+    let after = log.iter().position(|c| *c == Command::Abandon { peer: 2 }).expect("abandoned");
+    // Peer 1's own range, then whatever the moved pieces were queued on.
+    let pending: Vec<Command> = log
+        .iter()
+        .filter(|c| !matches!(c, Command::Request { peer: 2, .. }))
+        .cloned()
+        .collect();
+    log.extend(answer(&mut transfer, &bytes, &pending, 2, NOW + 600));
+    let moved: Vec<u32> = requests(&log[after..]).iter().flat_map(|(_, r)| r.start..r.end).collect();
+    assert!(
+        (slow.start..slow.end).all(|i| moved.contains(&i)),
+        "the slow range is reassigned: {log:?}"
+    );
+    assert!(!requests(&log[after..]).iter().any(|(s, _)| *s == Source::Peer(2)));
+    assert_eq!(delivered(&log), Some(&bytes));
+}
+
+#[test]
+fn a_flow_on_pace_is_never_abandoned() {
+    let bytes = object();
+    let (mut transfer, first) = two_peers(&bytes, NOW + 10_000, Some(50.0));
+    let range = range_of(&first, Source::Peer(2));
+    let size = slice(&bytes, range).len() as u64;
+    let mut at = 50;
+    while 200 * (at - 50) < size {
+        transfer.progress(NOW + at, Source::Peer(2), 200 * (at - 50));
+        let commands = transfer.drain_commands();
+        assert!(!commands.contains(&Command::Abandon { peer: 2 }), "at {at}: {commands:?}");
+        at += 50;
+    }
+    transfer.tick(NOW + at);
+    assert!(!transfer.drain_commands().contains(&Command::Abandon { peer: 2 }));
+}
+
+#[test]
+fn a_flow_that_stalls_is_abandoned_by_a_tick_before_the_floor() {
+    let bytes = object();
+    let (mut transfer, _) = two_peers(&bytes, NOW + 10_000, Some(50.0));
+    transfer.progress(NOW + 50, Source::Peer(2), 10_000);
+    transfer.progress(NOW + 100, Source::Peer(2), 20_000);
+    assert!(transfer.drain_commands().is_empty());
+    let mut last = 0;
+    let abandoned_at = loop {
+        let at = transfer.next_deadline().expect("the stalled request is watched");
+        assert!(at > last && at < NOW + 8_000, "tick {at} after {last}");
+        last = at;
+        transfer.tick(at);
+        if transfer.drain_commands().contains(&Command::Abandon { peer: 2 }) {
+            break at;
+        }
+    };
+    assert!(abandoned_at <= NOW + 1_000, "abandoned at {abandoned_at}");
 }

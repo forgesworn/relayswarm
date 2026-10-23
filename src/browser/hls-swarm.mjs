@@ -180,6 +180,8 @@ const PEER_REQUEST_OUTCOMES = Object.freeze(["payload", "none", "timeout", "abor
 const PEER_EVIDENCE_STALE_MS = 15_000;
 // A holder's scheduling jitter must not read as silence on a short path.
 const SILENCE_FLOOR_MS = 250;
+// Ranged-request progress goes to the multi-holder transfer at most this often.
+const PROGRESS_REPORT_MS = 50;
 const ADMISSION_CALL_SITES = Object.freeze(["presence", "dialStart", "offerBeforeSend", "offerIncoming", "answerIncoming", "glareBeforeRollback", "glareAfterRollback", "answerBeforeSend", "upload", "refresh", "other"]);
 const UPLOAD_REFUSAL_REASONS = Object.freeze([
   "admission", "not-held", "not-serving", "banned", "session-allowance", "peer-limit", "rate-limit",
@@ -344,7 +346,7 @@ class HlsSwarm {
     this.remoteFraming = new Map();
     this.transferIds = new WeakMap();
     this.nextTransferId = 1;
-    this.multiHolder = { transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, peerBytes: 0, originBytes: 0, originRanges: 0 };
+    this.multiHolder = { transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, originRanges: 0 };
     // Per delivered transfer: total ms, the slowest single request's ms, and
     // the requests it made. Bounded, newest last.
     this.multiHolderTimings = [];
@@ -1364,7 +1366,7 @@ class HlsSwarm {
     const originMs = percentile(this.originLatencySamples, 0.5);
     const origin = [null, originMs ? commitment.size / originMs : null];
     return new Promise((resolve) => {
-      const requests = new Map(), originRequests = new Set();
+      const requests = new Map(), originRequests = new Set(), abandoned = new WeakSet();
       let finished = false, tickTimer = null, backstop = null, releaseOrigin = null, originShare = 0;
       const begunAt = now();
       let slowestMs = 0, requestCount = 0;
@@ -1387,9 +1389,17 @@ class HlsSwarm {
           const link = ids.get(command.peer), controller = new AbortController();
           requests.set(command.peer, controller);
           const [from, to] = bytesOf(command.range), startedAt = now(), remainingMs = Math.max(1, deadline - startedAt);
-          let report = null;
+          let report = null, reportedAt = -Infinity;
           requestCount += 1;
-          link.request(key, remainingMs, { signal: controller.signal, expectedSize: to - from,
+          // The transfer judges the flow, as the single-holder path does, so
+          // a hopeless request is abandoned before the floor.
+          const onProgress = (received) => {
+            const at = now();
+            if (finished || requests.get(command.peer) !== controller || at - reportedAt < PROGRESS_REPORT_MS) return;
+            reportedAt = at;
+            apply(transfer.progress(at, command.peer, received));
+          };
+          link.request(key, remainingMs, { signal: controller.signal, expectedSize: to - from, onProgress,
             range: { start: command.range.start, end: command.range.end, objectSize: commitment.size },
             onResult: (result) => { report = result; this.#peerRequestResult(context, link, remainingMs, result); } }).then((bytes) => {
             if (requests.get(command.peer) === controller) requests.delete(command.peer);
@@ -1403,7 +1413,7 @@ class HlsSwarm {
               this.multiHolder.peerBytes += bytes.byteLength;
               apply(transfer.delivered(now(), command.peer, command.range, bytes));
             } else {
-              if (!controller.signal.aborted) this.peerSelection.record(link, now() - startedAt);
+              if (!controller.signal.aborted || abandoned.has(controller)) this.peerSelection.record(link, now() - startedAt);
               apply(transfer.failed(now(), command.peer));
             }
           }, () => { if (!finished) apply(transfer.failed(now(), command.peer)); });
@@ -1422,8 +1432,13 @@ class HlsSwarm {
             }
             apply(bytes ? transfer.delivered(now(), "origin", command.range, bytes) : transfer.failed(now(), "origin"));
           });
-        } else if (command.t === "cancel") {
-          requests.get(command.peer)?.abort(PeerLink.ABANDON_REASON);
+        } else if (command.t === "cancel" || command.t === "abandon") {
+          const controller = requests.get(command.peer);
+          if (command.t === "abandon") {
+            this.multiHolder.abandoned += 1;
+            if (controller) abandoned.add(controller);
+          }
+          controller?.abort(PeerLink.ABANDON_REASON);
         } else if (command.t === "ban") {
           const link = ids.get(command.peer);
           this.multiHolder.bans += 1;

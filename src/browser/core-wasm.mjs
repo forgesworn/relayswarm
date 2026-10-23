@@ -303,7 +303,7 @@ export async function loadCore(source, { onFailure } = {}) {
 }
 
 const TRANSFER_EXPORTS = ["rs_xfer_new", "rs_xfer_call", "rs_xfer_free"];
-const XFER = { start: 0, delivered: 1, failed: 2, tick: 3, state: 4 };
+const XFER = { start: 0, delivered: 1, failed: 2, tick: 3, state: 4, progress: 5 };
 
 /** The Rust `Transfer` for one object. Each call returns `{ commands, next,
  * late, finished, bytes }`, or null once the core has failed. Sources are a
@@ -317,6 +317,8 @@ class CoreTransfer {
   delivered(now, source, range, bytes) { return this.#call(XFER.delivered, now, source, range.start, range.end, bytes); }
   failed(now, source) { return this.#call(XFER.failed, now, source, 0, 0, EMPTY_BYTES); }
   tick(now) { return this.#call(XFER.tick, now, -1, 0, 0, EMPTY_BYTES); }
+  /** Bytes received so far on the peer's in-flight ranged request. */
+  progress(now, source, received) { return this.#call(XFER.progress, now, source, received, 0, EMPTY_BYTES); }
   free() {
     if (this.#handle === null) return;
     const handle = this.#handle;
