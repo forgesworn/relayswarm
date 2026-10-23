@@ -68,6 +68,7 @@ src/browser/hls-swarm.mjs      hls.js shadow and peer-first integration (./hls-s
 src/browser/segment-commitment.mjs  experimental signed media commitment contract
 src/browser/core-wasm.mjs      loader for the Rust core (relayswarm-core.wasm, committed): verifier, selection
 src/browser/core-peer-link.mjs PeerLink with its protocol in the Rust core
+src/browser/core-discovery.mjs NeighbourDiscovery with its state in the Rust core
 src/browser/peer-link.mjs      browser WebRTC peer link
 src/hls-publisher.mjs          Node-only local HLS publisher and signed commitments
 demo/                         runnable publisher/player with consent and local receipts
@@ -125,12 +126,14 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
   Preserve playlist-bound signing and explicit upload consent. Chrome fixture
   tests are loopback; do not describe them as physical-device/NAT validation.
 - The Rust core under `core/` is unreleased. Its commitment verifier, peer
-  selection and peer link are used only when a host passes `coreWasm`; the
+  selection, discovery and peer link are used only when a host passes `coreWasm`; the
   demo does. Rebuild and commit `src/browser/relayswarm-core.wasm` with
   `npm run core:wasm` after any change under `core/` that affects
-  verification, selection or links. A change to `peer-link.mjs` needs the
+  verification, selection, discovery or links. A change to `peer-link.mjs` needs the
   same change in `core/relayswarm-proto/src/link.rs`, regenerated traces and
-  `npm run test:proto` and `npm run test:swarm:core`.
+  `npm run test:proto` and `npm run test:swarm:core`; a change to
+  `peer-selection.mjs` or `neighbour-discovery.mjs` needs the same change in
+  `selection.rs` or `discovery.rs` and both commands.
   It must match the JavaScript verifier on every vector; change the JavaScript,
   regenerate the vectors, then make Rust agree. Its toolchain is pinned in
   `core/rust-toolchain.toml`; reuse `core/target/`.

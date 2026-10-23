@@ -7,6 +7,7 @@
 // reference. One instance holds one selection state, so load one per swarm.
 
 import { CorePeerLink } from "./core-peer-link.mjs";
+import { CoreNeighbourDiscovery } from "./core-discovery.mjs";
 import { PeerSelection } from "./peer-selection.mjs";
 import { segmentMediaContext } from "./segment-commitment.mjs";
 
@@ -44,7 +45,7 @@ async function instantiate(source) {
 }
 
 const SELECTION_EXPORTS = ["rs_sel_observe", "rs_sel_record", "rs_sel_forget", "rs_sel_select", "rs_sel_state",
-  "rs_sel_project", "rs_sel_minimum", "rs_sel_estimate", "rs_sel_summary", "rs_link_new", "rs_link_free", "rs_link_call"];
+  "rs_sel_project", "rs_sel_minimum", "rs_sel_estimate", "rs_sel_summary", "rs_link_new", "rs_link_free", "rs_link_call", "rs_disc_call"];
 const LINK_SETS = 13;
 const LINK_HEADER_BYTES = 13 * 8;
 const orNull = (value) => Number.isNaN(value) ? null : value;
@@ -161,10 +162,11 @@ class CorePeerSelection {
  * Load the core. `source` is a URL, the module's bytes or a compiled
  * WebAssembly.Module. `verifier` mirrors segment-commitment.mjs: a trap
  * inside the module throws; rejection returns null. `peerSelection()` returns
- * this instance's selection, once, and `peerLink(options)` a PeerLink backed
- * by the core. A trap in selection or a link retires the whole instance:
- * selection moves to a fresh JavaScript PeerSelection, every core link
- * closes as `host`, and `onFailure(error)` runs once. `retire()` does the
+ * this instance's selection, once, `neighbourDiscovery(clock)` its
+ * discovery, once, and `peerLink(options)` a PeerLink backed by the core.
+ * A trap in selection, discovery or a link retires the whole instance:
+ * selection and discovery move to fresh JavaScript instances, every core
+ * link closes as `host`, and `onFailure(error)` runs once. `retire()` does the
  * same without the callback, for a trap the caller caught itself.
  */
 export async function loadCore(source, { onFailure } = {}) {
@@ -172,11 +174,12 @@ export async function loadCore(source, { onFailure } = {}) {
   for (const name of ["memory", "rs_alloc", "rs_free", "rs_call", "rs_result_ptr", ...SELECTION_EXPORTS]) {
     if (!exports[name]) throw new Error(`Core module lacks ${name}.`);
   }
-  let retired = false, selection = null;
+  let retired = false, selection = null, discovery = null;
   const retire = () => {
     if (retired) return;
     retired = true;
     selection?.retire();
+    discovery?.retire();
     for (const link of [...host.links]) link.die();
   };
   const fail = (error) => {
@@ -235,6 +238,23 @@ export async function loadCore(source, { onFailure } = {}) {
     }
   }
 
+  // One discovery operation: JSON arguments in, JSON out. Throws on a trap
+  // or a refusal, which CoreNeighbourDiscovery reports through `fail`.
+  function discoveryCall(op, now, args) {
+    if (retired) throw new Error("The core has been retired.");
+    const bytes = encoder.encode(JSON.stringify(args));
+    const pointer = exports.rs_alloc(bytes.length);
+    let length;
+    try {
+      new Uint8Array(exports.memory.buffer, pointer, bytes.length).set(bytes);
+      length = exports.rs_disc_call(op, now, pointer, bytes.length);
+    } finally {
+      exports.rs_free(pointer, bytes.length);
+    }
+    if (length < 0) throw new Error(`Core discovery refused operation ${op}.`);
+    return JSON.parse(decoder.decode(new Uint8Array(exports.memory.buffer, exports.rs_result_ptr(), length)));
+  }
+
   const trust = ({ streamEvent, swarmId, revokedDelegationIds = [], delegationRevocations = [] }) =>
     ({ streamEvent, swarmId, revokedDelegationIds, delegationRevocations });
 
@@ -256,6 +276,11 @@ export async function loadCore(source, { onFailure } = {}) {
     peerSelection() {
       if (selection) throw new Error("This core instance already has a peer selection.");
       return selection = new CorePeerSelection(exports, fail);
+    },
+    neighbourDiscovery(clock) {
+      if (discovery) throw new Error("This core instance already has a neighbour discovery.");
+      if (retired) throw new Error("The core has been retired.");
+      return discovery = new CoreNeighbourDiscovery(discoveryCall, fail, clock);
     },
     peerLink(options) {
       return new CorePeerLink(options, host);

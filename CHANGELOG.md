@@ -36,6 +36,14 @@
   JavaScript. `core.links` counts links of each kind. The module is now
   274,837 bytes (112,644 gzip). `npm run test:swarm:core` runs the loader
   hardening suite with every peer-first fixture on the module.
+- With `coreWasm`, neighbour discovery also runs in the Rust core
+  (`src/browser/core-discovery.mjs` keeps one object per context, window
+  and attempt, as the swarm compares them by identity). Each swarm binds it
+  when the module loads, provided discovery holds no context, hint or window
+  yet. The seeded and scripted discovery sequences match through the module.
+  A trap hands discovery to a fresh JavaScript instance that keeps the
+  counters. `core.discovery` in the metrics reports which one runs. The
+  module is now 315,803 bytes (122,029 gzip).
 
 ## v0.2.1 (21 October 2026)
 

@@ -15,6 +15,7 @@ import { commitmentContent, KIND_SEGMENT_COMMITMENT, verifySegmentCommitment } f
 import { startLocalRelay } from "./support/local-relay.mjs";
 import { boundedOperation } from "../src/browser/bounded-operation.mjs";
 import { NeighbourDiscovery } from "../src/browser/neighbour-discovery.mjs";
+import { CoreNeighbourDiscovery } from "../src/browser/core-discovery.mjs";
 import { PeerSelection } from "../src/browser/peer-selection.mjs";
 import { createOperatorControls } from "../demo/operator.mjs";
 
@@ -62,7 +63,8 @@ class RecordedChannel extends Channel {
 // Exercise the real relay/session admission and PeerLink paths, with only the
 // browser connection replaced. No private swarm state is exposed to tests.
 // RELAYSWARM_TEST_CORE=1 runs every peer-first fixture without its own
-// coreWasm on the committed module, with links opened after it is ready.
+// coreWasm on the committed module, with selection and discovery bound to it
+// and links opened after it is ready.
 const testCore = process.env.RELAYSWARM_TEST_CORE === "1"
   ? await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url))) : null;
 
@@ -77,7 +79,10 @@ async function linkedFixture(options = {}, LoaderImpl = Loader) {
   swarm.attach(hls);
   const pool = new RelayPool([relay.url], { WebSocketImpl: options.WebSocketImpl }); await pool.connect();
   await until(() => swarm.metrics().pubkey);
-  if (testCore && options.coreWasm === testCore) await until(() => swarm.metrics().core.state === "ready");
+  if (testCore && options.coreWasm === testCore) {
+    await until(() => swarm.metrics().core.state === "ready");
+    assert.deepEqual([swarm.metrics().core.selection, swarm.metrics().core.discovery], ["wasm", "wasm"], "the fixture runs on the core");
+  }
   const addPeer = async (channel = new RecordedChannel(), peerPool = pool) => {
     const peer = new RelaySwarmSession({ pool: peerPool, swarmId: base.swarmId }); peer.start(); peers.push(peer);
     const count = connections.length, accepted = swarm.metrics().peers.offersAccepted;
@@ -756,7 +761,7 @@ test("the Rust core verifies peer-first commitments, and its rejection stands", 
     const metrics = fixture.swarm.metrics();
     assert.equal(metrics.segments.commitmentRejected, 1);
     assert.equal(metrics.segments.peerFirstLoaded, 1);
-    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 } });
+    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", discovery: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 } });
   } finally { await fixture.close(); }
 });
 
@@ -772,26 +777,28 @@ test("a trapping or unloadable core hands its links and verification to JavaScri
       const metrics = fixture.swarm.metrics();
       assert.equal(metrics.segments.peerFirstLoaded, 1);
       // The trapping core fails on the first link it opens, which then runs in JavaScript.
-      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 } });
+      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 } });
       assert.equal(metrics.errors.byStage.core, 1);
     } finally { await fixture.close(); }
   }
 });
 
-test("a core whose links answer malformed frames retires before the first request", async () => {
-  // The stub returns empty frames from every link call; verification would
-  // reject everything, so a peer load proves JavaScript took over.
+test("a core that answers malformed results retires and the loader carries on in JavaScript", async () => {
+  // The stub answers every call with an empty result. Discovery or the first
+  // link, whichever asks first, retires it; core-link.test.mjs covers links alone.
   const playback = peerPlaybackOptions(1000);
   const fixture = await linkedFixture({ ...playback.options, coreWasm: stubCore([], { rs_call: -1, rs_link_new: 1 }), WebSocketImpl: memoryRelaySocket() });
   try {
-    await until(() => fixture.swarm.metrics().core.state === "ready");
-    assert.equal(fixture.swarm.metrics().core.selection, "wasm");
-    await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder")).catch(() => {});
+    await until(() => ["ready", "failed"].includes(fixture.swarm.metrics().core.state));
+    const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder")).catch(() => null);
     await until(() => fixture.swarm.metrics().core.state === "failed");
-    const metrics = fixture.swarm.metrics();
-    assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", links: { wasm: 1, js: 0 }, fallbacks: 1, decided: { wasm: 0, js: 0 } });
-    assert.equal(metrics.errors.byStage.core, 1);
-    assert.equal(metrics.peers.linksClosed, 1);
+    const { core, errors } = fixture.swarm.metrics();
+    assert.deepEqual({ ...core, links: core.links.wasm + core.links.js }, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: 1, fallbacks: 1, decided: { wasm: 0, js: 0 } });
+    assert.equal(errors.byStage.core, 1);
+    if (channel && core.links.js === 1) {
+      channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+      assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+    }
   } finally { await fixture.close(); }
 });
 
@@ -800,7 +807,7 @@ test("the core option is checked and ignored outside peer-first", () => {
     assert.equal(createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm }).metrics().disabledReason, "invalid-core-wasm");
   }
   const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm });
-  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 } });
+  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 } });
   swarm.stop();
 });
 
@@ -2570,8 +2577,11 @@ for (const change of ["main-zero-budget", "withdrawal", "new-ticket", "expiry", 
   try {
     f.announce(); await until(() => f.state.checks > 0);
     if (change === "main-zero-budget") {
-      let haveChecks = 0; const valid = NeighbourDiscovery.prototype.valid;
-      t.mock.method(NeighbourDiscovery.prototype, "valid", function (...args) { haveChecks++; return valid.apply(this, args); });
+      let haveChecks = 0;
+      for (const prototype of [NeighbourDiscovery.prototype, CoreNeighbourDiscovery.prototype]) {
+        const valid = prototype.valid;
+        t.mock.method(prototype, "valid", function (...args) { haveChecks++; return valid.apply(this, args); });
+      }
       f.hls.media = { currentTime: 0, buffered: { length: 0 } };
       let completed = false;
       new f.hls.config.fLoader({}).load({ ...context, frag: { ...context.frag, level: 1 } }, {}, { onSuccess() { completed = true; } });

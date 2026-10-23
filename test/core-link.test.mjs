@@ -9,6 +9,7 @@ import { resolve } from "node:path";
 import { PeerLink } from "../src/browser/peer-link.mjs";
 import { loadCore } from "../src/browser/core-wasm.mjs";
 import { runLinkTrace } from "./link-traces.mjs";
+import { stubCore } from "./core-stub.mjs";
 
 const path = process.env.RELAYSWARM_CORE_WASM
   ? resolve(process.env.RELAYSWARM_CORE_WASM) : new URL("../src/browser/relayswarm-core.wasm", import.meta.url);
@@ -193,4 +194,18 @@ test("a trap retires the core: its links close as host and new requests read clo
   assert.equal(await link.request(KEY, 5000), null);
   assert.deepEqual(failures, []);
   assert.throws(() => core.peerLink({ pubkey: "late", channel: new Channel(), pc: new PC(), maxSegmentBytes: 1024 }), /retired/);
+});
+
+test("a core whose links answer malformed frames retires before the first request", async () => {
+  const failures = [];
+  // Every link call answers an empty frame, shorter than the header.
+  const core = await loadCore(stubCore([], { rs_link_new: 1 }), { onFailure: (error) => failures.push(error) });
+  const channel = new Channel(), pc = new PC(), closed = [];
+  const link = core.peerLink({ pubkey: "peer", channel, pc, maxSegmentBytes: 1 << 20, onClose: (peer) => closed.push(peer.closeReason) });
+  assert.equal(await link.request(KEY, 5000), null);
+  assert.equal(core.retired, true);
+  assert.equal(failures.length, 1);
+  assert.match(String(failures[0]), /refused operation/);
+  assert.deepEqual(closed, ["host"]);
+  assert.equal(channel.sent.length, 0);
 });

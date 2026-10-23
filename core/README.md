@@ -67,12 +67,27 @@ ID and whether an upload waits for the channel to drain), then events as a
 tag, a u32 length and a payload. The shell copies the frame out before
 running any callback, since a callback may call in again.
 
+Neighbour discovery takes JSON: `rs_disc_call(op, now, ptr, len)` reads an
+array of arguments and returns the length of a JSON result. Queries answer a
+bare value; changes answer `{"r": result, "s": state}`, where the state lists
+every context, the open window and its attempt, and the three counters the
+core keeps (checks, replacements, verified). Contexts, windows and attempts
+are numeric IDs. A host's eligibility and need checks run before the call and
+cross as lists of public keys and media types, and `begin` starts from the
+latest `choose` or `hinted` result. Each instance holds one discovery state.
+
 The browser loader is `src/browser/core-wasm.mjs`; hosts opt in with
 `coreWasm` (see `INTEGRATION.md`). Its `PeerSelection` stand-in replays
 the seeded selection sequences through the committed module and matches the
 JavaScript at every step. `src/browser/core-peer-link.mjs` is a `PeerLink`
 that owns the channel, the one timer and the callbacks and leaves the
 protocol to the core; all 48 committed link traces match through it.
+`src/browser/core-discovery.mjs` is a `NeighbourDiscovery` that keeps one
+JavaScript object per context, window and attempt, updated in place, so the
+swarm's identity checks and its own fields on them (a window's timer, an
+attempt's dial and negotiation) hold; the seeded and scripted discovery
+sequences match through it, apart from holder entries, which the core keeps to
+itself and which `stale` reports.
 
 Known differences in the link: the core counts a response in `bytesOut` as
 it emits the chunks, so a channel that refuses a chunk leaves the closed
@@ -88,12 +103,14 @@ local directory. `npm run test:proto` runs all 120 vectors through the
 committed module; CI also builds a fresh one and runs them through that. A
 fresh module's bytes may differ by host; its verdicts may not.
 
-Measured on 22 October 2026:
+Measured on 22 and 23 October 2026:
 
 | Build | Raw bytes | gzip -9 |
 |---|---|---|
-| `relayswarm-core.wasm` with selection and links (committed, no `wasm-opt`) | 274,837 | 112,644 |
-| The same after `wasm-opt -Oz` (version 133, current features enabled) | 223,262 | 109,259 |
+| `relayswarm-core.wasm` with selection, links and discovery (committed, no `wasm-opt`) | 315,803 | 122,029 |
+| The same after `wasm-opt -Oz` (version 133, current features enabled) | 253,619 | 120,570 |
+| With selection and links, before discovery | 274,837 | 112,644 |
+| With selection and links after `wasm-opt -Oz` | 223,262 | 109,259 |
 | With selection, before links | 227,541 | 94,900 |
 | With selection after `wasm-opt -Oz` | 186,384 | 92,203 |
 | Verifiers only (committed before selection) | 200,458 | 87,373 |

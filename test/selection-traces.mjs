@@ -101,10 +101,10 @@ export function discoveryOps(seed, count) {
   return ops;
 }
 
-/** Run discovery operations and record every output. */
-export function runDiscoveryOps(ops) {
+/** Run discovery operations and record every output. `create(clock)` makes the NeighbourDiscovery. */
+export function runDiscoveryOps(ops, create = (clock) => new NeighbourDiscovery(clock)) {
   let now = SELECTION_EPOCH_MS;
-  const discovery = new NeighbourDiscovery(() => now);
+  const discovery = create(() => now);
   // Old context objects stay addressable per media type, as a caller holding one would.
   const held = new Map();
   let attempt = null;
@@ -144,7 +144,7 @@ export function runDiscoveryOps(ops) {
         victim: window.victim, attempt: window.attempt ? { pubkey: window.attempt.pubkey, key: window.attempt.key, ticket: window.attempt.ticket, dial: window.attempt.dial } : null } : null,
       contexts: [...discovery.contexts.values()].map((context) => ({ mediaType: context.mediaType, rendition: context.rendition, keys: [...context.keys],
         lastDemandAt: context.lastDemandAt, activityAt: context.activityAt, spent: context.spent,
-        holders: [...context.holders].map(([pubkey, entry]) => [pubkey, entry.firstMissAt, entry.misses, entry.lastKey]) })),
+        holders: context.holders && [...context.holders].map(([pubkey, entry]) => [pubkey, entry.firstMissAt, entry.misses, entry.lastKey]) })),
       candidates: [...discovery.candidates.values()].map((candidate) => [candidate.pubkey, candidate.have, candidate.ticket, candidate.at]),
       snapshot: discovery.snapshot() });
   }

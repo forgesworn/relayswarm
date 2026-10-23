@@ -54,6 +54,25 @@ pub struct ContextId(u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AttemptId(u64);
 
+impl ContextId {
+    /// The number a host stores in place of the context.
+    pub fn value(self) -> u64 {
+        self.0
+    }
+    pub fn from_value(value: u64) -> Self {
+        ContextId(value)
+    }
+}
+
+impl AttemptId {
+    pub fn value(self) -> u64 {
+        self.0
+    }
+    pub fn from_value(value: u64) -> Self {
+        AttemptId(value)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Holder {
     pub first_miss_at: u64,
@@ -93,7 +112,7 @@ pub struct Attempt {
 
 #[derive(Clone, Debug)]
 pub struct Window {
-    id: u64,
+    pub id: u64,
     /// The context the window serves, which may since have been replaced.
     pub context: ContextId,
     pub media_type: MediaType,
@@ -404,6 +423,8 @@ impl NeighbourDiscovery {
             dial: None,
         };
         let id = attempt.id;
+        // Only the open window's attempts can still change visible state.
+        self.attempts.retain(|_, stored| stored.window == window_id);
         self.attempts.insert(id, attempt.clone());
         self.window.as_mut().unwrap().attempt = Some(attempt);
         self.counters.checks += 1;
@@ -477,6 +498,7 @@ impl NeighbourDiscovery {
 
     /// Close the current window.
     pub fn end(&mut self) -> bool {
+        self.attempts.clear();
         self.window.take().is_some()
     }
 

@@ -651,7 +651,7 @@ class HlsSwarm {
       },
       errors: { total: c.errors, byStage: { ...this.errorsByStage } },
       // Additive metrics-v2 field: which commitment verifier and peer selection run.
-      core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", selection: this.peerSelection.kind ?? "js", links: { ...this.coreLinks }, fallbacks: this.coreFallbacks, decided: { ...this.coreDecided } },
+      core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", selection: this.peerSelection.kind ?? "js", discovery: this.discovery.kind ?? "js", links: { ...this.coreLinks }, fallbacks: this.coreFallbacks, decided: { ...this.coreDecided } },
       config: {
         originFallbackMs: this.options.originFallbackMs,
         maxPeerWaitMs: this.options.maxPeerWaitMs,
@@ -1691,6 +1691,12 @@ class HlsSwarm {
       // Selection state is not transferred: the core takes over only before
       // the first choice, which is normally well after the module loads.
       if (this.peerSelection.order === 0) this.peerSelection = core.peerSelection();
+      // Discovery likewise, while it holds no context, hint or window.
+      const discovery = this.discovery;
+      if (discovery.contexts.size === 0 && discovery.candidates.size === 0 && !discovery.window) {
+        this.discovery = core.neighbourDiscovery();
+        Object.assign(this.discovery.counters, discovery.counters);
+      }
       this.coreState = "ready";
     } catch (error) {
       this.coreState = "failed";
@@ -1699,7 +1705,8 @@ class HlsSwarm {
   }
 
   // A trap anywhere in the module retires it for the rest of the session:
-  // selection moves to a fresh JavaScript PeerSelection and core links close.
+  // selection and discovery move to fresh JavaScript instances and core
+  // links close.
   #coreTrapped(error) {
     this.core?.retire();
     this.coreVerifier = null;

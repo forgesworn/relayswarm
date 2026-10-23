@@ -453,3 +453,197 @@ pub unsafe extern "C" fn rs_link_call(handle: u32, op: u32, now: f64, open: u32,
         }
     })
 }
+
+// --- neighbour discovery ----------------------------------------------------
+//
+// `rs_disc_call(op, now, pointer, len)` takes a JSON array of arguments and
+// leaves a JSON result at `rs_result_ptr`, returning its length or -1 for
+// malformed input. Queries return a bare value. Mutations return
+// `{"r": result, "s": state}`, where the state is every context, the open
+// window and the three counters the core owns, so the host can keep its
+// own objects in step. Contexts, windows and attempts are numeric IDs.
+
+use relayswarm_proto::discovery::{AttemptId, Candidate, ContextId, Found, NeighbourDiscovery};
+
+thread_local! {
+    static DISCOVERY: RefCell<NeighbourDiscovery> = RefCell::new(NeighbourDiscovery::new());
+    /// The latest choice, for the `begin` that follows it.
+    static FOUND: RefCell<Option<Found>> = const { RefCell::new(None) };
+}
+
+pub const DISC_CONTEXT: u32 = 0;
+pub const DISC_DEMAND: u32 = 1;
+pub const DISC_HINT: u32 = 2;
+pub const DISC_HOLDER_MISS: u32 = 3;
+pub const DISC_HOLDER_AHEAD: u32 = 4;
+pub const DISC_STALE: u32 = 5;
+pub const DISC_FORGET: u32 = 6;
+pub const DISC_CURRENT: u32 = 7;
+pub const DISC_CANDIDATES: u32 = 8;
+pub const DISC_CHOOSE: u32 = 9;
+pub const DISC_HINTED: u32 = 10;
+pub const DISC_BEGIN: u32 = 11;
+pub const DISC_VALID: u32 = 12;
+pub const DISC_REPLACED: u32 = 13;
+pub const DISC_ALLOCATED: u32 = 14;
+pub const DISC_ABANDONED: u32 = 15;
+pub const DISC_FAILED: u32 = 16;
+pub const DISC_END: u32 = 17;
+pub const DISC_VERIFIED: u32 = 18;
+pub const DISC_LIVE: u32 = 19;
+pub const DISC_RESERVED: u32 = 20;
+pub const DISC_SUPPRESSES: u32 = 21;
+pub const DISC_SNAPSHOT: u32 = 22;
+pub const DISC_CLEAR: u32 = 23;
+
+fn candidate_json(candidate: &Candidate) -> Value {
+    serde_json::json!([candidate.pubkey, candidate.have, candidate.ticket, candidate.at])
+}
+
+fn found_json(found: Option<Found>) -> Value {
+    let value = found.as_ref().map_or(Value::Null, |found| {
+        serde_json::json!({ "context": context_id(found.context), "mediaType": found.media_type.as_str(),
+            "candidate": candidate_json(&found.candidate), "key": found.key })
+    });
+    FOUND.with(|cell| *cell.borrow_mut() = found);
+    value
+}
+
+fn context_id(id: ContextId) -> u64 {
+    id.value()
+}
+
+fn discovery_state(discovery: &NeighbourDiscovery) -> Value {
+    let contexts: Vec<Value> = discovery
+        .contexts()
+        .map(|context| {
+            serde_json::json!({ "id": context_id(context.id), "mediaType": context.media_type.as_str(), "rendition": context.rendition,
+                "keys": context.keys, "lastDemandAt": context.last_demand_at, "activityAt": context.activity_at, "spent": context.spent })
+        })
+        .collect();
+    let window = discovery.window().map_or(Value::Null, |window| {
+        serde_json::json!({ "id": window.id, "context": context_id(window.context), "mediaType": window.media_type.as_str(),
+            "createdAt": window.created_at, "expiresAt": window.expires_at, "vacant": window.vacant, "victim": window.victim,
+            "attempt": window.attempt.as_ref().map(|attempt| serde_json::json!({ "id": attempt.id.value(), "pubkey": attempt.pubkey,
+                "ticket": attempt.ticket, "key": attempt.key, "dial": attempt.dial })) })
+    });
+    let counters = &discovery.counters;
+    serde_json::json!({ "c": contexts, "w": window, "n": [counters.checks, counters.replacements, counters.verified] })
+}
+
+/// One discovery operation; `None` for malformed input.
+pub fn discovery_call(discovery: &mut NeighbourDiscovery, op: u32, now: u64, args: &Value) -> Option<Value> {
+    let arg = |index: usize| args.get(index).unwrap_or(&Value::Null);
+    let text = |index: usize| arg(index).as_str();
+    let id = |index: usize| arg(index).as_u64();
+    let context = |index: usize| id(index).map(ContextId::from_value);
+    let attempt = |index: usize| id(index).map(AttemptId::from_value);
+    let pubkeys = |index: usize| -> Vec<String> {
+        arg(index).as_array().map_or_else(Vec::new, |values| {
+            values.iter().filter_map(|value| value.as_str().map(str::to_owned)).collect()
+        })
+    };
+    let result = match op {
+        DISC_CONTEXT => Value::from(discovery.context(now, text(0)?, text(1)?).map(context_id)),
+        DISC_DEMAND => Value::from(discovery.demand(now, text(0)?, text(1)?, text(2)?).map(context_id)),
+        DISC_HINT => {
+            let have: Vec<&str> = arg(1).as_array()?.iter().filter_map(Value::as_str).collect();
+            discovery.hint(now, text(0)?, &have, text(2));
+            Value::Null
+        }
+        DISC_HOLDER_MISS => {
+            discovery.holder_miss(now, context(0), text(1)?, text(2)?);
+            return Some(Value::Null);
+        }
+        DISC_HOLDER_AHEAD => {
+            discovery.holder_ahead(context(0), text(1)?);
+            return Some(Value::Null);
+        }
+        DISC_STALE => return Some(Value::Bool(discovery.stale(now, context(0), text(1)?))),
+        DISC_FORGET => {
+            discovery.forget(text(0)?);
+            return Some(Value::Null);
+        }
+        DISC_CURRENT => return Some(Value::Bool(context(0).is_some_and(|context| discovery.current(now, context)))),
+        DISC_CANDIDATES => return Some(Value::Array(discovery.candidates().map(candidate_json).collect())),
+        DISC_CHOOSE => {
+            let (eligible, unmet) = (pubkeys(0), pubkeys(1));
+            let found = discovery.choose(
+                now,
+                |candidate| eligible.contains(&candidate.pubkey),
+                |media| unmet.iter().any(|value| value == media.as_str()),
+                arg(2).as_bool()?,
+            );
+            return Some(found_json(found));
+        }
+        DISC_HINTED => {
+            let eligible = pubkeys(1);
+            let found = context(0)
+                .and_then(|context| discovery.hinted(now, context, &|candidate: &Candidate| eligible.contains(&candidate.pubkey)));
+            return Some(found_json(found));
+        }
+        DISC_BEGIN => {
+            let found = FOUND.with(|cell| cell.borrow_mut().take())?;
+            Value::from(discovery.begin(now, &found).map(AttemptId::value))
+        }
+        DISC_VALID => return Some(Value::Bool(attempt(0).is_some_and(|attempt| discovery.valid(now, attempt)))),
+        DISC_REPLACED => Value::Bool(attempt(0).is_some_and(|attempt| discovery.replaced(now, attempt, text(1)))),
+        DISC_ALLOCATED => {
+            discovery.allocated(attempt(0)?, id(1)?);
+            Value::Null
+        }
+        DISC_ABANDONED => {
+            discovery.abandoned(attempt(0)?);
+            Value::Null
+        }
+        DISC_FAILED => {
+            discovery.failed(id(0)?);
+            Value::Null
+        }
+        DISC_END => Value::Bool(discovery.end()),
+        DISC_VERIFIED => Value::Bool(discovery.verified(context(0))),
+        DISC_LIVE => return Some(Value::Bool(discovery.live(now))),
+        DISC_RESERVED => return Some(Value::Bool(discovery.reserved(now))),
+        DISC_SUPPRESSES => return Some(Value::Bool(discovery.suppresses(now, text(0)?))),
+        DISC_SNAPSHOT => {
+            let snapshot = discovery.snapshot(now);
+            let counters = &snapshot.counters;
+            return Some(
+                serde_json::json!({ "v": 1, "candidateCapacity": 64, "candidates": snapshot.candidates, "contexts": snapshot.contexts,
+                "requestedKeys": snapshot.requested_keys, "replacementSpent": snapshot.replacement_spent,
+                "opportunityActive": snapshot.opportunity_active, "remainingMs": snapshot.remaining_ms,
+                "vacancyReserved": snapshot.vacancy_reserved, "counters": { "checks": counters.checks, "replacements": counters.replacements,
+                    "expired": counters.expired, "opened": counters.opened, "verified": counters.verified,
+                    "staleHolder": counters.stale_holder, "staleBlocked": counters.stale_blocked } }),
+            );
+        }
+        DISC_CLEAR => {
+            discovery.clear();
+            FOUND.with(|cell| *cell.borrow_mut() = None);
+            Value::Null
+        }
+        _ => return None,
+    };
+    Some(serde_json::json!({ "r": result, "s": discovery_state(discovery) }))
+}
+
+/// # Safety
+/// `pointer` must address `len` initialised bytes from `rs_alloc`.
+#[no_mangle]
+pub unsafe extern "C" fn rs_disc_call(op: u32, now: f64, pointer: *const u8, len: usize) -> i32 {
+    let bytes = std::slice::from_raw_parts(pointer, len);
+    let result = serde_json::from_slice::<Value>(bytes)
+        .ok()
+        .and_then(|args| DISCOVERY.with(|cell| discovery_call(&mut cell.borrow_mut(), op, now as u64, &args)));
+    RESULT.with(|cell| {
+        let mut buffer = cell.borrow_mut();
+        buffer.clear();
+        match result {
+            Some(value) => {
+                buffer.extend_from_slice(value.to_string().as_bytes());
+                buffer.len() as i32
+            }
+            None => -1,
+        }
+    })
+}
