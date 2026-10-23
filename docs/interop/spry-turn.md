@@ -12,12 +12,14 @@ No camera, microphone recording, production room or personal identity was used.
 | --- | --- | --- |
 | UDP | PASS | 34 in-time peer segments, 15,648,744 verified peer bytes and 81.0% in-time delivery. |
 | TCP | FAIL | 10 in-time peer segments, 7,633,740 verified peer bytes and 27.0% in-time delivery, below the existing 50% gate. |
-| TLS | FAIL | 14 in-time peer segments, 8,830,548 verified peer bytes and 37.8% in-time delivery, below the same gate. |
+| TLS | FAIL | 14 in-time peer segments, 8,830,548 verified peer bytes and 37.8% in-time delivery. Also no active bidirectional selected path at the final sample. |
 
 All three used distinct short-lived TURN principals per viewer, with Spry's
 default per-user allocation limit of eight.  No ICE error codes were observed.
-Selected paths were relay/relay using the requested client transport and the
-bounded relay-port range.  HTTP playback and tampering rejection passed.
+UDP and TCP had active relay/relay paths using the requested client transport
+and bounded ports at the final sample. TLS recorded earlier relay/relay
+connections and verified media, but no active selected path at that sample;
+its final-path gate also failed. HTTP playback and tampering rejection passed.
 
 All three runs completed the harness's resource cleanup checks.  The TLS
 fixture uses an explicit self-signed-certificate bypass in Chrome, so it does
@@ -39,7 +41,7 @@ defect and are superseded for composition qualification by the table above.
 
 Giving each viewer its own principal removed the quota errors and restored
 TCP media transfer without raising server limits.  TCP and TLS still miss the
-unchanged delivery-time gate.  The raw private evidence also retains the first
+unchanged delivery-time gate, and TLS also fails the final active-path check.  The raw private evidence also retains the first
 v0.2.1 UDP attempt, which timed out without a completed browser receipt, and
 the shared-credential TCP/TLS trials.  No failed trial was counted as a pass.
 

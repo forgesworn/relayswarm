@@ -202,5 +202,5 @@
       "clean_stop": true
     }
   ],
-  "overall_qualification": "RED: per-viewer UDP passed; TCP and TLS carried verified media without ICE errors but missed the existing 50% in-time delivery gate. The timing failure is not attributed to either implementation. HTTP playback remained available."
+  "overall_qualification": "RED: per-viewer UDP passed; TCP and TLS carried verified media without ICE errors but missed the existing 50% in-time delivery gate. TLS also had no active selected path at the final sample. The remaining failures are not attributed to either implementation. HTTP playback remained available."
 }
