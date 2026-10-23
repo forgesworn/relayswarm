@@ -1222,7 +1222,10 @@ test("a silent holder is abandoned after its silence floor and the load goes to 
   } finally { await fixture.close(); }
 });
 
-test("serial peer attempts leave time for another link and stalled peers fall back once by the deadline", async () => {
+test("serial peer attempts leave time for another link and stalled peers fall back once by the deadline", async (t) => {
+  // Virtual time: the cold slice leaves another link 25ms, which host timer
+  // lateness (Windows granularity, a loaded machine) could otherwise consume.
+  const realSetTimeout = setTimeout;
   for (const bothStall of [false, true]) {
     const playback = peerPlaybackOptions(120), trace = [];
     const fixture = await linkedFixture(playback.options);
@@ -1230,14 +1233,32 @@ test("serial peer attempts leave time for another link and stalled peers fall ba
       const stalled = await fixture.addPeer(new ServingChannel(null, null, trace, "stalled"));
       const other = await fixture.addPeer(new ServingChannel(playback.bytes, bothStall ? null : 2, trace, "other"));
       for (const channel of [stalled, other]) channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
-      const started = performance.now(); const response = await fixture.load();
+      let clock = performance.now();
+      const started = clock;
+      t.mock.method(performance, "now", () => clock);
+      t.mock.timers.enable({ apis: ["setTimeout"] });
+      const step = async () => { await new Promise((resolve) => realSetTimeout(resolve, 1)); clock += 1; t.mock.timers.tick(1); };
+      const advanceUntil = async (predicate, limitMs) => {
+        for (let elapsed = 0; !predicate(); elapsed++) {
+          assert.ok(elapsed <= limitMs, "expected loader phase did not occur");
+          await step();
+        }
+      };
+      let response = null;
+      fixture.load().then((value) => { response = value; });
+      await advanceUntil(() => trace.length === 2, 200);
+      assert.ok(clock - started < 120, "the stalled attempt ends before the origin deadline");
+      await advanceUntil(() => response !== null, 200);
       assert.equal(response.data.byteLength, 32);
-      assert.ok(performance.now() - started < 220, "the existing origin deadline remains bounded");
-      await sleep(30);
+      assert.ok(clock - started <= 121, "the existing origin deadline remains bounded");
+      for (let elapsed = 0; elapsed < 30; elapsed++) await step();
       assert.deepEqual(trace, ["stalled", "other"]);
       assert.equal(fixture.swarm.metrics().segments.originFallbacks, bothStall ? 1 : 0);
       assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, bothStall ? 0 : 1);
-    } finally { await fixture.close(); }
+    } finally {
+      t.mock.timers.reset(); t.mock.restoreAll();
+      await fixture.close();
+    }
   }
 });
 
