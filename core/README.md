@@ -25,7 +25,19 @@ JavaScript link, adds a piece range to `want` and `meta` (`"p":[start,end]`):
 held object by the schema 3 piece size, and a `meta` that does not echo the
 range with its exact length closes the link. `relayswarm_proto::pieces` holds
 the offsets; `tests/link_ranges.rs` covers it, as there is no JavaScript
-reference to record traces from. The shell sends what it emits,
+reference to record traces from.
+
+`relayswarm_proto::scheduler` plans one schema 3 object across holders
+(CORE-SPEC section 6). `plan` splits the needed pieces so every source is
+projected to finish together, from each source's first byte and rate, with
+at most `max_holders` peers; when peers alone would be late, origin joins and
+takes the tail. `Transfer` issues the ranged requests, verifies each piece
+against the commitment, bans a holder that sends a bad piece, reassigns
+failed work, moves outstanding pieces to origin at the deadline less
+`originReserveMs`, duplicates the last two pieces of a lagging source, and
+delivers only when the whole object matches. `DEFAULT_MAX_HOLDERS` (3) and
+`DEFAULT_LOOKAHEAD_SEGMENTS` (2) are the spec's proposals, not yet set from a
+replayed field trace. It is not wired into the loader. The shell sends what it emits,
 answers its serve requests and reports timers and channel draining. The native
 HyperDHT framing in `object-transfer.mjs` stays with the Node adapter.
 
