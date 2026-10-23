@@ -328,6 +328,7 @@ class HlsSwarm {
     // Settles when the session may start: the core has loaded or failed, or
     // CORE_WAIT_MS has passed. Null when no core was requested.
     this.coreWait = null;
+    this.coreRelease = null;
     this.coreFallbacks = 0;
     this.coreDecided = { wasm: 0, js: 0 };
     this.coreLinks = { wasm: 0, js: 0 };
@@ -464,8 +465,15 @@ class HlsSwarm {
       if (this.options.mode === "peer-first" && this.options.coreWasm !== undefined) {
         let release;
         const settled = new Promise((resolve) => { release = resolve; });
-        const timer = setTimeout(release, CORE_WAIT_MS);
-        this.coreWait = settled.then(() => { clearTimeout(timer); this.coreWait = null; });
+        // A tracked timer, so stop() clears it; stop() also releases the wait.
+        const timer = this.#after(CORE_WAIT_MS, release);
+        this.coreRelease = release;
+        this.coreWait = settled.then(() => {
+          clearTimeout(timer);
+          this.timers.delete(timer);
+          this.coreWait = null;
+          this.coreRelease = null;
+        });
         this.#guard("core", () => this.#loadCore().finally(release));
       }
       this.#guard("start", () => this.#start());
@@ -503,6 +511,7 @@ class HlsSwarm {
     } catch {}
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
+    this.coreRelease?.();
     for (const waiter of this.haveWaiters) waiter();
     this.haveWaiters.clear();
     for (const dial of this.dials.values()) {
