@@ -137,7 +137,7 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
   It must match the JavaScript verifier on every vector; change the JavaScript,
   regenerate the vectors, then make Rust agree. Its toolchain is pinned in
   `core/rust-toolchain.toml`; reuse `core/target/`.
-- Package version 0.2.1, session wire version 3, commitment schemas 1/2 and metrics
+- Package version 0.2.1, session wire version 3, commitment schemas 1/2/3 (3 experimental) and metrics
   version 2 are distinct. Published RelaySwarmKit v0.5.0 supports wire version 3
   and signed media; current SDK/browser interoperability is measured on macOS
   arm64 loopback. Physical Apple devices and public-NAT interop remain unproved.

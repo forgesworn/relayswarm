@@ -123,6 +123,7 @@ commit("v1: whitespace in content", "reject", commitment(null, { content: commit
 commit("v1: extra content field", "reject", commitment(null, { content: commitmentContent(commitmentFields()).replace("}", ",\"extra\":1}") }));
 commit("v1: version 3", "reject", commitment(null, { content: commitmentContent(commitmentFields()).replace("\"v\":1", "\"v\":3") }));
 commit("v1: wrong domain", "reject", commitment(null, { content: commitmentContent(commitmentFields()).replace("segment-v1", "segment-v9") }));
+commit("v1: part absent from content", "reject", commitment(null, { content: commitmentContent(commitmentFields()).replace(",\"part\":null", "") }));
 commit("v1: content not JSON", "reject", commitment(null, { content: "{" }));
 commit("v1: content null", "reject", commitment(null, { content: "null" }));
 commit("v1: duplicate x tag", "reject", commitment(commitmentFields(), { tags: [["x", SWARM], ["x", SWARM], ["e", streamEvent.id]] }));

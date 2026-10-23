@@ -12,6 +12,8 @@ import { runVectorCase } from "./proto-vectors.mjs";
 import { CORE_FUNCTIONS, stubCore } from "./core-stub.mjs";
 import { discoveryOps, discoveryScenarios, runDiscoveryOps, runSelectionOps, selectionOps } from "./selection-traces.mjs";
 import { NeighbourDiscovery } from "../src/browser/neighbour-discovery.mjs";
+import { CORE_SOURCE_SECTION, coreSourceHash } from "../scripts/core-source-hash.mjs";
+import { fileURLToPath } from "node:url";
 
 const path = process.env.RELAYSWARM_CORE_WASM
   ? resolve(process.env.RELAYSWARM_CORE_WASM) : new URL("../src/browser/relayswarm-core.wasm", import.meta.url);
@@ -35,6 +37,14 @@ test("the module has no imports and the expected exports", async () => {
   for (const name of ["memory", ...Object.keys(CORE_FUNCTIONS)]) {
     assert.ok(WebAssembly.Module.exports(module).some((entry) => entry.name === name), name);
   }
+});
+
+test("the module was built from the Rust sources beside it", async () => {
+  const sections = WebAssembly.Module.customSections(await WebAssembly.compile(bytes), CORE_SOURCE_SECTION);
+  assert.equal(sections.length, 1, "one source stamp");
+  const stamped = Buffer.from(sections[0]).toString("utf8");
+  assert.equal(stamped, coreSourceHash(fileURLToPath(new URL("..", import.meta.url))),
+    "core/ changed since the module was built: run npm run core:wasm");
 });
 
 test("every shared vector verifies identically through WebAssembly", () => {

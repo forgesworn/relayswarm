@@ -1365,25 +1365,25 @@ class HlsSwarm {
       } finally { attempt.done(); }
       this.peerSelection.observe(attempt.observation());
       if (attempt.abandoned) {
-        this.peerSelection.record(link, now() - requestedAt);
+        this.#recordSelection(link, now() - requestedAt);
         this.counters.peerAbandoned += 1;
         return null;
       }
       if (!bytes || signal.aborted || this.stopped) {
-        if (!signal.aborted && !this.stopped) this.peerSelection.record(link, now() - requestedAt);
+        if (!signal.aborted && !this.stopped) this.#recordSelection(link, now() - requestedAt);
         continue;
       }
       const digest = await sha256Hex(bytes);
       if (signal.aborted || this.stopped) return null;
       if (bytes.byteLength !== commitment.size || digest !== commitment.sha256) {
-        this.peerSelection.record(link, now() - requestedAt);
+        this.#recordSelection(link, now() - requestedAt);
         this.counters.peerCorrupt += 1;
         this.banned.add(link.pubkey);
         link.close("integrity");
         continue;
       }
       if (commitment.expiresAt <= Math.floor(Date.now() / 1000)) return null;
-      this.peerSelection.record(link, now() - requestedAt, bytes.byteLength);
+      this.#recordSelection(link, now() - requestedAt, bytes.byteLength);
       if (coordinated) this.counters.coordinatedPeerLoads += 1;
       return { key, bytes, discoveryContext };
     }
@@ -1441,7 +1441,8 @@ class HlsSwarm {
         if (finished) return;
         finished = true;
         tickTimer = clear(tickTimer); backstop = clear(backstop);
-        for (const controller of [...requests.values(), ...originRequests]) controller.abort(PeerLink.ABANDON_REASON);
+        // Only a hopeless holder counts as abandoned; leftovers are plain aborts.
+        for (const controller of [...requests.values(), ...originRequests]) controller.abort();
         releaseOrigin?.();
         plan.onDeadline = null;
         signal.removeEventListener("abort", onAbort);
@@ -1475,12 +1476,12 @@ class HlsSwarm {
               this.peerSelection.observe({ firstByteMs: report.firstByteMs, bytes: report.receivedBytes, flowMs: report.elapsedMs - report.firstByteMs });
             }
             if (bytes) {
-              this.peerSelection.record(link, now() - startedAt, bytes.byteLength);
+              this.#recordSelection(link, now() - startedAt, bytes.byteLength);
               this.multiHolder.peerBytes += bytes.byteLength;
               apply(xfer("delivered", { source: command.peer, p: [command.range.start, command.range.end], bytes: bytes.byteLength },
                 (at) => transfer.delivered(at, command.peer, command.range, bytes)));
             } else {
-              if (!controller.signal.aborted || abandoned.has(controller)) this.peerSelection.record(link, now() - startedAt);
+              if (!controller.signal.aborted || abandoned.has(controller)) this.#recordSelection(link, now() - startedAt);
               apply(xfer("failed", { source: command.peer }, (at) => transfer.failed(at, command.peer)));
             }
           }, () => { if (!finished) apply(xfer("failed", { source: command.peer }, (at) => transfer.failed(at, command.peer))); });
@@ -1510,7 +1511,7 @@ class HlsSwarm {
             this.multiHolder.abandoned += 1;
             if (controller) abandoned.add(controller);
           }
-          controller?.abort(PeerLink.ABANDON_REASON);
+          controller?.abort(command.t === "abandon" ? PeerLink.ABANDON_REASON : undefined);
         } else if (command.t === "ban") {
           const link = ids.get(command.peer);
           this.multiHolder.bans += 1;
@@ -1604,6 +1605,13 @@ class HlsSwarm {
     };
     state.done = () => { clearTimeout(silence); signal.removeEventListener("abort", relay); };
     return state;
+  }
+
+  // A closed link was forgotten on close; its last request can finish later,
+  // so forget it again rather than leave an entry the core keeps for good.
+  #recordSelection(link, elapsedMs, bytes) {
+    this.peerSelection.record(link, elapsedMs, bytes);
+    if (link.closed) this.peerSelection.forget(link);
   }
 
   #peerRequestResult(context, link, remainingMs, result, range = null) {
@@ -1780,7 +1788,7 @@ class HlsSwarm {
         race.peerLink = link;
         break;
       }
-      if (!race.controller.signal.aborted && !this.stopped) this.peerSelection.record(link, now() - requestedAt);
+      if (!race.controller.signal.aborted && !this.stopped) this.#recordSelection(link, now() - requestedAt);
     }
     race.peerDone = true;
     race.sawPeer = sawPeer || this.links.size > 0;
@@ -1853,14 +1861,14 @@ class HlsSwarm {
     c.raced += 1;
     const peerDigest = await sha256Hex(race.peerBytes);
     if (peerDigest !== race.originDigest) {
-      this.peerSelection.record(race.peerLink, race.requestMs);
+      this.#recordSelection(race.peerLink, race.requestMs);
       c.peerCorrupt += 1;
       this.banned.add(race.peerLink.pubkey);
       race.peerLink.close("integrity");
       return;
     }
     const latency = race.peerAt - race.t0;
-    this.peerSelection.record(race.peerLink, race.requestMs, race.peerBytes.byteLength);
+    this.#recordSelection(race.peerLink, race.requestMs, race.peerBytes.byteLength);
     if (this.firstPeerSegmentAtMs === null) this.firstPeerSegmentAtMs = Date.now() - this.startedAt;
     pushSample(this.peerLatencySamples, latency);
     c.bytesFromPeers += race.peerBytes.byteLength;

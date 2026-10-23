@@ -133,15 +133,17 @@ resuming at once when the channel reports little queued, which matches
 `npm run core:wasm` builds it with the release profile and writes
 `src/browser/relayswarm-core.wasm`, which is committed so Git installs need no
 Rust. Source paths are remapped, and the script fails if the module names a
-local directory. `npm run test:proto` runs all 120 vectors through the
-committed module; CI also builds a fresh one and runs them through that. A
-fresh module's bytes may differ by host; its verdicts may not.
+local directory, and appends a `relayswarm-source` custom section holding
+the SHA-256 of the Rust sources it was built from. `npm run test:proto` runs
+all 140 vectors through the committed module and fails if that hash no
+longer matches `core/`; CI also builds a fresh one and runs them through
+that. A fresh module's bytes may differ by host; its verdicts may not.
 
 Measured on 22 and 23 October 2026:
 
 | Build | Raw bytes | gzip -9 |
 |---|---|---|
-| `relayswarm-core.wasm` with selection, links, discovery and the scheduler (committed, no `wasm-opt`) | 399,967 | 147,752 |
+| `relayswarm-core.wasm` with selection, links, discovery and the scheduler (committed, no `wasm-opt`) | 400,340 | 147,971 |
 | With selection, links and discovery, before the scheduler | 315,803 | 122,029 |
 | The same after `wasm-opt -Oz` (version 133, current features enabled) | 253,619 | 120,570 |
 | With selection and links, before discovery | 274,837 | 112,644 |

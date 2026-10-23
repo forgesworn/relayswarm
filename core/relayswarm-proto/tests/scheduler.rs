@@ -603,3 +603,23 @@ fn a_flow_that_stalls_is_abandoned_by_a_tick_before_the_floor() {
     };
     assert!(abandoned_at <= NOW + 1_000, "abandoned at {abandoned_at}");
 }
+
+#[test]
+fn untested_first_bytes_use_the_shared_time_so_a_late_plan_gives_origin_the_tail() {
+    // Each peer needs about 820 ms for half the object; the floor is 2 s away.
+    let bytes = object();
+    let start = |shared: Option<f64>| {
+        let mut transfer = transfer(&bytes, NOW + 4_000);
+        transfer.start(
+            NOW,
+            &[peer(1, None, Some(200.0)), peer(2, None, Some(200.0))],
+            origin(100.0, 500.0),
+            shared,
+            None,
+        );
+        requests(&transfer.drain_commands())
+    };
+    assert!(!start(Some(10.0)).iter().any(|(s, _)| *s == Source::Origin));
+    // A 1.5 s shared first byte makes both peers late, so origin takes a tail.
+    assert!(start(Some(1_500.0)).iter().any(|(s, _)| *s == Source::Origin));
+}

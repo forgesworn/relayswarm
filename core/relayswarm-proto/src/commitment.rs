@@ -349,6 +349,8 @@ pub fn verify_segment_commitment(
     let wide = v >= 2;
     let sequence = js::safe_integer(get(&value, "sequence"));
     let discontinuity = js::safe_integer(get(&value, "discontinuity"));
+    // A missing `part` is not `null`: the JavaScript verifier rejects it.
+    let part_present = absent_or(&value, "part").is_some();
     let part = get(&value, "part");
     let size = js::safe_integer(get(&value, "size"));
     let expires_at = js::safe_integer(get(&value, "expiresAt"));
@@ -360,6 +362,7 @@ pub fn verify_segment_commitment(
         && get(&value, "key").as_str() == Some(key)
         && js::strict_eq(get(&value, "sequence"), &context.sequence)
         && js::strict_eq(get(&value, "discontinuity"), &context.discontinuity)
+        && part_present
         && js::strict_eq(part, &context.part)
         && sequence.is_some_and(|n| n >= 0)
         && discontinuity.is_some_and(|n| n >= 0)

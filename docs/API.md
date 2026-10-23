@@ -379,8 +379,9 @@ it does not sign an event or validate media bytes.
 (`v: 3`, `relayswarm-segment-v3`) requires: at least 64 KiB, at most 64 pieces
 per segment, rounded up to a multiple of 16 KiB. Schema 3 adds `pieceSize` and
 one lowercase SHA-256 per piece in `pieces` to schema 2. The verifier accepts
-it; the publisher signs it only with `pieceCommitments: true`, and the loader
-does not yet use the pieces.
+it; the publisher signs it only with `pieceCommitments: true`. The loader
+fetches and verifies pieces from several holders only with `multiHolder`
+(see `INTEGRATION.md`).
 
 `validStreamAuthorisation(event)` checks the signed kind-30311 event, a `d` tag,
 bounded event size and the exact redistribution tag.

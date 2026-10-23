@@ -627,7 +627,14 @@ impl Transfer {
             .map(|(_, lane)| {
                 let mut estimate = lane.estimate;
                 let backlog = (lane.finish_at - now as f64).max(0.0);
-                estimate.first_byte_ms = Some(estimate.first_byte_ms.unwrap_or(0.0).max(backlog));
+                // An untested peer keeps no first-byte time, so the plan
+                // still falls back to the shared one.
+                if backlog > 0.0 {
+                    let first_byte = non_negative(estimate.first_byte_ms)
+                        .or(non_negative(self.shared_first_byte_ms))
+                        .unwrap_or(0.0);
+                    estimate.first_byte_ms = Some(first_byte.max(backlog));
+                }
                 estimate
             })
             .collect();
@@ -792,7 +799,10 @@ impl Transfer {
             .lanes
             .iter()
             .filter(|(source, lane)| {
+                // Origin has no cancel, so its fetch keeps running and its
+                // lane stays live.
                 **source != winner
+                    && matches!(source, Source::Peer(_))
                     && !lane.retired
                     && !lane.in_flight.is_empty()
                     && lane

@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 // Build the Rust core's WebAssembly module and copy it beside the browser
-// loader. Source paths are remapped so the binary names no local directory.
+// loader. Source paths are remapped so the binary names no local directory,
+// and a custom section records the SHA-256 of the sources it was built from.
 //
 //   node scripts/build-core-wasm.mjs [--out path]
 
 import { execFileSync } from "node:child_process";
-import { copyFileSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
+import { CORE_SOURCE_SECTION, coreSourceHash, customSection } from "./core-source-hash.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const core = join(root, "core");
@@ -31,5 +33,7 @@ const text = bytes.toString("latin1");
 for (const local of [homedir(), root, cargoHome]) {
   if (text.includes(local)) throw new Error(`The module still names a local path (${local.length} characters); check the remapping.`);
 }
-copyFileSync(built, out);
-console.log(`${out}: ${statSync(out).size} bytes, ${gzipSync(bytes, { level: 9 }).length} gzip`);
+// Bytes differ between hosts, so the module records which sources built it.
+const stamped = Buffer.concat([bytes, customSection(CORE_SOURCE_SECTION, coreSourceHash(root))]);
+writeFileSync(out, stamped);
+console.log(`${out}: ${statSync(out).size} bytes, ${gzipSync(stamped, { level: 9 }).length} gzip`);

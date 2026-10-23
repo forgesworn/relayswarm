@@ -3,9 +3,9 @@
 ## Unreleased
 
 - Add `core/relayswarm-proto`, a Rust port of signed segment commitment,
-  scoped delegation and revocation verification (schemas 1 and 2). It performs
-  no I/O and builds for WebAssembly. It is not used by the browser loader or
-  the native path yet.
+  scoped delegation and revocation verification (schemas 1 and 2; schema 3
+  below). It performs no I/O and builds for WebAssembly. The browser loader
+  uses it only with `coreWasm` (below); the native path does not use it.
 - Add 120 shared vectors generated from the JavaScript verifier
   (`core/vectors/commitments.json`). The Rust and JavaScript test suites both
   check them, and a new CI job runs both with the Rust lint and WebAssembly
@@ -56,8 +56,8 @@
 - Add piece-range requests (framing 2, `"p"` on `want` and `meta`) to the
   Rust link, and `relayswarm_proto::scheduler`, which plans one schema 3
   object across up to three holders with origin for a late tail and runs the
-  transfer with per-piece verification. Neither is used by the loader yet;
-  the holder and lookahead defaults are provisional.
+  transfer with per-piece verification. The loader uses both only with
+  `multiHolder` (below); the holder and lookahead defaults are provisional.
 - Add the publisher option `pieceCommitments` and the demo flag
   `--piece-commitments` (both off by default): exact-playlist contexts are
   signed as schema 3 instead of schema 2, with piece digests from the same
@@ -83,6 +83,13 @@
   every multi-holder scheduler call with its inputs and commands. A test
   replays a recorded transfer through the module and gets the same commands.
   The Chrome harness takes `--trace N` and stores each viewer's trace.
+- The Rust verifier now rejects a commitment whose content omits `part`, as
+  the JavaScript one does (a new shared vector, 140 in all). Under
+  `multiHolder`, an untested holder is planned with the shared first-byte
+  time rather than none, origin stays live once peers verify its pieces,
+  requests stopped because the segment is done or another holder won count
+  as aborts rather than abandonments, and a closed link's last result no
+  longer leaves an entry in the core's peer selection.
 
 ## v0.2.1 (21 October 2026)
 

@@ -3625,12 +3625,23 @@ test("multi-holder: a silent holder's pieces come from origin by range at the de
     assert.ok(f.channels[1].wants.length > 0, "the silent holder was asked");
     assert.equal(multiHolder.originBytes + multiHolder.peerBytes, f.bytes.length);
     assert.equal(f.swarm.metrics().bytes.fromPeers, multiHolder.peerBytes);
+    // Cancelling the silent holder at the deadline is not an abandonment.
+    const counters = () => f.swarm.metrics().peerRequestDiagnostics.counters;
+    await until(() => counters().abort + counters().closed > 0);
+    assert.equal(counters().abandoned, 0);
   } finally { await f.close(); }
 });
 
 test("multi-holder: a holder too slow for the deadline is abandoned early and its pieces move", async (t) => {
   // About 10 bytes/ms against 64 KiB pieces: hopeless long before the 3 s
   // deadline, which is where the transfer alone would otherwise rescue it.
+  // Watch the core selection: a closed holder's late record must be forgotten.
+  const selection = Object.getPrototypeOf((await loadCore(multiCore)).peerSelection());
+  const calls = [];
+  for (const name of ["record", "forget"]) {
+    const original = selection[name];
+    t.mock.method(selection, name, function (link, ...rest) { calls.push([name, link]); return original.call(this, link, ...rest); });
+  }
   const f = await multiFixture(t, { holders: [{}, { trickleMs: 50 }], size: 12 * 65_536, originFallbackMs: 3_000 });
   try {
     const started = performance.now();
@@ -3644,6 +3655,11 @@ test("multi-holder: a holder too slow for the deadline is abandoned early and it
     assert.ok(f.channels[1].cancels === 1 || f.channels[1].readyState === "closed", "the slow holder's request was stopped");
     assert.equal(f.channels[1].wants.length, 1, "and it was given no more work");
     assert.equal(multiHolder.peerBytes + multiHolder.originBytes, f.bytes.length);
+    await until(() => calls.some(([name, link]) => name === "record" && link.closed));
+    assert.equal(f.swarm.metrics().peerRequestDiagnostics.counters.abandoned, 1, "only the hopeless holder");
+    for (const link of new Set(calls.filter(([, link]) => link.closed).map(([, link]) => link))) {
+      assert.equal(calls.findLast(([, seen]) => seen === link)[0], "forget", "a closed link ends forgotten");
+    }
   } finally { await f.close(); }
 });
 

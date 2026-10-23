@@ -181,13 +181,13 @@ jobs:
           cargo clippy --locked --all-targets -- -D warnings
           cargo test --locked
           cargo build --locked --target wasm32-unknown-unknown -p relayswarm-proto
-      # The committed module is checked by test:proto above. A fresh build from
-      # this commit must give the same verdicts; its bytes may differ by host.
+      # The committed module is checked by test:proto above, including its
+      # stamp of the core/ sources it was built from. A fresh build from this
+      # commit must give the same verdicts; its bytes may differ by host.
       - name: Fresh WebAssembly module against the shared vectors
         run: |
           node scripts/build-core-wasm.mjs --out "$RUNNER_TEMP/relayswarm-core.wasm"
           RELAYSWARM_CORE_WASM="$RUNNER_TEMP/relayswarm-core.wasm" node --test test/core-wasm.test.mjs test/core-link.test.mjs test/core-transfer.test.mjs
-          sha256sum "$RUNNER_TEMP/relayswarm-core.wasm" src/browser/relayswarm-core.wasm
       # Once, on Linux: the suite's timing tests are tight enough that running
       # it twice per Windows job doubles their chance of a slow-runner miss.
       - name: Loader suite with links, selection and verification in the Rust core
