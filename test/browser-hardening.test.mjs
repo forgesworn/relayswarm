@@ -717,6 +717,33 @@ class ServingChannel extends RecordedChannel {
   }
 }
 
+// Virtual time for loader timing tests: host timer lateness (Windows
+// granularity, a loaded machine) cannot eat a budget. Each step yields to real
+// I/O, then moves performance.now() and the mocked setTimeout on by 1ms.
+function virtualClock(t) {
+  const realSetTimeout = setTimeout;
+  // A whole-millisecond start keeps deadline arithmetic exact.
+  let clock = Math.ceil(performance.now());
+  t.mock.method(performance, "now", () => clock);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const step = async () => { await new Promise((resolve) => realSetTimeout(resolve, 1)); clock += 1; t.mock.timers.tick(1); };
+  const advanceUntil = async (predicate, limitMs) => {
+    for (let elapsed = 0; !predicate(); elapsed++) {
+      assert.ok(elapsed <= limitMs, "expected loader phase did not occur");
+      await step();
+    }
+  };
+  const advance = async (ms) => { for (let elapsed = 0; elapsed < ms; elapsed++) await step(); };
+  const settle = async (promise, limitMs = 5_000) => {
+    let outcome = null;
+    promise.then((value) => { outcome = { value }; }, (error) => { outcome = { error }; });
+    await advanceUntil(() => outcome !== null, limitMs);
+    if (outcome.error) throw outcome.error;
+    return outcome.value;
+  };
+  return { now: () => clock, step, advance, advanceUntil, settle, restore: () => { t.mock.timers.reset(); t.mock.restoreAll(); } };
+}
+
 test("a peer request is skipped for origin when the time left is below the fastest completed transfer", async () => {
   const playback = peerPlaybackOptions(1000);
   const requested = [];
@@ -1062,14 +1089,16 @@ test("peer eligibility observes coordination with one bounded commitment per eli
   }
 });
 
-test("peer-first explores a cold link, then prefers its measured faster verified delivery", async () => {
+test("peer-first explores a cold link, then prefers its measured faster verified delivery", async (t) => {
   const playback = peerPlaybackOptions(), trace = [];
   const fixture = await linkedFixture({ ...playback.options, serve: true, maxUploadBytesPerSession: 0 });
+  let time = null;
   try {
     const slow = await fixture.addPeer(new ServingChannel(playback.bytes, 40, trace, "slow"));
     const fast = await fixture.addPeer(new ServingChannel(playback.bytes, 2, trace, "fast"));
     for (const channel of [slow, fast]) channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
-    for (let i = 0; i < 7; i++) assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+    time = virtualClock(t);
+    for (let i = 0; i < 7; i++) assert.deepEqual(new Uint8Array((await time.settle(fixture.load(), 400)).data), playback.bytes);
     assert.deepEqual(trace, ["slow", "slow", "slow", "slow", "fast", "fast", "fast"]);
     assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 7);
     assert.equal(fixture.swarm.metrics().segments.originFallbacks, 0);
@@ -1077,17 +1106,19 @@ test("peer-first explores a cold link, then prefers its measured faster verified
     const measurements = fixture.swarm.metrics().peers.deliveryMeasurements;
     assert.equal(measurements.length, 2);
     assert.ok(measurements.every((value) => value.latencyMs > 0 && value.throughputBytesPerSecond > 0));
-  } finally { await fixture.close(); }
+  } finally { time?.restore(); await fixture.close(); }
 });
 
-test("a failing eligible peer yields to another peer within the existing origin deadline", async () => {
+test("a failing eligible peer yields to another peer within the existing origin deadline", async (t) => {
   const playback = peerPlaybackOptions(200), trace = [];
   const fixture = await linkedFixture(playback.options);
+  let time = null;
   try {
     const failing = await fixture.addPeer(new ServingChannel(null, 1, trace, "failing"));
     const healthy = await fixture.addPeer(new ServingChannel(playback.bytes, 20, trace, "healthy"));
     for (const channel of [failing, healthy]) channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
-    await fixture.load(); await fixture.load();
+    time = virtualClock(t);
+    await time.settle(fixture.load(), 300); await time.settle(fixture.load(), 300);
     assert.deepEqual(trace, ["failing", "healthy", "healthy"]);
     assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 2);
     assert.equal(fixture.swarm.metrics().segments.originFallbacks, 0);
@@ -1103,7 +1134,7 @@ test("a failing eligible peer yields to another peer within the existing origin 
       assert.equal(row.metadataReceived, row.outcome === "payload");
       assert.equal(row.receivedBytes, row.outcome === "payload" ? 32 : 0);
     }
-  } finally { await fixture.close(); }
+  } finally { time?.restore(); await fixture.close(); }
 });
 
 test("peer request diagnostics bound and copy local records without reporting transport payload as verification", async () => {
@@ -1164,39 +1195,41 @@ test("known 900ms verified delivery keeps enough of a 1500ms deadline when alter
   } finally { await fixture.close(); }
 });
 
-test("a holder projected slower than the budget gets a longer wait only while the buffer covers it", async () => {
+test("a holder projected slower than the budget gets a longer wait only while the buffer covers it", async (t) => {
   const playback = peerPlaybackOptions(1000), trace = [];
   const fixture = await linkedFixture(playback.options);
+  let time = null;
   try {
     // 5 s buffered less the 2 s origin reserve leaves 3 s: room to wait.
     const deep = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 15 } };
     fixture.hls.media = deep;
     const first = await fixture.addPeer(new ServingChannel(playback.bytes, 900, trace, "first"));
     first.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
-    await fixture.load(); // A 900 ms completion is the evidence.
+    time = virtualClock(t);
+    await time.settle(fixture.load(), 1_500); // A 900 ms completion is the evidence.
     assert.equal(fixture.swarm.metrics().segments.peerWaitExtended, 0, "no evidence, no longer wait");
     first.receive(JSON.stringify({ t: "have", keys: [] }));
-    const slow = await fixture.addPeer(new ServingChannel(playback.bytes, 1110, trace, "slow"));
+    const slow = await time.settle(fixture.addPeer(new ServingChannel(playback.bytes, 1110, trace, "slow")));
     Object.assign(slow, { ordered: true, maxRetransmits: null, maxPacketLifeTime: null }); // A deadline drains, not closes.
     slow.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
     // 3.05 s buffered leaves 1050 ms: the projection fits, the slow holder does not.
     fixture.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 13.05 } };
     let started = performance.now();
-    await fixture.load();
+    await time.settle(fixture.load(), 1_500);
     const elapsed = performance.now() - started;
     let segments = fixture.swarm.metrics().segments;
     assert.deepEqual(trace, ["first", "slow"]);
     assert.equal(segments.originFallbacks, 1, "the wait never passes the buffer less the origin reserve");
     assert.ok(elapsed >= 1000 && elapsed < 1100, `fell back at the buffer limit, not later (${Math.round(elapsed)} ms)`);
-    await sleep(150); // The cancelled response drains.
+    await time.advance(150); // The cancelled response drains.
     fixture.hls.media = deep;
     started = performance.now();
-    assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+    assert.deepEqual(new Uint8Array((await time.settle(fixture.load(), 3_000)).data), playback.bytes);
     assert.ok(performance.now() - started > 1000, "delivered after the 1000 ms budget");
     segments = fixture.swarm.metrics().segments;
     assert.equal(segments.peerFirstLoaded, 2); assert.equal(segments.originFallbacks, 1);
     assert.ok(segments.peerWaitExtended >= 1);
-  } finally { await fixture.close(); }
+  } finally { time?.restore(); await fixture.close(); }
 });
 
 test("a projection that cannot fit the buffer goes to origin before any wait or request", async () => {
@@ -1252,40 +1285,30 @@ test("a silent holder is abandoned after its silence floor and the load goes to 
 });
 
 test("serial peer attempts leave time for another link and stalled peers fall back once by the deadline", async (t) => {
-  // Virtual time: the cold slice leaves another link 25ms, which host timer
-  // lateness (Windows granularity, a loaded machine) could otherwise consume.
-  const realSetTimeout = setTimeout;
+  // The cold slice leaves another link 25ms, so this runs on virtual time.
   for (const bothStall of [false, true]) {
     const playback = peerPlaybackOptions(120), trace = [];
     const fixture = await linkedFixture(playback.options);
+    let time = null;
     try {
       const stalled = await fixture.addPeer(new ServingChannel(null, null, trace, "stalled"));
       const other = await fixture.addPeer(new ServingChannel(playback.bytes, bothStall ? null : 2, trace, "other"));
       for (const channel of [stalled, other]) channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
-      let clock = performance.now();
-      const started = clock;
-      t.mock.method(performance, "now", () => clock);
-      t.mock.timers.enable({ apis: ["setTimeout"] });
-      const step = async () => { await new Promise((resolve) => realSetTimeout(resolve, 1)); clock += 1; t.mock.timers.tick(1); };
-      const advanceUntil = async (predicate, limitMs) => {
-        for (let elapsed = 0; !predicate(); elapsed++) {
-          assert.ok(elapsed <= limitMs, "expected loader phase did not occur");
-          await step();
-        }
-      };
+      time = virtualClock(t);
+      const started = time.now();
       let response = null;
       fixture.load().then((value) => { response = value; });
-      await advanceUntil(() => trace.length === 2, 200);
-      assert.ok(clock - started < 120, "the stalled attempt ends before the origin deadline");
-      await advanceUntil(() => response !== null, 200);
+      await time.advanceUntil(() => trace.length === 2, 200);
+      assert.ok(time.now() - started < 120, "the stalled attempt ends before the origin deadline");
+      await time.advanceUntil(() => response !== null, 200);
       assert.equal(response.data.byteLength, 32);
-      assert.ok(clock - started <= 121, "the existing origin deadline remains bounded");
-      for (let elapsed = 0; elapsed < 30; elapsed++) await step();
+      assert.ok(time.now() - started <= 121, "the existing origin deadline remains bounded");
+      await time.advance(30);
       assert.deepEqual(trace, ["stalled", "other"]);
       assert.equal(fixture.swarm.metrics().segments.originFallbacks, bothStall ? 1 : 0);
       assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, bothStall ? 0 : 1);
     } finally {
-      t.mock.timers.reset(); t.mock.restoreAll();
+      time?.restore();
       await fixture.close();
     }
   }
