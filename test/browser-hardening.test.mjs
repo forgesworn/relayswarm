@@ -122,6 +122,25 @@ function memoryRelaySocket() {
   };
 }
 
+test("presence carries a bounded object framing version and drops an invalid one", async () => {
+  const pool = new RelayPool(["wss://memory.test"], { WebSocketImpl: memoryRelaySocket() });
+  const swarmId = "framing-presence", sender = new RelaySwarmSession({ pool, swarmId }), receiver = new RelaySwarmSession({ pool, swarmId });
+  const seen = [];
+  try {
+    await pool.connect(); sender.start(); receiver.start();
+    receiver.onPresence(({ payload }) => seen.push(payload.transports));
+    const entry = (extra) => ({ type: "webrtc", publicKey: sender.pubkey, ...extra });
+    for (const obj of [0, 16, 2.5, "2"]) assert.throws(() => sender.announcePresence({ role: "viewer", transports: [entry({ obj })] }), /transport capability/u);
+    sender.announcePresence({ role: "viewer", transports: [entry({ obj: 2 })] });
+    sender.announcePresence({ role: "viewer", transports: [entry()] });
+    // An older or careless peer: the entry stays, the field reads as framing 1.
+    pool.publish(finalizeEvent({ kind: 24170, created_at: Math.floor(Date.now() / 1000), tags: [["x", swarmId]],
+      content: JSON.stringify({ v: 3, role: "viewer", transports: [entry({ obj: 16 })], have: [] }) }, generateSecretKey()));
+    await until(() => seen.length === 3);
+    assert.deepEqual(seen, [[entry({ obj: 2 })], [entry()], [entry()]]);
+  } finally { sender.close(); receiver.close(); pool.close(); }
+});
+
 for (const policy of [undefined, "all", "relay"]) {
   test(`ICE transport policy ${policy ?? "default"} reaches incoming and outgoing native connections`, async () => {
     const servers = [{ urls: "turns:relay.example:5349", username: "fixture", credential: "fixture" }];

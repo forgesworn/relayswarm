@@ -1739,7 +1739,10 @@ uses a fresh ephemeral key by default; maximum event age defaults to 120 s.
   signal subscription; closing the session does not close its shared pool.
 - `onPresence`, `onSignal`, `onError` register handlers and return unsubscribe callbacks.
 - `announcePresence({ role, transports?, have?, open?, ticket? })` returns
-  the signed event. Capabilities are `{ type, publicKey }`; `have` contains digests.
+  the signed event. Capabilities are `{ type, publicKey, obj? }`; `have` contains
+  digests. Experimental `obj` is the object framing version, an integer 1 to 15
+  (absent means 1); received presence keeps a valid `obj` and drops any other.
+  Session wire version 3 is unchanged, and v0.2.1 peers ignore the field.
 - `sendSignal(toPubkey, { type, transport, requestId, payload? })` returns a
   signed NIP-44-encrypted event addressed to that session key.
 - `waitForPresence(predicate, timeoutMs?)` / `waitForSignal(predicate,
