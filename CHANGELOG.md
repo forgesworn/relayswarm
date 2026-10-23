@@ -106,10 +106,11 @@
   longer leaves an entry in the core's peer selection.
 - Add `core/relayswarm-ffi`, a UniFFI facade over the Rust core for Swift and
   Kotlin: the commitment verifiers (JSON in and out), the schema 3 piece
-  helpers, the multi-holder transfer scheduler, the peer link protocol and
-  peer selection. `npm run test:ffi:swift` and `npm run test:ffi:kotlin`
-  check all 140 vectors, all 48 recorded link traces, a transfer, a piece
-  range exchange and the seeded selection sequences through generated bindings, and CI runs both. RelaySwarmKit does not use it yet.
+  helpers, the multi-holder transfer scheduler, the peer link protocol, peer
+  selection and neighbour discovery. `npm run test:ffi:swift` and
+  `npm run test:ffi:kotlin` check all 140 vectors, all 48 recorded link
+  traces, a transfer, a piece range exchange and the seeded selection and
+  discovery sequences through generated bindings, and CI runs both. RelaySwarmKit does not use it yet.
 
 ## v0.2.1 (21 October 2026)
 

@@ -7,6 +7,7 @@
 //! core, nothing here reads a clock or performs I/O: the shell passes the time.
 
 use relayswarm_proto::commitment::{self, FragmentContext, Trust};
+use relayswarm_proto::discovery::{self, AttemptId, ContextId, MediaType};
 use relayswarm_proto::link::{self, LinkConfig};
 use relayswarm_proto::pieces::{self, PieceRange};
 use relayswarm_proto::scheduler::{self, Command, Estimate, Source, TransferConfig};
@@ -895,5 +896,380 @@ impl PeerSelection {
 
     pub fn estimate(&self, link: u64, size: f64) -> Option<f64> {
         self.lock().estimate(link, size)
+    }
+}
+
+// Neighbour discovery. Media types arrive as the strings HLS uses; any type
+// other than "main" or "audio" has no context, as in JavaScript. Contexts and
+// attempts are numeric IDs where the JavaScript compares object identity.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum DiscoveryMedia {
+    Main,
+    Audio,
+}
+
+impl From<MediaType> for DiscoveryMedia {
+    fn from(value: MediaType) -> Self {
+        match value {
+            MediaType::Main => DiscoveryMedia::Main,
+            MediaType::Audio => DiscoveryMedia::Audio,
+        }
+    }
+}
+
+/// A holder that has missed keys in one context.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DiscoveryHolder {
+    pub pubkey: String,
+    pub first_miss_at: u64,
+    pub misses: u32,
+    pub last_key: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DiscoveryContext {
+    pub id: u64,
+    pub media_type: DiscoveryMedia,
+    pub rendition: String,
+    pub keys: Vec<String>,
+    pub last_demand_at: Option<u64>,
+    pub activity_at: u64,
+    /// The context's one replacement is spent until a verified segment.
+    pub spent: bool,
+    /// In the order of their first miss.
+    pub holders: Vec<DiscoveryHolder>,
+}
+
+impl From<&discovery::Context> for DiscoveryContext {
+    fn from(value: &discovery::Context) -> Self {
+        DiscoveryContext {
+            id: value.id.value(),
+            media_type: value.media_type.into(),
+            rendition: value.rendition.clone(),
+            keys: value.keys.clone(),
+            last_demand_at: value.last_demand_at,
+            activity_at: value.activity_at,
+            spent: value.spent,
+            holders: value
+                .holders
+                .iter()
+                .map(|(pubkey, holder)| DiscoveryHolder {
+                    pubkey: pubkey.clone(),
+                    first_miss_at: holder.first_miss_at,
+                    misses: holder.misses,
+                    last_key: holder.last_key.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// A peer's latest hint.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DiscoveryCandidate {
+    pub pubkey: String,
+    pub have: Vec<String>,
+    pub ticket: Option<String>,
+    pub at: u64,
+}
+
+impl From<&discovery::Candidate> for DiscoveryCandidate {
+    fn from(value: &discovery::Candidate) -> Self {
+        DiscoveryCandidate {
+            pubkey: value.pubkey.clone(),
+            have: value.have.clone(),
+            ticket: value.ticket.clone(),
+            at: value.at,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DiscoveryAttempt {
+    pub id: u64,
+    pub pubkey: String,
+    pub ticket: Option<String>,
+    pub key: String,
+    pub dial: Option<u64>,
+}
+
+/// The single replacement window.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DiscoveryWindow {
+    pub id: u64,
+    /// The context the window serves, which may since have been replaced.
+    pub context: u64,
+    pub media_type: DiscoveryMedia,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub attempt: Option<DiscoveryAttempt>,
+    pub vacant: bool,
+    pub victim: Option<String>,
+}
+
+/// A hinted candidate for a demanded key.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct FoundHolder {
+    pub context: u64,
+    pub media_type: DiscoveryMedia,
+    pub candidate: DiscoveryCandidate,
+    pub key: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DiscoveryCounters {
+    pub checks: u64,
+    pub replacements: u64,
+    pub expired: u64,
+    pub opened: u64,
+    pub verified: u64,
+    pub stale_holder: u64,
+    pub stale_blocked: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DiscoverySnapshot {
+    pub candidates: u32,
+    pub contexts: u32,
+    pub requested_keys: u32,
+    pub replacement_spent: u32,
+    pub opportunity_active: bool,
+    pub remaining_ms: u64,
+    pub vacancy_reserved: bool,
+    pub counters: DiscoveryCounters,
+}
+
+struct DiscoveryState {
+    discovery: discovery::NeighbourDiscovery,
+    /// The latest `choose` or `hinted` result, for the `begin` that follows.
+    found: Option<discovery::Found>,
+}
+
+/// Demand, hints, holder misses and the single replacement window, as
+/// `neighbour-discovery.mjs` keeps them. The shell owns admission, slots and
+/// connections. One per swarm.
+#[derive(uniffi::Object)]
+pub struct NeighbourDiscovery {
+    inner: Mutex<DiscoveryState>,
+}
+
+impl NeighbourDiscovery {
+    fn lock(&self) -> MutexGuard<'_, DiscoveryState> {
+        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn keep(&self, found: Option<discovery::Found>) -> Option<FoundHolder> {
+        let result = found.as_ref().map(|found| FoundHolder {
+            context: found.context.value(),
+            media_type: found.media_type.into(),
+            candidate: (&found.candidate).into(),
+            key: found.key.clone(),
+        });
+        self.lock().found = found;
+        result
+    }
+}
+
+#[uniffi::export]
+impl NeighbourDiscovery {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(NeighbourDiscovery {
+            inner: Mutex::new(DiscoveryState {
+                discovery: discovery::NeighbourDiscovery::new(),
+                found: None,
+            }),
+        })
+    }
+
+    /// The live context for this media type and rendition, created or reset
+    /// after 30 s without activity or demand.
+    pub fn context(&self, now: u64, media_type: String, rendition: String) -> Option<u64> {
+        self.lock().discovery.context(now, &media_type, &rendition).map(ContextId::value)
+    }
+
+    /// Record demand for `key`; keeps the two most recent keys, with an
+    /// in-flight attempt's key pinned first.
+    pub fn demand(&self, now: u64, media_type: String, rendition: String, key: String) -> Option<u64> {
+        self.lock()
+            .discovery
+            .demand(now, &media_type, &rendition, &key)
+            .map(ContextId::value)
+    }
+
+    /// A peer's advertised keys and ticket, newest last, at most 64 peers.
+    pub fn hint(&self, now: u64, pubkey: String, have: Vec<String>, ticket: Option<String>) {
+        let have: Vec<&str> = have.iter().map(String::as_str).collect();
+        self.lock().discovery.hint(now, &pubkey, &have, ticket.as_deref());
+    }
+
+    /// This holder lacked `key` at the deadline; one miss per distinct key.
+    pub fn holder_miss(&self, now: u64, context: Option<u64>, pubkey: String, key: String) {
+        self.lock()
+            .discovery
+            .holder_miss(now, context.map(ContextId::from_value), &pubkey, &key);
+    }
+
+    /// The holder answered ahead of the deadline; clears its misses here.
+    pub fn holder_ahead(&self, context: Option<u64>, pubkey: String) {
+        self.lock().discovery.holder_ahead(context.map(ContextId::from_value), &pubkey);
+    }
+
+    /// The holder has missed on enough distinct keys for long enough.
+    pub fn stale(&self, now: u64, context: Option<u64>, pubkey: String) -> bool {
+        self.lock().discovery.stale(now, context.map(ContextId::from_value), &pubkey)
+    }
+
+    /// Drop this peer's misses in every context; its hint stays.
+    pub fn forget(&self, pubkey: String) {
+        self.lock().discovery.forget(&pubkey);
+    }
+
+    /// The context is live, recently active and recently demanded.
+    pub fn current(&self, now: u64, context: u64) -> bool {
+        self.lock().discovery.current(now, ContextId::from_value(context))
+    }
+
+    /// A hinted candidate for an unmet current context, or `None`. Only
+    /// candidates in `eligible` (pubkeys) are considered, and only media
+    /// types in `unmet`. With `room` (a free slot), a context whose one
+    /// replacement is spent is still considered.
+    pub fn choose(&self, now: u64, eligible: Vec<String>, unmet: Vec<String>, room: bool) -> Option<FoundHolder> {
+        let found = self.lock().discovery.choose(
+            now,
+            |candidate| eligible.contains(&candidate.pubkey),
+            |media| unmet.iter().any(|value| value == media.as_str()),
+            room,
+        );
+        self.keep(found)
+    }
+
+    /// A fresh eligible candidate hinting a key this context demands.
+    pub fn hinted(&self, now: u64, context: u64, eligible: Vec<String>) -> Option<FoundHolder> {
+        let found = self
+            .lock()
+            .discovery
+            .hinted(now, ContextId::from_value(context), &|candidate: &discovery::Candidate| {
+                eligible.contains(&candidate.pubkey)
+            });
+        self.keep(found)
+    }
+
+    /// Open the replacement window if none is open, then start one attempt
+    /// on the holder the latest `choose` or `hinted` returned. Each result
+    /// begins at most once; `None` without one.
+    pub fn begin(&self, now: u64) -> Option<u64> {
+        let mut state = self.lock();
+        let found = state.found.take()?;
+        state.discovery.begin(now, &found).map(AttemptId::value)
+    }
+
+    /// The attempt is still the window's, current and freshly hinted.
+    pub fn valid(&self, now: u64, attempt: u64) -> bool {
+        self.lock().discovery.valid(now, AttemptId::from_value(attempt))
+    }
+
+    /// Spend this context's one replacement, dropping `victim` for the attempt.
+    pub fn replaced(&self, now: u64, attempt: u64, victim: Option<String>) -> bool {
+        self.lock()
+            .discovery
+            .replaced(now, AttemptId::from_value(attempt), victim.as_deref())
+    }
+
+    /// The attempt's connection was allocated as `dial`.
+    pub fn allocated(&self, attempt: u64, dial: u64) {
+        self.lock().discovery.allocated(AttemptId::from_value(attempt), dial);
+    }
+
+    pub fn abandoned(&self, attempt: u64) {
+        self.lock().discovery.abandoned(AttemptId::from_value(attempt));
+    }
+
+    /// The connection `dial` failed.
+    pub fn failed(&self, dial: u64) {
+        self.lock().discovery.failed(dial);
+    }
+
+    /// Close the current window.
+    pub fn end(&self) -> bool {
+        self.lock().discovery.end()
+    }
+
+    /// A verified peer segment re-arms the context's replacement.
+    pub fn verified(&self, context: Option<u64>) -> bool {
+        self.lock().discovery.verified(context.map(ContextId::from_value))
+    }
+
+    /// The replacement window is open.
+    pub fn live(&self, now: u64) -> bool {
+        self.lock().discovery.live(now)
+    }
+
+    /// The open window holds a vacated slot for a current context.
+    pub fn reserved(&self, now: u64) -> bool {
+        self.lock().discovery.reserved(now)
+    }
+
+    /// This peer is the live window's victim.
+    pub fn suppresses(&self, now: u64, pubkey: String) -> bool {
+        self.lock().discovery.suppresses(now, &pubkey)
+    }
+
+    pub fn contexts(&self) -> Vec<DiscoveryContext> {
+        self.lock().discovery.contexts().map(Into::into).collect()
+    }
+
+    pub fn candidates(&self) -> Vec<DiscoveryCandidate> {
+        self.lock().discovery.candidates().map(Into::into).collect()
+    }
+
+    pub fn window(&self) -> Option<DiscoveryWindow> {
+        self.lock().discovery.window().map(|window| DiscoveryWindow {
+            id: window.id,
+            context: window.context.value(),
+            media_type: window.media_type.into(),
+            created_at: window.created_at,
+            expires_at: window.expires_at,
+            attempt: window.attempt.as_ref().map(|attempt| DiscoveryAttempt {
+                id: attempt.id.value(),
+                pubkey: attempt.pubkey.clone(),
+                ticket: attempt.ticket.clone(),
+                key: attempt.key.clone(),
+                dial: attempt.dial,
+            }),
+            vacant: window.vacant,
+            victim: window.victim.clone(),
+        })
+    }
+
+    pub fn snapshot(&self, now: u64) -> DiscoverySnapshot {
+        let snapshot = self.lock().discovery.snapshot(now);
+        let counters = snapshot.counters;
+        DiscoverySnapshot {
+            candidates: snapshot.candidates as u32,
+            contexts: snapshot.contexts as u32,
+            requested_keys: snapshot.requested_keys as u32,
+            replacement_spent: snapshot.replacement_spent as u32,
+            opportunity_active: snapshot.opportunity_active,
+            remaining_ms: snapshot.remaining_ms,
+            vacancy_reserved: snapshot.vacancy_reserved,
+            counters: DiscoveryCounters {
+                checks: counters.checks,
+                replacements: counters.replacements,
+                expired: counters.expired,
+                opened: counters.opened,
+                verified: counters.verified,
+                stale_holder: counters.stale_holder,
+                stale_blocked: counters.stale_blocked,
+            },
+        }
+    }
+
+    /// Drop every context, candidate and the window; counters stay.
+    pub fn clear(&self) {
+        let mut state = self.lock();
+        state.discovery.clear();
+        state.found = None;
     }
 }

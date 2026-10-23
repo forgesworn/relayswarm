@@ -3,8 +3,8 @@
 // a small program against them and check its answers: every shared commitment
 // vector, one transfer from a holder and origin, a piece range exchanged
 // between two peer links, the link's channel-state calls, every recorded
-// peer link trace, and the seeded peer selection sequences that
-// `npm run proto:traces` records from the JavaScript. Swift needs swiftc; Kotlin needs kotlinc and java, and downloads a
+// peer link trace, and the seeded peer selection and neighbour discovery
+// sequences that `npm run proto:traces` records from the JavaScript. Swift needs swiftc; Kotlin needs kotlinc and java, and downloads a
 // pinned JNA jar into core/target.
 //
 //   node scripts/ffi-smoke.mjs swift|kotlin
@@ -69,11 +69,13 @@ const EPOCH = 1_792_000_000_000;
 // when missing rather than skipped.
 const recorded = join(core, "target/js-traces/selection-traces.json");
 if (!existsSync(recorded)) execFileSync(process.execPath, [join(root, "scripts/generate-selection-traces.mjs")], { cwd: root, stdio: "inherit" });
-const { selection: selections } = JSON.parse(readFileSync(recorded, "utf8"));
+const { selection: selections, discovery: discoveries } = JSON.parse(readFileSync(recorded, "utf8"));
+const pad = (name, fill) => fill.repeat(64 - (name.length - 1)) + name.slice(1);
 // The names and sizes tests/selection_traces.rs reads state with.
 const LINKS = ["l0", "l1", "l2", "l3", "l4"];
+const MEDIA = ["main", "audio", "video"];
+const PEERS = ["p0", "p1", "p2", "p3"].map((name) => pad(name, "c"));
 const PROJECT_SIZES = [0, 1000, 670000], STATE_SIZE = 670000;
-const pad = (name, fill) => fill.repeat(64 - (name.length - 1)) + name.slice(1);
 const linkId = (name) => {
   const id = LINKS.indexOf(name);
   if (id < 0) throw new Error(`unknown link ${name}`);
@@ -124,6 +126,30 @@ function selectionStep(op, now) {
   }
 }
 
+// One discovery operation at time `now`. Strings default to empty, as the
+// Rust replay reads them, and `have` keeps only strings.
+function discoveryStep(op, now) {
+  const text = (name) => str(op[name] ?? "");
+  switch (op.op) {
+    case "advance": case "noop": return `noop ${now}`;
+    case "context": return `context ${now} ${text("mediaType")} ${text("rendition")}`;
+    case "demand": return `demand ${now} ${text("mediaType")} ${text("rendition")} ${text("key")}`;
+    case "hint": return `hint ${now} ${text("pubkey")} ${list(op.have.filter((key) => typeof key === "string"))} ${str(typeof op.ticket === "string" ? op.ticket : null)}`;
+    case "holderMiss": return `holderMiss ${now} ${text("mediaType")} ${text("pubkey")} ${text("key")}`;
+    case "holderAhead": return `holderAhead ${now} ${text("mediaType")} ${text("pubkey")}`;
+    case "forget": return `forget ${now} ${text("pubkey")}`;
+    case "choose": return `choose ${now} ${list(op.eligible)} ${list(op.unmet)} ${flag(op.room)} ${flag(op.begin)}`;
+    case "replaced": return `replaced ${now} ${str(op.victim)}`;
+    case "allocated": return `allocated ${now} ${op.dial}`;
+    case "abandoned": return `abandoned ${now}`;
+    case "failed": return `failed ${now} ${op.dial}`;
+    case "end": return `end ${now}`;
+    case "verified": return `verified ${now} ${text("mediaType")}`;
+    case "clear": return `clear ${now}`;
+    default: throw new Error(`unknown discovery op ${op.op}`);
+  }
+}
+
 function input() {
   const lines = [`at ${vectors.at}`];
   for (const entry of vectors.cases) {
@@ -147,6 +173,12 @@ function input() {
     let now = EPOCH;
     for (const op of sequence.ops) lines.push(selectionStep(op, (now += op.op === "advance" ? op.ms : 0)));
     lines.push("selected");
+  }
+  for (const sequence of discoveries) {
+    lines.push(`discovery ${list(PEERS)} ${list(MEDIA)}`);
+    let now = EPOCH;
+    for (const op of sequence.ops) lines.push(discoveryStep(op, (now += op.op === "advance" ? op.ms : 0)));
+    lines.push("discovered");
   }
   return `${lines.join("\n")}\n`;
 }
@@ -212,6 +244,49 @@ function selectionState([result, firstByteMs, rate, project, minimum, lastObserv
   };
 }
 
+// Swift prints `main`, Kotlin `MAIN`.
+const media = (name) => name.toLowerCase();
+
+/// A discovery step the program printed as arrays, in the recorder's shape.
+function discoveryState(op, [result, valid, live, reserved, suppresses, stale, current, window, contexts, candidates, snapshot]) {
+  if (op.op === "choose" && result !== null) {
+    const [mediaType, pubkey, key, begun] = result;
+    result = { mediaType: media(mediaType), pubkey, key, ...(op.begin ? { begun } : {}) };
+  }
+  const [count, contextCount, requestedKeys, replacementSpent, opportunityActive, remainingMs, vacancyReserved,
+    [checks, replacements, expired, opened, verified, staleHolder, staleBlocked]] = snapshot;
+  return {
+    result, valid, live, reserved, suppresses, stale, current,
+    window: window && (([mediaType, createdAt, expiresAt, vacant, victim, attempt]) => ({
+      mediaType: media(mediaType), createdAt, expiresAt, vacant, victim,
+      attempt: attempt && (([pubkey, key, ticket, dial]) => ({ pubkey, key, ticket, dial }))(attempt),
+    }))(window),
+    contexts: contexts.map(([mediaType, rendition, keys, lastDemandAt, activityAt, spent, holders]) =>
+      ({ mediaType: media(mediaType), rendition, keys, lastDemandAt, activityAt, spent, holders })),
+    candidates,
+    snapshot: {
+      v: 1, candidateCapacity: 64, candidates: count, contexts: contextCount, requestedKeys, replacementSpent,
+      opportunityActive, remainingMs, vacancyReserved,
+      counters: { checks, replacements, expired, opened, verified, staleHolder, staleBlocked },
+    },
+  };
+}
+
+function checkDiscovery(results) {
+  assert.equal(results.length, discoveries.length, "one result per discovery sequence");
+  const differences = [];
+  discoveries.forEach((sequence, index) => {
+    const steps = results[index].discovery;
+    assert.equal(steps.length, sequence.expected.length, `discovery seed ${sequence.seed} steps`);
+    const at = sequence.expected.findIndex((expected, step) => !same(discoveryState(sequence.ops[step], steps[step]), expected));
+    if (at >= 0) {
+      differences.push(`discovery seed ${sequence.seed} step ${at} ${JSON.stringify(sequence.ops[at])}\n  expected ${JSON.stringify(sequence.expected[at])}\n  got      ${JSON.stringify(discoveryState(sequence.ops[at], steps[at]))}`);
+    }
+  });
+  assert.deepEqual(differences, [], `discovery differs through ${language}:\n${differences.join("\n")}`);
+  return discoveries.reduce((sum, sequence) => sum + sequence.ops.length, 0);
+}
+
 function checkSelection(results) {
   assert.equal(results.length, selections.length, "one result per selection sequence");
   const differences = [];
@@ -231,7 +306,8 @@ function check(output) {
   const results = output.trim().split("\n").map((line) => JSON.parse(line));
   const [first, second, third] = results;
   const links = results.slice(3, 3 + traces.length);
-  const selected = checkSelection(results.slice(3 + traces.length));
+  const selected = checkSelection(results.slice(3 + traces.length, 3 + traces.length + selections.length));
+  const discovered = checkDiscovery(results.slice(3 + traces.length + selections.length));
   assert.equal(first.vectors.length, vectors.cases.length);
   const differ = vectors.cases.filter((entry, index) => JSON.stringify(first.vectors[index]) !== JSON.stringify(entry.expected));
   for (const entry of differ) console.error(entry.name, JSON.stringify(first.vectors[vectors.cases.indexOf(entry)]), JSON.stringify(entry.expected));
@@ -262,7 +338,7 @@ function check(output) {
   });
   assert.deepEqual(differences, [], `link traces differ through ${language}:\n${differences.join("\n")}`);
   const steps = traces.reduce((sum, trace) => sum + trace.steps.length, 0);
-  console.log(`${language} bindings: ${vectors.cases.length} vectors match; ${traces.length} link traces (${steps} steps) match; transfer ${second.log.join(", ")}; range of ${wanted.length} bytes; ${selections.length} selection sequences (${selected} steps) match`);
+  console.log(`${language} bindings: ${vectors.cases.length} vectors match; ${traces.length} link traces (${steps} steps) match; transfer ${second.log.join(", ")}; range of ${wanted.length} bytes; ${selections.length} selection sequences (${selected} steps) and ${discoveries.length} discovery sequences (${discovered} steps) match`);
 }
 
 // --- build and run -----------------------------------------------------------

@@ -172,6 +172,89 @@ final class SelectionRun {
     }
 }
 
+// Discovery state after each operation, as arrays the script names. Tracks
+// the context last returned for each media type and the latest attempt.
+final class DiscoveryRun {
+    let discovery = NeighbourDiscovery()
+    let peers: [String], media: [String]
+    var held: [String: UInt64] = [:]
+    var attempt: UInt64? = nil
+    var steps: [Any] = []
+
+    init(_ field: [Substring]) {
+        peers = strings(field[1])
+        media = strings(field[2])
+    }
+
+    func apply(_ field: [Substring]) {
+        let now = number(field[1])
+        var result: Any = NSNull()
+        switch field[0] {
+        case "noop": break
+        case "context":
+            let id = discovery.context(now: now, mediaType: text(field[2])!, rendition: text(field[3])!)
+            if let id { held[text(field[2])!] = id }
+            result = id != nil
+        case "demand":
+            if let id = discovery.demand(now: now, mediaType: text(field[2])!, rendition: text(field[3])!, key: text(field[4])!) {
+                held[text(field[2])!] = id
+                result = discovery.contexts().first { $0.id == id }!.keys
+            }
+        case "hint": discovery.hint(now: now, pubkey: text(field[2])!, have: strings(field[3]), ticket: text(field[4]))
+        case "holderMiss":
+            let context = held[text(field[2])!]
+            discovery.holderMiss(now: now, context: context, pubkey: text(field[3])!, key: text(field[4])!)
+            result = discovery.stale(now: now, context: context, pubkey: text(field[3])!)
+        case "holderAhead": discovery.holderAhead(context: held[text(field[2])!], pubkey: text(field[3])!)
+        case "forget": discovery.forget(pubkey: text(field[2])!)
+        case "choose":
+            if let found = discovery.choose(now: now, eligible: strings(field[2]), unmet: strings(field[3]), room: field[4] == "1") {
+                var begun: Any = NSNull()
+                if field[5] == "1" {
+                    let id = discovery.begin(now: now)
+                    if let id { attempt = id }
+                    begun = id != nil
+                }
+                result = ["\(found.mediaType)", found.candidate.pubkey, found.key, begun] as [Any]
+            }
+        case "replaced":
+            if let attempt { result = discovery.replaced(now: now, attempt: attempt, victim: text(field[2])) }
+        case "allocated":
+            if let attempt { discovery.allocated(attempt: attempt, dial: number(field[2])) }
+        case "abandoned":
+            if let attempt { discovery.abandoned(attempt: attempt) }
+        case "failed": discovery.failed(dial: number(field[2]))
+        case "end": result = discovery.end()
+        case "verified": result = discovery.verified(context: held[text(field[2])!])
+        case "clear":
+            discovery.clear()
+            held = [:]
+            attempt = nil
+        default: fatalError("unknown discovery input \(field[0])")
+        }
+        let window: Any = discovery.window().map { window -> Any in
+            ["\(window.mediaType)", window.createdAt, window.expiresAt, window.vacant, orNull(window.victim),
+             orNull(window.attempt.map { [$0.pubkey, $0.key, orNull($0.ticket), orNull($0.dial)] as [Any] })] as [Any]
+        } ?? NSNull()
+        let contexts: [Any] = discovery.contexts().map { context in
+            ["\(context.mediaType)", context.rendition, context.keys, orNull(context.lastDemandAt), context.activityAt, context.spent,
+             context.holders.map { [$0.pubkey, $0.firstMissAt, $0.misses, $0.lastKey] as [Any] }] as [Any]
+        }
+        let snapshot = discovery.snapshot(now: now), counters = snapshot.counters
+        steps.append([
+            result, orNull(attempt.map { discovery.valid(now: now, attempt: $0) }), discovery.live(now: now), discovery.reserved(now: now),
+            peers.map { discovery.suppresses(now: now, pubkey: $0) },
+            media.map { kind in peers.map { discovery.stale(now: now, context: held[kind], pubkey: $0) } },
+            media.map { kind in orNull(held[kind].map { discovery.current(now: now, context: $0) }) },
+            window, contexts, discovery.candidates().map { [$0.pubkey, $0.have, orNull($0.ticket), $0.at] as [Any] },
+            [snapshot.candidates, snapshot.contexts, snapshot.requestedKeys, snapshot.replacementSpent, snapshot.opportunityActive,
+             snapshot.remainingMs, snapshot.vacancyReserved,
+             [counters.checks, counters.replacements, counters.expired, counters.opened, counters.verified,
+              counters.staleHolder, counters.staleBlocked]] as [Any],
+        ] as [Any])
+    }
+}
+
 func event(_ event: PeerLinkEvent) -> [Any] {
     switch event {
     case let .sendText(text): return ["sendText", text]
@@ -202,8 +285,13 @@ var now: UInt64 = 0
 var lastRequest: UInt64? = nil
 var steps: [Any] = []
 var selection: SelectionRun? = nil
+var discovery: DiscoveryRun? = nil
 
 for field in lines {
+    if let run = discovery, field[0] != "discovered" {
+        run.apply(field)
+        continue
+    }
     if let run = selection, field[0] != "selected" {
         run.apply(field)
         continue
@@ -211,6 +299,11 @@ for field in lines {
     switch field[0] {
     case "selection":
         selection = SelectionRun(field)
+    case "discovery":
+        discovery = DiscoveryRun(field)
+    case "discovered":
+        print(json(["discovery": discovery!.steps]))
+        discovery = nil
     case "selected":
         print(json(["selection": selection!.steps]))
         selection = nil

@@ -162,8 +162,9 @@ measured 1,002,411 bytes (352,844 gzip) for the demo client.
 It exposes the commitment verifiers, taking the event and the options
 `segment-commitment.mjs` takes as JSON text and returning the verified content
 as JSON or nothing; the schema 3 piece helpers; the multi-holder `Transfer`;
-`PeerLink`, the data channel protocol; and `PeerSelection`, which chooses a
-link from the shell's numeric link handles. Objects take and return typed
+`PeerLink`, the data channel protocol; `PeerSelection`, which chooses a
+link from the shell's numeric link handles; and `NeighbourDiscovery`, the
+demand, hint and replacement-window state. Objects take and return typed
 records. Each `PeerLink` call returns the events to act on in order, the
 request ID it assigned, and the link's scalar state; `sets()` returns what the
 remote has announced and need be read only when `version` changes. Request
@@ -174,7 +175,11 @@ its low-water threshold from `link_limits()`, and closes the link with
 `close_link(reason)`; in Kotlin, `close()` frees the object instead. The facade restores the
 loader's key order in the fragment context's `media` and `encryption` before
 verifying, because the core compares `encryption` as `JSON.stringify` text and
-a host serialising a dictionary may reorder it. UniFFI exports no constants,
+a host serialising a dictionary may reorder it. Discovery takes media types
+as the strings HLS uses and has no context for any but `main` and `audio`, as
+in JavaScript; contexts and attempts are numeric IDs, and `begin` starts an
+attempt on the holder the latest `choose` or `hinted` returned, as the
+WebAssembly bridge does. UniFFI exports no constants,
 so `default_transfer_settings()` and `link_limits()` return the core's values.
 
 `cargo test` runs the shared vectors and every recorded link trace through
@@ -185,13 +190,13 @@ library, generate bindings, compile a small program against them and check
 every vector, every link trace, one transfer and a piece range exchanged
 between two links, that a full send buffer holds the range's data until a
 drain, that the channel's open and reliable flags change what the link
-sends and how an abort ends, and every seeded selection sequence that
-`npm run proto:traces` records from the JavaScript (the script records them
-first if they are missing); CI runs both on Linux. The
+sends and how an abort ends, and every seeded selection and discovery
+sequence that `npm run proto:traces` records from the JavaScript (the script
+records them first if they are missing); CI runs both on Linux. The
 Kotlin check downloads JNA 5.14.0 from Maven Central into `core/target/` and
 verifies its SHA-256. Generate bindings from an unstripped build: the release
 profile strips symbols, and on Linux that removes the UniFFI metadata.
-Neighbour discovery is not in the facade, there is no packaged Apple
+There is no packaged Apple
 framework or Android library, and RelaySwarmKit does not use it yet. Release
 builds abort on panic, so a panic in the core ends the host process rather
 than raising an error.

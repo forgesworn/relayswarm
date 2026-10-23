@@ -162,6 +162,88 @@ class SelectionRun(field: List<String>) {
     }
 }
 
+// Discovery state after each operation, as arrays the script names. Tracks
+// the context last returned for each media type and the latest attempt.
+class DiscoveryRun(field: List<String>) {
+    val discovery = NeighbourDiscovery()
+    val peers = strings(field[1])
+    val media = strings(field[2])
+    val held = mutableMapOf<String, ULong>()
+    var attempt: ULong? = null
+    val steps = mutableListOf<Any?>()
+
+    fun apply(field: List<String>) {
+        val now = number(field[1])
+        var result: Any? = null
+        when (field[0]) {
+            "noop" -> {}
+            "context" -> {
+                val id = discovery.context(now, text(field[2])!!, text(field[3])!!)
+                if (id != null) held[text(field[2])!!] = id
+                result = id != null
+            }
+            "demand" -> {
+                val id = discovery.demand(now, text(field[2])!!, text(field[3])!!, text(field[4])!!)
+                if (id != null) {
+                    held[text(field[2])!!] = id
+                    result = discovery.contexts().first { it.id == id }.keys
+                }
+            }
+            "hint" -> discovery.hint(now, text(field[2])!!, strings(field[3]), text(field[4]))
+            "holderMiss" -> {
+                val context = held[text(field[2])!!]
+                discovery.holderMiss(now, context, text(field[3])!!, text(field[4])!!)
+                result = discovery.stale(now, context, text(field[3])!!)
+            }
+            "holderAhead" -> discovery.holderAhead(held[text(field[2])!!], text(field[3])!!)
+            "forget" -> discovery.forget(text(field[2])!!)
+            "choose" -> {
+                val found = discovery.choose(now, strings(field[2]), strings(field[3]), field[4] == "1")
+                if (found != null) {
+                    var begun: Boolean? = null
+                    if (field[5] == "1") {
+                        val id = discovery.begin(now)
+                        if (id != null) attempt = id
+                        begun = id != null
+                    }
+                    result = listOf(found.mediaType.name, found.candidate.pubkey, found.key, begun)
+                }
+            }
+            "replaced" -> attempt?.let { result = discovery.replaced(now, it, text(field[2])) }
+            "allocated" -> attempt?.let { discovery.allocated(it, number(field[2])) }
+            "abandoned" -> attempt?.let { discovery.abandoned(it) }
+            "failed" -> discovery.failed(number(field[2]))
+            "end" -> result = discovery.end()
+            "verified" -> result = discovery.verified(held[text(field[2])!!])
+            "clear" -> {
+                discovery.clear()
+                held.clear()
+                attempt = null
+            }
+            else -> error("unknown discovery input ${field[0]}")
+        }
+        val window = discovery.window()?.let { window ->
+            listOf(window.mediaType.name, window.createdAt, window.expiresAt, window.vacant, window.victim,
+                window.attempt?.let { listOf(it.pubkey, it.key, it.ticket, it.dial) })
+        }
+        val contexts = discovery.contexts().map { context ->
+            listOf(context.mediaType.name, context.rendition, context.keys, context.lastDemandAt, context.activityAt, context.spent,
+                context.holders.map { listOf(it.pubkey, it.firstMissAt, it.misses, it.lastKey) })
+        }
+        val snapshot = discovery.snapshot(now)
+        val counters = snapshot.counters
+        steps.add(listOf(result, attempt?.let { discovery.valid(now, it) }, discovery.live(now), discovery.reserved(now),
+            peers.map { discovery.suppresses(now, it) },
+            media.map { kind -> peers.map { discovery.stale(now, held[kind], it) } },
+            media.map { kind -> held[kind]?.let { discovery.current(now, it) } },
+            window, contexts, discovery.candidates().map { listOf(it.pubkey, it.have, it.ticket, it.at) },
+            listOf(snapshot.candidates, snapshot.contexts, snapshot.requestedKeys, snapshot.replacementSpent,
+                snapshot.opportunityActive, snapshot.remainingMs, snapshot.vacancyReserved,
+                listOf(counters.checks, counters.replacements, counters.expired, counters.opened, counters.verified,
+                    counters.staleHolder, counters.staleBlocked))))
+    }
+}
+
 fun event(event: PeerLinkEvent): List<Any?> = when (event) {
     is PeerLinkEvent.SendText -> listOf("sendText", event.text)
     is PeerLinkEvent.SendBinary -> listOf("sendBinary", base64(event.bytes))
@@ -192,15 +274,26 @@ fun main() {
     var lastRequest: ULong? = null
     val steps = mutableListOf<Any?>()
     var selection: SelectionRun? = null
+    var discovery: DiscoveryRun? = null
     for (line in generateSequence(::readLine)) {
         if (line.isEmpty()) continue
         val field = line.split(" ")
+        if (discovery != null && field[0] != "discovered") {
+            discovery.apply(field)
+            continue
+        }
         if (selection != null && field[0] != "selected") {
             selection.apply(field)
             continue
         }
         when (field[0]) {
             "selection" -> selection = SelectionRun(field)
+            "discovery" -> discovery = DiscoveryRun(field)
+            "discovered" -> {
+                println(json(mapOf("discovery" to discovery!!.steps)))
+                discovery.discovery.close()
+                discovery = null
+            }
             "selected" -> {
                 println(json(mapOf("selection" to selection!!.steps)))
                 selection.selection.close()
