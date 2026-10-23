@@ -1236,6 +1236,7 @@ its measured scope and acceptance gaps in [Status](https://raw.githubusercontent
 | Continue the agreed production work as another agent | [Goals and agent handover](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/AGENT-GOALS.md) |
 | Implement compatible session and commitment messages | [Protocol draft](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md) |
 | Run a trial on separate devices and interpret receipts | [Publisher/player field test](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md) |
+| Force HLS peer traffic through Spry TURN and inspect the qualification gates | [Spry interoperability](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/interop/spry-turn.md) |
 | Ingest a live broadcast or add optional RTMPS forwarding | [Broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md) |
 | Operate private state, remote policy and opt-in reports | [Operations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/OPERATIONS.md) |
 | Share an upload allowance across devices using Nostr or website accounts | [Shared upload allowance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/ACCOUNT-UPLOAD-BUDGET.md) |

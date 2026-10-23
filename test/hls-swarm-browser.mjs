@@ -67,6 +67,12 @@ const TRACE = Number(flag("trace", 0));
 const MEDIA = MULTI ? "/media/" : "/hls/";
 const FALLBACK_MS = Number(flag("fallback", 1500));
 const CHROME = flag("chrome", process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+// Credentials stay in an owner-only scratch file and browser memory, never receipts.
+const ICE_CONFIG_PATH = flag("iceConfig", null);
+const ICE_CONFIG = ICE_CONFIG_PATH ? JSON.parse(await readFile(ICE_CONFIG_PATH, "utf8")) : null;
+if (ICE_CONFIG && (!Array.isArray(ICE_CONFIG.iceServers) || !ICE_CONFIG.iceServers.length
+  || !["all", "relay"].includes(ICE_CONFIG.iceTransportPolicy))) throw new Error("Invalid test ICE configuration.");
+const TEST_TLS_BYPASS = flag("testTlsBypass", "0") === "1";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (message) => console.error(`[hls-swarm] ${message}`);
 
@@ -80,6 +86,10 @@ const cleanup = async () => {
   }
   await rm(work, { recursive: true, force: true });
 };
+for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, async () => {
+  await cleanup();
+  process.exit(signal === "SIGINT" ? 130 : 143);
+});
 
 try {
   // --- the stream ---------------------------------------------------------
@@ -188,6 +198,7 @@ try {
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       "--use-fake-ui-for-media-stream",
       "--use-fake-device-for-media-stream",
+      ...(TEST_TLS_BYPASS ? ["--ignore-certificate-errors"] : []),
     ],
   });
   cleanups.push(() => browser.close());
@@ -204,6 +215,7 @@ try {
 
   const joinViewer = async (role) => {
     const context = await browser.newContext();
+    if (ICE_CONFIG) await context.addInitScript((ice) => { globalThis.__relaySwarmTestIce = ice; }, ICE_CONFIG);
     const tab = await context.newPage();
     tab.on("pageerror", (error) => pageErrors.push({ viewer: role.viewer, message: String(error.message || error) }));
     const query = new URLSearchParams({
@@ -274,6 +286,7 @@ try {
   const reports = [];
   for (const { role, tab, network, joinedAt } of pages) reports.push({ ...role, network,
     observedSeconds: (Date.now() - joinedAt) / 1000, ...(await tab.evaluate(() => window.__viewer.report())),
+    iceEvidence: await tab.evaluate(() => window.__viewer.iceEvidence()),
     ...(TRACE && role.swarm ? { trace: await tab.evaluate(() => window.__viewer.trace()) } : {}) });
   const stopChecks = [];
   for (const { role, tab } of pages) {
@@ -329,6 +342,7 @@ try {
     at: new Date().toISOString(),
     mode: MODE,
     rotation: process.env.RELAYSWARM_NO_ROTATION === "1" ? "off" : "on",
+    transport: { policy: ICE_CONFIG?.iceTransportPolicy ?? "all", configuredIceServers: ICE_CONFIG?.iceServers.length ?? 0, testTlsCertificateBypass: TEST_TLS_BYPASS },
     shape: { liveSyncDurationCount: MODE === "peer-first" ? 4 : 3, ...(MODE === "peer-first" ? { maxBufferLength: 4, maxMaxBufferLength: 6 } : {}), viewers: VIEWERS, waves: WAVES, waveGapMs: WAVE_GAP_MS, maxPeers: MAX_PEERS, corruptPeer: CORRUPT_PEER, plusCorruptPeer: CORRUPT_PEER ? 1 : 0, plusBaselineWithoutSwarm: 1, durationS: DURATION_S, staggerMs: STAGGER_MS, segmentSeconds: 2, videoKbps: 1500, originFallbackMs: FALLBACK_MS, multiHolder: MULTI },
     waves: waveRows,
     churn: { intervalSeconds: CHURN_EVERY_S, countPerInterval: CHURN_COUNT, departures: churn, observationMs: Date.now() - observationAt },
@@ -377,6 +391,16 @@ try {
     viewers: reports,
   };
   const failures = [];
+  if (ICE_CONFIG?.iceTransportPolicy === "relay") {
+    const pairs = Object.entries(summary.aggregate.candidatePairs);
+    if (!pairs.length || pairs.some(([pair, count]) => pair !== "relay/relay" && count > 0)) failures.push("a selected peer path was absent or was not relay/relay");
+    const selected = reports.flatMap((report) => report.iceEvidence);
+    if (!selected.length || selected.some((pair) => pair.local !== "relay" || pair.remote !== "relay"
+      || !pair.bytesSent || !pair.bytesReceived)) failures.push("selected TURN paths did not carry bidirectional traffic");
+    if (ICE_CONFIG.expectedRelayProtocol && selected.some((pair) => pair.relayProtocol !== ICE_CONFIG.expectedRelayProtocol)) failures.push("selected relay protocol did not match the requested transport");
+    if (ICE_CONFIG.relayPortRange && selected.some((pair) => [pair.localPort, pair.remotePort].some((port) =>
+      !Number.isInteger(port) || port < ICE_CONFIG.relayPortRange[0] || port > ICE_CONFIG.relayPortRange[1]))) failures.push("selected relay port escaped the configured range");
+  }
   const lastWave = waveRows[waveRows.length - 1];
   if (MODE === "shadow" && summary.aggregate.peerInTime === 0) failures.push("no peer delivered a segment in time");
   if (MODE === "shadow" && summary.rotation === "on") {

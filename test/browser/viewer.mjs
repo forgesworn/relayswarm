@@ -35,6 +35,14 @@ const streamEvent = mode === "peer-first" ? await fetch("/authorisation.json").t
 let commitmentRequests = 0;
 const resourceSamples = [];
 const resourceHighWater = { samples: 0, firstAtMs: null, lastAtMs: null, activePeers: 0, heldBytes: 0, relays: 0, jsHeapBytes: 0 };
+const testConnections = new Set();
+class ObservedPeerConnection extends RTCPeerConnection {
+  constructor(configuration) {
+    super(configuration);
+    testConnections.add(this);
+    this.addEventListener("connectionstatechange", () => { if (this.connectionState === "closed") testConnections.delete(this); });
+  }
+}
 
 const swarm = useSwarm
   ? createHlsSwarm({
@@ -53,7 +61,9 @@ const swarm = useSwarm
       shadowSampleRate: 1,
       swarmId: params.get("swarmId"),
       relays: [params.get("relay")],
-      iceServers: [],
+      iceServers: globalThis.__relaySwarmTestIce?.iceServers ?? [],
+      iceTransportPolicy: globalThis.__relaySwarmTestIce?.iceTransportPolicy ?? "all",
+      ...(globalThis.__relaySwarmTestIce ? { RTCPeerConnectionImpl: ObservedPeerConnection } : {}),
       originFallbackMs: Number(params.get("fallbackMs") || 1500),
       ...(params.get("core") === "1" ? { coreWasm: "/relayswarm-core.wasm" } : {}),
       ...(params.get("multi") === "1" ? { multiHolder: true } : {}),
@@ -100,6 +110,15 @@ video.muted = true;
 video.play().catch(() => {});
 
 window.__viewer = {
+  iceEvidence: async () => Promise.all([...testConnections].filter((pc) => pc.connectionState === "connected").map(async (pc) => {
+    const stats = await pc.getStats();
+    let pair;
+    stats.forEach((report) => { if (report.type === "transport" && report.selectedCandidatePairId) pair = stats.get(report.selectedCandidatePairId); });
+    if (!pair) stats.forEach((report) => { if (report.type === "candidate-pair" && report.nominated && report.state === "succeeded") pair = report; });
+    const local = pair && stats.get(pair.localCandidateId), remote = pair && stats.get(pair.remoteCandidateId);
+    return { local: local?.candidateType, remote: remote?.candidateType, relayProtocol: local?.relayProtocol,
+      localPort: local?.port, remotePort: remote?.port, bytesSent: pair?.bytesSent ?? 0, bytesReceived: pair?.bytesReceived ?? 0 };
+  })),
   viewer,
   useSwarm,
   report: () => ({ viewer, useSwarm, player: { ...player, currentTime: video.currentTime }, swarm: swarm?.metrics() ?? null, resourceSamples: [...resourceSamples], resourceHighWater: { ...resourceHighWater } }),
