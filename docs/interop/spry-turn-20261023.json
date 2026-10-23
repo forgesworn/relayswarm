@@ -1,0 +1,189 @@
+{
+  "date": "2026-10-23",
+  "scope": "desktop Chrome, macOS arm64, loopback only; not a performance benchmark or phone/NAT acceptance",
+  "spry_release": "v0.2.0",
+  "spry_binary_sha256": "27eeb7dd93aee99c75df5140905cf75b886a65ab0475c615aa7634fec2a867f6",
+  "relayswarm_base_commit": "4612a53c62ecb05e2b3fa32a6efa4e63e7b22313",
+  "source_hashes": {
+    "src/browser/hls-swarm.mjs": "c7be2d187b96929751db5b342d7a96ea3f956abcc965cca85bb37c97dc30f098",
+    "src/browser/peer-link.mjs": "33208e3a5f9646fe7a0a4280d2dfd6206458b68288ffb339af92beead9641663",
+    "test/hls-swarm-browser.mjs": "9fc03ea6c0fb02941fba527837c49ca0c69b39a15ef1a5f7f992d62273c923af",
+    "test/browser/viewer.mjs": "934d131419ef432ea5e6524c015534266ddc4592a1f3f898d0e9ef3120103aeb"
+  },
+  "runner_sha256": "9f05bff9eaa04d129c934d4368d4925477f9b52ce2b18a15cb82085f8c710d05",
+  "generated_media": "FFmpeg testsrc2 and sine, H.264/AAC HLS; no camera or microphone media",
+  "results": [
+    {
+      "transport": "udp",
+      "ok": true,
+      "aggregate": {
+        "originLoaded": 45,
+        "peerFirstLoaded": 0,
+        "originFallbacks": 0,
+        "peerFirstBytes": 0,
+        "raced": 44,
+        "noPeers": 0,
+        "peerInTime": 34,
+        "peerLate": 5,
+        "peerMiss": 3,
+        "peerCorrupt": 2,
+        "inTimeShare": 0.773,
+        "sampledInTimeShare": 0.773,
+        "peerFirstShare": null,
+        "medianOfViewerPeerLatencyMs": 272,
+        "bytesFromPeers": 16478764,
+        "bytesUploaded": 18145196,
+        "candidatePairs": {
+          "relay/relay": 4
+        },
+        "swarmErrors": 0,
+        "relayEventsPublished": 19,
+        "corruptPeerBannedBy": 2
+      },
+      "failures": [],
+      "selected_paths": [
+        {
+          "local": "relay",
+          "remote": "relay",
+          "relayProtocol": "udp",
+          "localPort": 49168,
+          "remotePort": 49174,
+          "bytesSent": 9398774,
+          "bytesReceived": 8419954
+        },
+        {
+          "local": "relay",
+          "remote": "relay",
+          "relayProtocol": "udp",
+          "localPort": 49174,
+          "remotePort": 49168,
+          "bytesSent": 8456254,
+          "bytesReceived": 9383044
+        }
+      ],
+      "honest_playback": [
+        {
+          "viewer": "v0",
+          "seconds": 52.658311,
+          "fatal_errors": 0
+        },
+        {
+          "viewer": "v1",
+          "seconds": 47.817346,
+          "fatal_errors": 0
+        }
+      ],
+      "test_tls_certificate_bypass": false,
+      "clean_stop": true
+    },
+    {
+      "transport": "tcp",
+      "ok": false,
+      "aggregate": {
+        "originLoaded": 44,
+        "peerFirstLoaded": 0,
+        "originFallbacks": 0,
+        "peerFirstBytes": 0,
+        "raced": 3,
+        "noPeers": 35,
+        "peerInTime": 0,
+        "peerLate": 0,
+        "peerMiss": 2,
+        "peerCorrupt": 1,
+        "inTimeShare": 0,
+        "sampledInTimeShare": 0,
+        "peerFirstShare": null,
+        "medianOfViewerPeerLatencyMs": null,
+        "bytesFromPeers": 0,
+        "bytesUploaded": 824192,
+        "candidatePairs": {
+          "relay/relay": 1
+        },
+        "swarmErrors": 0,
+        "relayEventsPublished": 18,
+        "corruptPeerBannedBy": 1
+      },
+      "failures": [
+        "selected TURN paths did not carry bidirectional traffic",
+        "no peer delivered a segment in time",
+        "the last wave was never served by a peer",
+        "2 of 2 late viewers fell back to the origin throughout",
+        "late-wave in-time share 0 below 0.5",
+        "in-time share 0 below 0.5"
+      ],
+      "selected_paths": [],
+      "honest_playback": [
+        {
+          "viewer": "v0",
+          "seconds": 44.402415,
+          "fatal_errors": 0
+        },
+        {
+          "viewer": "v1",
+          "seconds": 44.916806,
+          "fatal_errors": 0
+        }
+      ],
+      "test_tls_certificate_bypass": false,
+      "clean_stop": true
+    },
+    {
+      "transport": "tls",
+      "ok": false,
+      "aggregate": {
+        "originLoaded": 52,
+        "peerFirstLoaded": 0,
+        "originFallbacks": 0,
+        "peerFirstBytes": 0,
+        "raced": 38,
+        "noPeers": 10,
+        "peerInTime": 8,
+        "peerLate": 5,
+        "peerMiss": 24,
+        "peerCorrupt": 1,
+        "inTimeShare": 0.211,
+        "sampledInTimeShare": 0.167,
+        "peerFirstShare": null,
+        "medianOfViewerPeerLatencyMs": 3320,
+        "bytesFromPeers": 5507084,
+        "bytesUploaded": 10142036,
+        "candidatePairs": {
+          "relay/relay": 11
+        },
+        "swarmErrors": 0,
+        "relayEventsPublished": 35,
+        "corruptPeerBannedBy": 1
+      },
+      "failures": [
+        "late-wave in-time share 0.211 below 0.5",
+        "in-time share 0.211 below 0.5"
+      ],
+      "selected_paths": [
+        {
+          "local": "relay",
+          "remote": "relay",
+          "relayProtocol": "tls",
+          "localPort": 49208,
+          "remotePort": 49212,
+          "bytesSent": 436353,
+          "bytesReceived": 318014
+        }
+      ],
+      "honest_playback": [
+        {
+          "viewer": "v0",
+          "seconds": 63.36926,
+          "fatal_errors": 0
+        },
+        {
+          "viewer": "v1",
+          "seconds": 48.351312,
+          "fatal_errors": 0
+        }
+      ],
+      "test_tls_certificate_bypass": true,
+      "clean_stop": true
+    }
+  ],
+  "overall_qualification": "RED: UDP passed; TCP stalled; TLS missed the in-time delivery gate. HTTP playback remained available."
+}

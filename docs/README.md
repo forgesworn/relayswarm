@@ -18,6 +18,7 @@ its measured scope and acceptance gaps in [Status](STATUS.md).
 | Continue the agreed production work as another agent | [Goals and agent handover](AGENT-GOALS.md) |
 | Implement compatible session and commitment messages | [Protocol draft](NIP-DRAFT.md) |
 | Run a trial on separate devices and interpret receipts | [Publisher/player field test](FIELD-TEST.md) |
+| Force HLS peer traffic through Spry TURN and inspect the qualification gates | [Spry interoperability](interop/spry-turn.md) |
 | Ingest a live broadcast or add optional RTMPS forwarding | [Broadcasting](BROADCASTING.md) |
 | Operate private state, remote policy and opt-in reports | [Operations](OPERATIONS.md) |
 | Share an upload allowance across devices using Nostr or website accounts | [Shared upload allowance](ACCOUNT-UPLOAD-BUDGET.md) |
