@@ -83,6 +83,10 @@
   every multi-holder scheduler call with its inputs and commands. A test
   replays a recorded transfer through the module and gets the same commands.
   The Chrome harness takes `--trace N` and stores each viewer's trace.
+- Add `scripts/trace-report.mjs`, which replays saved traces against the
+  module and summarises holder use, origin share, request timing and buffer
+  ahead, with an optional what-if over other holder limits (an estimate that
+  ignores shared uplinks).
 - The Rust verifier now rejects a commitment whose content omits `part`, as
   the JavaScript one does (a new shared vector, 140 in all). Under
   `multiHolder`, an untested holder is planned with the shared first-byte
