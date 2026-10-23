@@ -802,6 +802,35 @@ test("a core that answers malformed results retires and the loader carries on in
   } finally { await fixture.close(); }
 });
 
+test("the relay session waits for a loading core, so discovery and selection start in it", async (t) => {
+  let release = null, hung = false;
+  t.mock.method(globalThis, "fetch", () => hung ? new Promise(() => {})
+    : new Promise((resolve) => { release = () => resolve(new Response(coreWasm, { headers: { "content-type": "application/wasm" } })); }));
+  for (const slow of [true, false]) {
+    hung = !slow;
+    const playback = peerPlaybackOptions(1000);
+    const swarm = createHlsSwarm({ ...base, ...playback.options, relays: ["wss://memory-relay.example"], WebSocketImpl: memoryRelaySocket(), coreWasm: "https://core.example/relayswarm-core.wasm" });
+    const hls = { config: { loader: Loader } };
+    try {
+      const started = performance.now();
+      swarm.attach(hls);
+      await sleep(50);
+      assert.equal(swarm.metrics().pubkey, null, "no session while the core loads");
+      assert.equal(swarm.metrics().relays.presenceSent, 0);
+      // A fragment loaded meanwhile goes to origin and leaves discovery empty.
+      await new Promise((resolve) => new hls.config.fLoader({}).load(context, {}, { onSuccess: resolve }));
+      if (slow) release();
+      await until(() => swarm.metrics().pubkey, slow ? 1000 : 4000);
+      const { core } = swarm.metrics();
+      if (slow) assert.deepEqual([core.state, core.selection, core.discovery], ["ready", "wasm", "wasm"]);
+      else {
+        assert.ok(performance.now() - started >= 1900, "a core that never settles holds the session for its wait only");
+        assert.deepEqual([core.state, core.selection, core.discovery], ["loading", "js", "js"]);
+      }
+    } finally { swarm.stop(); }
+  }
+});
+
 test("the core option is checked and ignored outside peer-first", () => {
   for (const coreWasm of [1, {}, null, true]) {
     assert.equal(createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm }).metrics().disabledReason, "invalid-core-wasm");

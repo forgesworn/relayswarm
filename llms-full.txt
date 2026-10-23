@@ -375,7 +375,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
-| `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
+| `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The relay session starts once the module has loaded or failed, after at most 2 seconds; fragments loaded meanwhile go to origin. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 
@@ -914,6 +914,11 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
   A trap hands discovery to a fresh JavaScript instance that keeps the
   counters. `core.discovery` in the metrics reports which one runs. The
   module is now 315,803 bytes (122,029 gzip).
+- With `coreWasm`, the relay session starts once the module has loaded or
+  failed, waiting at most 2 seconds; the relay connection opens meanwhile.
+  Fragments loaded during the wait go to origin and leave discovery empty, so
+  discovery, selection and links start in the module. One CI viewer had
+  kept discovery in JavaScript after hints arrived before the module loaded.
 
 ## v0.2.1 (21 October 2026)
 

@@ -44,6 +44,11 @@
   A trap hands discovery to a fresh JavaScript instance that keeps the
   counters. `core.discovery` in the metrics reports which one runs. The
   module is now 315,803 bytes (122,029 gzip).
+- With `coreWasm`, the relay session starts once the module has loaded or
+  failed, waiting at most 2 seconds; the relay connection opens meanwhile.
+  Fragments loaded during the wait go to origin and leave discovery empty, so
+  discovery, selection and links start in the module. One CI viewer had
+  kept discovery in JavaScript after hints arrived before the module loaded.
 
 ## v0.2.1 (21 October 2026)
 

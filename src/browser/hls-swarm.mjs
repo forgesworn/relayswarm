@@ -99,6 +99,10 @@ const DEFAULTS = Object.freeze({
   coreWasm: undefined,
 });
 const SAMPLE_LIMIT = 500;
+// The longest the relay session waits for an opted-in core module to load or
+// fail. A later module still takes new links, but discovery and selection
+// stay in JavaScript once they hold state.
+const CORE_WAIT_MS = 2_000;
 
 const now = () => performance.now();
 // Wall-clock time of the response's first byte, which is when the origin
@@ -321,6 +325,9 @@ class HlsSwarm {
     this.core = null;
     this.coreVerifier = null;
     this.coreState = "off";
+    // Settles when the session may start: the core has loaded or failed, or
+    // CORE_WAIT_MS has passed. Null when no core was requested.
+    this.coreWait = null;
     this.coreFallbacks = 0;
     this.coreDecided = { wasm: 0, js: 0 };
     this.coreLinks = { wasm: 0, js: 0 };
@@ -454,8 +461,14 @@ class HlsSwarm {
       this.originalFragmentLoader = hls.config.fLoader;
       const BaseLoader = hls.config.fLoader || hls.config.loader;
       hls.config.fLoader = this.options.mode === "peer-first" ? this.#peerFirstLoader(BaseLoader) : this.#shadowLoader(BaseLoader);
+      if (this.options.mode === "peer-first" && this.options.coreWasm !== undefined) {
+        let release;
+        const settled = new Promise((resolve) => { release = resolve; });
+        const timer = setTimeout(release, CORE_WAIT_MS);
+        this.coreWait = settled.then(() => { clearTimeout(timer); this.coreWait = null; });
+        this.#guard("core", () => this.#loadCore().finally(release));
+      }
       this.#guard("start", () => this.#start());
-      if (this.options.mode === "peer-first" && this.options.coreWasm !== undefined) this.#guard("core", () => this.#loadCore());
       if (typeof this.options.onMetrics === "function") {
         this.#every(this.options.metricsIntervalMs, 0, () => this.options.onMetrics(this.metrics()));
       }
@@ -884,6 +897,8 @@ class HlsSwarm {
 
   #contributionContext(context) {
     if (this.stopped || !context.frag || context.frag.sn === "initSegment") return;
+    // Discovery may move into the core only while it holds no state.
+    if (this.coreWait) return;
     const rendition = this.#renditionContext(context);
     this.discovery.context(context.frag.type || "main", rendition);
     this.#expireDiscovery(false);
@@ -1754,7 +1769,9 @@ class HlsSwarm {
       WebSocketImpl: this.options.WebSocketImpl || globalThis.WebSocket,
       reconnect: true,
     });
-    await this.pool.connect();
+    // Connect while an opted-in core loads; the session, and with it every
+    // hint, link and choice, starts once the core has settled.
+    await Promise.all([this.pool.connect(), this.coreWait]);
     if (this.stopped) return this.pool.close();
     this.session = new RelaySwarmSession({ pool: this.pool, swarmId: this.options.swarmId, secretKey, maxEventAgeSeconds: 60 });
     this.session.onPresence((presence) => this.#guard("presence", () => this.#onPresence(presence)));
