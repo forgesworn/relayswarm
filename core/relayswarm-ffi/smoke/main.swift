@@ -18,6 +18,7 @@ func number(_ field: Substring) -> UInt64 { UInt64(field)! }
 // bridge an integer to a Bool on Apple platforms.
 func json(_ value: Any) -> String {
     func exactly<T>(_ type: T.Type) -> Bool { Swift.type(of: value) == type }
+    if let text = value as? JSONText { return text.text }
     if value is NSNull { return "null" }
     if exactly(Bool.self) { return (value as! Bool) ? "true" : "false" }
     if exactly(Double.self) { let double = value as! Double; return double.isFinite ? "\(double)" : "null" }
@@ -43,7 +44,13 @@ func json(_ value: Any) -> String {
 }
 func orNull(_ value: Any?) -> Any { value ?? NSNull() }
 // JSON has no infinity or NaN; JavaScript writes them as null.
-func finite(_ value: Double?) -> Any { value.map { $0.isFinite ? $0 as Any : NSNull() } ?? NSNull() }
+// Written out here, because a Double boxed in `Any` beside Foundation values
+// came back as another number on Linux.
+struct JSONText { let text: String }
+func finite(_ value: Double?) -> JSONText {
+    guard let value, value.isFinite else { return JSONText(text: "null") }
+    return JSONText(text: "\(value)")
+}
 func double(_ field: Substring) -> Double? { field == "-" ? nil : Double(field)! }
 func hexList(_ field: Substring) -> [String] { field == "-" ? [] : field.split(separator: ",").map(String.init) }
 
