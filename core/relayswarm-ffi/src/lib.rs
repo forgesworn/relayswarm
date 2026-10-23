@@ -7,6 +7,7 @@
 //! core, nothing here reads a clock or performs I/O: the shell passes the time.
 
 use relayswarm_proto::commitment::{self, FragmentContext, Trust};
+use relayswarm_proto::link::{self, LinkConfig};
 use relayswarm_proto::pieces::{self, PieceRange};
 use relayswarm_proto::scheduler::{self, Command, Estimate, Source, TransferConfig};
 use serde_json::{Map, Value};
@@ -384,5 +385,380 @@ impl Transfer {
         let mut transfer = self.lock();
         transfer.tick(now);
         Self::state(&mut transfer)
+    }
+}
+
+// One peer link: the data channel protocol between two viewers.
+
+/// The link's fixed sizes. The shell sets its channel's low-water threshold
+/// to `low_water_bytes`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct LinkLimits {
+    pub chunk_bytes: u64,
+    pub high_water_bytes: u64,
+    pub low_water_bytes: u64,
+    pub max_have_keys: u32,
+}
+
+#[uniffi::export]
+pub fn link_limits() -> LinkLimits {
+    LinkLimits {
+        chunk_bytes: link::CHUNK_BYTES as u64,
+        high_water_bytes: link::HIGH_WATER_BYTES,
+        low_water_bytes: link::LOW_WATER_BYTES,
+        max_have_keys: link::MAX_HAVE_KEYS as u32,
+    }
+}
+
+/// Settings for one link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct LinkSettings {
+    pub max_segment_bytes: u64,
+    pub max_queued_requests: u32,
+    pub drain_timeout_ms: u64,
+    /// Ordered, fully reliable channel: an abandoned response may be drained.
+    pub reliable: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum RequestOutcome {
+    Payload,
+    None,
+    Timeout,
+    Abort,
+    Abandoned,
+    Closed,
+    Busy,
+    SendError,
+}
+
+impl From<link::Outcome> for RequestOutcome {
+    fn from(outcome: link::Outcome) -> Self {
+        match outcome {
+            link::Outcome::Payload => RequestOutcome::Payload,
+            link::Outcome::None => RequestOutcome::None,
+            link::Outcome::Timeout => RequestOutcome::Timeout,
+            link::Outcome::Abort => RequestOutcome::Abort,
+            link::Outcome::Abandoned => RequestOutcome::Abandoned,
+            link::Outcome::Closed => RequestOutcome::Closed,
+            link::Outcome::Busy => RequestOutcome::Busy,
+            link::Outcome::SendError => RequestOutcome::SendError,
+        }
+    }
+}
+
+/// The logical result of one request, reported once.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct RequestReport {
+    pub id: Option<u64>,
+    pub outcome: RequestOutcome,
+    pub received_bytes: u64,
+    pub metadata_received: bool,
+    pub draining: bool,
+    pub close_reason: Option<String>,
+}
+
+/// What the shell must do or learn, in order.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum PeerLinkEvent {
+    /// Send this text frame on the channel.
+    SendText {
+        text: String,
+    },
+    /// Send this binary frame on the channel.
+    SendBinary {
+        bytes: Vec<u8>,
+    },
+    /// The link closed; close the channel and connection.
+    Closed {
+        reason: String,
+    },
+    Report {
+        report: RequestReport,
+    },
+    /// The request's bytes, or `None`. Resolved once, possibly before the
+    /// link finishes draining the response. The shell hashes them.
+    Resolved {
+        id: Option<u64>,
+        bytes: Option<Vec<u8>>,
+    },
+    HaveChanged {
+        keys: Vec<String>,
+    },
+    ScheduleChanged,
+    /// The remote wants this key; answer with `serve_response`.
+    ServeRequest {
+        key: String,
+    },
+    /// The remote wants these pieces of this key. Answer with the whole held
+    /// object; the link sends only the span. Charge the span's bytes against
+    /// upload allowances.
+    ServeRange {
+        key: String,
+        span: PieceSpan,
+    },
+    UploadCancelled {
+        bytes: u64,
+    },
+    Progress {
+        received: u64,
+        size: u64,
+    },
+}
+
+impl From<link::LinkEvent> for PeerLinkEvent {
+    fn from(event: link::LinkEvent) -> Self {
+        use link::LinkEvent as E;
+        match event {
+            E::SendText(text) => PeerLinkEvent::SendText { text },
+            E::SendBinary(bytes) => PeerLinkEvent::SendBinary { bytes },
+            E::Closed(reason) => PeerLinkEvent::Closed { reason: reason.to_owned() },
+            E::Report(report) => PeerLinkEvent::Report {
+                report: RequestReport {
+                    id: report.id,
+                    outcome: report.outcome.into(),
+                    received_bytes: report.received_bytes,
+                    metadata_received: report.metadata_received,
+                    draining: report.draining,
+                    close_reason: report.close_reason.map(str::to_owned),
+                },
+            },
+            E::Resolved { id, bytes } => PeerLinkEvent::Resolved { id, bytes },
+            E::HaveChanged(keys) => PeerLinkEvent::HaveChanged { keys },
+            E::ScheduleChanged => PeerLinkEvent::ScheduleChanged,
+            E::ServeRequest(key) => PeerLinkEvent::ServeRequest { key },
+            E::ServeRange { key, range } => PeerLinkEvent::ServeRange { key, span: range.into() },
+            E::UploadCancelled(bytes) => PeerLinkEvent::UploadCancelled { bytes },
+            E::Progress { received, size } => PeerLinkEvent::Progress { received, size },
+        }
+    }
+}
+
+/// The events from one call, the request ID `request`/`request_range`
+/// assigned, and the link's scalar state. When `version` changes, read
+/// `sets` again.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct LinkUpdate {
+    pub events: Vec<PeerLinkEvent>,
+    pub request_id: Option<u64>,
+    pub version: u64,
+    pub closed: bool,
+    pub busy: bool,
+    pub transferring: bool,
+    pub outbound_in_flight: u32,
+    pub bytes_in: u64,
+    pub bytes_out: u64,
+    pub opened_at: u64,
+    pub last_served_at: u64,
+    pub last_delivered_at: u64,
+    pub next_deadline: Option<u64>,
+    pub upload_waiting: bool,
+}
+
+/// A key with the time it was announced or expires.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct TimedKey {
+    pub key: String,
+    pub at: u64,
+}
+
+/// What the remote has announced.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct LinkSets {
+    pub have: Vec<String>,
+    /// Keys the remote is fetching, with each lease's expiry.
+    pub fetching: Vec<TimedKey>,
+    /// Renditions the remote plays, with when each was last announced.
+    pub renditions: Vec<TimedKey>,
+    pub serving: bool,
+    pub rendition: Option<String>,
+    pub contribution_at: u64,
+    pub close_reason: Option<String>,
+}
+
+fn timed<'a>(entries: impl IntoIterator<Item = (&'a String, &'a u64)>) -> Vec<TimedKey> {
+    entries
+        .into_iter()
+        .map(|(key, at)| TimedKey { key: key.clone(), at: *at })
+        .collect()
+}
+
+/// One data channel between two viewers. Every method that takes `now` takes
+/// the shell's current time in milliseconds; call `tick` at `next_deadline`.
+#[derive(uniffi::Object)]
+pub struct PeerLink {
+    inner: Mutex<link::Link>,
+}
+
+impl PeerLink {
+    fn lock(&self) -> MutexGuard<'_, link::Link> {
+        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn run(&self, apply: impl FnOnce(&mut link::Link) -> Option<u64>) -> LinkUpdate {
+        let mut link = self.lock();
+        let request_id = apply(&mut link);
+        LinkUpdate {
+            events: link.drain_events().into_iter().map(Into::into).collect(),
+            request_id,
+            version: link.version(),
+            closed: link.closed(),
+            busy: link.busy(),
+            transferring: link.transferring(),
+            outbound_in_flight: link.outbound_in_flight() as u32,
+            bytes_in: link.bytes_in(),
+            bytes_out: link.bytes_out(),
+            opened_at: link.opened_at(),
+            last_served_at: link.last_served_at(),
+            last_delivered_at: link.last_delivered_at(),
+            next_deadline: link.next_deadline(),
+            upload_waiting: link.upload_waiting(),
+        }
+    }
+}
+
+#[uniffi::export]
+impl PeerLink {
+    #[uniffi::constructor]
+    pub fn new(settings: LinkSettings, now: u64) -> Arc<Self> {
+        let config = LinkConfig {
+            max_segment_bytes: settings.max_segment_bytes,
+            max_queued_requests: settings.max_queued_requests as usize,
+            drain_timeout_ms: settings.drain_timeout_ms,
+            reliable: settings.reliable,
+        };
+        Arc::new(PeerLink {
+            inner: Mutex::new(link::Link::new(config, now)),
+        })
+    }
+
+    /// Whether the channel is open. A closed or closing channel sends
+    /// nothing and cannot drain an abandoned response. Starts open.
+    pub fn set_channel_open(&self, open: bool) {
+        self.lock().set_channel_open(open);
+    }
+
+    /// Whether the channel is ordered and fully reliable.
+    pub fn set_reliable(&self, reliable: bool) {
+        self.lock().set_reliable(reliable);
+    }
+
+    /// The channel's `bufferedAmount`, before `serve_response`.
+    pub fn observe_buffered(&self, buffered: u64) {
+        self.lock().observe_buffered(buffered);
+    }
+
+    /// The remote's announcements; read again when `version` changes.
+    pub fn sets(&self) -> LinkSets {
+        let link = self.lock();
+        let (serving, rendition, contribution_at) = link.contribution();
+        LinkSets {
+            have: link.have().iter().cloned().collect(),
+            fetching: timed(link.fetching()),
+            renditions: timed(link.renditions()),
+            serving,
+            rendition: rendition.map(str::to_owned),
+            contribution_at,
+            close_reason: link.close_reason().map(str::to_owned),
+        }
+    }
+
+    /// The current state, with any events not yet taken.
+    pub fn state(&self) -> LinkUpdate {
+        self.run(|_| None)
+    }
+
+    pub fn handle_text(&self, now: u64, text: String) -> LinkUpdate {
+        self.run(|link| {
+            link.handle_text(now, &text);
+            None
+        })
+    }
+
+    pub fn handle_binary(&self, now: u64, chunk: Vec<u8>) -> LinkUpdate {
+        self.run(|link| {
+            link.handle_binary(now, &chunk);
+            None
+        })
+    }
+
+    /// Ask for the whole object `key`; `request_id` is `None` when refused.
+    pub fn request(&self, now: u64, key: String, timeout_ms: u64, expected_size: Option<u64>) -> LinkUpdate {
+        self.run(|link| link.request(now, &key, timeout_ms, expected_size))
+    }
+
+    /// Framing 2: ask for pieces `span` of `key`, an object of `object_size`
+    /// bytes. Send only to a holder that advertised framing 2.
+    pub fn request_range(&self, now: u64, key: String, timeout_ms: u64, span: PieceSpan, object_size: u64) -> LinkUpdate {
+        self.run(|link| link.request_range(now, &key, timeout_ms, span.into(), object_size))
+    }
+
+    /// Abort request `id`; `abandoned` when it was hopeless rather than unwanted.
+    pub fn abort(&self, now: u64, id: u64, abandoned: bool) -> LinkUpdate {
+        self.run(|link| {
+            link.abort(now, id, abandoned);
+            None
+        })
+    }
+
+    /// Close the link with one of the known reasons; others close as `host`.
+    pub fn close(&self, reason: String) -> LinkUpdate {
+        self.run(|link| {
+            link.close(&reason);
+            None
+        })
+    }
+
+    pub fn tick(&self, now: u64) -> LinkUpdate {
+        self.run(|link| {
+            link.tick(now);
+            None
+        })
+    }
+
+    /// Answer the oldest `ServeRequest` or `ServeRange` with the held
+    /// object, or `None` when it is no longer held.
+    pub fn serve_response(&self, now: u64, bytes: Option<Vec<u8>>) -> LinkUpdate {
+        self.run(|link| {
+            link.serve_response(now, bytes);
+            None
+        })
+    }
+
+    /// The channel's `bufferedamountlow` fired with `buffered` bytes queued.
+    pub fn buffered_amount_low(&self, now: u64, buffered: u64) -> LinkUpdate {
+        self.run(|link| {
+            link.buffered_amount_low(now, buffered);
+            None
+        })
+    }
+
+    pub fn send_have(&self, keys: Vec<String>) -> LinkUpdate {
+        self.run(|link| {
+            link.send_have(&keys);
+            None
+        })
+    }
+
+    pub fn send_have_change(&self, add: Vec<String>, del: Vec<String>) -> LinkUpdate {
+        self.run(|link| {
+            link.send_have_change(&add, &del);
+            None
+        })
+    }
+
+    pub fn send_contribution(&self, serving: bool, rendition: Option<String>) -> LinkUpdate {
+        self.run(|link| {
+            link.send_contribution(serving, rendition.as_deref());
+            None
+        })
+    }
+
+    /// Announce that this viewer is fetching `key`, for `lease_ms`.
+    pub fn send_fetching(&self, key: String, lease_ms: u64) -> LinkUpdate {
+        self.run(|link| {
+            link.send_fetching(&key, lease_ms);
+            None
+        })
     }
 }

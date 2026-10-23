@@ -161,21 +161,31 @@ measured 1,002,411 bytes (352,844 gzip) for the demo client.
 `relayswarm-ffi` is the UniFFI facade (spec step 4) for Swift and Kotlin.
 It exposes the commitment verifiers, taking the event and the options
 `segment-commitment.mjs` takes as JSON text and returning the verified content
-as JSON or nothing; the schema 3 piece helpers; and the multi-holder
-`Transfer` as an object whose inputs and commands are typed records. The
-facade restores the loader's key order in the fragment context's `media` and
-`encryption` before verifying, because the core compares `encryption` as
-`JSON.stringify` text and a host serialising a dictionary may reorder it.
-UniFFI exports no constants, so `default_transfer_settings()` returns the
-core's defaults. `cargo test` runs the shared vectors through it and replays
-a scripted transfer through both the facade and the core, expecting the same
-commands. `npm run test:ffi:swift` builds the debug library, generates Swift
-bindings, compiles a small program against them and checks every vector and
-one transfer; CI runs it on Linux. Generate bindings from an unstripped
-build: the release profile strips symbols, and on Linux that removes the
-UniFFI metadata. RelaySwarmKit does not use it yet, and no Kotlin bindings
-are generated or tested. Release builds abort on panic, so a
-panic in the core ends the host process rather than raising an error.
+as JSON or nothing; the schema 3 piece helpers; the multi-holder `Transfer`;
+and `PeerLink`, the data channel protocol. Objects take and return typed
+records. Each `PeerLink` call returns the events to act on in order, the
+request ID it assigned, and the link's scalar state; `sets()` returns what the
+remote has announced and need be read only when `version` changes. The shell
+reports the channel's state with `set_channel_open` and `set_reliable`, and
+sets its low-water threshold from `link_limits()`. The facade restores the
+loader's key order in the fragment context's `media` and `encryption` before
+verifying, because the core compares `encryption` as `JSON.stringify` text and
+a host serialising a dictionary may reorder it. UniFFI exports no constants,
+so `default_transfer_settings()` and `link_limits()` return the core's values.
+
+`cargo test` runs the shared vectors and every recorded link trace through
+the facade, and replays a scripted transfer and a piece range exchange through
+both the facade and the core, expecting the same commands and events.
+`npm run test:ffi:swift` and `npm run test:ffi:kotlin` build the debug
+library, generate bindings, compile a small program against them and check
+every vector, every link trace and one transfer; CI runs both on Linux. The
+Kotlin check downloads JNA 5.14.0 from Maven Central into `core/target/` and
+verifies its SHA-256. Generate bindings from an unstripped build: the release
+profile strips symbols, and on Linux that removes the UniFFI metadata. Peer
+selection and discovery are not in the facade, there is no packaged Apple
+framework or Android library, and RelaySwarmKit does not use it yet. Release
+builds abort on panic, so a panic in the core ends the host process rather
+than raising an error.
 
 ```sh
 cd core
@@ -183,6 +193,7 @@ cargo test
 cargo build --target wasm32-unknown-unknown -p relayswarm-proto
 cd .. && npm run core:wasm
 npm run test:ffi:swift
+npm run test:ffi:kotlin
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. Builds use `core/target/`.

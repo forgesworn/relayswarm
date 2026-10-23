@@ -193,9 +193,14 @@ jobs:
       - name: Loader suite with links, selection and verification in the Rust core
         run: npm run test:swarm:core
       # The runner image ships Swift, so the UniFFI bindings compile and run
-      # against the shared vectors here, not only on a Mac.
+      # against the shared vectors and link traces here, not only on a Mac.
       - name: Swift bindings through UniFFI
         run: npm run test:ffi:swift
+      # The image ships kotlinc and a JDK; JNA comes pinned from Maven Central.
+      - name: Kotlin bindings through UniFFI
+        run: |
+          kotlinc -version
+          npm run test:ffi:kotlin
 
   live-relays:
     name: browser transport against live relays
