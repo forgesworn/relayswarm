@@ -135,6 +135,11 @@ function percentile(values, fraction) {
   return Math.round(sorted[Math.min(sorted.length - 1, Math.floor(fraction * sorted.length))]);
 }
 
+/** p50 and p90 of a sample list, or nulls when it is empty. */
+function percentiles(values) {
+  return { p50: percentile(values, 0.5), p90: percentile(values, 0.9) };
+}
+
 function pushSample(list, value) {
   list.push(value);
   if (list.length > SAMPLE_LIMIT) list.shift();
@@ -340,6 +345,9 @@ class HlsSwarm {
     this.transferIds = new WeakMap();
     this.nextTransferId = 1;
     this.multiHolder = { transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, peerBytes: 0, originBytes: 0, originRanges: 0 };
+    // Per delivered transfer: total ms, the slowest single request's ms, and
+    // the requests it made. Bounded, newest last.
+    this.multiHolderTimings = [];
     this.coreFallbacks = 0;
     this.coreDecided = { wasm: 0, js: 0 };
     this.coreLinks = { wasm: 0, js: 0 };
@@ -687,7 +695,9 @@ class HlsSwarm {
       errors: { total: c.errors, byStage: { ...this.errorsByStage } },
       // Additive metrics-v2 field: which commitment verifier and peer selection run.
       core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", selection: this.peerSelection.kind ?? "js", discovery: this.discovery.kind ?? "js", links: { ...this.coreLinks }, fallbacks: this.coreFallbacks, decided: { ...this.coreDecided },
-        multiHolder: { enabled: this.#rangesEnabled(), ...this.multiHolder } },
+        multiHolder: { enabled: this.#rangesEnabled(), ...this.multiHolder,
+          timings: { durationMs: percentiles(this.multiHolderTimings.map((row) => row[0])), slowestRequestMs: percentiles(this.multiHolderTimings.map((row) => row[1])),
+            requests: percentiles(this.multiHolderTimings.map((row) => row[2])) } } },
       config: {
         originFallbackMs: this.options.originFallbackMs,
         maxPeerWaitMs: this.options.maxPeerWaitMs,
@@ -1356,6 +1366,8 @@ class HlsSwarm {
     return new Promise((resolve) => {
       const requests = new Map(), originRequests = new Set();
       let finished = false, tickTimer = null, backstop = null, releaseOrigin = null, originShare = 0;
+      const begunAt = now();
+      let slowestMs = 0, requestCount = 0;
       const clear = (timer) => { if (timer !== null) { clearTimeout(timer); this.timers.delete(timer); } return null; };
       const finish = (result) => {
         if (finished) return;
@@ -1376,10 +1388,12 @@ class HlsSwarm {
           requests.set(command.peer, controller);
           const [from, to] = bytesOf(command.range), startedAt = now(), remainingMs = Math.max(1, deadline - startedAt);
           let report = null;
+          requestCount += 1;
           link.request(key, remainingMs, { signal: controller.signal, expectedSize: to - from,
             range: { start: command.range.start, end: command.range.end, objectSize: commitment.size },
             onResult: (result) => { report = result; this.#peerRequestResult(context, link, remainingMs, result); } }).then((bytes) => {
             if (requests.get(command.peer) === controller) requests.delete(command.peer);
+            slowestMs = Math.max(slowestMs, now() - startedAt);
             if (finished) return;
             if (report?.firstByteMs !== null && report?.elapsedMs !== null && report?.receivedBytes) {
               this.peerSelection.observe({ firstByteMs: report.firstByteMs, bytes: report.receivedBytes, flowMs: report.elapsedMs - report.firstByteMs });
@@ -1418,6 +1432,8 @@ class HlsSwarm {
           link.close("integrity");
         } else if (command.t === "deliver") {
           this.multiHolder.delivered += 1;
+          this.multiHolderTimings.push([now() - begunAt, slowestMs, requestCount]);
+          if (this.multiHolderTimings.length > 128) this.multiHolderTimings.shift();
           finish(commitment.expiresAt <= Math.floor(Date.now() / 1000) ? null : { key, bytes: state.bytes.slice(), discoveryContext, multi: true, peerBytes: Math.max(0, commitment.size - originShare) });
         } else if (command.t === "fail") {
           this.multiHolder.failed += 1;

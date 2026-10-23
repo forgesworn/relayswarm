@@ -209,6 +209,8 @@ not an identity), `uptimeMs`, `serving`, plus:
   is advertised (`enabled`) and counts `transfers`, `delivered`, `late`
   (planned past the deadline even with origin), `failed`, `bans`, and the
   bytes from peers and origin (`peerBytes`, `originBytes`, `originRanges`).
+  `timings` gives p50 and p90 over the last 128 delivered transfers of their
+  duration, their slowest single request and their request count.
   Peer byte totals elsewhere count only a transfer's peer share. An additive
   metrics-v2 field.
 - `config`: the effective settings, so a receipt says what produced it.
