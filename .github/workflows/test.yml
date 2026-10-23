@@ -155,6 +155,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: node --test test/fixture-ice.test.mjs
       - run: npm run test:native
       - run: npm run test:swarm
       - run: npm run test:publisher

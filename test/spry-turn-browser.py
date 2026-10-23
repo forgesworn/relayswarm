@@ -52,9 +52,12 @@ def main():
     receipt = {
         "scope": "desktop Chrome HLS and actual RelaySwarm through Spry, loopback only; not physical-phone or NAT acceptance",
         "spry_binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+        "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "fixture_sha256": hashlib.sha256(Path(spec.origin).read_bytes()).hexdigest(),
+        "ice_credential_scope": "per-viewer, default Spry allocation limits",
         "relayswarm_source": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "source_hashes": {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in [
-            "src/browser/hls-swarm.mjs", "src/browser/peer-link.mjs", "test/hls-swarm-browser.mjs", "test/browser/viewer.mjs"]},
+            "src/browser/hls-swarm.mjs", "src/browser/peer-link.mjs", "test/hls-swarm-browser.mjs", "test/browser/viewer.mjs", "test/support/fixture-ice.mjs"]},
         "generated_media": "FFmpeg testsrc2 and sine, H.264/AAC HLS",
         "results": [],
     }
@@ -63,12 +66,15 @@ def main():
         for transport in transports:
             fixture = interop.Fixture(binary, tls=transport == "tls", limits=("--relay-ports", "49160:49223"))
             try:
-                username = f"{int(time.time()) + 900}:generated-hls"
-                credential = base64.b64encode(hmac.digest(fixture.secret.encode(), username.encode(), "sha1")).decode()
                 url = f"turns:127.0.0.1:{fixture.tls_port}?transport=tcp" if transport == "tls" else f"turn:127.0.0.1:{fixture.port}?transport={transport}"
+                servers_by_viewer = {}
+                for viewer in ["corrupt", "v0", "v1"]:
+                    username = f"{int(time.time()) + 900}:generated-hls-{viewer}"
+                    credential = base64.b64encode(hmac.digest(fixture.secret.encode(), username.encode(), "sha1")).decode()
+                    servers_by_viewer[viewer] = [{"urls": url, "username": username, "credential": credential}]
                 with tempfile.TemporaryDirectory(prefix="relayswarm-spry-") as scratch:
                     config = Path(scratch) / "ice.json"
-                    config.write_text(json.dumps({"iceServers": [{"urls": url, "username": username, "credential": credential}],
+                    config.write_text(json.dumps({"iceServersByViewer": servers_by_viewer,
                         "iceTransportPolicy": "relay", "expectedRelayProtocol": transport, "relayPortRange": [49160, 49223]}))
                     config.chmod(0o600)
                     results = output / transport

@@ -29,6 +29,7 @@ import { commitmentContent, KIND_SEGMENT_COMMITMENT } from "../src/browser/segme
 import { build } from "esbuild";
 import { chromium } from "playwright-core";
 import { startLocalRelay } from "./support/local-relay.mjs";
+import { testIceForViewer } from "./support/fixture-ice.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -60,8 +61,6 @@ const CHROME = flag("chrome", process.env.CHROME_PATH || "/Applications/Google C
 // Credentials stay in an owner-only scratch file and browser memory, never receipts.
 const ICE_CONFIG_PATH = flag("iceConfig", null);
 const ICE_CONFIG = ICE_CONFIG_PATH ? JSON.parse(await readFile(ICE_CONFIG_PATH, "utf8")) : null;
-if (ICE_CONFIG && (!Array.isArray(ICE_CONFIG.iceServers) || !ICE_CONFIG.iceServers.length
-  || !["all", "relay"].includes(ICE_CONFIG.iceTransportPolicy))) throw new Error("Invalid test ICE configuration.");
 const TEST_TLS_BYPASS = flag("testTlsBypass", "0") === "1";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (message) => console.error(`[hls-swarm] ${message}`);
@@ -193,7 +192,8 @@ try {
 
   const joinViewer = async (role) => {
     const context = await browser.newContext();
-    if (ICE_CONFIG) await context.addInitScript((ice) => { globalThis.__relaySwarmTestIce = ice; }, ICE_CONFIG);
+    const ice = role.swarm ? testIceForViewer(ICE_CONFIG, role.viewer) : null;
+    if (ice) await context.addInitScript((value) => { globalThis.__relaySwarmTestIce = value; }, ice);
     const tab = await context.newPage();
     tab.on("pageerror", (error) => pageErrors.push({ viewer: role.viewer, message: String(error.message || error) }));
     const query = new URLSearchParams({
@@ -316,7 +316,8 @@ try {
     at: new Date().toISOString(),
     mode: MODE,
     rotation: process.env.RELAYSWARM_NO_ROTATION === "1" ? "off" : "on",
-    transport: { policy: ICE_CONFIG?.iceTransportPolicy ?? "all", configuredIceServers: ICE_CONFIG?.iceServers.length ?? 0, testTlsCertificateBypass: TEST_TLS_BYPASS },
+    transport: { policy: ICE_CONFIG?.iceTransportPolicy ?? "all", configuredIceServers: ICE_CONFIG ? testIceForViewer(ICE_CONFIG, "v0").iceServers.length : 0,
+      credentialScope: ICE_CONFIG?.iceServersByViewer ? "per-viewer" : ICE_CONFIG ? "shared" : "none", testTlsCertificateBypass: TEST_TLS_BYPASS },
     shape: { liveSyncDurationCount: MODE === "peer-first" ? 4 : 3, ...(MODE === "peer-first" ? { maxBufferLength: 4, maxMaxBufferLength: 6 } : {}), viewers: VIEWERS, waves: WAVES, waveGapMs: WAVE_GAP_MS, maxPeers: MAX_PEERS, corruptPeer: CORRUPT_PEER, plusCorruptPeer: CORRUPT_PEER ? 1 : 0, plusBaselineWithoutSwarm: 1, durationS: DURATION_S, staggerMs: STAGGER_MS, segmentSeconds: 2, videoKbps: 1500, originFallbackMs: FALLBACK_MS },
     waves: waveRows,
     churn: { intervalSeconds: CHURN_EVERY_S, countPerInterval: CHURN_COUNT, departures: churn, observationMs: Date.now() - observationAt },
