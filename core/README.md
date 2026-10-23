@@ -162,7 +162,8 @@ measured 1,002,411 bytes (352,844 gzip) for the demo client.
 It exposes the commitment verifiers, taking the event and the options
 `segment-commitment.mjs` takes as JSON text and returning the verified content
 as JSON or nothing; the schema 3 piece helpers; the multi-holder `Transfer`;
-and `PeerLink`, the data channel protocol. Objects take and return typed
+`PeerLink`, the data channel protocol; and `PeerSelection`, which chooses a
+link from the shell's numeric link handles. Objects take and return typed
 records. Each `PeerLink` call returns the events to act on in order, the
 request ID it assigned, and the link's scalar state; `sets()` returns what the
 remote has announced and need be read only when `version` changes. Request
@@ -183,12 +184,14 @@ both the facade and the core, expecting the same commands and events.
 library, generate bindings, compile a small program against them and check
 every vector, every link trace, one transfer and a piece range exchanged
 between two links, that a full send buffer holds the range's data until a
-drain, and that the channel's open and reliable flags change what the link
-sends and how an abort ends; CI runs both on Linux. The
+drain, that the channel's open and reliable flags change what the link
+sends and how an abort ends, and every seeded selection sequence that
+`npm run proto:traces` records from the JavaScript (the script records them
+first if they are missing); CI runs both on Linux. The
 Kotlin check downloads JNA 5.14.0 from Maven Central into `core/target/` and
 verifies its SHA-256. Generate bindings from an unstripped build: the release
-profile strips symbols, and on Linux that removes the UniFFI metadata. Peer
-selection and discovery are not in the facade, there is no packaged Apple
+profile strips symbols, and on Linux that removes the UniFFI metadata.
+Neighbour discovery is not in the facade, there is no packaged Apple
 framework or Android library, and RelaySwarmKit does not use it yet. Release
 builds abort on panic, so a panic in the core ends the host process rather
 than raising an error.

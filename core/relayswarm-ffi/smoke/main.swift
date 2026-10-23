@@ -17,6 +17,10 @@ func json(_ value: Any) -> String {
     String(data: try! JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]), encoding: .utf8)!
 }
 func orNull(_ value: Any?) -> Any { value ?? NSNull() }
+// JSON has no infinity or NaN; JavaScript writes them as null.
+func finite(_ value: Double?) -> Any { value.map { $0.isFinite ? $0 as Any : NSNull() } ?? NSNull() }
+func double(_ field: Substring) -> Double? { field == "-" ? nil : Double(field)! }
+func hexList(_ field: Substring) -> [String] { field == "-" ? [] : field.split(separator: ",").map(String.init) }
 
 let lines = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8)!
     .split(separator: "\n").map { $0.split(separator: " ", omittingEmptySubsequences: false) }
@@ -126,6 +130,48 @@ func range(_ field: [Substring]) {
                 "unreliableAbortCloses": abortCloses(false), "reliableAbortCloses": abortCloses(true)]))
 }
 
+// Selection state after each operation, as arrays the script names.
+final class SelectionRun {
+    let selection = PeerSelection()
+    let sizes: [Double], size: Double, count: UInt64
+    var steps: [Any] = []
+
+    init(_ field: [Substring]) {
+        sizes = field[1].split(separator: ",").map { Double($0)! }
+        size = Double(field[2])!
+        count = number(field[3])
+    }
+
+    func apply(_ field: [Substring]) {
+        var result: UInt64? = nil
+        switch field[0] {
+        case "noop": break
+        case "observe":
+            selection.observe(now: number(field[1]), firstByteMs: double(field[2]), bytes: double(field[3])!,
+                              flowMs: double(field[4])!, totalFlowMs: double(field[5]))
+        case "record":
+            selection.record(now: number(field[1]), link: number(field[2]), elapsedMs: double(field[3])!, bytes: double(field[4])!)
+        case "forget": selection.forget(link: number(field[1]))
+        case "select":
+            let links = hexList(field[4]).map { entry -> SelectableLink in
+                let part = entry.split(separator: "/")
+                return SelectableLink(id: number(part[0]), pubkey: String(part[1]), closed: part[2] == "1",
+                                      busy: part[3] == "1", hasKey: part[4] == "1")
+            }
+            result = selection.select(links: links, tried: hexList(field[3]), size: double(field[1])!, deadlineMs: double(field[2])!)
+        default: fatalError("unknown selection input \(field[0])")
+        }
+        let links: [Any] = (0..<count).map { link in
+            let value = selection.summary(link: link)
+            return [value.attempts, finite(value.latencyMs), finite(value.throughputBytesPerSecond), finite(value.failureRate),
+                    value.consecutiveFailures, value.lastSelected, finite(selection.estimate(link: link, size: size))] as [Any]
+        }
+        steps.append([orNull(result), finite(selection.firstByteMs()), finite(selection.rate()),
+                      sizes.map { finite(selection.projectMs(size: $0)) }, finite(selection.minimumMs(size: size)),
+                      selection.lastObservedAt(), selection.turn(), selection.order(), links] as [Any])
+    }
+}
+
 func event(_ event: PeerLinkEvent) -> [Any] {
     switch event {
     case let .sendText(text): return ["sendText", text]
@@ -155,9 +201,19 @@ var link: PeerLink? = nil
 var now: UInt64 = 0
 var lastRequest: UInt64? = nil
 var steps: [Any] = []
+var selection: SelectionRun? = nil
 
 for field in lines {
+    if let run = selection, field[0] != "selected" {
+        run.apply(field)
+        continue
+    }
     switch field[0] {
+    case "selection":
+        selection = SelectionRun(field)
+    case "selected":
+        print(json(["selection": selection!.steps]))
+        selection = nil
     case "at":
         at = Int64(field[1])!
     case "case":

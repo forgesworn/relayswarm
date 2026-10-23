@@ -26,6 +26,9 @@ fun json(value: Any?): String = when (value) {
         append('"')
     }
     is Boolean, is Int, is Long, is ULong, is UInt -> value.toString()
+    // JSON has no infinity or NaN; JavaScript writes them as null.
+    is Double -> if (value.isFinite()) value.toString() else "null"
+
     is List<*> -> value.joinToString(",", "[", "]") { json(it) }
     is Map<*, *> -> value.entries.joinToString(",", "{", "}") { json(it.key as String) + ":" + json(it.value) }
     else -> error("cannot write $value")
@@ -122,6 +125,43 @@ fun range(field: List<String>) {
         "unreliableAbortCloses" to abortCloses(false), "reliableAbortCloses" to abortCloses(true))))
 }
 
+fun double(field: String): Double? = if (field == "-") null else field.toDouble()
+fun hexList(field: String): List<String> = if (field == "-") emptyList() else field.split(",")
+
+// Selection state after each operation, as arrays the script names.
+class SelectionRun(field: List<String>) {
+    val selection = PeerSelection()
+    val sizes = field[1].split(",").map { it.toDouble() }
+    val size = field[2].toDouble()
+    val count = field[3].toULong()
+    val steps = mutableListOf<Any?>()
+
+    fun apply(field: List<String>) {
+        var result: ULong? = null
+        when (field[0]) {
+            "noop" -> {}
+            "observe" -> selection.observe(number(field[1]), double(field[2]), double(field[3])!!, double(field[4])!!, double(field[5]))
+            "record" -> selection.record(number(field[1]), number(field[2]), double(field[3])!!, double(field[4])!!)
+            "forget" -> selection.forget(number(field[1]))
+            "select" -> {
+                val links = hexList(field[4]).map {
+                    val part = it.split("/")
+                    SelectableLink(number(part[0]), part[1], part[2] == "1", part[3] == "1", part[4] == "1")
+                }
+                result = selection.select(links, hexList(field[3]), double(field[1])!!, double(field[2])!!)
+            }
+            else -> error("unknown selection input ${field[0]}")
+        }
+        val links = (0uL until count).map { link ->
+            val value = selection.summary(link)
+            listOf(value.attempts, value.latencyMs, value.throughputBytesPerSecond, value.failureRate,
+                value.consecutiveFailures, value.lastSelected, selection.estimate(link, size))
+        }
+        steps.add(listOf(result, selection.firstByteMs(), selection.rate(), sizes.map { selection.projectMs(it) },
+            selection.minimumMs(size), selection.lastObservedAt(), selection.turn(), selection.order(), links))
+    }
+}
+
 fun event(event: PeerLinkEvent): List<Any?> = when (event) {
     is PeerLinkEvent.SendText -> listOf("sendText", event.text)
     is PeerLinkEvent.SendBinary -> listOf("sendBinary", base64(event.bytes))
@@ -151,10 +191,21 @@ fun main() {
     var now = 0uL
     var lastRequest: ULong? = null
     val steps = mutableListOf<Any?>()
+    var selection: SelectionRun? = null
     for (line in generateSequence(::readLine)) {
         if (line.isEmpty()) continue
         val field = line.split(" ")
+        if (selection != null && field[0] != "selected") {
+            selection.apply(field)
+            continue
+        }
         when (field[0]) {
+            "selection" -> selection = SelectionRun(field)
+            "selected" -> {
+                println(json(mapOf("selection" to selection!!.steps)))
+                selection.selection.close()
+                selection = null
+            }
             "at" -> at = field[1].toLong()
             "case" -> {
                 val event = text(field[2])!!

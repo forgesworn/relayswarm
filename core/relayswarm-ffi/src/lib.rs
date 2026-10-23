@@ -10,6 +10,7 @@ use relayswarm_proto::commitment::{self, FragmentContext, Trust};
 use relayswarm_proto::link::{self, LinkConfig};
 use relayswarm_proto::pieces::{self, PieceRange};
 use relayswarm_proto::scheduler::{self, Command, Estimate, Source, TransferConfig};
+use relayswarm_proto::selection;
 use serde_json::{Map, Value};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -762,5 +763,137 @@ impl PeerLink {
             link.send_fetching(&key, lease_ms);
             None
         })
+    }
+}
+
+// Peer selection. Links are the shell's own numeric handles; a reconnected
+// peer takes a new handle and starts without history.
+
+/// One link as selection sees it at the moment of choice.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct SelectableLink {
+    pub id: u64,
+    pub pubkey: String,
+    pub closed: bool,
+    pub busy: bool,
+    /// The link advertises the requested key.
+    pub has_key: bool,
+}
+
+/// One link's measured history.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct LinkObservation {
+    pub attempts: u32,
+    pub latency_ms: Option<f64>,
+    pub throughput_bytes_per_second: Option<f64>,
+    pub failure_rate: f64,
+    pub consecutive_failures: u32,
+    pub last_selected: u64,
+}
+
+impl From<selection::Observation> for LinkObservation {
+    fn from(value: selection::Observation) -> Self {
+        LinkObservation {
+            attempts: value.attempts,
+            latency_ms: value.latency_ms,
+            throughput_bytes_per_second: value.throughput_bytes_per_second,
+            failure_rate: value.failure_rate,
+            consecutive_failures: value.consecutive_failures,
+            last_selected: value.last_selected,
+        }
+    }
+}
+
+/// Chooses which link to ask for a segment, from shared and per-link
+/// measurements, as `peer-selection.mjs` does. One per swarm.
+#[derive(uniffi::Object)]
+pub struct PeerSelection {
+    inner: Mutex<selection::PeerSelection>,
+}
+
+impl PeerSelection {
+    fn lock(&self) -> MutexGuard<'_, selection::PeerSelection> {
+        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+#[uniffi::export]
+impl PeerSelection {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(PeerSelection {
+            inner: Mutex::new(selection::PeerSelection::new()),
+        })
+    }
+
+    /// One attempt's timing: first byte in milliseconds, then a rate as
+    /// bytes over milliseconds from the latest part of its flow, and how long
+    /// the whole flow ran (`None` means `flow_ms`).
+    pub fn observe(&self, now: u64, first_byte_ms: Option<f64>, bytes: f64, flow_ms: f64, total_flow_ms: Option<f64>) {
+        self.lock().observe(now, first_byte_ms, bytes, flow_ms, total_flow_ms);
+    }
+
+    /// One attempt on `link`: `bytes` delivered, 0 for a failure.
+    pub fn record(&self, now: u64, link: u64, elapsed_ms: f64, bytes: f64) {
+        self.lock().record(now, link, elapsed_ms, bytes);
+    }
+
+    /// Drop a closed link's history.
+    pub fn forget(&self, link: u64) {
+        self.lock().forget(link);
+    }
+
+    /// Choose a link for a key of `size` bytes, or `None`. `tried` holds
+    /// pubkeys already asked for this key; `deadline_ms` may be infinite.
+    pub fn select(&self, links: Vec<SelectableLink>, tried: Vec<String>, size: f64, deadline_ms: f64) -> Option<u64> {
+        let views: Vec<selection::LinkView> = links
+            .iter()
+            .map(|link| selection::LinkView {
+                id: link.id,
+                pubkey: &link.pubkey,
+                closed: link.closed,
+                busy: link.busy,
+                has_key: link.has_key,
+            })
+            .collect();
+        let tried: Vec<&str> = tried.iter().map(String::as_str).collect();
+        self.lock().select(&views, &tried, size, deadline_ms)
+    }
+
+    pub fn first_byte_ms(&self) -> Option<f64> {
+        self.lock().first_byte_ms()
+    }
+
+    /// Shared bytes per millisecond.
+    pub fn rate(&self) -> Option<f64> {
+        self.lock().rate()
+    }
+
+    pub fn project_ms(&self, size: f64) -> Option<f64> {
+        self.lock().project_ms(size)
+    }
+
+    pub fn minimum_ms(&self, size: f64) -> f64 {
+        self.lock().minimum_ms(size)
+    }
+
+    pub fn last_observed_at(&self) -> u64 {
+        self.lock().last_observed_at()
+    }
+
+    pub fn turn(&self) -> u32 {
+        self.lock().turn()
+    }
+
+    pub fn order(&self) -> u64 {
+        self.lock().order()
+    }
+
+    pub fn summary(&self, link: u64) -> LinkObservation {
+        self.lock().summary(link).into()
+    }
+
+    pub fn estimate(&self, link: u64, size: f64) -> Option<f64> {
+        self.lock().estimate(link, size)
     }
 }
