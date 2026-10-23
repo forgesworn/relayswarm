@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { open, realpath, stat as fileStat } from "node:fs/promises";
 import { resolve, relative, sep, isAbsolute } from "node:path";
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";
-import { commitmentContent, KIND_SEGMENT_COMMITMENT, verifyCommitmentDelegation } from "./browser/segment-commitment.mjs";
+import { commitmentContent, commitmentPieceSize, KIND_SEGMENT_COMMITMENT, verifyCommitmentDelegation } from "./browser/segment-commitment.mjs";
 import { publisherManifestPath, publisherSwarmId, publisherStreamEvent, validatePublisherStreamEvent } from "./publisher-state.mjs";
 
 import { createPublisherAdvertisement, verifyPublisherAdvertisement } from "./publisher-advertisement.mjs";
@@ -29,13 +29,14 @@ const assetKey = (record) => JSON.stringify([record.path, record.rangeStart, rec
 
 export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", secretKey, swarmId, streamEvent: restoredStreamEvent,
   now = Date.now, maxCacheEntries = 512, maxConcurrent = 8, allowEncryptedMedia = false, commitmentSecretKey, delegation,
-  revokedDelegationIds = [], delegationRevocations = [] } = {}) {
+  revokedDelegationIds = [], delegationRevocations = [], pieceCommitments = false } = {}) {
   const externalAuthor = !secretKey && !!restoredStreamEvent && !!commitmentSecretKey && !!delegation;
   secretKey = externalAuthor ? null : Uint8Array.from(secretKey ?? generateSecretKey());
   const signingKey = commitmentSecretKey ? Uint8Array.from(commitmentSecretKey) : secretKey;
   const signerPubkey = getPublicKey(signingKey);
   delegation = delegation ? structuredClone(delegation) : undefined;
   if (typeof allowEncryptedMedia !== "boolean") throw new PublisherError("Invalid encrypted-media policy.");
+  if (typeof pieceCommitments !== "boolean") throw new PublisherError("Invalid piece commitment policy.");
   const root = await realpath(resolve(mediaDir));
   const manifestPath = publisherManifestPath(manifest);
   const streamEvent = restoredStreamEvent ? validatePublisherStreamEvent(restoredStreamEvent, secretKey, manifestPath, { allowExternalAuthor: externalAuthor }) : publisherStreamEvent(secretKey, manifestPath, now);
@@ -149,16 +150,26 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
       const start = record.rangeStart ?? 0, end = record.rangeEnd ?? Number(before.size), size = end - start;
       if (!before.isFile() || size < 1 || size > MAX_SEGMENT || BigInt(end) > before.size) throw new PublisherError("Media size is outside bounds.");
       const hash = createHash("sha256"), bytes = Buffer.alloc(Math.min(size, 64 * 1024));
+      // Schema 3: one digest per piece, from the same read pass.
+      const pieceSize = pieceCommitments ? commitmentPieceSize(size) : 0, pieces = [];
+      let piece = pieceCommitments ? createHash("sha256") : null, pieceFill = 0;
       metrics.hashReads++;
       let offset = 0;
       while (offset < size) {
         const { bytesRead } = await handle.read(bytes, 0, Math.min(bytes.length, size - offset), start + offset);
         if (!bytesRead) throw changed();
-        hash.update(bytes.subarray(0, bytesRead)); offset += bytesRead;
+        const chunk = bytes.subarray(0, bytesRead);
+        hash.update(chunk); offset += bytesRead;
+        for (let at = 0; piece && at < chunk.length;) {
+          const take = Math.min(chunk.length - at, pieceSize - pieceFill);
+          piece.update(chunk.subarray(at, at + take)); at += take; pieceFill += take;
+          if (pieceFill === pieceSize) { pieces.push(piece.digest("hex")); piece = createHash("sha256"); pieceFill = 0; }
+        }
       }
+      if (piece && pieceFill) pieces.push(piece.digest("hex"));
       await unchanged(handle, file, before);
       metrics.hashesComputed++;
-      const result = { version, sha256: hash.digest("hex"), size };
+      const result = { version, sha256: hash.digest("hex"), size, ...(pieceCommitments ? { pieceSize, pieces } : {}) };
       // Publish the verified digest before releasing the pending task. A late
       // caller may arrive while the first caller revalidates its playlist.
       retain(hashes, key, result);
@@ -224,7 +235,9 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
           && entry.rangeStart === rangeStart && entry.rangeEnd === rangeEnd && entry.part === part
           && (wide ? entry.playlist === input.playlist && entry.mediaType === mediaType : entry.level === level && !entry.encryption));
         if (!record) throw new PublisherError("Context is absent from the published playlists.", 404);
-        const contextId = contextKey(record), key = `${wide ? "v2" : "v1"}:${contextId}`, scope = signingScope(now());
+        // Piece commitments need exact playlist identity, as schema 2 does.
+        const schema = wide ? (pieceCommitments ? 3 : 2) : 1;
+        const contextId = contextKey(record), key = `v${schema}:${contextId}`, scope = signingScope(now());
         const rendition = wide ? record.playlist : String(level);
         if (scope && (!scope.renditions.includes(rendition) || !scope.mediaTypes.includes(record.mediaType) || part !== null && !scope.allowParts)) throw new PublisherError("Media is outside the commitment delegation scope.", 403);
         const file = await localFile(record.path), handle = await open(file, "r");
@@ -252,7 +265,8 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
           const range = record.rangeEnd === null ? "" : `#${record.rangeStart}-${record.rangeEnd}`;
           const currentScope = signingScope(now());
           if (currentScope && hash.size > currentScope.maxSegmentBytes) throw new PublisherError("Media exceeds the delegation size limit.", 403);
-          const fields = { ...(wide ? { v: 2, playlist: record.playlist, mediaType: record.mediaType, encryption: record.encryption } : {}), streamEventId: streamEvent.id, swarmId, key: digest(`${swarmId}\n${record.path}${range}`), rendition, sequence, discontinuity, part,
+          const fields = { ...(wide ? { v: schema, playlist: record.playlist, mediaType: record.mediaType, encryption: record.encryption } : {}),
+            ...(schema === 3 ? { pieceSize: hash.pieceSize, pieces: hash.pieces } : {}), streamEventId: streamEvent.id, swarmId, key: digest(`${swarmId}\n${record.path}${range}`), rendition, sequence, discontinuity, part,
             sha256: hash.sha256, size: hash.size, expiresAt: Math.min(signedAt + 60, currentScope?.expiresAt ?? Infinity) };
           const event = finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: signedAt, tags: [["x", swarmId], ["e", streamEvent.id], ...(currentScope ? [["delegation", delegation.id]] : [])], content: commitmentContent(fields) }, signingKey);
           if (cached?.version === version) metrics.renewals++;

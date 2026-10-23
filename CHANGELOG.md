@@ -58,6 +58,12 @@
   object across up to three holders with origin for a late tail and runs the
   transfer with per-piece verification. Neither is used by the loader yet;
   the holder and lookahead defaults are provisional.
+- Add the publisher option `pieceCommitments` and the demo flag
+  `--piece-commitments` (both off by default): exact-playlist contexts are
+  signed as schema 3 instead of schema 2, with piece digests from the same
+  read pass. Schema 3 replaces schema 2 rather than being published beside
+  it, so v0.2.1 and RelaySwarmKit v0.5.0 receivers load those segments from
+  origin.
 
 ## v0.2.1 (21 October 2026)
 

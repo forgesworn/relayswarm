@@ -188,6 +188,7 @@ const publisher = await createHlsPublisher({
 | `maxConcurrent` | `8` | Simultaneous signing work, configurable from 1 to 64 |
 | `maxCacheEntries` | `512` | Entries in each bounded hash/commitment cache, configurable from 1 to 4,096 |
 | `allowEncryptedMedia` | `false` | Explicit AES-128 ciphertext publication; local keys remain HTTP-only |
+| `pieceCommitments` | `false` | Experimental: sign exact-playlist contexts as schema 3 (one SHA-256 per piece) instead of schema 2. v0.2.1 and RelaySwarmKit v0.5.0 receivers reject schema 3 and load those segments from origin |
 | `commitmentSecretKey` / `delegation` | author key / none | Author-scoped delegated commitment signing; an externally authored event permits operation without the author secret |
 | `revokedDelegationIds` / `delegationRevocations` | empty arrays | Host-trusted current revocation view; no automatic global lookup |
 
