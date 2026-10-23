@@ -54,6 +54,22 @@ func finite(_ value: Double?) -> JSONText {
 func double(_ field: Substring) -> Double? { field == "-" ? nil : Double(field)! }
 func hexList(_ field: Substring) -> [String] { field == "-" ? [] : field.split(separator: ",").map(String.init) }
 
+// DIAGNOSTIC: how f64 values cross into Swift on this platform.
+do {
+    func show(_ name: String, _ value: Double?) {
+        FileHandle.standardError.write("diag \(name): \(value.map { "\($0) bits \(String($0.bitPattern, radix: 16))" } ?? "none")\n".data(using: .utf8)!)
+    }
+    show("literal 0.0", 0.0)
+    let probe = PeerSelection()
+    show("minimumMs", probe.minimumMs(size: 670000))
+    show("summary.failureRate", probe.summary(link: 0).failureRate)
+    show("originReserveMs", defaultTransferSettings().originReserveMs)
+    probe.observe(now: 0, firstByteMs: 100, bytes: 1000, flowMs: 10, totalFlowMs: nil)
+    show("firstByteMs after observe", probe.firstByteMs())
+    show("rate after observe", probe.rate())
+    show("projectMs(1000)", probe.projectMs(size: 1000))
+}
+
 let lines = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8)!
     .split(separator: "\n").map { $0.split(separator: " ", omittingEmptySubsequences: false) }
 

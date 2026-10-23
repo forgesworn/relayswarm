@@ -195,9 +195,13 @@ jobs:
       # The runner image ships Swift, so the UniFFI bindings compile and run
       # against the shared vectors and link traces here, not only on a Mac.
       - name: Swift bindings through UniFFI
-        run: npm run test:ffi:swift
+        run: |
+          swift --version
+          npm run test:ffi:swift
       # The image ships kotlinc and a JDK; JNA comes pinned from Maven Central.
+      # Runs after a Swift failure too, so each run reports both bindings.
       - name: Kotlin bindings through UniFFI
+        if: ${{ !cancelled() }}
         run: |
           kotlinc -version
           npm run test:ffi:kotlin
