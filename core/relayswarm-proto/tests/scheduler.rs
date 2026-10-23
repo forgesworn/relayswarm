@@ -124,6 +124,11 @@ fn late_peers_hand_the_tail_to_origin_instead_of_declining() {
     let peers = [peer(1, Some(700.0), Some(190.0))];
     let alone = plan(&input(size, &all(size), &peers, None, 1_860.0));
     assert!(alone.late);
+    let hashes: Vec<String> = (0..piece_count(size).unwrap()).map(|i| hex(&[i as u8])).collect();
+    let refs: Vec<&str> = hashes.iter().map(String::as_str).collect();
+    let mut late = Transfer::new(TransferConfig::default(), size, &hex(b"x"), &refs, NOW + 2_000 + 1_860).unwrap();
+    late.start(NOW, &peers, origin(150.0, 1.0), None, None);
+    assert!(late.late(), "a slow origin cannot rescue it either");
     let planned = plan(&input(size, &all(size), &peers, Some(origin(150.0, 1_000.0)), 1_860.0));
     assert!(!planned.late, "{planned:?}");
     let tail = pieces_of(&planned, Source::Origin);

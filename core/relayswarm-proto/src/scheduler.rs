@@ -273,9 +273,11 @@ pub enum Command {
     /// The peer sent a piece that failed its hash: ban it for this object
     /// and charge it under the existing ban rules.
     Ban { peer: u64 },
-    /// Every piece verified and the whole object matches.
+    /// Every piece verified and the whole object matches. In-flight peers
+    /// get `Cancel` first; the shell aborts any origin fetch still running.
     Deliver(Vec<u8>),
-    /// The object cannot be completed here; fetch it whole from origin.
+    /// The object cannot be completed here; fetch it whole from origin. As
+    /// with `Deliver`, the shell aborts any origin range fetch still running.
     Fail,
 }
 
@@ -324,6 +326,8 @@ pub struct Transfer {
     /// Pieces already duplicated by the endgame.
     duplicated: BTreeSet<u32>,
     floor_reached: bool,
+    /// The latest plan was projected past the origin floor.
+    late: bool,
     finished: bool,
     commands: Vec<Command>,
 }
@@ -358,6 +362,7 @@ impl Transfer {
             shared_rate: None,
             duplicated: BTreeSet::new(),
             floor_reached: false,
+            late: false,
             finished: false,
             commands: Vec::new(),
         })
@@ -369,6 +374,13 @@ impl Transfer {
 
     pub fn finished(&self) -> bool {
         self.finished
+    }
+
+    /// The latest plan, origin included, is projected to finish after the
+    /// deadline less the origin reserve. The shell may prefer a whole-object
+    /// origin fetch; the floor still applies either way.
+    pub fn late(&self) -> bool {
+        self.late
     }
 
     /// Plan and issue the first requests. `peers` are the eligible holders;
@@ -452,6 +464,7 @@ impl Transfer {
             max_holders: self.config.max_holders,
         };
         let mut planned = plan(&input);
+        self.late = planned.late;
         if planned.assignments.is_empty() {
             // No peer can take it: origin always can.
             planned.assignments.push(Assignment {
