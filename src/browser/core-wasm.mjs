@@ -52,6 +52,20 @@ const orNull = (value) => Number.isNaN(value) ? null : value;
 // Read memory only after the call: a call can grow it, detaching the old buffer.
 const numbers = (core, pointer) => new Float64Array(core.memory.buffer, pointer, 6);
 
+// Copy `bytes` into the module for one call and free them after. The memory
+// view is taken after rs_alloc, which can grow and detach the old buffer.
+function withBytes(exports, bytes, run) {
+  const length = bytes.byteLength, pointer = exports.rs_alloc(length);
+  try {
+    new Uint8Array(exports.memory.buffer, pointer, length).set(bytes);
+    return run(pointer, length);
+  } finally {
+    exports.rs_free(pointer, length);
+  }
+}
+
+const resultBytes = (exports, length) => new Uint8Array(exports.memory.buffer, exports.rs_result_ptr(), length);
+
 /**
  * PeerSelection backed by the core. Arguments cross as WebAssembly doubles,
  * so they coerce exactly as the JavaScript's arithmetic does, and NaN comes
@@ -202,16 +216,9 @@ export async function loadCore(source, { onFailure } = {}) {
     call(handle, op, now, channel, a, b, bytes) {
       if (retired) return null;
       try {
-        const length = bytes.byteLength, pointer = exports.rs_alloc(length);
-        let size;
-        try {
-          new Uint8Array(exports.memory.buffer, pointer, length).set(bytes);
-          size = exports.rs_link_call(handle, op, now, channel, a, b, pointer, length);
-        } finally {
-          exports.rs_free(pointer, length);
-        }
+        const size = withBytes(exports, bytes, (pointer, length) => exports.rs_link_call(handle, op, now, channel, a, b, pointer, length));
         if (size < 0 || (op !== LINK_SETS && size < LINK_HEADER_BYTES)) throw new Error(`Core link ${handle} refused operation ${op}.`);
-        return new Uint8Array(exports.memory.buffer, exports.rs_result_ptr(), size).slice();
+        return resultBytes(exports, size).slice();
       } catch (error) {
         fail(error);
         return null;
@@ -227,15 +234,8 @@ export async function loadCore(source, { onFailure } = {}) {
   function call(op, input) {
     let bytes;
     try { bytes = encoder.encode(JSON.stringify(input)); } catch { return null; }
-    const pointer = exports.rs_alloc(bytes.length);
-    try {
-      new Uint8Array(exports.memory.buffer, pointer, bytes.length).set(bytes);
-      const length = exports.rs_call(op, pointer, bytes.length);
-      if (length < 0) return null;
-      return JSON.parse(decoder.decode(new Uint8Array(exports.memory.buffer, exports.rs_result_ptr(), length)));
-    } finally {
-      exports.rs_free(pointer, bytes.length);
-    }
+    const length = withBytes(exports, bytes, (pointer, size) => exports.rs_call(op, pointer, size));
+    return length < 0 ? null : JSON.parse(decoder.decode(resultBytes(exports, length)));
   }
 
   // One discovery operation: JSON arguments in, JSON out. Throws on a trap
@@ -243,16 +243,9 @@ export async function loadCore(source, { onFailure } = {}) {
   function discoveryCall(op, now, args) {
     if (retired) throw new Error("The core has been retired.");
     const bytes = encoder.encode(JSON.stringify(args));
-    const pointer = exports.rs_alloc(bytes.length);
-    let length;
-    try {
-      new Uint8Array(exports.memory.buffer, pointer, bytes.length).set(bytes);
-      length = exports.rs_disc_call(op, now, pointer, bytes.length);
-    } finally {
-      exports.rs_free(pointer, bytes.length);
-    }
+    const length = withBytes(exports, bytes, (pointer, size) => exports.rs_disc_call(op, now, pointer, size));
     if (length < 0) throw new Error(`Core discovery refused operation ${op}.`);
-    return JSON.parse(decoder.decode(new Uint8Array(exports.memory.buffer, exports.rs_result_ptr(), length)));
+    return JSON.parse(decoder.decode(resultBytes(exports, length)));
   }
 
   const trust = ({ streamEvent, swarmId, revokedDelegationIds = [], delegationRevocations = [] }) =>
@@ -290,12 +283,8 @@ export async function loadCore(source, { onFailure } = {}) {
     transfer({ size, sha256, pieces, deadline, maxHolders, originReserveMs }) {
       if (retired || !TRANSFER_EXPORTS.every((name) => typeof exports[name] === "function")) return null;
       try {
-        const bytes = encoder.encode(JSON.stringify({ sha256, pieces })), pointer = exports.rs_alloc(bytes.length);
-        let handle;
-        try {
-          new Uint8Array(exports.memory.buffer, pointer, bytes.length).set(bytes);
-          handle = exports.rs_xfer_new(size, deadline, maxHolders, originReserveMs, pointer, bytes.length);
-        } finally { exports.rs_free(pointer, bytes.length); }
+        const handle = withBytes(exports, encoder.encode(JSON.stringify({ sha256, pieces })),
+          (pointer, length) => exports.rs_xfer_new(size, deadline, maxHolders, originReserveMs, pointer, length));
         return handle ? new CoreTransfer(exports, handle, () => retired, fail) : null;
       } catch (error) { fail(error); return null; }
     },
@@ -329,14 +318,10 @@ class CoreTransfer {
     if (this.#handle === null || this.#retired()) return null;
     const exports = this.#exports;
     try {
-      const pointer = exports.rs_alloc(bytes.byteLength);
-      let length;
-      try {
-        new Uint8Array(exports.memory.buffer, pointer, bytes.byteLength).set(bytes);
-        length = exports.rs_xfer_call(this.#handle, op, Math.floor(now), source === "origin" ? -1 : source, a, b, pointer, bytes.byteLength);
-      } finally { exports.rs_free(pointer, bytes.byteLength); }
+      const length = withBytes(exports, bytes,
+        (pointer, size) => exports.rs_xfer_call(this.#handle, op, Math.floor(now), source === "origin" ? -1 : source, a, b, pointer, size));
       if (length < 4) throw new Error(`Core transfer refused operation ${op}.`);
-      const out = new Uint8Array(exports.memory.buffer, exports.rs_result_ptr(), length).slice();
+      const out = resultBytes(exports, length).slice();
       const jsonLength = new DataView(out.buffer).getUint32(0, true);
       const state = JSON.parse(decoder.decode(out.subarray(4, 4 + jsonLength)));
       const commands = state.c.map((command) => command.p ? { ...command, range: { start: command.p[0], end: command.p[1] } } : command);

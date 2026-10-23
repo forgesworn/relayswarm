@@ -8,6 +8,8 @@
 
 use indexmap::IndexMap;
 
+use crate::js::is_hex64;
+
 const STALE_HOLDER_MISSES: u32 = 4;
 const STALE_HOLDER_MS: u64 = 10_000;
 const MAX_HOLDERS: usize = 8;
@@ -17,10 +19,6 @@ const CONTEXT_IDLE_MS: u64 = 30_000;
 const CANDIDATE_FRESH_MS: u64 = 60_000;
 const WINDOW_MS: u64 = 15_000;
 const MAX_TICKET_BYTES: usize = 2 * 1024;
-
-fn is_hash(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
 
 /// `validTicket` from `relay-session.mjs`.
 pub fn valid_ticket(ticket: Option<&str>) -> bool {
@@ -229,7 +227,7 @@ impl NeighbourDiscovery {
     /// in-flight attempt's key pinned first.
     pub fn demand(&mut self, now: u64, media_type: &str, rendition: &str, key: &str) -> Option<ContextId> {
         let id = self.context(now, media_type, rendition)?;
-        if !is_hash(key) {
+        if !is_hex64(key) {
             return None;
         }
         let pinned = if self.live(now) && self.window.as_ref().is_some_and(|window| window.context == id) {
@@ -259,11 +257,11 @@ impl NeighbourDiscovery {
 
     /// A peer's advertised keys and ticket, newest last, at most 64 peers.
     pub fn hint(&mut self, now: u64, pubkey: &str, have: &[&str], ticket: Option<&str>) {
-        if !is_hash(pubkey) {
+        if !is_hex64(pubkey) {
             return;
         }
         let mut keys: Vec<String> = Vec::new();
-        for key in have.iter().filter(|key| is_hash(key)) {
+        for key in have.iter().filter(|key| is_hex64(key)) {
             if !keys.iter().any(|existing| existing == key) {
                 keys.push((*key).to_owned());
             }
@@ -286,7 +284,7 @@ impl NeighbourDiscovery {
 
     /// This holder lacked `key` at the deadline; one miss per distinct key.
     pub fn holder_miss(&mut self, now: u64, context: Option<ContextId>, pubkey: &str, key: &str) {
-        if !is_hash(pubkey) || !is_hash(key) {
+        if !is_hex64(pubkey) || !is_hex64(key) {
             return;
         }
         let Some(context) = context.and_then(|id| self.live_context_mut(id)) else {

@@ -218,9 +218,7 @@ pub struct Link {
 }
 
 fn is_hex64(value: &Value) -> bool {
-    value
-        .as_str()
-        .is_some_and(|text| text.len() == 64 && text.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    value.as_str().is_some_and(js::is_hex64)
 }
 
 fn utf16_len(text: &str) -> usize {

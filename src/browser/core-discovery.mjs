@@ -169,7 +169,7 @@ export class CoreNeighbourDiscovery {
 
   hint(pubkey, have, ticket) {
     if (typeof pubkey !== "string" || !HASH.test(pubkey) || !Array.isArray(have)) return;
-    this.#run(() => { this.#mutate(OP.hint, [pubkey, have.filter((key) => typeof key === "string"), validTicket(ticket) ? ticket : null]); },
+    this.#run(() => { this.#query(OP.hint, [pubkey, have.filter((key) => typeof key === "string"), validTicket(ticket) ? ticket : null]); },
       (js) => js.hint(pubkey, have, ticket));
   }
 

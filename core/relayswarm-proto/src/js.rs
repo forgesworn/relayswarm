@@ -9,6 +9,11 @@ use serde_json::{Map, Value};
 
 const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 
+/// `/^[0-9a-f]{64}$/u`: a lowercase SHA-256 or public key in hex.
+pub fn is_hex64(text: &str) -> bool {
+    text.len() == 64 && text.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// `Number.isSafeInteger`.
 pub fn safe_integer(value: &Value) -> Option<i64> {
     let number = value.as_f64()?;

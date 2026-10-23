@@ -143,7 +143,7 @@ Measured on 22 and 23 October 2026:
 
 | Build | Raw bytes | gzip -9 |
 |---|---|---|
-| `relayswarm-core.wasm` with selection, links, discovery and the scheduler (committed, no `wasm-opt`) | 400,340 | 147,971 |
+| `relayswarm-core.wasm` with selection, links, discovery and the scheduler (committed, no `wasm-opt`) | 400,116 | 147,914 |
 | With selection, links and discovery, before the scheduler | 315,803 | 122,029 |
 | The same after `wasm-opt -Oz` (version 133, current features enabled) | 253,619 | 120,570 |
 | With selection and links, before discovery | 274,837 | 112,644 |

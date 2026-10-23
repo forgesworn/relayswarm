@@ -250,7 +250,7 @@ pub fn verify_commitment_delegation(event: Option<&Value>, trust: &Trust, at_ms:
         && js::strict_eq(get(&value, "v"), &Value::from(1))
         && js::strict_eq(get(&value, "streamEventId"), &stream["id"])
         && get(&value, "swarmId").as_str() == Some(trust.swarm_id)
-        && is_hex64(&js::to_string(get(&value, "delegatePubkey")))
+        && js::is_hex64(&js::to_string(get(&value, "delegatePubkey")))
         && not_before.is_some_and(|nb| nb >= created_at && nb <= now)
         && expires_at.is_some_and(|ex| ex > now && Some(ex) > not_before && ex <= created_at + 3600)
         && renditions.is_some_and(|items| {
@@ -314,10 +314,6 @@ fn revocation_created_at(revocation: &Value, stream: &Value) -> Option<i64> {
     js::safe_integer(revocation.get("created_at")?)
 }
 
-fn is_hex64(text: &str) -> bool {
-    text.len() == 64 && text.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
 /// `verifySegmentCommitment(event, options, at)`: the commitment content, or
 /// `None`. The caller still checks received bytes against `sha256` and `size`.
 pub fn verify_segment_commitment(
@@ -367,7 +363,7 @@ pub fn verify_segment_commitment(
         && sequence.is_some_and(|n| n >= 0)
         && discontinuity.is_some_and(|n| n >= 0)
         && (part.is_null() || js::safe_integer(part).is_some_and(|n| n >= 0))
-        && is_hex64(&js::to_string(get(&value, "sha256")))
+        && js::is_hex64(&js::to_string(get(&value, "sha256")))
         && size.is_some_and(|n| n >= 1 && n <= limit)
         && expires_at.is_some_and(|ex| ex > now && ex <= now + 300);
     if !accepted {
@@ -381,7 +377,7 @@ pub fn verify_segment_commitment(
         let count = (size + piece_size - 1) / piece_size;
         if !js::strict_eq(get(&value, "pieceSize"), &Value::from(piece_size))
             || pieces.len() as i64 != count
-            || !pieces.iter().all(|piece| piece.as_str().is_some_and(is_hex64))
+            || !pieces.iter().all(|piece| piece.as_str().is_some_and(js::is_hex64))
         {
             return None;
         }

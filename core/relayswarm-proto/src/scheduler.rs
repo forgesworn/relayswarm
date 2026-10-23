@@ -940,18 +940,17 @@ impl Transfer {
         if <[u8; 32]>::from(Sha256::digest(&self.data)) != self.whole {
             return self.fail();
         }
-        self.finished = true;
-        for (source, lane) in self.lanes.iter_mut() {
-            if let (Source::Peer(peer), false) = (source, lane.in_flight.is_empty()) {
-                self.commands.push(Command::Cancel { peer: *peer });
-            }
-            lane.in_flight.clear();
-            lane.queue.clear();
-        }
+        self.close_out();
         self.commands.push(Command::Deliver(std::mem::take(&mut self.data)));
     }
 
     fn fail(&mut self) {
+        self.close_out();
+        self.commands.push(Command::Fail);
+    }
+
+    /// End the transfer: cancel every peer still sending and clear the lanes.
+    fn close_out(&mut self) {
         self.finished = true;
         for (source, lane) in self.lanes.iter_mut() {
             if let (Source::Peer(peer), false) = (source, lane.in_flight.is_empty()) {
@@ -960,6 +959,5 @@ impl Transfer {
             lane.in_flight.clear();
             lane.queue.clear();
         }
-        self.commands.push(Command::Fail);
     }
 }

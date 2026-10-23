@@ -564,7 +564,8 @@ pub fn discovery_call(discovery: &mut NeighbourDiscovery, op: u32, now: u64, arg
         DISC_HINT => {
             let have: Vec<&str> = arg(1).as_array()?.iter().filter_map(Value::as_str).collect();
             discovery.hint(now, text(0)?, &have, text(2));
-            Value::Null
+            // A hint changes only the candidates, which are not mirrored.
+            return Some(Value::Null);
         }
         DISC_HOLDER_MISS => {
             discovery.holder_miss(now, context(0), text(1)?, text(2)?);
