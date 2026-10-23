@@ -3591,15 +3591,16 @@ test("multi-holder: a holder that sends a bad piece is banned and the other comp
 });
 
 test("multi-holder: a silent holder's pieces come from origin by range at the deadline", async (t) => {
-  // Twelve pieces, so the silent holder has more than the endgame's two and
-  // only the deadline hand-over can finish the segment.
-  // A slow origin finishes them after the deadline, which the transfer, not
-  // a whole-segment fallback, owns.
+  // The silent holder is untested, so it gets one trial piece projected at
+  // the rate floor (2 s), past the 400 ms deadline: the endgame does not act
+  // first, and only the deadline hand-over can finish the segment. A slow
+  // origin finishes it after the deadline, which the transfer, not a
+  // whole-segment fallback, owns.
   const f = await multiFixture(t, { holders: [{}, { silent: true }], size: 12 * 65_536, originFallbackMs: 400, originDelayMs: 150 });
   try {
     sameBytes(await f.load(), f.bytes, "not the origin loader's whole-segment bytes");
     const [silent] = f.channels[1].wants;
-    assert.ok(silent[1] - silent[0] > 2, JSON.stringify(silent));
+    assert.equal(silent[1] - silent[0], 1, "the silent holder had one trial piece");
     const { multiHolder } = f.swarm.metrics().core;
     assert.ok(f.ranges.length > 0 && multiHolder.originRanges === f.ranges.length);
     assert.ok(f.channels[1].wants.length > 0, "the silent holder was asked");

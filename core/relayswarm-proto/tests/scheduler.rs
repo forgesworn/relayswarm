@@ -454,3 +454,25 @@ fn ticking_at_each_deadline_never_repeats_it() {
         transfer.drain_commands();
     }
 }
+
+#[test]
+fn a_fast_origin_takes_only_the_tail_peers_cannot_finish() {
+    // A local origin far faster than the peers must not take the head too.
+    let size = 6 * 65_536;
+    let peers = [peer(1, Some(0.0), Some(100.0)), peer(2, Some(0.0), Some(100.0))];
+    let planned = plan(&input(size, &all(size), &peers, Some(origin(5.0, 100_000.0)), 1_400.0));
+    // Each peer finishes two pieces (131,072 bytes at 100 bytes/ms) in 1,400 ms.
+    assert_eq!(pieces_of(&planned, Source::Peer(1)), vec![0, 1]);
+    assert_eq!(pieces_of(&planned, Source::Peer(2)), vec![2, 3]);
+    assert_eq!(pieces_of(&planned, Source::Origin), vec![4, 5]);
+    assert!(!planned.late);
+}
+
+#[test]
+fn an_untested_peer_gets_one_trial_piece_even_when_projected_late() {
+    let size = 4 * 65_536;
+    let peers = [peer(1, None, None)];
+    let planned = plan(&input(size, &all(size), &peers, Some(origin(5.0, 100_000.0)), 500.0));
+    assert_eq!(pieces_of(&planned, Source::Peer(1)), vec![0]);
+    assert_eq!(pieces_of(&planned, Source::Origin), vec![1, 2, 3]);
+}

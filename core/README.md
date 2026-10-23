@@ -30,8 +30,9 @@ reference to record traces from.
 `relayswarm_proto::scheduler` plans one schema 3 object across holders
 (CORE-SPEC section 6). `plan` splits the needed pieces so every source is
 projected to finish together, from each source's first byte and rate, with
-at most `max_holders` peers; when peers alone would be late, origin joins and
-takes the tail. `Transfer` issues the ranged requests, verifies each piece
+at most `max_holders` peers; when peers alone would be late, each keeps what
+it can finish in time (an untested peer at least one trial piece) and origin
+takes the rest of the tail. `Transfer` issues the ranged requests, verifies each piece
 against the commitment, bans a holder that sends a bad piece, reassigns
 failed work, moves outstanding pieces to origin at the deadline less
 `originReserveMs`, duplicates the last two pieces of a lagging source, and

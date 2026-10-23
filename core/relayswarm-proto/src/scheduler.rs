@@ -239,10 +239,70 @@ pub fn plan(input: &PlanInput) -> Plan {
             late: true,
         });
     };
-    // Origin's own rate, or the peers' floor when it has none measured.
+    // Rule 3: peers keep what they can finish in time, fastest first, and
+    // origin takes only the tail. Origin never competes for the head, so a
+    // fast origin cannot starve the peers of the evidence they need. An
+    // untested peer gets at least one piece, so it is measured; the floor
+    // moves that piece to origin if it is late.
     let origin = resolve(&[origin], input)[0];
-    peers.push(origin);
-    split(input, &peers)
+    let untested: Vec<Source> = input
+        .peers
+        .iter()
+        .filter(|peer| positive(peer.rate).is_none())
+        .map(|peer| peer.source)
+        .collect();
+    tail_to_origin(input, &peers, origin, &untested)
+}
+
+fn tail_to_origin(input: &PlanInput, peers: &[(Source, f64, f64)], origin: (Source, f64, f64), untested: &[Source]) -> Plan {
+    let piece_size = commitment_piece_size(input.size as i64) as u64;
+    let mut at = 0;
+    let mut assignments = Vec::new();
+    for (source, first_byte, rate) in peers {
+        if at >= input.needed.len() {
+            break;
+        }
+        let capacity = (input.available_ms - first_byte).max(0.0) * rate;
+        let mut count = 0;
+        let mut bytes = 0;
+        while at + count < input.needed.len() {
+            let next = piece_bytes(input.size, piece_size, input.needed[at + count]);
+            let trial = count == 0 && untested.contains(source);
+            if (bytes + next) as f64 > capacity && !trial {
+                break;
+            }
+            bytes += next;
+            count += 1;
+        }
+        if count == 0 {
+            continue;
+        }
+        assignments.push(Assignment {
+            source: *source,
+            ranges: runs(&input.needed[at..at + count]),
+            bytes,
+            projected_ms: first_byte + bytes as f64 / rate,
+        });
+        at += count;
+    }
+    if at < input.needed.len() {
+        let bytes: u64 = input.needed[at..]
+            .iter()
+            .map(|&index| piece_bytes(input.size, piece_size, index))
+            .sum();
+        assignments.push(Assignment {
+            source: origin.0,
+            ranges: runs(&input.needed[at..]),
+            bytes,
+            projected_ms: origin.1 + bytes as f64 / origin.2,
+        });
+    }
+    let projected_ms = assignments.iter().map(|a| a.projected_ms).fold(0.0, f64::max);
+    Plan {
+        assignments,
+        projected_ms,
+        late: projected_ms > input.available_ms,
+    }
 }
 
 /// Settings for one transfer.
