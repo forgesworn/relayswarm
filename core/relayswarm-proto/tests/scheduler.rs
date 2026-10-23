@@ -623,3 +623,38 @@ fn untested_first_bytes_use_the_shared_time_so_a_late_plan_gives_origin_the_tail
     // A 1.5 s shared first byte makes both peers late, so origin takes a tail.
     assert!(start(Some(1_500.0)).iter().any(|(s, _)| *s == Source::Origin));
 }
+
+// --- Known limit ---------------------------------------------------------------
+
+/// Known limit (CORE-SPEC section 7, 23 October 2026): with untested holders
+/// the plan is late, so each holder gets one trial piece and origin is sent
+/// everything else in one request. When the trials come back fast, the idle
+/// holders get nothing more: origin's unreceived pieces are not moved back.
+/// Found running the core's link and transfer over RelaySwarmKit's data
+/// channels. A fix that rebalances should flip the last two assertions.
+#[test]
+fn known_limit_fast_trials_do_not_take_back_origin_work() {
+    let bytes: Vec<u8> = (0..8 * 65_536).map(|i| ((i * 131 + 17) % 251) as u8).collect();
+    let mut transfer = transfer(&bytes, NOW + 2_000);
+    // Origin at 300 bytes/ms needs about 1.5 s for the six pieces it is given.
+    transfer.start(NOW, &[peer(1, None, None), peer(2, None, None)], origin(50.0, 300.0), None, None);
+    let first = transfer.drain_commands();
+    let asked = requests(&first);
+    assert_eq!(asked.len(), 3, "{asked:?}");
+    let origin_range = range_of(&first, Source::Origin);
+    assert_eq!(
+        (origin_range.start, origin_range.end),
+        (2, 8),
+        "origin is sent the rest in one request"
+    );
+    // Both trials verify within 10 ms: the holders are fast and now idle.
+    for peer in [1, 2] {
+        let range = range_of(&first, Source::Peer(peer));
+        assert_eq!(range.end - range.start, 1, "one trial piece");
+        transfer.delivered(NOW + 10, Source::Peer(peer), range, slice(&bytes, range));
+    }
+    transfer.tick(NOW + 20);
+    let after = transfer.drain_commands();
+    assert!(requests(&after).is_empty(), "no new work for the idle holders: {after:?}");
+    assert!(!transfer.finished(), "origin still owes pieces 2 to 7");
+}
