@@ -2694,7 +2694,8 @@ test("neighbour admission cannot evict links with active outbound reservations",
   const f = await discoveryFixture({ serve: true, maxUploadPeers: 6,
     reserveUploadBytes: () => { uploads++; return reservations; }, admit: pubkey => pubkey === candidate ? admission : true }); candidate = f.candidate.pubkey;
   try {
-    f.announce(); await until(() => f.state.checks > 0);
+    // The origin path holds a segment only after its key digest settles.
+    f.announce(); await until(() => f.state.checks > 0 && f.swarm.metrics().bytes.held > 0);
     for (const channel of f.channels) channel.receive(JSON.stringify({ t: "want", id: 1, k: f.playback.key }));
     await until(() => uploads === 6);
     release(true); await sleep(40);
