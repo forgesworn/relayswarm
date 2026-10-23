@@ -232,6 +232,7 @@ pub extern "C" fn rs_sel_summary(link: u32) -> *const f64 {
 // --- peer links -------------------------------------------------------------
 
 use relayswarm_proto::link::{Link, LinkConfig, LinkEvent};
+use relayswarm_proto::pieces::PieceRange;
 use std::collections::HashMap;
 
 thread_local! {
@@ -253,6 +254,8 @@ pub const LINK_SEND_CONTRIBUTION: u32 = 10;
 pub const LINK_SEND_FETCHING: u32 = 11;
 pub const LINK_STATE: u32 = 12;
 pub const LINK_SETS: u32 = 13;
+/// Framing 2: `a` timeout, `b` object size, input `[key, start, end]`.
+pub const LINK_REQUEST_RANGE: u32 = 14;
 
 const EVENT_SEND_TEXT: u8 = 1;
 const EVENT_SEND_BINARY: u8 = 2;
@@ -417,6 +420,13 @@ pub unsafe extern "C" fn rs_link_call(handle: u32, op: u32, now: f64, open: u32,
                     Some(ms(b))
                 };
                 request = link.request(now, text()?, ms(a), expected);
+            }
+            LINK_REQUEST_RANGE => {
+                let args = json()?;
+                let key = args.get(0)?.as_str()?;
+                let start = u32::try_from(args.get(1)?.as_u64()?).ok()?;
+                let end = u32::try_from(args.get(2)?.as_u64()?).ok()?;
+                request = link.request_range(now, key, ms(a), PieceRange { start, end }, ms(b));
             }
             LINK_ABORT => link.abort(now, ms(a), b != 0.0),
             LINK_CLOSE => link.close(text()?),
@@ -641,6 +651,171 @@ pub unsafe extern "C" fn rs_disc_call(op: u32, now: f64, pointer: *const u8, len
         match result {
             Some(value) => {
                 buffer.extend_from_slice(value.to_string().as_bytes());
+                buffer.len() as i32
+            }
+            None => -1,
+        }
+    })
+}
+
+// --- multi-holder transfer ---------------------------------------------------
+//
+// `rs_xfer_new(size, deadline, max_holders, origin_reserve_ms, pointer, len)`
+// takes `{"sha256": hex, "pieces": [hex]}` and returns a handle, or 0 when
+// the pieces do not fit the size. `rs_xfer_call(handle, op, now, source, a,
+// b, pointer, len)` returns the length at `rs_result_ptr` of a u32 JSON
+// length, the JSON `{"c": commands, "next": ms|null, "late", "finished"}` and
+// then the delivered object's bytes, if a command is `deliver`. `source` is a
+// peer handle, or -1 for origin; `a`/`b` are a piece range.
+
+use relayswarm_proto::scheduler::{Command, Estimate, Source, Transfer, TransferConfig};
+
+thread_local! {
+    static TRANSFERS: RefCell<HashMap<u32, Transfer>> = RefCell::new(HashMap::new());
+    static NEXT_TRANSFER: RefCell<u32> = const { RefCell::new(1) };
+}
+
+pub const XFER_START: u32 = 0;
+pub const XFER_DELIVERED: u32 = 1;
+pub const XFER_FAILED: u32 = 2;
+pub const XFER_TICK: u32 = 3;
+pub const XFER_STATE: u32 = 4;
+
+fn number(value: Option<&Value>) -> Option<f64> {
+    value.and_then(Value::as_f64)
+}
+
+/// `[id, firstByteMs|null, rate|null]` for a peer, `[firstByteMs, rate]` for origin.
+/// Peers, origin, then the shared first byte and rate.
+type Estimates = (Vec<Estimate>, Estimate, Option<f64>, Option<f64>);
+
+fn estimates(args: &Value) -> Option<Estimates> {
+    let peers = args.get("peers")?.as_array()?;
+    let peers = peers
+        .iter()
+        .map(|entry| {
+            Some(Estimate {
+                source: Source::Peer(entry.get(0)?.as_u64()?),
+                first_byte_ms: number(entry.get(1)),
+                rate: number(entry.get(2)),
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let origin = args.get("origin")?;
+    let origin = Estimate {
+        source: Source::Origin,
+        first_byte_ms: number(origin.get(0)),
+        rate: number(origin.get(1)),
+    };
+    Some((peers, origin, number(args.get("sharedFirstByteMs")), number(args.get("sharedRate"))))
+}
+
+fn transfer_frame(transfer: &mut Transfer) -> Vec<u8> {
+    let mut payload = Vec::new();
+    let commands: Vec<Value> = transfer
+        .drain_commands()
+        .into_iter()
+        .map(|command| match command {
+            Command::Request { peer, range } => serde_json::json!({ "t": "request", "peer": peer, "p": [range.start, range.end] }),
+            Command::FetchOrigin { range } => serde_json::json!({ "t": "origin", "p": [range.start, range.end] }),
+            Command::Cancel { peer } => serde_json::json!({ "t": "cancel", "peer": peer }),
+            Command::Ban { peer } => serde_json::json!({ "t": "ban", "peer": peer }),
+            Command::Deliver(bytes) => {
+                payload = bytes;
+                serde_json::json!({ "t": "deliver" })
+            }
+            Command::Fail => serde_json::json!({ "t": "fail" }),
+        })
+        .collect();
+    let json = serde_json::json!({
+        "c": commands, "next": transfer.next_deadline(), "late": transfer.late(), "finished": transfer.finished(),
+    })
+    .to_string();
+    let mut out = (json.len() as u32).to_le_bytes().to_vec();
+    out.extend_from_slice(json.as_bytes());
+    out.extend_from_slice(&payload);
+    out
+}
+
+/// # Safety
+/// `pointer` must address `len` initialised bytes from `rs_alloc`.
+#[no_mangle]
+pub unsafe extern "C" fn rs_xfer_new(
+    size: f64,
+    deadline: f64,
+    max_holders: f64,
+    origin_reserve_ms: f64,
+    pointer: *const u8,
+    len: usize,
+) -> u32 {
+    let input = if len == 0 {
+        &[][..]
+    } else {
+        std::slice::from_raw_parts(pointer, len)
+    };
+    let made = serde_json::from_slice::<Value>(input).ok().and_then(|args| {
+        let sha256 = args.get("sha256")?.as_str()?;
+        let pieces: Vec<&str> = args.get("pieces")?.as_array()?.iter().map(Value::as_str).collect::<Option<_>>()?;
+        let config = TransferConfig {
+            max_holders: (ms(max_holders) as usize).max(1),
+            origin_reserve_ms: origin_reserve_ms.max(0.0),
+        };
+        Transfer::new(config, ms(size), sha256, &pieces, ms(deadline))
+    });
+    let Some(transfer) = made else { return 0 };
+    let handle = NEXT_TRANSFER.with(|next| {
+        let mut next = next.borrow_mut();
+        let handle = *next;
+        *next += 1;
+        handle
+    });
+    TRANSFERS.with(|transfers| transfers.borrow_mut().insert(handle, transfer));
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn rs_xfer_free(handle: u32) {
+    TRANSFERS.with(|transfers| transfers.borrow_mut().remove(&handle));
+}
+
+/// # Safety
+/// `pointer` must address `len` initialised bytes from `rs_alloc` (or `len` 0).
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn rs_xfer_call(handle: u32, op: u32, now: f64, source: f64, a: f64, b: f64, pointer: *const u8, len: usize) -> i32 {
+    let input = if len == 0 {
+        &[][..]
+    } else {
+        std::slice::from_raw_parts(pointer, len)
+    };
+    let now = ms(now);
+    let source = if source < 0.0 { Source::Origin } else { Source::Peer(ms(source)) };
+    let range = PieceRange {
+        start: ms(a) as u32,
+        end: ms(b) as u32,
+    };
+    let out = TRANSFERS.with(|transfers| {
+        let mut transfers = transfers.borrow_mut();
+        let transfer = transfers.get_mut(&handle)?;
+        match op {
+            XFER_START => {
+                let (peers, origin, first_byte, rate) = estimates(&serde_json::from_slice::<Value>(input).ok()?)?;
+                transfer.start(now, &peers, origin, first_byte, rate);
+            }
+            XFER_DELIVERED => transfer.delivered(now, source, range, input),
+            XFER_FAILED => transfer.failed(now, source),
+            XFER_TICK => transfer.tick(now),
+            XFER_STATE => {}
+            _ => return None,
+        }
+        Some(transfer_frame(transfer))
+    });
+    RESULT.with(|cell| {
+        let mut buffer = cell.borrow_mut();
+        buffer.clear();
+        match out {
+            Some(bytes) => {
+                buffer.extend_from_slice(&bytes);
                 buffer.len() as i32
             }
             None => -1,

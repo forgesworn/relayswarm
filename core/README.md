@@ -37,7 +37,13 @@ failed work, moves outstanding pieces to origin at the deadline less
 `originReserveMs`, duplicates the last two pieces of a lagging source, and
 delivers only when the whole object matches. `DEFAULT_MAX_HOLDERS` (3) and
 `DEFAULT_LOOKAHEAD_SEGMENTS` (2) are the spec's proposals, not yet set from a
-replayed field trace. It is not wired into the loader. The shell sends what it emits,
+replayed field trace. It is not wired into the loader.
+
+The module exposes it as `rs_xfer_new`, `rs_xfer_call` and `rs_xfer_free`
+(commands as JSON, a delivered object's bytes after them), and ranged link
+requests as `rs_link_call` operation 14. `core.transfer()` and the `range`
+option of `CorePeerLink.request` wrap them; `test/core-transfer.test.mjs`
+drives a transfer between core links through the module. The shell sends what it emits,
 answers its serve requests and reports timers and channel draining. The native
 HyperDHT framing in `object-transfer.mjs` stays with the Node adapter.
 

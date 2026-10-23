@@ -285,8 +285,67 @@ export async function loadCore(source, { onFailure } = {}) {
     peerLink(options) {
       return new CorePeerLink(options, host);
     },
+    // One schema 3 object across several holders, or null when this module
+    // has no scheduler or the pieces do not fit the size.
+    transfer({ size, sha256, pieces, deadline, maxHolders, originReserveMs }) {
+      if (retired || !TRANSFER_EXPORTS.every((name) => typeof exports[name] === "function")) return null;
+      try {
+        const bytes = encoder.encode(JSON.stringify({ sha256, pieces })), pointer = exports.rs_alloc(bytes.length);
+        let handle;
+        try {
+          new Uint8Array(exports.memory.buffer, pointer, bytes.length).set(bytes);
+          handle = exports.rs_xfer_new(size, deadline, maxHolders, originReserveMs, pointer, bytes.length);
+        } finally { exports.rs_free(pointer, bytes.length); }
+        return handle ? new CoreTransfer(exports, handle, () => retired, fail) : null;
+      } catch (error) { fail(error); return null; }
+    },
   });
 }
+
+const TRANSFER_EXPORTS = ["rs_xfer_new", "rs_xfer_call", "rs_xfer_free"];
+const XFER = { start: 0, delivered: 1, failed: 2, tick: 3, state: 4 };
+
+/** The Rust `Transfer` for one object. Each call returns `{ commands, next,
+ * late, finished, bytes }`, or null once the core has failed. Sources are a
+ * peer's numeric ID, or "origin". */
+class CoreTransfer {
+  #exports; #handle; #retired; #fail;
+  constructor(exports, handle, retired, fail) { this.#exports = exports; this.#handle = handle; this.#retired = retired; this.#fail = fail; }
+  start(now, { peers, origin, sharedFirstByteMs = null, sharedRate = null }) {
+    return this.#call(XFER.start, now, -1, 0, 0, encoder.encode(JSON.stringify({ peers, origin, sharedFirstByteMs, sharedRate })));
+  }
+  delivered(now, source, range, bytes) { return this.#call(XFER.delivered, now, source, range.start, range.end, bytes); }
+  failed(now, source) { return this.#call(XFER.failed, now, source, 0, 0, EMPTY_BYTES); }
+  tick(now) { return this.#call(XFER.tick, now, -1, 0, 0, EMPTY_BYTES); }
+  free() {
+    if (this.#handle === null) return;
+    const handle = this.#handle;
+    this.#handle = null;
+    if (!this.#retired()) try { this.#exports.rs_xfer_free(handle); } catch (error) { this.#fail(error); }
+  }
+  #call(op, now, source, a, b, bytes) {
+    if (this.#handle === null || this.#retired()) return null;
+    const exports = this.#exports;
+    try {
+      const pointer = exports.rs_alloc(bytes.byteLength);
+      let length;
+      try {
+        new Uint8Array(exports.memory.buffer, pointer, bytes.byteLength).set(bytes);
+        length = exports.rs_xfer_call(this.#handle, op, Math.floor(now), source === "origin" ? -1 : source, a, b, pointer, bytes.byteLength);
+      } finally { exports.rs_free(pointer, bytes.byteLength); }
+      if (length < 4) throw new Error(`Core transfer refused operation ${op}.`);
+      const out = new Uint8Array(exports.memory.buffer, exports.rs_result_ptr(), length).slice();
+      const jsonLength = new DataView(out.buffer).getUint32(0, true);
+      const state = JSON.parse(decoder.decode(out.subarray(4, 4 + jsonLength)));
+      const commands = state.c.map((command) => command.p ? { ...command, range: { start: command.p[0], end: command.p[1] } } : command);
+      return { commands, next: state.next, late: state.late, finished: state.finished, bytes: out.length > 4 + jsonLength ? out.subarray(4 + jsonLength) : null };
+    } catch (error) {
+      this.#fail(error);
+      return null;
+    }
+  }
+}
+const EMPTY_BYTES = new Uint8Array(0);
 
 /** Load the core's commitment verifiers only. */
 export async function loadCoreVerifier(source) {

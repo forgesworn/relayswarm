@@ -186,7 +186,7 @@ jobs:
       - name: Fresh WebAssembly module against the shared vectors
         run: |
           node scripts/build-core-wasm.mjs --out "$RUNNER_TEMP/relayswarm-core.wasm"
-          RELAYSWARM_CORE_WASM="$RUNNER_TEMP/relayswarm-core.wasm" node --test test/core-wasm.test.mjs test/core-link.test.mjs
+          RELAYSWARM_CORE_WASM="$RUNNER_TEMP/relayswarm-core.wasm" node --test test/core-wasm.test.mjs test/core-link.test.mjs test/core-transfer.test.mjs
           sha256sum "$RUNNER_TEMP/relayswarm-core.wasm" src/browser/relayswarm-core.wasm
       # Once, on Linux: the suite's timing tests are tight enough that running
       # it twice per Windows job doubles their chance of a slow-runner miss.

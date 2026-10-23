@@ -6,7 +6,7 @@
 import { PeerLink } from "./peer-link.mjs";
 
 const OP = { text: 0, binary: 1, request: 2, abort: 3, close: 4, tick: 5, serve: 6, bufferedLow: 7,
-  sendHave: 8, sendHaveChange: 9, sendContribution: 10, sendFetching: 11, state: 12, sets: 13 };
+  sendHave: 8, sendHaveChange: 9, sendContribution: 10, sendFetching: 11, state: 12, sets: 13, requestRange: 14 };
 const EVENT = { sendText: 1, sendBinary: 2, closed: 3, report: 4, resolved: 5, haveChanged: 6,
   scheduleChanged: 7, serveRequest: 8, uploadCancelled: 9, progress: 10 };
 const HEADER = 13;
@@ -112,7 +112,9 @@ export class CorePeerLink {
     if (!this.closed) this.#call(OP.sendFetching, { a: leaseMs, bytes: encoder.encode(String(key)) });
   }
 
-  request(key, timeoutMs, { signal, expectedSize, onResult, onProgress } = {}) {
+  // `range` ({ start, end, objectSize }) asks a framing 2 holder for pieces
+  // start..end of a schema 3 object; `expectedSize` is then those pieces' bytes.
+  request(key, timeoutMs, { signal, expectedSize, onResult, onProgress, range } = {}) {
     const startedAt = clockNow();
     let reported = false;
     const report = (outcome, row = null) => {
@@ -155,7 +157,10 @@ export class CorePeerLink {
       // undefined: no expected size; anything else that is not a size never matches.
       const expected = expectedSize === undefined ? NaN : Number.isSafeInteger(expectedSize) && expectedSize >= 0 ? expectedSize : -1;
       this.#starting = entry;
-      try { this.#call(OP.request, { a: timerMs(timeoutMs), b: expected, bytes: encoder.encode(String(key)) }); }
+      try {
+        if (range) this.#call(OP.requestRange, { a: timerMs(timeoutMs), b: range.objectSize, bytes: encoder.encode(JSON.stringify([String(key), range.start, range.end])) });
+        else this.#call(OP.request, { a: timerMs(timeoutMs), b: expected, bytes: encoder.encode(String(key)) });
+      }
       finally { this.#starting = null; }
       if (entry.id === null) {
         // The core never accepted it (the module failed): settle as closed.
