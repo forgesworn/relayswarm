@@ -13,62 +13,19 @@ func strings(_ field: Substring) -> [String] {
     field == "-" ? [] : field.split(separator: ",").map { text($0)! }
 }
 func number(_ field: Substring) -> UInt64 { UInt64(field)! }
-// JSON without Foundation's serialiser, which on Linux writes some doubles as
-// other numbers. Types are matched exactly, because a cast from `Any` can
-// bridge an integer to a Bool on Apple platforms.
 func json(_ value: Any) -> String {
-    func exactly<T>(_ type: T.Type) -> Bool { Swift.type(of: value) == type }
-    if let text = value as? JSONText { return text.text }
-    if value is NSNull { return "null" }
-    if exactly(Bool.self) { return (value as! Bool) ? "true" : "false" }
-    if exactly(Double.self) { let double = value as! Double; return double.isFinite ? "\(double)" : "null" }
-    if let integer = value as? any BinaryInteger { return "\(integer)" }
-    if exactly(String.self) {
-        var out = "\""
-        // Non-ASCII as UTF-16 escapes, so the output encoding never matters.
-        for unit in (value as! String).utf16 {
-            switch unit {
-            case 0x22: out += "\\\""
-            case 0x5c: out += "\\\\"
-            case 0x20...0x7e: out.unicodeScalars.append(Unicode.Scalar(unit)!)
-            default:
-                let hex = String(unit, radix: 16)
-                out += "\\u" + String(repeating: "0", count: 4 - hex.count) + hex
-            }
-        }
-        return out + "\""
-    }
-    if let array = value as? [Any] { return "[" + array.map(json).joined(separator: ",") + "]" }
-    if let object = value as? [String: Any] { return "{" + object.map { json($0.key) + ":" + json($0.value) }.joined(separator: ",") + "}" }
-    fatalError("cannot write \(Swift.type(of: value))")
+    String(data: try! JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]), encoding: .utf8)!
 }
 func orNull(_ value: Any?) -> Any { value ?? NSNull() }
-// JSON has no infinity or NaN; JavaScript writes them as null.
-// Written out here, because a Double boxed in `Any` beside Foundation values
-// came back as another number on Linux.
-struct JSONText { let text: String }
-func finite(_ value: Double?) -> JSONText {
-    guard let value, value.isFinite else { return JSONText(text: "null") }
-    return JSONText(text: "\(value)")
+// JSON has no infinity or NaN; JavaScript writes them as null. Not named
+// `finite`: on Linux that resolves to glibc's `finite(double) -> int` for a
+// non-optional argument.
+func jsonNumber(_ value: Double?) -> Any {
+    guard let value, value.isFinite else { return NSNull() }
+    return value
 }
 func double(_ field: Substring) -> Double? { field == "-" ? nil : Double(field)! }
 func hexList(_ field: Substring) -> [String] { field == "-" ? [] : field.split(separator: ",").map(String.init) }
-
-// DIAGNOSTIC: how f64 values cross into Swift on this platform.
-do {
-    func show(_ name: String, _ value: Double?) {
-        FileHandle.standardError.write("diag \(name): \(value.map { "\($0) bits \(String($0.bitPattern, radix: 16))" } ?? "none")\n".data(using: .utf8)!)
-    }
-    show("literal 0.0", 0.0)
-    let probe = PeerSelection()
-    show("minimumMs", probe.minimumMs(size: 670000))
-    show("summary.failureRate", probe.summary(link: 0).failureRate)
-    show("originReserveMs", defaultTransferSettings().originReserveMs)
-    probe.observe(now: 0, firstByteMs: 100, bytes: 1000, flowMs: 10, totalFlowMs: nil)
-    show("firstByteMs after observe", probe.firstByteMs())
-    show("rate after observe", probe.rate())
-    show("projectMs(1000)", probe.projectMs(size: 1000))
-}
 
 let lines = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8)!
     .split(separator: "\n").map { $0.split(separator: " ", omittingEmptySubsequences: false) }
@@ -211,11 +168,11 @@ final class SelectionRun {
         }
         let links: [Any] = (0..<count).map { link in
             let value = selection.summary(link: link)
-            return [value.attempts, finite(value.latencyMs), finite(value.throughputBytesPerSecond), finite(value.failureRate),
-                    value.consecutiveFailures, value.lastSelected, finite(selection.estimate(link: link, size: size))] as [Any]
+            return [value.attempts, jsonNumber(value.latencyMs), jsonNumber(value.throughputBytesPerSecond), jsonNumber(value.failureRate),
+                    value.consecutiveFailures, value.lastSelected, jsonNumber(selection.estimate(link: link, size: size))] as [Any]
         }
-        steps.append([orNull(result), finite(selection.firstByteMs()), finite(selection.rate()),
-                      sizes.map { finite(selection.projectMs(size: $0)) }, finite(selection.minimumMs(size: size)),
+        steps.append([orNull(result), jsonNumber(selection.firstByteMs()), jsonNumber(selection.rate()),
+                      sizes.map { jsonNumber(selection.projectMs(size: $0)) }, jsonNumber(selection.minimumMs(size: size)),
                       selection.lastObservedAt(), selection.turn(), selection.order(), links] as [Any])
     }
 }
