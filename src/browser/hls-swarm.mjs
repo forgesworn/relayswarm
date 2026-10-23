@@ -363,7 +363,7 @@ class HlsSwarm {
     this.remoteFraming = new Map();
     this.transferIds = new WeakMap();
     this.nextTransferId = 1;
-    this.multiHolder = { transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, originRanges: 0, originRangesIgnored: 0 };
+    this.multiHolder = { transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0 };
     // Origins (scheme, host and port) that answered a range with something
     // else; multi-holder transfer skips their segments for the session.
     this.originsWithoutRanges = new Set();
@@ -1485,7 +1485,16 @@ class HlsSwarm {
     const origin = [null, originMs ? commitment.size / originMs : null];
     return new Promise((resolve) => {
       const requests = new Map(), originRequests = new Set(), abandoned = new WeakSet();
-      let finished = false, tickTimer = null, backstop = null, releaseOrigin = null, originShare = 0;
+      let finished = false, tickTimer = null, backstop = null, releaseOrigin = null, originShare = 0, verified = 0;
+      // A source is credited only with the bytes its delivery newly
+      // verified: a holder and origin can both send a piece, and the first
+      // verified copy wins. The rest is counted as unused.
+      const credit = (state, received) => {
+        const fresh = state?.verified == null ? 0 : Math.max(0, state.verified - verified);
+        if (state?.verified != null) verified = Math.max(verified, state.verified);
+        this.multiHolder.unusedBytes += received - fresh;
+        return fresh;
+      };
       const begunAt = now();
       let slowestMs = 0, requestCount = 0;
       const clear = (timer) => { if (timer !== null) { clearTimeout(timer); this.timers.delete(timer); } return null; };
@@ -1529,9 +1538,10 @@ class HlsSwarm {
             }
             if (bytes) {
               this.#recordSelection(link, now() - startedAt, bytes.byteLength);
-              this.multiHolder.peerBytes += bytes.byteLength;
-              apply(xfer("delivered", { source: command.peer, p: [command.range.start, command.range.end], bytes: bytes.byteLength },
-                (at) => transfer.delivered(at, command.peer, command.range, bytes)));
+              const state = xfer("delivered", { source: command.peer, p: [command.range.start, command.range.end], bytes: bytes.byteLength },
+                (at) => transfer.delivered(at, command.peer, command.range, bytes));
+              this.multiHolder.peerBytes += credit(state, bytes.byteLength);
+              apply(state);
             } else {
               if (!controller.signal.aborted || abandoned.has(controller)) this.#recordSelection(link, now() - startedAt);
               apply(xfer("failed", { source: command.peer }, (at) => transfer.failed(at, command.peer)));
@@ -1553,14 +1563,14 @@ class HlsSwarm {
             if (this.options.traceRequests) this.#trace({ k: "origin", load, at: this.#traceAt(originAt), ms: Math.round(now() - originAt), ranged: true,
               range: [command.range.start, command.range.end], outcome: bytes ? "payload" : finished ? "abort" : "none", bytes: bytes?.byteLength ?? null });
             if (finished) return;
-            if (bytes) {
-              this.multiHolder.originBytes += bytes.byteLength;
-              this.counters.bytesFromOrigin += bytes.byteLength;
-              originShare += bytes.byteLength;
-            }
             const p = [command.range.start, command.range.end];
-            apply(bytes ? xfer("delivered", { source: "origin", p, bytes: bytes.byteLength }, (at) => transfer.delivered(at, "origin", command.range, bytes))
-              : xfer("failed", { source: "origin" }, (at) => transfer.failed(at, "origin")));
+            if (!bytes) return apply(xfer("failed", { source: "origin" }, (at) => transfer.failed(at, "origin")));
+            this.counters.bytesFromOrigin += bytes.byteLength;
+            const state = xfer("delivered", { source: "origin", p, bytes: bytes.byteLength }, (at) => transfer.delivered(at, "origin", command.range, bytes));
+            const fresh = credit(state, bytes.byteLength);
+            this.multiHolder.originBytes += fresh;
+            originShare += fresh;
+            apply(state);
           });
         } else if (command.t === "cancel" || command.t === "abandon") {
           const controller = requests.get(command.peer);

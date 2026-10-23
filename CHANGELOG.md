@@ -78,6 +78,16 @@
 - Under `multiHolder`, load ranged origin pieces through the player's own
   fragment loader, so headers and credentials from `xhrSetup`, `fetchSetup`
   or a custom loader apply; a body that is not exactly the range is discarded.
+- Under `multiHolder`, a holder whose first request proves it fast takes
+  back pieces origin has not yet delivered, as many as it can finish before
+  origin is projected to, leaving busy holders their share; the first
+  verified copy wins and origin's request keeps running. Before, untested
+  holders got one trial piece each and origin the rest in one request, and
+  nothing moved that work back: over RelaySwarmKit's data channels, with
+  8 MB and origin at 300 bytes per ms, 60 of 62 pieces came from origin in
+  27.9 s against a 10 s deadline. `core.multiHolder.peerBytes` and
+  `originBytes` now count the bytes each source was first to verify, and the
+  new `unusedBytes` counts received bytes that verified nothing new.
 - Under `multiHolder`, stop asking an origin for ranges once it has answered
   one with something else, and send its later segments down the
   single-holder path for the session; counted as

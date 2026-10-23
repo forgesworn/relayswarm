@@ -293,6 +293,8 @@ pub struct TransferState {
     pub next_deadline: Option<u64>,
     pub late: bool,
     pub finished: bool,
+    /// Bytes of the object verified so far, each piece counted once.
+    pub verified_bytes: u64,
 }
 
 /// One object fetched from several holders and origin, piece by piece. Every
@@ -315,6 +317,7 @@ impl Transfer {
             next_deadline: transfer.next_deadline(),
             late: transfer.late(),
             finished: transfer.finished(),
+            verified_bytes: transfer.verified_bytes(),
         }
     }
 }

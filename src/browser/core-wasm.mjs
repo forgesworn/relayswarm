@@ -295,7 +295,8 @@ const TRANSFER_EXPORTS = ["rs_xfer_new", "rs_xfer_call", "rs_xfer_free"];
 const XFER = { start: 0, delivered: 1, failed: 2, tick: 3, state: 4, progress: 5 };
 
 /** The Rust `Transfer` for one object. Each call returns `{ commands, next,
- * late, finished, bytes }`, or null once the core has failed. Sources are a
+ * late, finished, verified, bytes }`, `verified` being the object's bytes
+ * verified so far (each piece once), or null once the core has failed. Sources are a
  * peer's numeric ID, or "origin". */
 class CoreTransfer {
   #exports; #handle; #retired; #fail;
@@ -325,7 +326,7 @@ class CoreTransfer {
       const jsonLength = new DataView(out.buffer).getUint32(0, true);
       const state = JSON.parse(decoder.decode(out.subarray(4, 4 + jsonLength)));
       const commands = state.c.map((command) => command.p ? { ...command, range: { start: command.p[0], end: command.p[1] } } : command);
-      return { commands, next: state.next, late: state.late, finished: state.finished, bytes: out.length > 4 + jsonLength ? out.subarray(4 + jsonLength) : null };
+      return { commands, next: state.next, late: state.late, finished: state.finished, verified: state.verified ?? null, bytes: out.length > 4 + jsonLength ? out.subarray(4 + jsonLength) : null };
     } catch (error) {
       this.#fail(error);
       return null;

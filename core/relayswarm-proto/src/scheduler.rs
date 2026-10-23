@@ -460,6 +460,15 @@ impl Transfer {
         self.finished
     }
 
+    /// Bytes of the object verified so far, each piece counted once
+    /// whichever source sent it first.
+    pub fn verified_bytes(&self) -> u64 {
+        (0..self.verified.len() as u32)
+            .filter(|&index| self.verified[index as usize])
+            .map(|index| piece_bytes(self.size, self.piece_size, index))
+            .sum()
+    }
+
     /// The latest plan, origin included, is projected to finish after the
     /// deadline less the origin reserve. The shell may prefer a whole-object
     /// origin fetch; the floor still applies either way.
@@ -569,6 +578,7 @@ impl Transfer {
         let pieces = self.retire(source);
         let pieces: Vec<u32> = pieces.into_iter().filter(|index| !self.covered(*index)).collect();
         self.assign(now, &pieces);
+        self.rebalance_origin(now);
     }
 
     /// Bytes received so far on the peer's in-flight request. Abandons it
@@ -733,6 +743,7 @@ impl Transfer {
         let Some(position) = lane.in_flight.iter().position(|(sent, _)| *sent == range) else {
             return;
         };
+        let (sent, first_byte_at) = (lane.in_flight[position].1, lane.first_byte_at);
         let (from, to) = self.piece_range_bytes(range);
         // A wrong length fails the source with this range still in flight,
         // so its pieces are reassigned.
@@ -762,11 +773,111 @@ impl Transfer {
         if bad {
             return self.bad_piece(now, source);
         }
+        self.measure(now, source, sent, first_byte_at, (to - from) as u64);
         self.drop_redundant(now, source);
         if self.verified.iter().all(|done| *done) {
             return self.finish();
         }
         self.issue(now, source);
+        self.rebalance_origin(now);
+    }
+
+    /// An untested peer's first verified request gives it an estimate for
+    /// the rest of this object: first byte, then rate after it.
+    fn measure(&mut self, now: u64, source: Source, sent: u64, first_byte_at: Option<u64>, bytes: u64) {
+        let shared_first_byte = non_negative(self.shared_first_byte_ms);
+        let Some(lane) = self.lanes.get_mut(&source) else { return };
+        if !matches!(source, Source::Peer(_)) || positive(lane.estimate.rate).is_some() {
+            return;
+        }
+        let first_byte = first_byte_at.map_or(shared_first_byte.unwrap_or(0.0), |at| at.saturating_sub(sent) as f64);
+        let streaming = (now as f64 - sent as f64 - first_byte).max(1.0);
+        lane.estimate.first_byte_ms = Some(first_byte);
+        lane.estimate.rate = Some(bytes as f64 / streaming);
+    }
+
+    /// Rule 9: origin's pieces not yet delivered go to idle measured peers
+    /// that can finish them before origin is projected to, or by the floor
+    /// once origin is behind. Origin's request keeps running and the first
+    /// verified copy wins; when the peers cover the rest, the object is
+    /// delivered and the shell aborts the origin fetch.
+    fn rebalance_origin(&mut self, now: u64) {
+        if self.finished || self.floor_reached {
+            return;
+        }
+        let Some(origin) = self.lanes.get(&Source::Origin) else { return };
+        let mut owed: Vec<u32> = origin
+            .in_flight
+            .iter()
+            .map(|(range, _)| *range)
+            .chain(origin.queue.iter().copied())
+            .flat_map(|range| range.start..range.end)
+            .filter(|&index| !self.verified[index as usize])
+            .collect();
+        owed.sort_unstable();
+        owed.dedup();
+        let peers = || {
+            self.lanes
+                .iter()
+                .filter(|(source, lane)| matches!(source, Source::Peer(_)) && !lane.retired)
+                .map(|(_, lane)| lane)
+        };
+        let pending: Vec<u32> = owed
+            .iter()
+            .copied()
+            .filter(|&index| !peers().any(|lane| lane.holds(index)))
+            .collect();
+        let is_idle = |lane: &Lane| lane.in_flight.is_empty() && lane.queue.is_empty() && positive(lane.estimate.rate).is_some();
+        let idle: Vec<Estimate> = peers().filter(|lane| is_idle(lane)).map(|lane| lane.estimate).collect();
+        if pending.is_empty() || idle.is_empty() {
+            return;
+        }
+        // Busy peers not yet working on origin's pieces will be idle soon:
+        // leave them their share, so the first idle peer does not take all.
+        let busy = peers()
+            .filter(|lane| !is_idle(lane) && !owed.iter().any(|&index| lane.holds(index)))
+            .count();
+        let share = (pending.len() * idle.len()).div_ceil(idle.len() + busy);
+        let floor = self.floor_at() as f64;
+        let until = if origin.finish_at > now as f64 {
+            origin.finish_at.min(floor)
+        } else {
+            floor
+        };
+        let available_ms = until - now as f64;
+        if available_ms <= 0.0 {
+            return;
+        }
+        let input = PlanInput {
+            size: self.size,
+            needed: &pending,
+            peers: &idle,
+            origin: None,
+            shared_first_byte_ms: self.shared_first_byte_ms,
+            shared_rate: self.shared_rate,
+            available_ms,
+            max_holders: idle.len(),
+        };
+        let peers = resolve(&idle, &input);
+        // Only what the peers can finish in time, taken from origin's tail.
+        let capacity: usize = peers
+            .iter()
+            .map(|(_, first_byte, rate)| ((available_ms - first_byte).max(0.0) * rate / self.piece_size as f64).floor() as usize)
+            .sum();
+        let take = capacity.min(share);
+        if take == 0 {
+            return;
+        }
+        let needed = &pending[pending.len() - take..];
+        let planned = split(&PlanInput { needed, ..input.clone() }, &peers);
+        for assignment in planned.assignments {
+            let Some(lane) = self.lanes.get_mut(&assignment.source) else {
+                continue;
+            };
+            lane.queue.extend(assignment.ranges);
+            lane.finish_at = lane.finish_at.max(now as f64 + assignment.projected_ms.max(0.0));
+            self.issue(now, assignment.source);
+        }
     }
 
     fn bad_piece(&mut self, now: u64, source: Source) {
@@ -836,6 +947,7 @@ impl Transfer {
         let pieces = self.retire(source);
         let pieces: Vec<u32> = pieces.into_iter().filter(|index| !self.covered(*index)).collect();
         self.assign(now, &pieces);
+        self.rebalance_origin(now);
     }
 
     pub fn tick(&mut self, now: u64) {
@@ -885,6 +997,7 @@ impl Transfer {
             }
         }
         self.endgame(now);
+        self.rebalance_origin(now);
     }
 
     fn queue_origin(&mut self, now: u64, range: PieceRange) {

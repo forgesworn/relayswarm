@@ -36,7 +36,13 @@ takes the rest of the tail. `Transfer` issues the ranged requests, verifies each
 against the commitment, bans a holder that sends a bad piece, reassigns
 failed work, moves outstanding pieces to origin at the deadline less
 `originReserveMs`, duplicates the last two pieces of a lagging source, and
-delivers only when the whole object matches. Fed each request's progress, it
+delivers only when the whole object matches. An untested peer is measured by
+its first verified request; once idle, a measured peer takes back pieces
+origin has not yet delivered, as many as it can finish before origin is
+projected to (or by the floor once origin is behind), from origin's tail and
+leaving busy peers their share. Origin's request keeps running and the first
+verified copy of a piece wins; when the peers cover the rest, the object is
+delivered and the shell aborts the origin fetch. Fed each request's progress, it
 abandons a peer early by the single-holder loader's rules: no first byte
 within three recent first-byte times (and 250 ms), or a flow that cannot
 finish its range by the floor even at twice its recent rate or the best

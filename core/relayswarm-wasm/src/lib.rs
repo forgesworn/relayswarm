@@ -738,6 +738,7 @@ fn transfer_frame(transfer: &mut Transfer) -> Vec<u8> {
         .collect();
     let json = serde_json::json!({
         "c": commands, "next": transfer.next_deadline(), "late": transfer.late(), "finished": transfer.finished(),
+        "verified": transfer.verified_bytes(),
     })
     .to_string();
     let mut out = (json.len() as u32).to_le_bytes().to_vec();
