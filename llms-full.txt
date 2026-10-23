@@ -968,6 +968,8 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
   module and summarises holder use, origin share, request timing and buffer
   ahead, with an optional what-if over other holder limits (an estimate that
   ignores shared uplinks).
+- Document commitment schema 3, object framing 2 and the presence `obj`
+  field in `docs/NIP-DRAFT.md`.
 - The Rust verifier now rejects a commitment whose content omits `part`, as
   the JavaScript one does (a new shared vector, 140 in all). Under
   `multiHolder`, an untested holder is planned with the shared first-byte
@@ -7554,8 +7556,9 @@ Source: [docs/NIP-DRAFT.md](https://raw.githubusercontent.com/forgesworn/relaysw
 
 This is a local specification of the implemented RelaySwarm session and browser
 object contracts. It is **not an accepted Nostr NIP**. Session wire version 3,
-commitment schemas 1 and 2, the browser object framing and native object framing
-have separate version boundaries. The original `poc.mjs` uses older plaintext
+commitment schemas 1 to 3, browser object framings 1 and 2 and native object
+framing have separate version boundaries. Schema 3 and framing 2 are
+experimental and off by default. The original `poc.mjs` uses older plaintext
 signalling and must not be described as this encrypted contract.
 
 ## Session events
@@ -7585,6 +7588,9 @@ Presence content has this shape:
 
 `role` and transport `type` are lowercase tokens, up to 32 characters, matching
 `[a-z0-9][a-z0-9-]*`. `transports` is required and contains at most eight entries.
+A capability may carry `obj`, its browser object framing version, an integer
+from 1 to 15; absent reads as 1, and other values reject the presence. v0.2.1
+accepts the field and discards it.
 `have` is required and contains at most 32 lowercase 64-character hexadecimal
 object keys. `open` is optional and advisory. An optional opaque `ticket` is a
 non-empty string of at most 2 KiB UTF-8; admission is the host's responsibility.
@@ -7641,6 +7647,21 @@ that do not implement it ignore the message and send the response in full.
 The existing bounded drain timeout closes an incomplete response; unknown or partially reliable
 channels close immediately. Host stop and admission withdrawal still close
 immediately. Upload queues and backpressure retain their original bounds.
+Framing 2 adds a piece range `"p":[start,end]` to `want` and `meta`, with `end`
+exclusive and `0 <= start < end <= 64`. Pieces are those of commitment schema 3,
+whose piece size is a function of the object size alone, so both sides derive
+the byte offsets without exchanging them. A holder that has the object answers
+with `meta` echoing the same range and `size` equal to the range's exact byte
+length, then those bytes; a range past the held object's last piece is answered
+with `none`. A malformed range closes the link. The requester closes the link
+when `meta` omits or changes the range or its size differs, which is how a
+framing 1 holder that ignores `p` and sends the whole object is detected. A
+requester sends `p` only to a holder whose current presence advertises
+`obj: 2` or higher, and a viewer advertises framing 2 only while every one of
+its links can serve ranges. A holder charges a ranged response against upload
+allowances by the bytes it sends. Requests without `p` behave exactly as in
+framing 1.
+
 Optional `contribution` and `fetching` controls coordinate serving and short
 fetch leases; they are advisory and never authorise media or spend upload
 allowance.
@@ -7666,6 +7687,18 @@ identity. This avoids treating player level indices, which codec filtering can
 renumber, as trusted media identities. Content must equal the canonical field
 order emitted by `commitmentContent` in
 [segment-commitment.mjs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/src/browser/segment-commitment.mjs).
+
+Schema 3 uses `relayswarm-segment-v3` and adds `pieceSize` and `pieces` to the
+schema 2 fields, after `encryption`. `pieceSize` must equal
+`ceil(max(65536, ceil(size / 64)) / 16384) * 16384`: at least 64 KiB, at most 64
+pieces, a multiple of 16 KiB. `pieces` holds exactly `ceil(size / pieceSize)`
+lowercase SHA-256 digests, one per piece in order; the last piece may be
+short. A receiver may verify and keep each piece as it arrives, from any
+source, and still requires the whole object to match `sha256` and `size`
+before delivery to the player. The local publisher signs schema 3 instead of
+schema 2, never both, when its `pieceCommitments` option is set. v0.2.1 and
+RelaySwarmKit v0.5.0 reject schema 3, so their viewers load those segments
+from origin.
 
 The receiver independently matches every context field. Commitments are at
 most 120 seconds old, at most 30 seconds ahead and expire within 300 seconds of

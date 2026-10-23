@@ -87,6 +87,8 @@
   module and summarises holder use, origin share, request timing and buffer
   ahead, with an optional what-if over other holder limits (an estimate that
   ignores shared uplinks).
+- Document commitment schema 3, object framing 2 and the presence `obj`
+  field in `docs/NIP-DRAFT.md`.
 - The Rust verifier now rejects a commitment whose content omits `part`, as
   the JavaScript one does (a new shared vector, 140 in all). Under
   `multiHolder`, an untested holder is planned with the shared first-byte
