@@ -52,7 +52,7 @@
 - Experimental commitment schema 3 (`relayswarm-segment-v3`): schema 2 plus
   `pieceSize` and one SHA-256 per piece, at most 64 pieces. Both verifiers
   accept it and `commitmentPieceSize` is exported; 19 new shared vectors
-  (139 in all). No publisher emits it yet.
+  (139 in all).
 - Add piece-range requests (framing 2, `"p"` on `want` and `meta`) to the
   Rust link, and `relayswarm_proto::scheduler`, which plans one schema 3
   object across up to three holders with origin for a late tail and runs the

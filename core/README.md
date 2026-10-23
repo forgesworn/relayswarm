@@ -9,8 +9,8 @@ delegation and revocation verification, ported from
 [`segment-commitment.mjs`](../src/browser/segment-commitment.mjs). Schema 3
 (`relayswarm-segment-v3`) is schema 2 plus `pieceSize` and one SHA-256 per
 piece in `pieces`, for multi-holder transfer; the piece size is fixed by the
-segment size (at least 64 KiB, at most 64 pieces, a multiple of 16 KiB). No
-publisher emits schema 3 yet and no receiver uses its pieces. It performs
+segment size (at least 64 KiB, at most 64 pieces, a multiple of 16 KiB). The
+publisher signs it with `pieceCommitments`; no receiver uses its pieces yet. It performs
 no I/O and reads no clock; callers pass the time. It reproduces the JavaScript
 semantics the verifier relies on, including `JSON.stringify` output, strict
 equality and `Number.isSafeInteger`.
