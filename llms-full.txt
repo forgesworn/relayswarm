@@ -378,6 +378,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The relay session starts once the module has loaded or failed, after at most 2 seconds; fragments loaded meanwhile go to origin. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
 | `multiHolder` | `false` | Experimental; needs `coreWasm`. A schema 3 segment (signed with the publisher's `pieceCommitments`) is fetched from several holders at once by piece range, with an HTTP `Range` fetch from origin for any tail the peers are projected to miss; every piece is verified against the commitment before the segment is delivered. A holder that stays silent or whose flow cannot finish its range in time is abandoned early, by the single-holder rules, and its pieces move to the other sources; unlike the single-holder path, a flow that stops after its first byte is also checked every 250 ms rather than left to its timeout. Used only with holders whose presence advertises object framing 2, and the viewer advertises it only while every one of its links runs in the core. Ranged origin requests go through the player's own fragment loader with `rangeStart` and `rangeEnd` set, as for an `EXT-X-BYTERANGE` segment, so headers and credentials from hls.js `xhrSetup`, `fetchSetup` or a custom loader apply. A body that is not exactly the range (a server that ignored `Range` and sent the whole segment) is discarded, and a refused range sends the segment to the whole-segment origin load. A ranged upload is charged by the bytes it sends. |
 | `maxHoldersPerObject` | `3` | Holders per segment under `multiHolder`, 1 to 8. Provisional: not yet set from a replayed field trace. |
+| `traceRequests` | `0` | Rows kept for `trace()`, 0 to 32,768, oldest dropped first: loads, eligibility decisions, peer and origin requests and multi-holder scheduler calls, enough to replay a transfer offline. For field runs that need a replayable input; it is not part of `metrics()`, so a receipt must take `trace()` itself. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 
@@ -958,6 +959,11 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 - Under `multiHolder`, load ranged origin pieces through the player's own
   fragment loader, so headers and credentials from `xhrSetup`, `fetchSetup`
   or a custom loader apply; a body that is not exactly the range is discarded.
+- Add the loader option `traceRequests` (off by default) and `trace()`: a
+  bounded ring of loads, eligibility decisions, peer and origin requests and
+  every multi-holder scheduler call with its inputs and commands. A test
+  replays a recorded transfer through the module and gets the same commands.
+  The Chrome harness takes `--trace N` and stores each viewer's trace.
 
 ## v0.2.1 (21 October 2026)
 
@@ -1372,11 +1378,19 @@ object-transfer modules into an ordinary browser page.
 ## Browser loader
 
 `createHlsSwarm(options)` returns
-`{ attach(hls), updateTicket(ticket), stop(), metrics() }`.
+`{ attach(hls), updateTicket(ticket), stop(), metrics(), trace() }`.
 `attach` wraps `hls.config.fLoader`; call it before `loadSource`. `stop` is the
 origin-only kill switch and closes connections, cancels pending work, releases
 held bytes and restores the original loader. Create a new swarm to participate
 again. Uploading defaults to off; `mode` defaults to `shadow`.
+
+`trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
+`traceRequests` (none by default): each peer-first load, eligibility
+decision, peer request and origin request (whole or ranged), joined by a load
+ID, and each multi-holder scheduler call with its inputs and the commands it
+returned, so a recorded transfer replays against the module offline. Times are
+whole milliseconds from the swarm's creation; holders are session labels, not
+keys. It is kept out of `metrics()`, which receipts snapshot repeatedly.
 
 `updateTicket(ticket)` refreshes this viewer's bounded opaque admission ticket
 without rebuilding connections, the loader or upload accounting. It returns

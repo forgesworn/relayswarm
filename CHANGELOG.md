@@ -78,6 +78,11 @@
 - Under `multiHolder`, load ranged origin pieces through the player's own
   fragment loader, so headers and credentials from `xhrSetup`, `fetchSetup`
   or a custom loader apply; a body that is not exactly the range is discarded.
+- Add the loader option `traceRequests` (off by default) and `trace()`: a
+  bounded ring of loads, eligibility decisions, peer and origin requests and
+  every multi-holder scheduler call with its inputs and commands. A test
+  replays a recorded transfer through the module and gets the same commands.
+  The Chrome harness takes `--trace N` and stores each viewer's trace.
 
 ## v0.2.1 (21 October 2026)
 

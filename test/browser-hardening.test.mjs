@@ -8,6 +8,7 @@ import { Readable } from "node:stream";
 import { readFile } from "node:fs/promises";
 import { generateSecretKey, finalizeEvent, getPublicKey } from "nostr-tools/pure";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
+import { loadCore } from "../src/browser/core-wasm.mjs";
 import { originClockOffsetMs, originClockSummary } from "../src/browser/origin-clock.mjs";
 import { PeerLink } from "../src/browser/peer-link.mjs";
 import { RelayPool, RelaySwarmSession } from "../src/relay-session.mjs";
@@ -3546,7 +3547,7 @@ function sameBytes(actual, expected, message) {
     message ?? `got ${actual.length} bytes, expected ${expected.length}`);
 }
 
-async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, originFallbackMs = 3_000, originDelayMs = 0, ignoreRanges = false }) {
+async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, originFallbackMs = 3_000, originDelayMs = 0, ignoreRanges = false, traceRequests = 0 }) {
   const bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
   // The player's loader. It answers a range from the same object; its whole
   // segment is different bytes, so a whole-segment fallback shows.
@@ -3566,7 +3567,7 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
   const signed = signedFixture({ v: 3, key, rendition: "/media/index.m3u8", playlist: "/media/index.m3u8", mediaType: "main", encryption: null,
     sha256: createHash("sha256").update(bytes).digest("hex"), size, pieceSize, pieces });
   const f = await linkedFixture({ mode: "peer-first", streamEvent: signed.options.streamEvent, getCommitment: () => signed.event, originFallbackMs,
-    segmentKey: () => "/media/seg.ts", coreWasm: multiCore, multiHolder, WebSocketImpl: memoryRelaySocket() }, RangeLoader);
+    segmentKey: () => "/media/seg.ts", coreWasm: multiCore, multiHolder, traceRequests, WebSocketImpl: memoryRelaySocket() }, RangeLoader);
   await until(() => f.swarm.metrics().core.state === "ready");
   const channels = [];
   for (const options of holders) {
@@ -3667,6 +3668,78 @@ test("multi-holder: a loader that ignores ranges sends the segment to the whole 
     sameBytes(await f.load(), new Uint8Array(32).fill(9), "the whole-segment origin bytes");
     assert.equal(f.swarm.metrics().core.multiHolder.delivered, 0);
   } finally { await f.close(); }
+});
+
+test("trace: off by default, bounded, and refused when invalid", async (t) => {
+  const f = await multiFixture(t, { holders: [{}, {}] });
+  try {
+    await f.load();
+    assert.deepEqual(f.swarm.trace(), { v: 1, capacity: 0, dropped: 0, rows: [] });
+  } finally { await f.close(); }
+  for (const traceRequests of [-1, 1.5, 32_769, "64"]) {
+    const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], mode: "shadow", traceRequests });
+    assert.equal(swarm.metrics().disabledReason, "invalid-trace", String(traceRequests));
+    swarm.stop();
+  }
+  const small = await multiFixture(t, { holders: [{}, {}], traceRequests: 3 });
+  try {
+    await small.load();
+    const trace = small.swarm.trace();
+    assert.equal(trace.rows.length, 3);
+    assert.ok(trace.dropped > 0);
+  } finally { await small.close(); }
+});
+
+test("trace: a multi-holder transfer replays from its rows alone to the same commands", async (t) => {
+  // A bad holder and a slow one, so the trace carries a ban, an abandonment,
+  // progress, origin ranges and ticks.
+  const f = await multiFixture(t, { holders: [{}, { corrupt: true }, { trickleMs: 50 }], size: 12 * 65_536, originFallbackMs: 1_500, traceRequests: 4_096 });
+  let rows;
+  try {
+    sameBytes(await f.load(), f.bytes);
+    rows = f.swarm.trace().rows;
+  } finally { await f.close(); }
+  const [load] = rows.filter((row) => row.k === "load");
+  assert.ok(load && Number.isSafeInteger(load.sn) && load.limitMs > 0, JSON.stringify(load));
+  const calls = rows.filter((row) => row.k === "xfer" && row.load === load.load);
+  assert.ok(rows.some((row) => row.k === "request" && row.load === load.load && Array.isArray(row.range)), "request rows join the load");
+  assert.ok(rows.some((row) => row.k === "origin" && row.ranged && row.load === load.load), "ranged origin rows join the load");
+  const ops = new Set(calls.map((row) => row.op));
+  for (const op of ["start", "delivered", "progress"]) assert.ok(ops.has(op), `the trace has ${op}: ${[...ops]}`);
+  const commands = calls.flatMap((row) => row.out.c.map((command) => command.t));
+  for (const t of ["ban", "abandon", "deliver"]) assert.ok(commands.includes(t), `the trace has ${t}: ${commands}`);
+
+  // Replay: a synthetic object of the recorded size, its own digests, and
+  // each recorded call at its recorded time. A delivery the recording
+  // answered with a ban is replayed corrupt.
+  const [start] = calls;
+  assert.equal(start.op, "start");
+  const object = Uint8Array.from({ length: start.size }, (_, i) => (i * 7 + 1) & 255);
+  const pieces = [];
+  for (let at = 0; at < start.size; at += start.pieceSize) pieces.push(createHash("sha256").update(object.subarray(at, at + start.pieceSize)).digest("hex"));
+  assert.equal(pieces.length, start.pieces);
+  const core = await loadCore(multiCore);
+  const transfer = core.transfer({ size: start.size, sha256: createHash("sha256").update(object).digest("hex"), pieces,
+    deadline: start.deadline, maxHolders: start.maxHolders, originReserveMs: start.originReserveMs });
+  const summary = (state) => ({ c: state.commands.map(({ t, peer, p }) => ({ t, ...(peer !== undefined ? { peer } : {}), ...(p ? { p } : {}) })),
+    next: state.next, late: state.late, finished: state.finished });
+  for (const row of calls) {
+    let state;
+    if (row.op === "start") state = transfer.start(row.at, { peers: row.peers, origin: row.origin, sharedFirstByteMs: row.sharedFirstByteMs, sharedRate: row.sharedRate });
+    else if (row.op === "delivered") {
+      const range = { start: row.p[0], end: row.p[1] };
+      const bytes = object.slice(range.start * start.pieceSize, Math.min(range.end * start.pieceSize, start.size));
+      assert.equal(bytes.byteLength, row.bytes);
+      if (row.out.c.some((command) => command.t === "ban" && command.peer === row.source)) bytes[0] ^= 0xff;
+      state = transfer.delivered(row.at, row.source, range, bytes);
+    } else if (row.op === "failed") state = transfer.failed(row.at, row.source);
+    else if (row.op === "progress") state = transfer.progress(row.at, row.source, row.received);
+    else if (row.op === "tick") state = transfer.tick(row.at);
+    else assert.fail(`unknown op ${row.op}`);
+    assert.deepEqual(summary(state), row.out, `${row.op} at ${row.at}`);
+  }
+  assert.ok(calls.at(-1).out.c.some((command) => command.t === "deliver"));
+  transfer.free();
 });
 
 test("multi-holder: without the option a schema 3 segment comes whole from one holder", async (t) => {

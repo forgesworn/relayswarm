@@ -61,6 +61,9 @@ const CORE = flag("core", "wasm");
 // --multiHolder 1: schema 3 commitments with exact playlist identity (media
 // under /media/), ranged origin responses and multiHolder viewers.
 const MULTI = flag("multiHolder", "0") === "1";
+// --trace N: each viewer keeps N trace rows (traceRequests) and its final
+// report carries swarm.trace(), so the receipt holds a replayable trace.
+const TRACE = Number(flag("trace", 0));
 const MEDIA = MULTI ? "/media/" : "/hls/";
 const FALLBACK_MS = Number(flag("fallback", 1500));
 const CHROME = flag("chrome", process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
@@ -211,6 +214,7 @@ try {
       maxPeers: String(MAX_PEERS),
       core: CORE === "wasm" ? "1" : "0",
       multi: MULTI ? "1" : "0",
+      trace: String(TRACE),
     });
     const network = { originSegmentRequests: 0 };
     tab.on("request", (request) => { if (/\/(hls|media)\/seg[0-9]+\.ts/.test(request.url())) network.originSegmentRequests++; });
@@ -269,7 +273,8 @@ try {
 
   const reports = [];
   for (const { role, tab, network, joinedAt } of pages) reports.push({ ...role, network,
-    observedSeconds: (Date.now() - joinedAt) / 1000, ...(await tab.evaluate(() => window.__viewer.report())) });
+    observedSeconds: (Date.now() - joinedAt) / 1000, ...(await tab.evaluate(() => window.__viewer.report())),
+    ...(TRACE && role.swarm ? { trace: await tab.evaluate(() => window.__viewer.trace()) } : {}) });
   const stopChecks = [];
   for (const { role, tab } of pages) {
     if (!role.swarm) continue;
@@ -359,6 +364,9 @@ try {
         for (const [name, value] of Object.entries(r.swarm.core?.multiHolder ?? {})) if (typeof value === "number") total[name] = (total[name] || 0) + value;
         return total;
       }, { enabledViewers: honest.filter((r) => r.swarm.core?.multiHolder?.enabled).length }),
+      ...(TRACE ? { trace: { viewers: honest.filter((r) => r.trace?.rows?.length).length, rows: honest.reduce((n, r) => n + (r.trace?.rows?.length ?? 0), 0),
+        dropped: honest.reduce((n, r) => n + (r.trace?.dropped ?? 0), 0),
+        xfer: honest.reduce((n, r) => n + (r.trace?.rows?.filter((row) => row.k === "xfer").length ?? 0), 0) } } : {}),
     },
     player: {
       withSwarm: honest.map((r) => ({ viewer: r.viewer, observedSeconds: r.observedSeconds, stalls: r.player.stalls, fatalErrors: r.player.fatalErrors, currentTime: Number(r.player.currentTime.toFixed(1)) })),
@@ -393,6 +401,7 @@ try {
   }
   if (MODE === "peer-first" && CORE === "wasm" && honest.some((report) => report.swarm.core?.verifier !== "wasm" || report.swarm.core.selection !== "wasm" || report.swarm.core.discovery !== "wasm" || !report.swarm.core.links?.wasm || report.swarm.core.links.js || report.swarm.core.fallbacks || !report.swarm.core.decided.wasm)) failures.push("a peer-first viewer did not link, verify, select or discover with the Rust core");
   if (MULTI && MODE === "peer-first" && CORE === "wasm" && !summary.aggregate.multiHolder.delivered) failures.push("no segment was delivered by a multi-holder transfer");
+  if (TRACE && !summary.aggregate.trace.rows) failures.push("--trace was set but no viewer recorded a trace");
   if (MODE === "peer-first" && VIEWERS >= 2) {
     const faulted = honest.find((report) => report.viewer === "v1");
     if (!faulted?.swarm.segments.commitmentRejected || !faulted?.swarm.segments.commitmentUnavailable) failures.push("invalid and stalled commitments were not exercised");

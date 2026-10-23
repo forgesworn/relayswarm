@@ -103,7 +103,11 @@ const DEFAULTS = Object.freeze({
   multiHolder: false,
   // Provisional (CORE-SPEC open question 6): not yet set from a field trace.
   maxHoldersPerObject: 3,
+  // Rows kept for trace(): every load, eligibility decision, peer and origin
+  // request, and each multi-holder scheduler call. 0 keeps none.
+  traceRequests: 0,
 });
+const TRACE_LIMIT = 32_768;
 const SAMPLE_LIMIT = 500;
 // The longest the relay session waits for an opted-in core module to load or
 // fail. A later module still takes new links, but discovery and selection
@@ -296,6 +300,7 @@ export function createHlsSwarm(options = {}) {
     updateTicket: (ticket) => swarm.updateTicket(ticket),
     stop: () => swarm.stop(),
     metrics: () => swarm.metrics(),
+    trace: () => swarm.trace(),
   };
 }
 
@@ -317,6 +322,11 @@ class HlsSwarm {
     // Session-local holder labels for local diagnostics only: small counters in
     // first-link order, never derived from a key and never sent to any peer.
     this.holderLabels = new Map();
+    this.traceRows = [];
+    this.traceDropped = 0;
+    this.traceLoads = new WeakMap();
+    this.traceLoadNext = 1;
+    this.traceBase = Math.floor(now());
     this.holderLabelNext = 1;
     this.peerRequestRecords = [];
     this.peerRequestDropped = 0;
@@ -463,6 +473,7 @@ class HlsSwarm {
       || (typeof WebAssembly === "object" && core instanceof WebAssembly.Module))) return "invalid-core-wasm";
     if (typeof this.options.multiHolder !== "boolean" || !Number.isSafeInteger(this.options.maxHoldersPerObject)
       || this.options.maxHoldersPerObject < 1 || this.options.maxHoldersPerObject > 8) return "invalid-multi-holder";
+    if (!Number.isSafeInteger(this.options.traceRequests) || this.options.traceRequests < 0 || this.options.traceRequests > TRACE_LIMIT) return "invalid-trace";
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (this.options.reserveUploadBytes !== undefined && typeof this.options.reserveUploadBytes !== "function") return "invalid-upload-reservation";
     if (typeof this.options.serve !== "boolean" || typeof this.options.serveOnCellular !== "boolean") return "invalid-serve-option";
@@ -553,6 +564,43 @@ class HlsSwarm {
     try { this.session?.close(); } catch {}
     try { this.pool?.close(); } catch {}
     try { this.options.onMetrics?.(this.metrics()); } catch {}
+  }
+
+  /**
+   * The request trace kept under `traceRequests`: rows in order, times in
+   * whole milliseconds since the swarm was created, holders by the same
+   * session labels as the diagnostics. Multi-holder `xfer` rows are each
+   * scheduler call with its inputs and the commands it returned, so a trace
+   * replays against another scheduler configuration.
+   */
+  trace() {
+    return { v: 1, capacity: this.options.traceRequests, dropped: this.traceDropped, rows: this.traceRows.map((row) => structuredClone(row)) };
+  }
+
+  #trace(row) {
+    if (!this.options.traceRequests) return;
+    try {
+      if (this.traceRows.length >= this.options.traceRequests) { this.traceRows.shift(); this.traceDropped = increment(this.traceDropped); }
+      this.traceRows.push(row);
+    } catch {}
+  }
+
+  #traceAt(at = now()) { return Math.floor(at) - this.traceBase; }
+
+  // A load ID for the peer-first loader's context, so its rows join.
+  #traceLoad(context) {
+    try { return (context && this.traceLoads.get(context)) ?? null; } catch { return null; }
+  }
+
+  #traceBegin(context, budgetMs, limitMs, budgetGeometry) {
+    if (!this.options.traceRequests) return;
+    try {
+      const load = this.traceLoadNext++;
+      this.traceLoads.set(context, load);
+      const integer = (value) => Number.isSafeInteger(value) ? value : null;
+      this.#trace({ k: "load", load, at: this.#traceAt(), sn: integer(context.frag?.sn), level: integer(context.frag?.level), cc: integer(context.frag?.cc),
+        budgetMs: Math.round(budgetMs), limitMs: Math.round(limitMs), budgetGeometry: { ...budgetGeometry } });
+    } catch {}
   }
 
   metrics() {
@@ -831,15 +879,18 @@ class HlsSwarm {
             if (!completed && !swarm.stopped) this.releaseFetch = swarm.#claimOrigin(key);
           }).catch(() => {});
           const finishOrigin = () => { completed = true; this.releaseFetch?.(); this.releaseFetch = null; };
+          const traceOrigin = (outcome, bytes = null) => swarm.options.traceRequests && swarm.#trace({ k: "origin", load: swarm.#traceLoad(context), at: swarm.#traceAt(originStarted),
+            ms: Math.round(now() - originStarted), ranged: false, outcome, bytes });
           this.inner.load(context, config, {
             ...callbacks,
-            onError: (...args) => { finishOrigin(); callbacks.onError?.(...args); },
-            onTimeout: (...args) => { finishOrigin(); callbacks.onTimeout?.(...args); },
-            onAbort: (...args) => { finishOrigin(); callbacks.onAbort?.(...args); },
+            onError: (...args) => { traceOrigin("error"); finishOrigin(); callbacks.onError?.(...args); },
+            onTimeout: (...args) => { traceOrigin("timeout"); finishOrigin(); callbacks.onTimeout?.(...args); },
+            onAbort: (...args) => { traceOrigin("abort"); finishOrigin(); callbacks.onAbort?.(...args); },
             onSuccess: (response, stats, ctx, details) => {
               const receivedMs = firstByteWallMs(stats);
               let copy = null;
               try { if (response.data?.byteLength) copy = response.data.slice(0); } catch {}
+              traceOrigin("payload", copy?.byteLength ?? null);
               completed = true;
               pushSample(swarm.originLatencySamples, now() - originStarted);
               swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - originStarted);
@@ -872,6 +923,7 @@ class HlsSwarm {
         // past the buffered playback less the origin reserve.
         const ceiling = Math.max(swarm.options.originFallbackMs, swarm.options.maxPeerWaitMs);
         const limitMs = Math.max(budgetMs, Math.min(ceiling, budgetGeometry.uncappedMs ?? budgetMs));
+        swarm.#traceBegin(context, budgetMs, limitMs, budgetGeometry);
         // Ranged origin pieces go through the player's loader, as the whole would.
         const origin = { Loader: BaseLoader, config: this.hlsConfig, loaderConfig: config };
         const plan = { deadline: t0 + budgetMs, limit: t0 + limitMs, expired: false, onDeadline: null, origin, extend: (to) => {
@@ -1103,6 +1155,7 @@ class HlsSwarm {
         this.peerEligibilityDropped = increment(this.peerEligibilityDropped);
       }
       this.peerEligibilityRecords.push(record);
+      this.#trace({ k: "eligibility", load: this.#traceLoad(context), at: this.#traceAt(), ...structuredClone(record) });
     } catch {}
   }
 
@@ -1359,6 +1412,16 @@ class HlsSwarm {
       deadline, maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0 });
     if (!transfer) return undefined;
     this.multiHolder.transfers += 1;
+    // Each scheduler call, with its time, inputs and returned commands, so
+    // the trace replays it (times relative to the trace base).
+    const load = this.#traceLoad(context), base = this.traceBase;
+    const xfer = (op, input, call) => {
+      const at = Math.floor(now()), state = call(at);
+      if (this.options.traceRequests) this.#trace({ k: "xfer", load, op, at: at - base, ...input, out: state && {
+        c: state.commands.map(({ t, peer, p }) => ({ t, ...(peer !== undefined ? { peer } : {}), ...(p ? { p: [...p] } : {}) })),
+        next: state.next === null ? null : state.next - base, late: state.late, finished: state.finished } });
+      return state;
+    };
     plan.extend(plan.limit);
     const pieceSize = commitment.pieceSize;
     const bytesOf = ({ start, end }) => [start * pieceSize, Math.min(end * pieceSize, commitment.size)];
@@ -1400,11 +1463,11 @@ class HlsSwarm {
             const at = now();
             if (finished || requests.get(command.peer) !== controller || at - reportedAt < PROGRESS_REPORT_MS) return;
             reportedAt = at;
-            apply(transfer.progress(at, command.peer, received));
+            apply(xfer("progress", { source: command.peer, received }, (floored) => transfer.progress(floored, command.peer, received)));
           };
           link.request(key, remainingMs, { signal: controller.signal, expectedSize: to - from, onProgress,
             range: { start: command.range.start, end: command.range.end, objectSize: commitment.size },
-            onResult: (result) => { report = result; this.#peerRequestResult(context, link, remainingMs, result); } }).then((bytes) => {
+            onResult: (result) => { report = result; this.#peerRequestResult(context, link, remainingMs, result, command.range); } }).then((bytes) => {
             if (requests.get(command.peer) === controller) requests.delete(command.peer);
             slowestMs = Math.max(slowestMs, now() - startedAt);
             if (finished) return;
@@ -1414,27 +1477,32 @@ class HlsSwarm {
             if (bytes) {
               this.peerSelection.record(link, now() - startedAt, bytes.byteLength);
               this.multiHolder.peerBytes += bytes.byteLength;
-              apply(transfer.delivered(now(), command.peer, command.range, bytes));
+              apply(xfer("delivered", { source: command.peer, p: [command.range.start, command.range.end], bytes: bytes.byteLength },
+                (at) => transfer.delivered(at, command.peer, command.range, bytes)));
             } else {
               if (!controller.signal.aborted || abandoned.has(controller)) this.peerSelection.record(link, now() - startedAt);
-              apply(transfer.failed(now(), command.peer));
+              apply(xfer("failed", { source: command.peer }, (at) => transfer.failed(at, command.peer)));
             }
-          }, () => { if (!finished) apply(transfer.failed(now(), command.peer)); });
+          }, () => { if (!finished) apply(xfer("failed", { source: command.peer }, (at) => transfer.failed(at, command.peer))); });
         } else if (command.t === "origin") {
           releaseOrigin ??= this.#claimOrigin(key);
-          const controller = new AbortController(), [from, to] = bytesOf(command.range);
+          const controller = new AbortController(), [from, to] = bytesOf(command.range), originAt = now();
           originRequests.add(controller);
           this.multiHolder.originRanges += 1;
           (plan.origin?.Loader ? loadOriginRange(plan.origin, context, from, to, { signal: controller.signal })
             : fetchOriginRange(context, from, to, { signal: controller.signal })).then((bytes) => {
             originRequests.delete(controller);
+            if (this.options.traceRequests) this.#trace({ k: "origin", load, at: this.#traceAt(originAt), ms: Math.round(now() - originAt), ranged: true,
+              range: [command.range.start, command.range.end], outcome: bytes ? "payload" : finished ? "abort" : "none", bytes: bytes?.byteLength ?? null });
             if (finished) return;
             if (bytes) {
               this.multiHolder.originBytes += bytes.byteLength;
               this.counters.bytesFromOrigin += bytes.byteLength;
               originShare += bytes.byteLength;
             }
-            apply(bytes ? transfer.delivered(now(), "origin", command.range, bytes) : transfer.failed(now(), "origin"));
+            const p = [command.range.start, command.range.end];
+            apply(bytes ? xfer("delivered", { source: "origin", p, bytes: bytes.byteLength }, (at) => transfer.delivered(at, "origin", command.range, bytes))
+              : xfer("failed", { source: "origin" }, (at) => transfer.failed(at, "origin")));
           });
         } else if (command.t === "cancel" || command.t === "abandon") {
           const controller = requests.get(command.peer);
@@ -1464,17 +1532,20 @@ class HlsSwarm {
         if (!state) return finish(null); // the module failed
         for (const command of state.commands) { run(command, state); if (finished) return; }
         tickTimer = clear(tickTimer);
-        if (state.next !== null) tickTimer = this.#after(Math.max(0, state.next - now()), () => { tickTimer = null; apply(transfer.tick(now())); });
+        if (state.next !== null) tickTimer = this.#after(Math.max(0, state.next - now()), () => { tickTimer = null; apply(xfer("tick", {}, (at) => transfer.tick(at))); });
       };
       // At the loader's deadline the transfer hands its pieces to origin and
       // has the origin reserve to finish before the whole-segment fallback.
       plan.onDeadline = () => {
         if (finished) return false;
-        apply(transfer.tick(now()));
+        apply(xfer("tick", {}, (at) => transfer.tick(at)));
         if (!finished && backstop === null) backstop = this.#after(this.options.originReserveMs, () => { backstop = null; finish(null); });
         return true;
       };
-      const started = transfer.start(now(), { peers, origin, sharedFirstByteMs: this.peerSelection.firstByteMs(), sharedRate: this.peerSelection.rate() });
+      const estimates = { peers, origin, sharedFirstByteMs: this.peerSelection.firstByteMs(), sharedRate: this.peerSelection.rate() };
+      const started = xfer("start", { size: commitment.size, pieces: commitment.pieces.length, pieceSize, deadline: deadline - base,
+        maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...structuredClone(estimates),
+        holders: [...ids].map(([id, link]) => [id, this.#holderLabel(link.pubkey)]) }, (at) => transfer.start(at, estimates));
       if (started?.late) this.multiHolder.late += 1;
       apply(started);
     });
@@ -1535,7 +1606,7 @@ class HlsSwarm {
     return state;
   }
 
-  #peerRequestResult(context, link, remainingMs, result) {
+  #peerRequestResult(context, link, remainingMs, result, range = null) {
     try {
       if (!PEER_REQUEST_OUTCOMES.includes(result.outcome)) return;
       const numeric = (value) => Number.isFinite(value) && value >= 0 ? value : null;
@@ -1557,6 +1628,7 @@ class HlsSwarm {
         this.peerRequestDropped = increment(this.peerRequestDropped);
       }
       this.peerRequestRecords.push(record);
+      this.#trace({ k: "request", load: this.#traceLoad(context), at: this.#traceAt(), range: range ? [range.start, range.end] : null, ...record });
     } catch {}
   }
 

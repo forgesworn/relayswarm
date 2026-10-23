@@ -33,11 +33,19 @@ object-transfer modules into an ordinary browser page.
 ## Browser loader
 
 `createHlsSwarm(options)` returns
-`{ attach(hls), updateTicket(ticket), stop(), metrics() }`.
+`{ attach(hls), updateTicket(ticket), stop(), metrics(), trace() }`.
 `attach` wraps `hls.config.fLoader`; call it before `loadSource`. `stop` is the
 origin-only kill switch and closes connections, cancels pending work, releases
 held bytes and restores the original loader. Create a new swarm to participate
 again. Uploading defaults to off; `mode` defaults to `shadow`.
+
+`trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
+`traceRequests` (none by default): each peer-first load, eligibility
+decision, peer request and origin request (whole or ranged), joined by a load
+ID, and each multi-holder scheduler call with its inputs and the commands it
+returned, so a recorded transfer replays against the module offline. Times are
+whole milliseconds from the swarm's creation; holders are session labels, not
+keys. It is kept out of `metrics()`, which receipts snapshot repeatedly.
 
 `updateTicket(ticket)` refreshes this viewer's bounded opaque admission ticket
 without rebuilding connections, the loader or upload accounting. It returns

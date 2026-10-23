@@ -57,6 +57,7 @@ const swarm = useSwarm
       originFallbackMs: Number(params.get("fallbackMs") || 1500),
       ...(params.get("core") === "1" ? { coreWasm: "/relayswarm-core.wasm" } : {}),
       ...(params.get("multi") === "1" ? { multiHolder: true } : {}),
+      ...(Number(params.get("trace")) > 0 ? { traceRequests: Number(params.get("trace")) } : {}),
       metricsIntervalMs: 5000,
       onMetrics: (metrics) => {
         const atMs = Math.round(performance.now());
@@ -105,4 +106,5 @@ window.__viewer = {
   stop: () => swarm?.stop(),
   loaderRestored: () => !hls.config.fLoader,
   stoppedMetrics: () => swarm?.metrics(),
+  trace: () => swarm?.trace() ?? null,
 };
