@@ -21,10 +21,7 @@ func json(_ value: Any) -> String {
     if value is NSNull { return "null" }
     if exactly(Bool.self) { return (value as! Bool) ? "true" : "false" }
     if exactly(Double.self) { let double = value as! Double; return double.isFinite ? "\(double)" : "null" }
-    if exactly(Int.self) { return "\(value as! Int)" }
-    if exactly(Int64.self) { return "\(value as! Int64)" }
-    if exactly(UInt64.self) { return "\(value as! UInt64)" }
-    if exactly(UInt32.self) { return "\(value as! UInt32)" }
+    if let integer = value as? any BinaryInteger { return "\(integer)" }
     if exactly(String.self) {
         var out = "\""
         // Non-ASCII as UTF-16 escapes, so the output encoding never matters.
