@@ -221,7 +221,7 @@ jobs:
       # In core/, so the targets go to the toolchain rust-toolchain.toml pins.
       - name: Rust targets for iPhone, the simulator and macOS
         working-directory: core
-        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios aarch64-apple-darwin x86_64-apple-darwin
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin
       # Builds the XCFramework and package, links the smoke for iPhone and
       # runs it on macOS and in an iPhone simulator.
       - name: Package, link and replay

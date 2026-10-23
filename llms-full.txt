@@ -994,7 +994,7 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
   traces, a transfer, a piece range exchange and the seeded selection and
   discovery sequences through generated bindings, and CI runs both.
   `npm run build:ffi:apple` packages it as a Swift package with an
-  XCFramework for iPhone, the iOS simulator and macOS (iOS 16, macOS 14);
+  arm64 XCFramework for iPhone, the iOS simulator and macOS (iOS 16, macOS 14);
   `npm run test:ffi:apple` runs the same checks against the package on macOS
   and in an iPhone simulator, and links it for iPhone. RelaySwarmKit does not
   use it yet.

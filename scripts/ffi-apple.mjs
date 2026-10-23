@@ -9,11 +9,13 @@
 //
 // --check builds the smoke program (core/relayswarm-ffi/smoke/main.swift)
 // against the package with xcodebuild for iPhone, the simulator and macOS,
-// then runs the macOS build through scripts/ffi-smoke.mjs, as arm64 and, when
-// Rosetta is installed, as x86_64. The iPhone build is only linked.
+// then runs the macOS build through scripts/ffi-smoke.mjs. The iPhone build
+// is only linked. Apple silicon only: there are no x86_64 slices, so an app's
+// release build for the simulator or macOS must build arm64 alone
+// (ARCHS=arm64, or EXCLUDED_ARCHS=x86_64).
 // --simulator also runs the simulator build in an available iPhone
 // simulator, booting one and shutting it down again if none is booted.
-// Needs a Mac with Xcode and the five Rust targets listed below.
+// Needs a Mac with Xcode and the three Rust targets listed below.
 
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -37,8 +39,8 @@ const IOS = "16.0";
 const MACOS = "14.0";
 const SLICES = [
   { name: "ios", targets: ["aarch64-apple-ios"], env: { IPHONEOS_DEPLOYMENT_TARGET: IOS }, minimum: IOS },
-  { name: "ios-simulator", targets: ["aarch64-apple-ios-sim", "x86_64-apple-ios"], env: { IPHONEOS_DEPLOYMENT_TARGET: IOS }, minimum: IOS },
-  { name: "macos", targets: ["aarch64-apple-darwin", "x86_64-apple-darwin"], env: { MACOSX_DEPLOYMENT_TARGET: MACOS }, minimum: MACOS },
+  { name: "ios-simulator", targets: ["aarch64-apple-ios-sim"], env: { IPHONEOS_DEPLOYMENT_TARGET: IOS }, minimum: IOS },
+  { name: "macos", targets: ["aarch64-apple-darwin"], env: { MACOSX_DEPLOYMENT_TARGET: MACOS }, minimum: MACOS },
 ];
 
 const installed = run("rustup", ["target", "list", "--installed"]).toString("utf8").split("\n");
@@ -106,7 +108,7 @@ rmSync(xcframework, { recursive: true, force: true });
 run("xcodebuild", ["-create-xcframework", ...libraries.flatMap((library) => ["-library", library, "-headers", headers]),
   "-output", xcframework], { stdio: "inherit" });
 cpSync(join(bindings, "relayswarm_ffi.swift"), join(apple, "Sources/RelaySwarmCore/relayswarm_ffi.swift"));
-console.log(`Apple package: ${apple} (iPhone arm64, simulator arm64 and x86_64, macOS arm64 and x86_64; iOS ${IOS}, macOS ${MACOS})`);
+console.log(`Apple package: ${apple} (arm64 for iPhone, the simulator and macOS; iOS ${IOS}, macOS ${MACOS})`);
 
 if (!options.has("--check")) process.exit(0);
 
@@ -137,7 +139,7 @@ for (const [platform, destination, folder] of [
   ["macOS", "generic/platform=macOS", "Release"],
 ]) {
   run("xcodebuild", ["build", "-quiet", "-scheme", "Smoke", "-configuration", "Release", "-destination", destination,
-    "-derivedDataPath", derived, "CODE_SIGNING_ALLOWED=NO"], { cwd: smoke, stdio: "inherit" });
+    "-derivedDataPath", derived, "ARCHS=arm64", "CODE_SIGNING_ALLOWED=NO"], { cwd: smoke, stdio: "inherit" });
   products[platform] = join(derived, "Build/Products", folder, "Smoke");
   if (!existsSync(products[platform])) throw new Error(`xcodebuild left no smoke for ${platform}`);
   console.log(`smoke built for ${platform}: ${run("lipo", ["-archs", products[platform]]).toString("utf8").trim()}`);
@@ -145,15 +147,7 @@ for (const [platform, destination, folder] of [
 
 const check = (label, command) => execFileSync(process.execPath, [join(root, "scripts/ffi-smoke.mjs"), "swift", label, "--", ...command],
   { cwd: root, stdio: "inherit" });
-check("Apple package on macOS arm64", ["arch", "-arm64", products.macOS]);
-let rosetta = true;
-try {
-  execFileSync("arch", ["-x86_64", "/usr/bin/true"], { stdio: "ignore" });
-} catch {
-  rosetta = false;
-}
-if (rosetta) check("Apple package on macOS x86_64 (Rosetta)", ["arch", "-x86_64", products.macOS]);
-else console.log("macOS x86_64 slice built but not run: Rosetta is not installed");
+check("Apple package on macOS", [products.macOS]);
 
 if (options.has("--simulator")) {
   const { devices } = JSON.parse(run("xcrun", ["simctl", "list", "devices", "available", "--json"]).toString("utf8"));

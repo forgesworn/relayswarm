@@ -199,19 +199,21 @@ verifies its SHA-256. Generate bindings from an unstripped build: the release
 profile strips symbols, and on Linux that removes the UniFFI metadata.
 
 `npm run build:ffi:apple` packages the facade for Apple platforms as the
-Swift package in `core/apple`: release static libraries for iPhone (arm64),
-the iOS simulator (arm64, x86_64) and macOS (arm64, x86_64), for iOS 16 and
+Swift package in `core/apple`: arm64 release static libraries for iPhone,
+the iOS simulator and macOS, for iOS 16 and
 macOS 14 as RelaySwarmKit requires, in `relayswarm_ffiFFI.xcframework`, with
 the generated bindings as the `RelaySwarmCore` library. Both are built into
 `core/apple` and git-ignored, so run the script before using the package; it
-needs Xcode and the five Rust targets it names. It refuses a library with an
+needs Xcode and the three Rust targets it names. It refuses a library with an
 object built for a newer OS than the package declares.
 `npm run test:ffi:apple` also links the smoke program against the package
 with `xcodebuild` for iPhone, the simulator and macOS, and runs the same
-checks on macOS (arm64, and x86_64 under Rosetta) and in an iPhone simulator;
+checks on macOS and in an iPhone simulator;
 CI runs it on macOS. The iPhone build is only linked: nothing here runs on a
-phone. The package sits in a subdirectory, so it is used by local path, not
-by Git URL, and there is no Android library. RelaySwarmKit does not use the
+phone. There are no Intel slices, so an app's release build for the
+simulator or macOS must build arm64 alone (`ARCHS=arm64` or
+`EXCLUDED_ARCHS=x86_64`). The package sits in a subdirectory, so it is used
+by local path, not by Git URL, and there is no Android library. RelaySwarmKit does not use the
 package yet.
 
 Release builds abort on panic, so a panic in the core ends the host process rather
