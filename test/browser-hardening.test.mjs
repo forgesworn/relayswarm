@@ -3546,15 +3546,27 @@ function sameBytes(actual, expected, message) {
     message ?? `got ${actual.length} bytes, expected ${expected.length}`);
 }
 
-async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, originFallbackMs = 3_000, originDelayMs = 0 }) {
+async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, originFallbackMs = 3_000, originDelayMs = 0, ignoreRanges = false }) {
   const bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
+  // The player's loader. It answers a range from the same object; its whole
+  // segment is different bytes, so a whole-segment fallback shows.
+  const ranges = [], rangeLoaders = [];
+  class RangeLoader extends Loader {
+    constructor(config) { super(); this.config = config; }
+    load(context, config, callbacks) {
+      if (!context.rangeEnd || ignoreRanges) return super.load(context, config, callbacks);
+      rangeLoaders.push({ config: this.config, loaderConfig: config, context });
+      ranges.push([context.rangeStart, context.rangeEnd - 1]);
+      setTimeout(() => callbacks.onSuccess({ data: bytes.slice(context.rangeStart, context.rangeEnd).buffer }, this.stats, context, null), originDelayMs);
+    }
+  }
   const pieceSize = commitmentPieceSize(size), pieces = [];
   for (let at = 0; at < size; at += pieceSize) pieces.push(createHash("sha256").update(bytes.subarray(at, at + pieceSize)).digest("hex"));
   const key = createHash("sha256").update(`${base.swarmId}\n/media/seg.ts`).digest("hex");
   const signed = signedFixture({ v: 3, key, rendition: "/media/index.m3u8", playlist: "/media/index.m3u8", mediaType: "main", encryption: null,
     sha256: createHash("sha256").update(bytes).digest("hex"), size, pieceSize, pieces });
   const f = await linkedFixture({ mode: "peer-first", streamEvent: signed.options.streamEvent, getCommitment: () => signed.event, originFallbackMs,
-    segmentKey: () => "/media/seg.ts", coreWasm: multiCore, multiHolder, WebSocketImpl: memoryRelaySocket() });
+    segmentKey: () => "/media/seg.ts", coreWasm: multiCore, multiHolder, WebSocketImpl: memoryRelaySocket() }, RangeLoader);
   await until(() => f.swarm.metrics().core.state === "ready");
   const channels = [];
   for (const options of holders) {
@@ -3565,17 +3577,11 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
   for (const peer of f.peers) peer.announcePresence({ role: "viewer", open: true, have: [key],
     transports: [{ type: "webrtc", publicKey: peer.pubkey, ...(framing === 2 ? { obj: 2 } : {}) }] });
   await until(() => f.swarm.metrics().peers.openPeersKnown === f.peers.length);
-  // Origin answers ranges from the same object; the fake loader's whole
-  // segment is different bytes, so a whole-segment fallback shows.
-  const ranges = [];
-  t.mock.method(globalThis, "fetch", async (_url, init) => {
-    const [, first, last] = /bytes=(\d+)-(\d+)/u.exec(init.headers.Range).map(Number);
-    ranges.push([first, last]);
-    if (originDelayMs) await sleep(originDelayMs);
-    return new Response(bytes.slice(first, last + 1), { status: 206, headers: { "content-range": `bytes ${first}-${last}/${bytes.length}` } });
-  });
-  const load = async () => new Uint8Array((await new Promise((resolve) => new f.hls.config.fLoader({}).load(multiContext, {}, { onSuccess: resolve }))).data);
-  return { ...f, bytes, channels, load, pieceSize, ranges };
+  // Plain fetch is not the origin path when the player's loader is known.
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("ranged origin load bypassed the player's loader"); });
+  const hlsConfig = { xhrSetup: () => {} }, loaderConfig = { loadPolicy: { maxTimeToFirstByteMs: 10_000, maxLoadTimeMs: 10_000 } };
+  const load = async () => new Uint8Array((await new Promise((resolve) => new f.hls.config.fLoader(hlsConfig).load(multiContext, loaderConfig, { onSuccess: resolve }))).data);
+  return { ...f, bytes, channels, load, pieceSize, ranges, rangeLoaders, hlsConfig, loaderConfig };
 }
 
 test("multi-holder: two framing 2 holders each send pieces of one schema 3 segment", async (t) => {
@@ -3637,6 +3643,29 @@ test("multi-holder: a holder too slow for the deadline is abandoned early and it
     assert.ok(f.channels[1].cancels === 1 || f.channels[1].readyState === "closed", "the slow holder's request was stopped");
     assert.equal(f.channels[1].wants.length, 1, "and it was given no more work");
     assert.equal(multiHolder.peerBytes + multiHolder.originBytes, f.bytes.length);
+  } finally { await f.close(); }
+});
+
+test("multi-holder: origin ranges go through the player's loader with its config", async (t) => {
+  const f = await multiFixture(t, { holders: [{ silent: true }], size: 12 * 65_536, originFallbackMs: 400 });
+  try {
+    sameBytes(await f.load(), f.bytes);
+    assert.ok(f.rangeLoaders.length > 0);
+    for (const { config, loaderConfig, context } of f.rangeLoaders) {
+      assert.equal(config, f.hlsConfig, "the hls.js config, with its xhrSetup");
+      assert.equal(loaderConfig, f.loaderConfig, "the fragment's own load policy");
+      assert.equal(context.url, multiContext.url);
+      assert.equal(context.frag, multiContext.frag);
+    }
+    assert.equal(multiContext.rangeEnd, undefined, "the player's context is not changed");
+  } finally { await f.close(); }
+});
+
+test("multi-holder: a loader that ignores ranges sends the segment to the whole origin load", async (t) => {
+  const f = await multiFixture(t, { holders: [{ silent: true }], size: 12 * 65_536, originFallbackMs: 400, ignoreRanges: true });
+  try {
+    sameBytes(await f.load(), new Uint8Array(32).fill(9), "the whole-segment origin bytes");
+    assert.equal(f.swarm.metrics().core.multiHolder.delivered, 0);
   } finally { await f.close(); }
 });
 

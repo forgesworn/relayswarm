@@ -35,7 +35,7 @@ import { NeighbourDiscovery } from "./neighbour-discovery.mjs";
 import { boundedOperation } from "./bounded-operation.mjs";
 import { commitmentPieceSize, validStreamAuthorisation, verifySegmentCommitment, segmentMediaContext } from "./segment-commitment.mjs";
 import { loadCore } from "./core-wasm.mjs";
-import { fetchOriginRange } from "./origin-range.mjs";
+import { fetchOriginRange, loadOriginRange } from "./origin-range.mjs";
 
 export const HLS_SWARM_METRICS_VERSION = 2;
 
@@ -774,6 +774,7 @@ class HlsSwarm {
       static relayswarmShadow = true;
       constructor(config) {
         this.inner = new BaseLoader(config);
+        this.hlsConfig = config;
         this.active = null;
         this.peerStats = null;
         this.peerContext = null;
@@ -871,7 +872,9 @@ class HlsSwarm {
         // past the buffered playback less the origin reserve.
         const ceiling = Math.max(swarm.options.originFallbackMs, swarm.options.maxPeerWaitMs);
         const limitMs = Math.max(budgetMs, Math.min(ceiling, budgetGeometry.uncappedMs ?? budgetMs));
-        const plan = { deadline: t0 + budgetMs, limit: t0 + limitMs, expired: false, onDeadline: null, extend: (to) => {
+        // Ranged origin pieces go through the player's loader, as the whole would.
+        const origin = { Loader: BaseLoader, config: this.hlsConfig, loaderConfig: config };
+        const plan = { deadline: t0 + budgetMs, limit: t0 + limitMs, expired: false, onDeadline: null, origin, extend: (to) => {
           const target = Math.min(plan.limit, to);
           if (this.active !== token || target <= plan.deadline) return false;
           plan.deadline = target;
@@ -1422,7 +1425,8 @@ class HlsSwarm {
           const controller = new AbortController(), [from, to] = bytesOf(command.range);
           originRequests.add(controller);
           this.multiHolder.originRanges += 1;
-          fetchOriginRange(context, from, to, { signal: controller.signal }).then((bytes) => {
+          (plan.origin?.Loader ? loadOriginRange(plan.origin, context, from, to, { signal: controller.signal })
+            : fetchOriginRange(context, from, to, { signal: controller.signal })).then((bytes) => {
             originRequests.delete(controller);
             if (finished) return;
             if (bytes) {

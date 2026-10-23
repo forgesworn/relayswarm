@@ -75,6 +75,9 @@
   single-holder rules, and move its pieces, instead of waiting for the
   deadline; counted as `core.multiHolder.abandoned`. Unlike the single-holder
   path, a flow that stops after its first byte is also rechecked every 250 ms.
+- Under `multiHolder`, load ranged origin pieces through the player's own
+  fragment loader, so headers and credentials from `xhrSetup`, `fetchSetup`
+  or a custom loader apply; a body that is not exactly the range is discarded.
 
 ## v0.2.1 (21 October 2026)
 
