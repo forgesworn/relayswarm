@@ -26,9 +26,11 @@ export function originRangeFor(context, from, to) {
  * instance of the player's loader: `origin` is `{ Loader, config,
  * loaderConfig }` as hls.js gave them. Resolves to the bytes, or null on any
  * error, abort or a body that is not exactly the range (a server that
- * ignored `Range` sends the whole segment).
+ * ignored `Range` sends the whole segment). A successful load of any other
+ * length also calls `onIgnored`: the loader has already downloaded it, so
+ * the caller should stop asking that origin for ranges.
  */
-export function loadOriginRange(origin, context, from, to, { signal } = {}) {
+export function loadOriginRange(origin, context, from, to, { signal, onIgnored } = {}) {
   const range = originRangeFor(context, from, to);
   if (!range || typeof origin?.Loader !== "function" || typeof context?.url !== "string" || signal?.aborted) return Promise.resolve(null);
   return new Promise((resolve) => {
@@ -50,7 +52,11 @@ export function loadOriginRange(origin, context, from, to, { signal } = {}) {
       loader = new origin.Loader(origin.config);
       signal?.addEventListener("abort", onAbort, { once: true });
       loader.load({ ...context, responseType: "arraybuffer", rangeStart: range.first, rangeEnd: range.last + 1 }, origin.loaderConfig ?? {}, {
-        onSuccess: (response) => settle(exact(response?.data)),
+        onSuccess: (response) => {
+          const bytes = exact(response?.data);
+          if (!bytes && !settled) { try { onIgnored?.(); } catch {} }
+          settle(bytes);
+        },
         onError: () => settle(null), onTimeout: () => settle(null), onAbort: () => settle(null),
       });
     } catch { settle(null); }
@@ -68,20 +74,22 @@ function matchingContentRange(header, { first, last }) {
  * Fetch bytes `from..to` (end exclusive) of the segment at `context.url`.
  * Resolves to the bytes, or null when the origin ignored or misanswered the
  * range: a 200 is never sliced, since the server did not honour `Range`.
+ * A 200, or a 206 that is not the range asked for, also calls `onIgnored`.
  */
-export async function fetchOriginRange(context, from, to, { signal, fetchImpl = globalThis.fetch } = {}) {
+export async function fetchOriginRange(context, from, to, { signal, onIgnored, fetchImpl = globalThis.fetch } = {}) {
   const range = originRangeFor(context, from, to);
   if (!range || typeof context?.url !== "string" || typeof fetchImpl !== "function") return null;
   let response;
   try {
     response = await fetchImpl(context.url, { headers: { Range: `bytes=${range.first}-${range.last}` }, signal, credentials: "same-origin" });
   } catch { return null; }
+  const ignored = () => { try { onIgnored?.(); } catch {} return null; };
   try {
     if (response.status !== 206 || !matchingContentRange(response.headers.get("content-range"), range)) {
       try { await response.body?.cancel(); } catch {}
-      return null;
+      return response.status === 200 || response.status === 206 ? ignored() : null;
     }
     const bytes = new Uint8Array(await response.arrayBuffer());
-    return bytes.byteLength === to - from ? bytes : null;
+    return bytes.byteLength === to - from ? bytes : ignored();
   } catch { return null; }
 }

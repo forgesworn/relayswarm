@@ -136,6 +136,10 @@ function defaultSegmentKey(url) {
   return parsed.pathname;
 }
 
+function urlOrigin(url) {
+  try { return new URL(url, globalThis.location?.href).origin; } catch { return String(url); }
+}
+
 function percentile(values, fraction) {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -359,7 +363,10 @@ class HlsSwarm {
     this.remoteFraming = new Map();
     this.transferIds = new WeakMap();
     this.nextTransferId = 1;
-    this.multiHolder = { transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, originRanges: 0 };
+    this.multiHolder = { transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, originRanges: 0, originRangesIgnored: 0 };
+    // Origins (scheme, host and port) that answered a range with something
+    // else; multi-holder transfer skips their segments for the session.
+    this.originsWithoutRanges = new Set();
     // Per delivered transfer: total ms, the slowest single request's ms, and
     // the requests it made. Bounded, newest last.
     this.multiHolderTimings = [];
@@ -1442,6 +1449,10 @@ class HlsSwarm {
   // apply, so the single-holder path runs; null sends the load to origin.
   async #multiHolder(context, signal, plan, key, commitment, discoveryContext) {
     if (!this.#rangesEnabled() || !Array.isArray(commitment.pieces)) return undefined;
+    // An origin that once ignored a range sends whole segments, so a piece
+    // from it would cost a full download and then fail the transfer.
+    const originHost = urlOrigin(context.url);
+    if (this.originsWithoutRanges.has(originHost)) return undefined;
     const holders = [...this.links.values()].filter((link) => !link.closed && link.supportsRanges === true && link.have.has(key)
       && !this.banned.has(link.pubkey) && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2);
     if (!holders.length) return undefined;
@@ -1531,8 +1542,13 @@ class HlsSwarm {
           const controller = new AbortController(), [from, to] = bytesOf(command.range), originAt = now();
           originRequests.add(controller);
           this.multiHolder.originRanges += 1;
-          (plan.origin?.Loader ? loadOriginRange(plan.origin, context, from, to, { signal: controller.signal })
-            : fetchOriginRange(context, from, to, { signal: controller.signal })).then((bytes) => {
+          const onIgnored = () => {
+            if (this.originsWithoutRanges.has(originHost)) return;
+            this.originsWithoutRanges.add(originHost);
+            this.multiHolder.originRangesIgnored += 1;
+          };
+          (plan.origin?.Loader ? loadOriginRange(plan.origin, context, from, to, { signal: controller.signal, onIgnored })
+            : fetchOriginRange(context, from, to, { signal: controller.signal, onIgnored })).then((bytes) => {
             originRequests.delete(controller);
             if (this.options.traceRequests) this.#trace({ k: "origin", load, at: this.#traceAt(originAt), ms: Math.round(now() - originAt), ranged: true,
               range: [command.range.start, command.range.end], outcome: bytes ? "payload" : finished ? "abort" : "none", bytes: bytes?.byteLength ?? null });

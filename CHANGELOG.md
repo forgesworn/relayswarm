@@ -78,6 +78,15 @@
 - Under `multiHolder`, load ranged origin pieces through the player's own
   fragment loader, so headers and credentials from `xhrSetup`, `fetchSetup`
   or a custom loader apply; a body that is not exactly the range is discarded.
+- Under `multiHolder`, stop asking an origin for ranges once it has answered
+  one with something else, and send its later segments down the
+  single-holder path for the session; counted as
+  `core.multiHolder.originRangesIgnored`. A loader downloads the whole body
+  before the length check can reject it, and a failed origin piece fails the
+  transfer, so without this every such segment came from origin twice.
+  Cloudflare Stream answered a probe for a segment range with the whole
+  segment (200); Apple's, Mux's and Unified Streaming's test streams
+  answered 206.
 - Add the loader option `traceRequests` (off by default) and `trace()`: a
   bounded ring of loads, eligibility decisions, peer and origin requests and
   every multi-holder scheduler call with its inputs and commands. A test

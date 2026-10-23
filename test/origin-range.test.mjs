@@ -44,11 +44,23 @@ test("a byte-range segment offsets pieces by its own start and stays inside its 
 });
 
 for (const mode of ["ignore", "short", "shifted"]) {
-  test(`an origin that answers a range with ${mode} bytes yields nothing`, async (t) => {
+  test(`an origin that answers a range with ${mode} bytes yields nothing and reports it`, async (t) => {
     const { url } = await origin(t, mode);
-    assert.equal(await fetchOriginRange({ url }, 0, 65_536), null);
+    let ignored = 0;
+    assert.equal(await fetchOriginRange({ url }, 0, 65_536, { onIgnored: () => { ignored += 1; } }), null);
+    assert.equal(ignored, 1);
   });
 }
+
+test("a ranged fetch that fails without an answer is not reported as an ignored range", async (t) => {
+  const { url } = await origin(t);
+  let ignored = 0;
+  const onIgnored = () => { ignored += 1; };
+  assert.equal(await fetchOriginRange({ url: "http://127.0.0.1:1/x" }, 0, 10, { onIgnored }), null);
+  const fetchImpl = async () => new Response("no", { status: 416 });
+  assert.equal(await fetchOriginRange({ url }, 0, 10, { onIgnored, fetchImpl }), null);
+  assert.equal(ignored, 0);
+});
 
 test("an aborted or unreachable ranged fetch yields nothing", async (t) => {
   const { url } = await origin(t);
@@ -93,7 +105,9 @@ test("a ranged load through the player's loader sets its range and passes its co
 for (const mode of ["whole", "error"]) {
   test(`a player loader that answers a range with ${mode === "whole" ? "the whole segment" : "an error"} yields nothing`, async () => {
     const { Loader } = playerLoader(mode);
-    assert.equal(await loadOriginRange({ Loader }, { url: "https://origin.example/x" }, 0, 65_536), null);
+    let ignored = 0;
+    assert.equal(await loadOriginRange({ Loader }, { url: "https://origin.example/x" }, 0, 65_536, { onIgnored: () => { ignored += 1; } }), null);
+    assert.equal(ignored, mode === "whole" ? 1 : 0, "only a successful load of the wrong length is an ignored range");
   });
 }
 
