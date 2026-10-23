@@ -11,7 +11,7 @@ import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 import { originClockOffsetMs, originClockSummary } from "../src/browser/origin-clock.mjs";
 import { PeerLink } from "../src/browser/peer-link.mjs";
 import { RelayPool, RelaySwarmSession } from "../src/relay-session.mjs";
-import { commitmentContent, KIND_SEGMENT_COMMITMENT, verifySegmentCommitment } from "../src/browser/segment-commitment.mjs";
+import { commitmentContent, commitmentPieceSize, KIND_SEGMENT_COMMITMENT, verifySegmentCommitment } from "../src/browser/segment-commitment.mjs";
 import { startLocalRelay } from "./support/local-relay.mjs";
 import { boundedOperation } from "../src/browser/bounded-operation.mjs";
 import { NeighbourDiscovery } from "../src/browser/neighbour-discovery.mjs";
@@ -807,7 +807,7 @@ test("the Rust core verifies peer-first commitments, and its rejection stands", 
     const metrics = fixture.swarm.metrics();
     assert.equal(metrics.segments.commitmentRejected, 1);
     assert.equal(metrics.segments.peerFirstLoaded, 1);
-    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", discovery: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 } });
+    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", discovery: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, peerBytes: 0, originBytes: 0, originRanges: 0 } });
   } finally { await fixture.close(); }
 });
 
@@ -823,7 +823,7 @@ test("a trapping or unloadable core hands its links and verification to JavaScri
       const metrics = fixture.swarm.metrics();
       assert.equal(metrics.segments.peerFirstLoaded, 1);
       // The trapping core fails on the first link it opens, which then runs in JavaScript.
-      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 } });
+      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, peerBytes: 0, originBytes: 0, originRanges: 0 } });
       assert.equal(metrics.errors.byStage.core, 1);
     } finally { await fixture.close(); }
   }
@@ -839,7 +839,7 @@ test("a core that answers malformed results retires and the loader carries on in
     const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder")).catch(() => null);
     await until(() => fixture.swarm.metrics().core.state === "failed");
     const { core, errors } = fixture.swarm.metrics();
-    assert.deepEqual({ ...core, links: core.links.wasm + core.links.js }, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: 1, fallbacks: 1, decided: { wasm: 0, js: 0 } });
+    assert.deepEqual({ ...core, links: core.links.wasm + core.links.js }, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: 1, fallbacks: 1, decided: { wasm: 0, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, peerBytes: 0, originBytes: 0, originRanges: 0 } });
     assert.equal(errors.byStage.core, 1);
     if (channel && core.links.js === 1) {
       channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
@@ -882,7 +882,7 @@ test("the core option is checked and ignored outside peer-first", () => {
     assert.equal(createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm }).metrics().disabledReason, "invalid-core-wasm");
   }
   const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm });
-  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 } });
+  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, peerBytes: 0, originBytes: 0, originRanges: 0 } });
   swarm.stop();
 });
 
@@ -3495,5 +3495,134 @@ test("a caller abort during the wait is not a miss", async t => {
     const last = f.next(); via.announce(last.key); await sleep(30); f.touch();
     const pending = f.load(last.name);
     await until(() => via.offers.length === 1); await pending;
+  } finally { await f.close(); }
+});
+
+// --- multi-holder transfer (schema 3, framing 2) -----------------------------
+
+const multiCore = await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url)));
+const multiContext = { url: "https://origin.example/media/seg.ts",
+  frag: { sn: 1, level: 0, cc: 0, type: "main", baseurl: "https://origin.example/media/index.m3u8" } };
+
+/** A holder that answers framing 2 ranges by slicing its object. */
+class RangedChannel extends RecordedChannel {
+  wants = [];
+  constructor(bytes, { corrupt = false, silent = false, delayMs = 0 } = {}) { super(); Object.assign(this, { bytes, corrupt, silent, delayMs }); }
+  send(data) {
+    super.send(data);
+    if (typeof data !== "string") return;
+    const frame = JSON.parse(data);
+    if (frame.t !== "want") return;
+    this.wants.push(frame.p ?? null);
+    if (this.silent) return;
+    setTimeout(() => {
+      if (this.readyState !== "open") return;
+      const pieceSize = commitmentPieceSize(this.bytes.length);
+      const [from, to] = frame.p ? [frame.p[0] * pieceSize, Math.min(frame.p[1] * pieceSize, this.bytes.length)] : [0, this.bytes.length];
+      const body = this.bytes.slice(from, to);
+      if (this.corrupt) body[0] ^= 0xff;
+      this.receive(JSON.stringify({ t: "meta", id: frame.id, size: body.length, ...(frame.p ? { p: frame.p } : {}) }));
+      for (let at = 0; at < body.length; at += 16_384) this.receive(body.slice(at, at + 16_384).buffer);
+      this.receive(JSON.stringify({ t: "eof", id: frame.id }));
+    }, this.delayMs);
+  }
+}
+
+/** Equal bytes, without a diff of a large array on failure. */
+function sameBytes(actual, expected, message) {
+  assert.ok(actual.length === expected.length && Buffer.compare(Buffer.from(actual), Buffer.from(expected)) === 0,
+    message ?? `got ${actual.length} bytes, expected ${expected.length}`);
+}
+
+async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, originFallbackMs = 3_000, originDelayMs = 0 }) {
+  const bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
+  const pieceSize = commitmentPieceSize(size), pieces = [];
+  for (let at = 0; at < size; at += pieceSize) pieces.push(createHash("sha256").update(bytes.subarray(at, at + pieceSize)).digest("hex"));
+  const key = createHash("sha256").update(`${base.swarmId}\n/media/seg.ts`).digest("hex");
+  const signed = signedFixture({ v: 3, key, rendition: "/media/index.m3u8", playlist: "/media/index.m3u8", mediaType: "main", encryption: null,
+    sha256: createHash("sha256").update(bytes).digest("hex"), size, pieceSize, pieces });
+  const f = await linkedFixture({ mode: "peer-first", streamEvent: signed.options.streamEvent, getCommitment: () => signed.event, originFallbackMs,
+    segmentKey: () => "/media/seg.ts", coreWasm: multiCore, multiHolder, WebSocketImpl: memoryRelaySocket() });
+  await until(() => f.swarm.metrics().core.state === "ready");
+  const channels = [];
+  for (const options of holders) {
+    const channel = await f.addPeer(new RangedChannel(bytes, options));
+    channel.receive(JSON.stringify({ t: "have", keys: [key] }));
+    channels.push(channel);
+  }
+  for (const peer of f.peers) peer.announcePresence({ role: "viewer", open: true, have: [key],
+    transports: [{ type: "webrtc", publicKey: peer.pubkey, ...(framing === 2 ? { obj: 2 } : {}) }] });
+  await until(() => f.swarm.metrics().peers.openPeersKnown === f.peers.length);
+  // Origin answers ranges from the same object; the fake loader's whole
+  // segment is different bytes, so a whole-segment fallback shows.
+  const ranges = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    const [, first, last] = /bytes=(\d+)-(\d+)/u.exec(init.headers.Range).map(Number);
+    ranges.push([first, last]);
+    if (originDelayMs) await sleep(originDelayMs);
+    return new Response(bytes.slice(first, last + 1), { status: 206, headers: { "content-range": `bytes ${first}-${last}/${bytes.length}` } });
+  });
+  const load = async () => new Uint8Array((await new Promise((resolve) => new f.hls.config.fLoader({}).load(multiContext, {}, { onSuccess: resolve }))).data);
+  return { ...f, bytes, channels, load, pieceSize, ranges };
+}
+
+test("multi-holder: two framing 2 holders each send pieces of one schema 3 segment", async (t) => {
+  const f = await multiFixture(t, { holders: [{}, {}] });
+  try {
+    assert.equal(f.swarm.metrics().core.multiHolder.enabled, true);
+    sameBytes(await f.load(), f.bytes);
+    for (const channel of f.channels) assert.ok(channel.wants.length && channel.wants.every((range) => Array.isArray(range)), JSON.stringify(channel.wants));
+    const { multiHolder } = f.swarm.metrics().core;
+    assert.equal(multiHolder.transfers, 1); assert.equal(multiHolder.delivered, 1);
+    // Unmeasured peers plan at the rate floor, so origin may take a tail.
+    assert.ok(multiHolder.peerBytes > 0);
+    assert.equal(multiHolder.peerBytes + multiHolder.originBytes, f.bytes.length);
+    assert.equal(f.swarm.metrics().bytes.fromPeers, multiHolder.peerBytes);
+  } finally { await f.close(); }
+});
+
+test("multi-holder: a holder that sends a bad piece is banned and the other completes the segment", async (t) => {
+  const f = await multiFixture(t, { holders: [{}, { corrupt: true }] });
+  try {
+    sameBytes(await f.load(), f.bytes);
+    assert.equal(f.swarm.metrics().core.multiHolder.bans, 1);
+    assert.equal(f.channels[1].readyState, "closed");
+  } finally { await f.close(); }
+});
+
+test("multi-holder: a silent holder's pieces come from origin by range at the deadline", async (t) => {
+  // Twelve pieces, so the silent holder has more than the endgame's two and
+  // only the deadline hand-over can finish the segment.
+  // A slow origin finishes them after the deadline, which the transfer, not
+  // a whole-segment fallback, owns.
+  const f = await multiFixture(t, { holders: [{}, { silent: true }], size: 12 * 65_536, originFallbackMs: 400, originDelayMs: 150 });
+  try {
+    sameBytes(await f.load(), f.bytes, "not the origin loader's whole-segment bytes");
+    const [silent] = f.channels[1].wants;
+    assert.ok(silent[1] - silent[0] > 2, JSON.stringify(silent));
+    const { multiHolder } = f.swarm.metrics().core;
+    assert.ok(f.ranges.length > 0 && multiHolder.originRanges === f.ranges.length);
+    assert.ok(f.channels[1].wants.length > 0, "the silent holder was asked");
+    assert.equal(multiHolder.originBytes + multiHolder.peerBytes, f.bytes.length);
+    assert.equal(f.swarm.metrics().bytes.fromPeers, multiHolder.peerBytes);
+  } finally { await f.close(); }
+});
+
+test("multi-holder: without the option a schema 3 segment comes whole from one holder", async (t) => {
+  const f = await multiFixture(t, { holders: [{}, {}], multiHolder: false });
+  try {
+    assert.equal(f.swarm.metrics().core.multiHolder.enabled, false);
+    sameBytes(await f.load(), f.bytes);
+    const wants = f.channels.flatMap((channel) => channel.wants);
+    assert.deepEqual(wants, [null]);
+  } finally { await f.close(); }
+});
+
+test("multi-holder: framing 1 holders keep the whole-object path", async (t) => {
+  const f = await multiFixture(t, { holders: [{}, {}], framing: 1 });
+  try {
+    sameBytes(await f.load(), f.bytes);
+    assert.deepEqual(f.channels.flatMap((channel) => channel.wants), [null]);
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, 0);
   } finally { await f.close(); }
 });

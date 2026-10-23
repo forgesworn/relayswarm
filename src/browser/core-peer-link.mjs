@@ -26,6 +26,9 @@ const clockNow = () => { try { return globalThis.performance.now(); } catch { re
 const timerMs = (value) => { const ms = Math.trunc(Math.max(1, value)); return ms >= 1 && ms <= 2 ** 31 - 1 ? ms : 1; };
 
 export class CorePeerLink {
+  /** Framing 2: this link can request and serve piece ranges. */
+  get supportsRanges() { return !this.closed; }
+
   static ABANDON_REASON = PeerLink.ABANDON_REASON;
   #host;
   #handle;

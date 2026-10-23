@@ -35,6 +35,7 @@ import { NeighbourDiscovery } from "./neighbour-discovery.mjs";
 import { boundedOperation } from "./bounded-operation.mjs";
 import { validStreamAuthorisation, verifySegmentCommitment, segmentMediaContext } from "./segment-commitment.mjs";
 import { loadCore } from "./core-wasm.mjs";
+import { fetchOriginRange } from "./origin-range.mjs";
 
 export const HLS_SWARM_METRICS_VERSION = 2;
 
@@ -97,6 +98,11 @@ const DEFAULTS = Object.freeze({
   // or a compiled WebAssembly.Module. Peer-first only. Until it loads, or if
   // it fails to load or traps, the JavaScript verifier decides.
   coreWasm: undefined,
+  // Experimental, with coreWasm: fetch a schema 3 segment from several
+  // framing 2 holders at once, with origin taking a late tail.
+  multiHolder: false,
+  // Provisional (CORE-SPEC open question 6): not yet set from a field trace.
+  maxHoldersPerObject: 3,
 });
 const SAMPLE_LIMIT = 500;
 // The longest the relay session waits for an opted-in core module to load or
@@ -329,6 +335,11 @@ class HlsSwarm {
     // CORE_WAIT_MS has passed. Null when no core was requested.
     this.coreWait = null;
     this.coreRelease = null;
+    // Each peer's object framing version from its latest presence.
+    this.remoteFraming = new Map();
+    this.transferIds = new WeakMap();
+    this.nextTransferId = 1;
+    this.multiHolder = { transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, peerBytes: 0, originBytes: 0, originRanges: 0 };
     this.coreFallbacks = 0;
     this.coreDecided = { wasm: 0, js: 0 };
     this.coreLinks = { wasm: 0, js: 0 };
@@ -440,6 +451,8 @@ class HlsSwarm {
     const core = this.options.coreWasm;
     if (core !== undefined && !(typeof core === "string" || core instanceof URL || core instanceof ArrayBuffer || ArrayBuffer.isView(core)
       || (typeof WebAssembly === "object" && core instanceof WebAssembly.Module))) return "invalid-core-wasm";
+    if (typeof this.options.multiHolder !== "boolean" || !Number.isSafeInteger(this.options.maxHoldersPerObject)
+      || this.options.maxHoldersPerObject < 1 || this.options.maxHoldersPerObject > 8) return "invalid-multi-holder";
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (this.options.reserveUploadBytes !== undefined && typeof this.options.reserveUploadBytes !== "function") return "invalid-upload-reservation";
     if (typeof this.options.serve !== "boolean" || typeof this.options.serveOnCellular !== "boolean") return "invalid-serve-option";
@@ -673,7 +686,8 @@ class HlsSwarm {
       },
       errors: { total: c.errors, byStage: { ...this.errorsByStage } },
       // Additive metrics-v2 field: which commitment verifier and peer selection run.
-      core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", selection: this.peerSelection.kind ?? "js", discovery: this.discovery.kind ?? "js", links: { ...this.coreLinks }, fallbacks: this.coreFallbacks, decided: { ...this.coreDecided } },
+      core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", selection: this.peerSelection.kind ?? "js", discovery: this.discovery.kind ?? "js", links: { ...this.coreLinks }, fallbacks: this.coreFallbacks, decided: { ...this.coreDecided },
+        multiHolder: { enabled: this.#rangesEnabled(), ...this.multiHolder } },
       config: {
         originFallbackMs: this.options.originFallbackMs,
         maxPeerWaitMs: this.options.maxPeerWaitMs,
@@ -836,14 +850,16 @@ class HlsSwarm {
         }
         // Both timer arms mark the plan as deadline-driven before falling back,
         // so a wait ended by the deadline differs from a caller abort or stop.
-        const atDeadline = () => { plan.expired = true; fallback(); };
+        // A multi-holder transfer owns the deadline while it runs: it moves
+        // outstanding pieces to origin itself rather than reload the whole.
+        const atDeadline = () => { if (plan.onDeadline?.()) return; plan.expired = true; fallback(); };
         timer = setTimeout(atDeadline, budgetMs);
         swarm.lifecycle.signal.addEventListener("abort", fallback, { once: true });
         // The wait may grow from budgetMs up to the buffer-safe limit, never
         // past the buffered playback less the origin reserve.
         const ceiling = Math.max(swarm.options.originFallbackMs, swarm.options.maxPeerWaitMs);
         const limitMs = Math.max(budgetMs, Math.min(ceiling, budgetGeometry.uncappedMs ?? budgetMs));
-        const plan = { deadline: t0 + budgetMs, limit: t0 + limitMs, expired: false, extend: (to) => {
+        const plan = { deadline: t0 + budgetMs, limit: t0 + limitMs, expired: false, onDeadline: null, extend: (to) => {
           const target = Math.min(plan.limit, to);
           if (this.active !== token || target <= plan.deadline) return false;
           plan.deadline = target;
@@ -853,7 +869,7 @@ class HlsSwarm {
         } };
         swarm.#peerFirst(context, controller.signal, plan, budgetMs, budgetGeometry).then((result) => {
           if (this.active !== token || controller.signal.aborted || swarm.stopped) return;
-          if (!result || now() >= plan.deadline) return fallback();
+          if (!result || (now() >= plan.deadline && !result.multi)) return fallback();
           this.active = null;
           this.pendingCallbacks = null;
           cleanup();
@@ -866,9 +882,11 @@ class HlsSwarm {
             loading: { start: t0, first: end, end },
             parsing: { start: 0, end: 0 }, buffering: { start: 0, first: 0, end: 0 },
           });
-          swarm.counters.peerFirstLoaded += 1;
-          swarm.counters.peerFirstBytes += size;
-          swarm.counters.bytesFromPeers += size;
+          // A multi-holder load counts only the bytes peers sent.
+          const peerBytes = result.multi ? result.peerBytes : size;
+          if (peerBytes > 0) swarm.counters.peerFirstLoaded += 1;
+          swarm.counters.peerFirstBytes += peerBytes;
+          swarm.counters.bytesFromPeers += peerBytes;
           if (swarm.discovery.verified(result.discoveryContext)
             && swarm.discovery.window?.context === result.discoveryContext) swarm.#endDiscovery();
           if (swarm.firstPeerSegmentAtMs === null) swarm.firstPeerSegmentAtMs = Date.now() - swarm.startedAt;
@@ -1218,6 +1236,13 @@ class HlsSwarm {
     if (signal.aborted || this.stopped) return null;
     if (!this.renditionSizes.has(rendition) && this.renditionSizes.size >= 16) this.renditionSizes.delete(this.renditionSizes.keys().next().value);
     this.renditionSizes.set(rendition, commitment.size);
+    if (commitment.v === 3 && this.options.multiHolder) {
+      const multi = await this.#multiHolder(context, signal, plan, key, commitment, discoveryContext);
+      if (multi !== undefined) {
+        if (multi && coordinated) this.counters.coordinatedPeerLoads += 1;
+        return multi;
+      }
+    }
     // The committed size is now known and a holder has it.
     const transfer = this.peerSelection.projectMs(commitment.size);
     const known = this.#projection(transfer, 0, plan);
@@ -1295,6 +1320,129 @@ class HlsSwarm {
       return { key, bytes, discoveryContext };
     }
     return null;
+  }
+
+  #transferId(link) {
+    let id = this.transferIds.get(link);
+    if (id === undefined) { id = this.nextTransferId++; this.transferIds.set(link, id); }
+    return id;
+  }
+
+  // Schema 3 across framing 2 holders, with origin for a late tail, run by
+  // the core's Transfer (CORE-SPEC section 6). Undefined when it does not
+  // apply, so the single-holder path runs; null sends the load to origin.
+  async #multiHolder(context, signal, plan, key, commitment, discoveryContext) {
+    if (!this.#rangesEnabled() || !Array.isArray(commitment.pieces)) return undefined;
+    const holders = [...this.links.values()].filter((link) => !link.closed && link.supportsRanges === true && link.have.has(key)
+      && !this.banned.has(link.pubkey) && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2);
+    if (!holders.length) return undefined;
+    const ids = new Map(holders.map((link) => [this.#transferId(link), link]));
+    // Peers may hold pieces until the buffer-safe limit; what is left then
+    // goes to origin by range, within the origin reserve the limit keeps.
+    const deadline = Math.floor(plan.limit);
+    const transfer = this.core.transfer({ size: commitment.size, sha256: commitment.sha256, pieces: commitment.pieces,
+      deadline, maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0 });
+    if (!transfer) return undefined;
+    this.multiHolder.transfers += 1;
+    plan.extend(plan.limit);
+    const pieceSize = commitment.pieceSize;
+    const bytesOf = ({ start, end }) => [start * pieceSize, Math.min(end * pieceSize, commitment.size)];
+    const peers = [...ids].map(([id, link]) => {
+      const { throughputBytesPerSecond } = this.peerSelection.summary(link);
+      return [id, null, throughputBytesPerSecond ? throughputBytesPerSecond / 1000 : null];
+    });
+    const originMs = percentile(this.originLatencySamples, 0.5);
+    const origin = [null, originMs ? commitment.size / originMs : null];
+    return new Promise((resolve) => {
+      const requests = new Map(), originRequests = new Set();
+      let finished = false, tickTimer = null, backstop = null, releaseOrigin = null, originShare = 0;
+      const clear = (timer) => { if (timer !== null) { clearTimeout(timer); this.timers.delete(timer); } return null; };
+      const finish = (result) => {
+        if (finished) return;
+        finished = true;
+        tickTimer = clear(tickTimer); backstop = clear(backstop);
+        for (const controller of [...requests.values(), ...originRequests]) controller.abort(PeerLink.ABANDON_REASON);
+        releaseOrigin?.();
+        plan.onDeadline = null;
+        signal.removeEventListener("abort", onAbort);
+        transfer.free();
+        resolve(result);
+      };
+      const onAbort = () => finish(null);
+      signal.addEventListener("abort", onAbort, { once: true });
+      const run = (command, state) => {
+        if (command.t === "request") {
+          const link = ids.get(command.peer), controller = new AbortController();
+          requests.set(command.peer, controller);
+          const [from, to] = bytesOf(command.range), startedAt = now(), remainingMs = Math.max(1, deadline - startedAt);
+          let report = null;
+          link.request(key, remainingMs, { signal: controller.signal, expectedSize: to - from,
+            range: { start: command.range.start, end: command.range.end, objectSize: commitment.size },
+            onResult: (result) => { report = result; this.#peerRequestResult(context, link, remainingMs, result); } }).then((bytes) => {
+            if (requests.get(command.peer) === controller) requests.delete(command.peer);
+            if (finished) return;
+            if (report?.firstByteMs !== null && report?.elapsedMs !== null && report?.receivedBytes) {
+              this.peerSelection.observe({ firstByteMs: report.firstByteMs, bytes: report.receivedBytes, flowMs: report.elapsedMs - report.firstByteMs });
+            }
+            if (bytes) {
+              this.peerSelection.record(link, now() - startedAt, bytes.byteLength);
+              this.multiHolder.peerBytes += bytes.byteLength;
+              apply(transfer.delivered(now(), command.peer, command.range, bytes));
+            } else {
+              if (!controller.signal.aborted) this.peerSelection.record(link, now() - startedAt);
+              apply(transfer.failed(now(), command.peer));
+            }
+          }, () => { if (!finished) apply(transfer.failed(now(), command.peer)); });
+        } else if (command.t === "origin") {
+          releaseOrigin ??= this.#claimOrigin(key);
+          const controller = new AbortController(), [from, to] = bytesOf(command.range);
+          originRequests.add(controller);
+          this.multiHolder.originRanges += 1;
+          fetchOriginRange(context, from, to, { signal: controller.signal }).then((bytes) => {
+            originRequests.delete(controller);
+            if (finished) return;
+            if (bytes) {
+              this.multiHolder.originBytes += bytes.byteLength;
+              this.counters.bytesFromOrigin += bytes.byteLength;
+              originShare += bytes.byteLength;
+            }
+            apply(bytes ? transfer.delivered(now(), "origin", command.range, bytes) : transfer.failed(now(), "origin"));
+          });
+        } else if (command.t === "cancel") {
+          requests.get(command.peer)?.abort(PeerLink.ABANDON_REASON);
+        } else if (command.t === "ban") {
+          const link = ids.get(command.peer);
+          this.multiHolder.bans += 1;
+          this.counters.peerCorrupt += 1;
+          this.banned.add(link.pubkey);
+          link.close("integrity");
+        } else if (command.t === "deliver") {
+          this.multiHolder.delivered += 1;
+          finish(commitment.expiresAt <= Math.floor(Date.now() / 1000) ? null : { key, bytes: state.bytes.slice(), discoveryContext, multi: true, peerBytes: Math.max(0, commitment.size - originShare) });
+        } else if (command.t === "fail") {
+          this.multiHolder.failed += 1;
+          finish(null);
+        }
+      };
+      const apply = (state) => {
+        if (finished) return;
+        if (!state) return finish(null); // the module failed
+        for (const command of state.commands) { run(command, state); if (finished) return; }
+        tickTimer = clear(tickTimer);
+        if (state.next !== null) tickTimer = this.#after(Math.max(0, state.next - now()), () => { tickTimer = null; apply(transfer.tick(now())); });
+      };
+      // At the loader's deadline the transfer hands its pieces to origin and
+      // has the origin reserve to finish before the whole-segment fallback.
+      plan.onDeadline = () => {
+        if (finished) return false;
+        apply(transfer.tick(now()));
+        if (!finished && backstop === null) backstop = this.#after(this.options.originReserveMs, () => { backstop = null; finish(null); });
+        return true;
+      };
+      const started = transfer.start(now(), { peers, origin, sharedFirstByteMs: this.peerSelection.firstByteMs(), sharedRate: this.peerSelection.rate() });
+      if (started?.late) this.multiHolder.late += 1;
+      apply(started);
+    });
   }
 
   // A request that gives up early, so its failure costs little buffer, but
@@ -1732,11 +1880,20 @@ class HlsSwarm {
   // selection and discovery move to fresh JavaScript instances and core
   // links close.
   #coreTrapped(error) {
+    const ranged = this.#rangesEnabled();
     this.core?.retire();
     this.coreVerifier = null;
     this.coreState = "failed";
     this.coreFallbacks += 1;
     this.#noteError("core", error);
+    // Peers must stop sending ranged requests to links that cannot serve them.
+    if (ranged) this.#announce();
+  }
+
+  // Framing 2 is advertised only while every link runs the core's protocol.
+  #rangesEnabled() {
+    return this.options.multiHolder === true && this.options.mode === "peer-first" && !!this.core && !this.core.retired
+      && this.coreLinks.js === 0;
   }
 
   // Links opened once the core is ready run its protocol; earlier links, and
@@ -1796,7 +1953,7 @@ class HlsSwarm {
     try {
       this.session.announcePresence({
         role: "viewer",
-        transports: [{ type: TRANSPORT, publicKey: this.session.pubkey }],
+        transports: [{ type: TRANSPORT, publicKey: this.session.pubkey, ...(this.#rangesEnabled() ? { obj: 2 } : {}) }],
         have: this.#servingAllowed() ? [...this.held.keys()].slice(-8) : [],
         open: this.#canTakeAnotherPeer(),
         ...(this.#ownTicket() ? { ticket: this.#ownTicket() } : {}),
@@ -2084,7 +2241,11 @@ class HlsSwarm {
 
   async #onPresence({ from, payload }) {
     if (this.stopped || payload.role !== "viewer") return;
-    if (!payload.transports.some((transport) => transport.type === TRANSPORT)) return;
+    const transport = payload.transports.find((entry) => entry.type === TRANSPORT);
+    if (!transport) return;
+    this.remoteFraming.delete(from);
+    this.remoteFraming.set(from, transport.obj ?? 1);
+    if (this.remoteFraming.size > 1024) this.remoteFraming.delete(this.remoteFraming.keys().next().value);
     if (this.options.mode === "peer-first") {
       this.discovery.hint(from, payload.have, payload.ticket);
       this.#seekNeighbours();

@@ -64,6 +64,12 @@
   read pass. Schema 3 replaces schema 2 rather than being published beside
   it, so v0.2.1 and RelaySwarmKit v0.5.0 receivers load those segments from
   origin.
+- Add the experimental loader option `multiHolder` (with `coreWasm`): a
+  schema 3 segment comes from up to `maxHoldersPerObject` framing 2 holders
+  at once by piece range, run by the core's scheduler, with ranged HTTP
+  fetches from origin for a late tail and for pieces still outstanding at
+  the deadline. Presence carries `obj: 2` only while every link runs in the
+  core. Off by default; ranged uploads are still charged as whole segments.
 
 ## v0.2.1 (21 October 2026)
 
