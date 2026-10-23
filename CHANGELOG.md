@@ -69,7 +69,8 @@
   at once by piece range, run by the core's scheduler, with ranged HTTP
   fetches from origin for a late tail and for pieces still outstanding at
   the deadline. Presence carries `obj: 2` only while every link runs in the
-  core. Off by default; ranged uploads are still charged as whole segments.
+  core. Off by default. A ranged upload is charged against upload allowances
+  and `reserveUploadBytes` by the bytes it sends, not the whole segment.
 
 ## v0.2.1 (21 October 2026)
 

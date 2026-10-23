@@ -114,6 +114,13 @@ pub enum LinkEvent {
     ScheduleChanged,
     /// The remote wants this key; answer with [`Link::serve_response`].
     ServeRequest(String),
+    /// Framing 2: the remote wants pieces of this key. Answer with the whole
+    /// held object; the link sends only the range. The shell charges the
+    /// range's bytes against upload allowances.
+    ServeRange {
+        key: String,
+        range: PieceRange,
+    },
     UploadCancelled(u64),
     Progress {
         received: u64,
@@ -873,7 +880,13 @@ impl Link {
                 self.in_flight = self.in_flight.saturating_sub(1);
                 continue;
             }
-            self.events.push(LinkEvent::ServeRequest(upload.key.clone()));
+            self.events.push(match upload.range {
+                Some(range) => LinkEvent::ServeRange {
+                    key: upload.key.clone(),
+                    range,
+                },
+                None => LinkEvent::ServeRequest(upload.key.clone()),
+            });
             self.active = Some(Active {
                 upload,
                 stage: Stage::AwaitingBytes,

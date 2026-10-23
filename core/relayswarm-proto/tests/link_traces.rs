@@ -41,6 +41,7 @@ fn record(events: Vec<LinkEvent>) -> Vec<Value> {
             LinkEvent::HaveChanged(added) => log.push(json!({ "haveChanged": added })),
             LinkEvent::ScheduleChanged => log.push(json!({ "scheduleChanged": true })),
             LinkEvent::ServeRequest(key) => log.push(json!({ "serveRequest": key })),
+            LinkEvent::ServeRange { key, range } => log.push(json!({ "serveRange": [key, range.start, range.end] })),
             LinkEvent::UploadCancelled(bytes) => log.push(json!({ "uploadCancelled": bytes })),
             LinkEvent::Progress { received, size } => log.push(json!({ "progress": [received, size] })),
         }

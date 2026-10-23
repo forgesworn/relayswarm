@@ -8,7 +8,7 @@ import { PeerLink } from "./peer-link.mjs";
 const OP = { text: 0, binary: 1, request: 2, abort: 3, close: 4, tick: 5, serve: 6, bufferedLow: 7,
   sendHave: 8, sendHaveChange: 9, sendContribution: 10, sendFetching: 11, state: 12, sets: 13, requestRange: 14 };
 const EVENT = { sendText: 1, sendBinary: 2, closed: 3, report: 4, resolved: 5, haveChanged: 6,
-  scheduleChanged: 7, serveRequest: 8, uploadCancelled: 9, progress: 10 };
+  scheduleChanged: 7, serveRequest: 8, uploadCancelled: 9, progress: 10, serveRange: 11 };
 const HEADER = 13;
 const HIGH_WATER_BYTES = 128 * 1024;
 const LOW_WATER_BYTES = 32 * 1024;
@@ -324,10 +324,13 @@ export class CorePeerLink {
         this.onScheduleChange?.(this);
         return;
       }
-      case EVENT.serveRequest: {
-        const key = decoder.decode(payload);
+      case EVENT.serveRequest:
+      case EVENT.serveRange: {
+        let key, range;
+        if (tag === EVENT.serveRange) { const [rangeKey, start, end] = JSON.parse(decoder.decode(payload)); key = rangeKey; range = { start, end }; }
+        else key = decoder.decode(payload);
         Promise.resolve()
-          .then(() => this.closed ? null : this.onRequest?.(this, key))
+          .then(() => this.closed ? null : range ? this.onRequest?.(this, key, range) : this.onRequest?.(this, key))
           .then((bytes) => this.#serve(bytes), () => { this.close("serve-error"); this.#serve(null); });
         return;
       }

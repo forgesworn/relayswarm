@@ -3626,3 +3626,23 @@ test("multi-holder: framing 1 holders keep the whole-object path", async (t) => 
     assert.equal(f.swarm.metrics().core.multiHolder.transfers, 0);
   } finally { await f.close(); }
 });
+
+test("multi-holder: a ranged serve sends and charges only the requested pieces", async () => {
+  const object = Uint8Array.from({ length: 200_000 }, (_, i) => (i * 7 + 1) & 255);
+  class BigLoader extends Loader { load(ctx, _config, callbacks) { callbacks.onSuccess({ data: object.slice().buffer }, this.stats, ctx, null); } }
+  const reserved = [], playback = peerPlaybackOptions(300);
+  const f = await linkedFixture({ ...playback.options, serve: true, coreWasm: multiCore, multiHolder: true, WebSocketImpl: memoryRelaySocket(),
+    reserveUploadBytes: (bytes) => { reserved.push(bytes); return true; } }, BigLoader);
+  try {
+    await until(() => f.swarm.metrics().core.state === "ready");
+    const channel = await f.addPeer();
+    await f.load(); await until(() => f.swarm.metrics().bytes.held === object.length);
+    channel.receive(JSON.stringify({ t: "want", id: 7, k: playback.key, p: [1, 3] }));
+    await until(() => channel.sent.some((frame) => frame.t === "eof" && frame.id === 7));
+    assert.deepEqual(channel.sent.find((frame) => frame.t === "meta"), { t: "meta", id: 7, size: 131_072, p: [1, 3] });
+    const body = Buffer.concat(channel.sent.filter((frame) => frame instanceof ArrayBuffer || ArrayBuffer.isView(frame)).map((chunk) => Buffer.from(chunk)));
+    sameBytes(body, object.subarray(65_536, 196_608));
+    assert.deepEqual(reserved, [131_072]);
+    assert.equal(f.swarm.metrics().bytes.uploaded, 131_072);
+  } finally { await f.close(); }
+});

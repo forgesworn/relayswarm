@@ -267,6 +267,7 @@ const EVENT_SCHEDULE_CHANGED: u8 = 7;
 const EVENT_SERVE_REQUEST: u8 = 8;
 const EVENT_UPLOAD_CANCELLED: u8 = 9;
 const EVENT_PROGRESS: u8 = 10;
+const EVENT_SERVE_RANGE: u8 = 11;
 
 /// Scalars at the start of every link frame, as little-endian doubles.
 pub const LINK_HEADER: usize = 13;
@@ -323,6 +324,10 @@ fn frame(link: &mut Link, request: Option<u64>) -> Vec<u8> {
             LinkEvent::HaveChanged(keys) => push_event(&mut out, EVENT_HAVE_CHANGED, Value::from(keys).to_string().as_bytes()),
             LinkEvent::ScheduleChanged => push_event(&mut out, EVENT_SCHEDULE_CHANGED, &[]),
             LinkEvent::ServeRequest(key) => push_event(&mut out, EVENT_SERVE_REQUEST, key.as_bytes()),
+            LinkEvent::ServeRange { key, range } => {
+                let json = serde_json::json!([key, range.start, range.end]).to_string();
+                push_event(&mut out, EVENT_SERVE_RANGE, json.as_bytes());
+            }
             LinkEvent::UploadCancelled(bytes) => push_event(&mut out, EVENT_UPLOAD_CANCELLED, &doubles(&[bytes as f64])),
             LinkEvent::Progress { received, size } => push_event(&mut out, EVENT_PROGRESS, &doubles(&[received as f64, size as f64])),
         }

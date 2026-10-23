@@ -33,7 +33,7 @@ import { PeerLink } from "./peer-link.mjs";
 import { PeerSelection } from "./peer-selection.mjs";
 import { NeighbourDiscovery } from "./neighbour-discovery.mjs";
 import { boundedOperation } from "./bounded-operation.mjs";
-import { validStreamAuthorisation, verifySegmentCommitment, segmentMediaContext } from "./segment-commitment.mjs";
+import { commitmentPieceSize, validStreamAuthorisation, verifySegmentCommitment, segmentMediaContext } from "./segment-commitment.mjs";
 import { loadCore } from "./core-wasm.mjs";
 import { fetchOriginRange } from "./origin-range.mjs";
 
@@ -1794,7 +1794,9 @@ class HlsSwarm {
     this.#announce();
   }
 
-  async #serveRequest(link, key) {
+  // `range` (framing 2) asks for pieces of the held object: the link sends
+  // only those, so only their bytes are charged.
+  async #serveRequest(link, key, range = null) {
     if (this.options.admit && !(await this.#admits(link.pubkey, this.admitted.get(link.pubkey)?.ticket, "upload"))) {
       this.#refuseUpload("admission");
       link.close("admission");
@@ -1802,10 +1804,17 @@ class HlsSwarm {
     }
     const bytes = this.held.get(key);
     if (!bytes) { this.#refuseUpload("not-held"); return null; }
+    let charge = bytes.byteLength;
+    if (range) {
+      const pieceSize = commitmentPieceSize(bytes.byteLength);
+      const from = range.start * pieceSize, to = Math.min(range.end * pieceSize, bytes.byteLength);
+      if (!(from < to)) { this.#refuseUpload("not-held"); return null; }
+      charge = to - from;
+    }
     if (!this.#servingAllowed()) { this.#refuseUpload("not-serving"); return null; }
     if (this.banned.has(link.pubkey)) { this.#refuseUpload("banned"); return null; }
     const remaining = this.#uploadRemaining();
-    if (remaining !== null && bytes.byteLength > remaining) {
+    if (remaining !== null && charge > remaining) {
       this.#refuseUpload("session-allowance");
       return null;
     }
@@ -1817,26 +1826,26 @@ class HlsSwarm {
     const elapsed = (now() - this.uploadRefilledAt) / 1_000;
     this.uploadRefilledAt = now();
     this.uploadTokens = Math.min(this.options.maxUploadBytesPerSecond * 2, this.uploadTokens + elapsed * this.options.maxUploadBytesPerSecond);
-    if (this.uploadTokens < bytes.byteLength) {
+    if (this.uploadTokens < charge) {
       this.#refuseUpload("rate-limit");
       return null;
     }
-    this.uploadTokens -= bytes.byteLength;
+    this.uploadTokens -= charge;
     // Reserve capacity before yielding, separately from public accepted-upload
     // metrics. Host revocation may archive metrics while its callback is pending.
-    this.uploadQuotaBytes += bytes.byteLength;
+    this.uploadQuotaBytes += charge;
     if (this.#uploadRemaining() === 0) this.#withdrawContribution();
     if (this.options.reserveUploadBytes) {
       let accepted = false;
-      try { accepted = await boundedOperation((signal) => this.options.reserveUploadBytes(bytes.byteLength, { signal }), this.lifecycle.signal, this.options.admissionTimeoutMs) === true; }
+      try { accepted = await boundedOperation((signal) => this.options.reserveUploadBytes(charge, { signal }), this.lifecycle.signal, this.options.admissionTimeoutMs) === true; }
       catch { this.#noteError("upload-reservation"); }
       if (!accepted || this.stopped || link.closed || this.options.serve !== true || (!this.options.serveOnCellular && onCellular())) {
-        if (!accepted) this.uploadQuotaBytes -= bytes.byteLength;
+        if (!accepted) this.uploadQuotaBytes -= charge;
         this.#refuseUpload(accepted ? "reservation-inactive" : "reservation-refused");
         return null;
       }
     }
-    this.counters.bytesUploaded += bytes.byteLength;
+    this.counters.bytesUploaded += charge;
     this.counters.uploadsServed += 1;
     if (this.options.testHooks?.corruptUploads) {
       const tampered = bytes.slice();
@@ -2652,7 +2661,7 @@ class HlsSwarm {
       pc: dial.pc,
       channel,
       maxSegmentBytes: this.options.maxSegmentBytes,
-      onRequest: (from, key) => this.#serveRequest(from, key),
+      onRequest: (from, key, range) => this.#serveRequest(from, key, range),
       onHaveChange: (_link, added) => {
         for (const waiter of [...this.haveWaiters]) waiter(added);
       },

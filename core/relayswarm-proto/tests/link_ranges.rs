@@ -56,7 +56,7 @@ fn serve(holder: &mut Link, want: Value, bytes: Option<Vec<u8>>) -> Vec<LinkEven
     let mut events = holder.drain_events();
     if events
         .iter()
-        .any(|event| matches!(event, LinkEvent::ServeRequest(key) if key == KEY))
+        .any(|event| matches!(event, LinkEvent::ServeRequest(key) | LinkEvent::ServeRange { key, .. } if key == KEY))
     {
         holder.serve_response(NOW, bytes);
         for _ in 0..64 {
@@ -101,6 +101,10 @@ fn a_holder_serves_exactly_the_requested_pieces() {
         .collect();
     assert_eq!(body, bytes[65_536..196_608]);
     assert_eq!(holder.bytes_out(), 131_072);
+    assert!(events.contains(&LinkEvent::ServeRange {
+        key: KEY.into(),
+        range: range(1, 3)
+    }));
     assert!(!holder.closed());
 }
 
