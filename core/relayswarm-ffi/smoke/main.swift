@@ -13,8 +13,36 @@ func strings(_ field: Substring) -> [String] {
     field == "-" ? [] : field.split(separator: ",").map { text($0)! }
 }
 func number(_ field: Substring) -> UInt64 { UInt64(field)! }
+// JSON without Foundation's serialiser, which on Linux writes some doubles as
+// other numbers. Types are matched exactly, because a cast from `Any` can
+// bridge an integer to a Bool on Apple platforms.
 func json(_ value: Any) -> String {
-    String(data: try! JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]), encoding: .utf8)!
+    func exactly<T>(_ type: T.Type) -> Bool { Swift.type(of: value) == type }
+    if value is NSNull { return "null" }
+    if exactly(Bool.self) { return (value as! Bool) ? "true" : "false" }
+    if exactly(Double.self) { let double = value as! Double; return double.isFinite ? "\(double)" : "null" }
+    if exactly(Int.self) { return "\(value as! Int)" }
+    if exactly(Int64.self) { return "\(value as! Int64)" }
+    if exactly(UInt64.self) { return "\(value as! UInt64)" }
+    if exactly(UInt32.self) { return "\(value as! UInt32)" }
+    if exactly(String.self) {
+        var out = "\""
+        // Non-ASCII as UTF-16 escapes, so the output encoding never matters.
+        for unit in (value as! String).utf16 {
+            switch unit {
+            case 0x22: out += "\\\""
+            case 0x5c: out += "\\\\"
+            case 0x20...0x7e: out.unicodeScalars.append(Unicode.Scalar(unit)!)
+            default:
+                let hex = String(unit, radix: 16)
+                out += "\\u" + String(repeating: "0", count: 4 - hex.count) + hex
+            }
+        }
+        return out + "\""
+    }
+    if let array = value as? [Any] { return "[" + array.map(json).joined(separator: ",") + "]" }
+    if let object = value as? [String: Any] { return "{" + object.map { json($0.key) + ":" + json($0.value) }.joined(separator: ",") + "}" }
+    fatalError("cannot write \(Swift.type(of: value))")
 }
 func orNull(_ value: Any?) -> Any { value ?? NSNull() }
 // JSON has no infinity or NaN; JavaScript writes them as null.
