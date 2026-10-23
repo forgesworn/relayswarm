@@ -702,7 +702,9 @@ impl PeerLink {
     }
 
     /// Close the link with one of the known reasons; others close as `host`.
-    pub fn close(&self, reason: String) -> LinkUpdate {
+    /// Not `close`: Kotlin bindings already have `close()`, which frees the
+    /// object.
+    pub fn close_link(&self, reason: String) -> LinkUpdate {
         self.run(|link| {
             link.close(&reason);
             None

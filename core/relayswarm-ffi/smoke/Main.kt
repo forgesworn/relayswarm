@@ -111,7 +111,7 @@ fun main() {
                 transfer(field)
             }
             "trace" -> {
-                link?.close()
+                link?.close() // frees the previous trace's link
                 now = number(field[1])
                 link = PeerLink(LinkSettings(number(field[2]), field[3].toUInt(), number(field[4]), field[5] == "1"), now)
                 lastRequest = null
@@ -142,7 +142,7 @@ fun main() {
                     }
                     "serve" -> peer.serveResponse(now, bytes(field[1]))
                     "drain" -> peer.bufferedAmountLow(now, 0uL)
-                    "close" -> peer.close(text(field[1])!!)
+                    "close" -> peer.closeLink(text(field[1])!!)
                     "sendHave" -> peer.sendHave(strings(field[1]))
                     "sendHaveChange" -> peer.sendHaveChange(strings(field[1]), strings(field[2]))
                     "sendContribution" -> peer.sendContribution(field[1] == "1", text(field[2]))

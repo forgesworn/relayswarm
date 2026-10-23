@@ -136,7 +136,7 @@ for field in lines {
             now = target
         case "serve": update = link.serveResponse(now: now, bytes: bytes(field[1]))
         case "drain": update = link.bufferedAmountLow(now: now, buffered: 0)
-        case "close": update = link.close(reason: text(field[1])!)
+        case "close": update = link.closeLink(reason: text(field[1])!)
         case "sendHave": update = link.sendHave(keys: strings(field[1]))
         case "sendHaveChange": update = link.sendHaveChange(add: strings(field[1]), del: strings(field[2]))
         case "sendContribution": update = link.sendContribution(serving: field[1] == "1", rendition: text(field[2]))

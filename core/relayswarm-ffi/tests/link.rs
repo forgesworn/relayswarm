@@ -129,7 +129,7 @@ fn replay(trace: &Value) -> Vec<String> {
         } else if input.get("drain").is_some() {
             link.buffered_amount_low(now, 0)
         } else if let Some(reason) = input.get("close") {
-            link.close(reason.as_str().unwrap().to_owned())
+            link.close_link(reason.as_str().unwrap().to_owned())
         } else if let Some(keys) = input.get("sendHave") {
             link.send_have(strings(keys))
         } else if let Some(change) = input.get("sendHaveChange") {

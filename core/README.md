@@ -166,8 +166,9 @@ and `PeerLink`, the data channel protocol. Objects take and return typed
 records. Each `PeerLink` call returns the events to act on in order, the
 request ID it assigned, and the link's scalar state; `sets()` returns what the
 remote has announced and need be read only when `version` changes. The shell
-reports the channel's state with `set_channel_open` and `set_reliable`, and
-sets its low-water threshold from `link_limits()`. The facade restores the
+reports the channel's state with `set_channel_open` and `set_reliable`, sets
+its low-water threshold from `link_limits()`, and closes the link with
+`close_link(reason)`; in Kotlin, `close()` frees the object instead. The facade restores the
 loader's key order in the fragment context's `media` and `encryption` before
 verifying, because the core compares `encryption` as `JSON.stringify` text and
 a host serialising a dictionary may reorder it. UniFFI exports no constants,
