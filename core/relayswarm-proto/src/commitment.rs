@@ -16,6 +16,7 @@ pub const MAX_SEGMENT_BYTES: i64 = 16 * 1024 * 1024;
 
 const DOMAIN_V1: &str = "relayswarm-segment-v1";
 const DOMAIN_V2: &str = "relayswarm-segment-v2";
+const DOMAIN_V3: &str = "relayswarm-segment-v3";
 const DOMAIN_DELEGATION: &str = "relayswarm-commitment-delegation-v1";
 const DOMAIN_REVOCATION: &str = "relayswarm-commitment-revocation-v1";
 
@@ -96,11 +97,39 @@ fn canonical(fields: &[(&str, Option<&Value>)]) -> String {
     js::stringify_fields(&present)
 }
 
+/// `commitmentPieceSize(size)`: the schema 3 piece size, at least 64 KiB, at
+/// most 64 pieces per segment and a multiple of 16 KiB.
+pub fn commitment_piece_size(size: i64) -> i64 {
+    let raw = 65_536.max((size + 63) / 64);
+    (raw + 16_383) / 16_384 * 16_384
+}
+
+/// The schema a content object claims: 3, 2, or 1 for anything else.
+fn schema(value: &Map<String, Value>) -> i64 {
+    let v = get(value, "v");
+    if js::strict_eq(v, &Value::from(3)) {
+        3
+    } else if js::strict_eq(v, &Value::from(2)) {
+        2
+    } else {
+        1
+    }
+}
+
+fn schema_domain(schema: i64) -> &'static str {
+    match schema {
+        3 => DOMAIN_V3,
+        2 => DOMAIN_V2,
+        _ => DOMAIN_V1,
+    }
+}
+
 /// `commitmentContent(value)`.
 pub fn commitment_content(value: &Map<String, Value>) -> String {
-    let wide = js::strict_eq(get(value, "v"), &Value::from(2));
-    let domain = Value::from(if wide { DOMAIN_V2 } else { DOMAIN_V1 });
-    let version = Value::from(if wide { 2 } else { 1 });
+    let v = schema(value);
+    let wide = v >= 2;
+    let domain = Value::from(schema_domain(v));
+    let version = Value::from(v);
     let mut fields: Vec<(&str, Option<&Value>)> = vec![("domain", Some(&domain)), ("v", Some(&version))];
     for name in [
         "streamEventId",
@@ -118,6 +147,11 @@ pub fn commitment_content(value: &Map<String, Value>) -> String {
     }
     if wide {
         for name in ["playlist", "mediaType", "encryption"] {
+            fields.push((name, absent_or(value, name)));
+        }
+    }
+    if v == 3 {
+        for name in ["pieceSize", "pieces"] {
             fields.push((name, absent_or(value, name)));
         }
     }
@@ -311,15 +345,16 @@ pub fn verify_segment_commitment(
         return None;
     }
     let value = parse_object(&event["content"])?;
-    let wide = js::strict_eq(get(&value, "v"), &Value::from(2));
+    let v = schema(&value);
+    let wide = v >= 2;
     let sequence = js::safe_integer(get(&value, "sequence"));
     let discontinuity = js::safe_integer(get(&value, "discontinuity"));
     let part = get(&value, "part");
     let size = js::safe_integer(get(&value, "size"));
     let expires_at = js::safe_integer(get(&value, "expiresAt"));
     let accepted = event["content"].as_str() == Some(commitment_content(&value).as_str())
-        && get(&value, "domain") == if wide { DOMAIN_V2 } else { DOMAIN_V1 }
-        && js::includes(&[Value::from(1), Value::from(2)], get(&value, "v"))
+        && get(&value, "domain") == schema_domain(v)
+        && js::includes(&[Value::from(1), Value::from(2), Value::from(3)], get(&value, "v"))
         && js::strict_eq(get(&value, "streamEventId"), &stream["id"])
         && get(&value, "swarmId").as_str() == Some(trust.swarm_id)
         && get(&value, "key").as_str() == Some(key)
@@ -334,6 +369,19 @@ pub fn verify_segment_commitment(
         && expires_at.is_some_and(|ex| ex > now && ex <= now + 300);
     if !accepted {
         return None;
+    }
+    // Schema 3 adds one SHA-256 per piece so a segment can come from several holders.
+    if v == 3 {
+        let size = size?;
+        let piece_size = commitment_piece_size(size);
+        let pieces = get(&value, "pieces").as_array()?;
+        let count = (size + piece_size - 1) / piece_size;
+        if !js::strict_eq(get(&value, "pieceSize"), &Value::from(piece_size))
+            || pieces.len() as i64 != count
+            || !pieces.iter().all(|piece| piece.as_str().is_some_and(is_hex64))
+        {
+            return None;
+        }
     }
     if wide {
         let expected = context.media.as_ref()?;

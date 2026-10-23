@@ -7,7 +7,7 @@
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { finalizeEvent, getPublicKey } from "nostr-tools/pure";
-import { commitmentContent, delegationContent, revocationContent, validStreamAuthorisation,
+import { commitmentContent, commitmentPieceSize, delegationContent, revocationContent, validStreamAuthorisation,
   verifyCommitmentDelegation, verifySegmentCommitment } from "../src/browser/segment-commitment.mjs";
 import { normaliseContext, runVectorCase } from "../test/proto-vectors.mjs";
 import { runLinkTrace } from "../test/link-traces.mjs";
@@ -206,6 +206,33 @@ commit("delegated v2: valid", "accept", delegatedCommitment(delegation, wideFiel
 commit("delegated v2: audio outside scope", "reject", delegatedCommitment(delegation, wideFields({ mediaType: "audio" })), { delegation, context: { frag: frag({ type: "audio" }) } });
 const audioDelegation = delegationEvent({ mediaTypes: ["main", "audio"] });
 commit("delegated v2: audio in scope", "accept", delegatedCommitment(audioDelegation, wideFields({ mediaType: "audio" })), { delegation: audioDelegation, context: { frag: frag({ type: "audio" }) } });
+
+// Author-signed schema 3: schema 2 plus one SHA-256 per piece.
+const pieceHashes = (size) => Array.from({ length: Math.ceil(size / commitmentPieceSize(size)) }, (_, index) => digest(`piece ${index}`));
+function pieceFields(overrides = {}) {
+  const size = overrides.size ?? 200_000;
+  return wideFields({ v: 3, size, pieceSize: commitmentPieceSize(size), pieces: pieceHashes(size), ...overrides });
+}
+const v3 = pieceFields();
+commit("v3: valid, short last piece", "accept", commitment(v3));
+commit("v3: audio", "accept", commitment(pieceFields({ mediaType: "audio" })), { context: { frag: frag({ type: "audio" }) } });
+commit("v3: one piece", "accept", commitment(pieceFields({ size: 4096 })));
+commit("v3: size at limit", "accept", commitment(pieceFields({ size: 1024 * 1024 })));
+commit("v3: 64 pieces at 4 MiB", "accept", commitment(pieceFields({ size: 4 * 1024 * 1024 })), { maxSegmentBytes: 16 * 1024 * 1024 });
+commit("v3: 64 pieces at 16 MiB", "accept", commitment(pieceFields({ size: 16 * 1024 * 1024 })), { maxSegmentBytes: 16 * 1024 * 1024 });
+commit("v3: piece size grows past 4 MiB", "accept", commitment(pieceFields({ size: 4 * 1024 * 1024 + 1 })), { maxSegmentBytes: 16 * 1024 * 1024 });
+commit("v3: piece size off the formula", "reject", commitment(pieceFields({ pieceSize: 65_536 + 16_384, pieces: pieceHashes(200_000).slice(0, 3) })));
+commit("v3: piece size as string", "reject", commitment(pieceFields({ pieceSize: "65536" })));
+commit("v3: one piece too few", "reject", commitment(pieceFields({ pieces: pieceHashes(200_000).slice(1) })));
+commit("v3: one piece too many", "reject", commitment(pieceFields({ pieces: [...pieceHashes(200_000), SHA] })));
+commit("v3: uppercase piece", "reject", commitment(pieceFields({ pieces: pieceHashes(200_000).map((hash, index) => index === 2 ? hash.toUpperCase() : hash) })));
+commit("v3: piece as one-element array", "reject", commitment(pieceFields({ pieces: pieceHashes(200_000).map((hash, index) => index === 0 ? [hash] : hash) })));
+commit("v3: pieces as object", "reject", commitment(pieceFields({ pieces: { 0: SHA, 1: SHA, 2: SHA, 3: SHA, length: 4 } })));
+commit("v3: pieces absent from content", "reject", commitment(null, { content: commitmentContent(v3).replace(/,"pieces":\[[^\]]*\]/u, "") }));
+commit("v3: schema 2 domain", "reject", commitment(null, { content: commitmentContent(v3).replace("segment-v3", "segment-v2") }));
+commit("v3: rendition differs from playlist", "reject", commitment(pieceFields({ rendition: "/media/low/index.m3u8" })));
+commit("v2: piece fields in content", "reject", commitment(null, { content: commitmentContent(v3).replace("segment-v3", "segment-v2").replace("\"v\":3", "\"v\":2") }));
+commit("delegated v3: valid", "accept", delegatedCommitment(delegation, pieceFields()), { delegation });
 
 // Cross-check the helpers used by the generator against the module under test.
 if (!validStreamAuthorisation(streamEvent) || !verifyCommitmentDelegation(delegation, { streamEvent, swarmId: SWARM }, AT)

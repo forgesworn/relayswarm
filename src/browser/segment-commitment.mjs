@@ -8,6 +8,8 @@ export const KIND_COMMITMENT_REVOCATION = 24174;
 const HEX64 = /^[0-9a-f]{64}$/u;
 const DOMAIN = "relayswarm-segment-v1";
 const DOMAIN_V2 = "relayswarm-segment-v2";
+const DOMAIN_V3 = "relayswarm-segment-v3";
+const DOMAINS = { 1: DOMAIN, 2: DOMAIN_V2, 3: DOMAIN_V3 };
 const encoder = new TextEncoder();
 
 function validSignature(event) {
@@ -20,13 +22,20 @@ function tag(event, name) {
 }
 function safePath(path) { return typeof path === "string" && /^\/media\/[a-z0-9_./-]+$/iu.test(path) && !path.split("/").includes(".."); }
 
+/** Schema 3 piece size: at least 64 KiB, at most 64 pieces, a multiple of 16 KiB. */
+export function commitmentPieceSize(size) {
+  return Math.ceil(Math.max(65_536, Math.ceil(size / 64)) / 16_384) * 16_384;
+}
+function schema(value) { return value.v === 3 ? 3 : value.v === 2 ? 2 : 1; }
+
 export function commitmentContent(value) {
-  const wide = value.v === 2;
-  return JSON.stringify({ domain: wide ? DOMAIN_V2 : DOMAIN, v: wide ? 2 : 1,
+  const v = schema(value), wide = v >= 2;
+  return JSON.stringify({ domain: DOMAINS[v], v,
     streamEventId: value.streamEventId, swarmId: value.swarmId, key: value.key,
     rendition: value.rendition, sequence: value.sequence, discontinuity: value.discontinuity,
     part: value.part, sha256: value.sha256, size: value.size, expiresAt: value.expiresAt,
     ...(wide ? { playlist: value.playlist, mediaType: value.mediaType, encryption: value.encryption } : {}),
+    ...(v === 3 ? { pieceSize: value.pieceSize, pieces: value.pieces } : {}),
   });
 }
 export function delegationContent(value) {
@@ -107,14 +116,18 @@ export function verifySegmentCommitment(event, { streamEvent, swarmId, key, cont
       || !validStreamAuthorisation(streamEvent) || !event || event.kind !== KIND_SEGMENT_COMMITMENT || !bounded(event)
       || !Number.isSafeInteger(event.created_at) || event.created_at > seconds + 30 || event.created_at < seconds - 120
       || !validSignature(event) || tag(event, "x") !== swarmId || tag(event, "e") !== streamEvent.id) return null;
-    const value = JSON.parse(event.content), wide = value.v === 2;
-    if (event.content !== commitmentContent(value) || value.domain !== (wide ? DOMAIN_V2 : DOMAIN) || ![1, 2].includes(value.v)
+    const value = JSON.parse(event.content), v = schema(value), wide = v >= 2;
+    if (event.content !== commitmentContent(value) || value.domain !== DOMAINS[v] || ![1, 2, 3].includes(value.v)
       || value.streamEventId !== streamEvent.id || value.swarmId !== swarmId || value.key !== key
       || value.sequence !== context.frag.sn || value.discontinuity !== (context.frag.cc ?? 0) || value.part !== (context.part?.index ?? null)
       || !Number.isSafeInteger(value.sequence) || value.sequence < 0 || !Number.isSafeInteger(value.discontinuity) || value.discontinuity < 0
       || (value.part !== null && (!Number.isSafeInteger(value.part) || value.part < 0)) || !HEX64.test(value.sha256)
       || !Number.isSafeInteger(value.size) || value.size < 1 || value.size > maxSegmentBytes
       || !Number.isSafeInteger(value.expiresAt) || value.expiresAt <= seconds || value.expiresAt > seconds + 300) return null;
+    // Schema 3 adds one SHA-256 per piece so a segment can come from several holders.
+    if (v === 3 && (value.pieceSize !== commitmentPieceSize(value.size) || !Array.isArray(value.pieces)
+      || value.pieces.length !== Math.ceil(value.size / value.pieceSize)
+      || value.pieces.some((piece) => typeof piece !== "string" || !HEX64.test(piece)))) return null;
     if (wide) {
       const expected = segmentMediaContext(context);
       if (!expected || value.rendition !== expected.playlist || value.playlist !== expected.playlist || value.mediaType !== expected.mediaType

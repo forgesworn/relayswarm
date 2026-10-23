@@ -15,7 +15,7 @@ are not a stable interoperability promise.
 |---|---|---|
 | `relayswarm` | Node or a browser bundler | `RelayPool`, `RelaySwarmSession`, `validTicket`, `RELAYSWARM_VERSION`, `KIND_PRESENCE`, `KIND_SIGNAL`, `SWARM_TAG` |
 | `relayswarm/hls-swarm` | Browser with hls.js | `createHlsSwarm`, `HLS_SWARM_METRICS_VERSION`, `rotationCandidate`, `retryAfterFor`, `readRefusal` |
-| `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `delegationContent`, `revocationContent`, `validStreamAuthorisation`, `verifyCommitmentDelegation`, `segmentMediaContext`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT`, `KIND_COMMITMENT_DELEGATION`, `KIND_COMMITMENT_REVOCATION` |
+| `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `commitmentPieceSize`, `delegationContent`, `revocationContent`, `validStreamAuthorisation`, `verifyCommitmentDelegation`, `segmentMediaContext`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT`, `KIND_COMMITMENT_DELEGATION`, `KIND_COMMITMENT_REVOCATION` |
 | `relayswarm/hls-publisher` | Node only | `createHlsPublisher`, `PublisherError` |
 | `relayswarm/publisher-state` | Node only | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent`, `createCommitmentDelegation`, `createCommitmentRevocation` |
 | `relayswarm/stream-discovery` | Browser or Node | `resolveTrustedStream`, `discoverTrustedStreams`, `StreamDiscoveryError` |
@@ -365,6 +365,13 @@ See [broadcast setup](BROADCASTING.md) and [container deployment](../deploy/READ
 `commitmentContent(fields)` returns canonical JSON with the domain
 `relayswarm-segment-v1`, schema `v: 1` and fixed field order. It serialises fields;
 it does not sign an event or validate media bytes.
+
+`commitmentPieceSize(size)` returns the piece size that experimental schema 3
+(`v: 3`, `relayswarm-segment-v3`) requires: at least 64 KiB, at most 64 pieces
+per segment, rounded up to a multiple of 16 KiB. Schema 3 adds `pieceSize` and
+one lowercase SHA-256 per piece in `pieces` to schema 2. The verifier accepts
+it; no publisher on this branch emits it and the loader does not yet use the
+pieces.
 
 `validStreamAuthorisation(event)` checks the signed kind-30311 event, a `d` tag,
 bounded event size and the exact redistribution tag.
