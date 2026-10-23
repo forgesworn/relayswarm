@@ -8,6 +8,11 @@
 // pinned JNA jar into core/target.
 //
 //   node scripts/ffi-smoke.mjs swift|kotlin
+//   node scripts/ffi-smoke.mjs swift <label> -- <command> [args...]
+//
+// The second form checks a program built elsewhere, such as the smoke that
+// scripts/ffi-apple.mjs builds against the packaged library, and reports it
+// under <label>.
 //
 // The program reads one line per input and prints one JSON line per result.
 // Strings travel as "." plus base64, so no field is empty; "-" is none.
@@ -22,7 +27,11 @@ import { fileURLToPath } from "node:url";
 import { commitmentPieceSize } from "../src/browser/segment-commitment.mjs";
 
 const language = process.argv[2];
-if (language !== "swift" && language !== "kotlin") throw new Error("usage: ffi-smoke.mjs swift|kotlin");
+if (language !== "swift" && language !== "kotlin") throw new Error("usage: ffi-smoke.mjs swift|kotlin [<label> -- <command> [args...]]");
+const separator = process.argv.indexOf("--");
+const prebuilt = separator > 0 ? process.argv.slice(separator + 1) : null;
+if (prebuilt && (prebuilt.length === 0 || separator !== 4)) throw new Error("usage: ffi-smoke.mjs swift|kotlin <label> -- <command> [args...]");
+const label = prebuilt ? process.argv[3] : `${language} bindings`;
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const core = join(root, "core");
@@ -338,36 +347,41 @@ function check(output) {
   });
   assert.deepEqual(differences, [], `link traces differ through ${language}:\n${differences.join("\n")}`);
   const steps = traces.reduce((sum, trace) => sum + trace.steps.length, 0);
-  console.log(`${language} bindings: ${vectors.cases.length} vectors match; ${traces.length} link traces (${steps} steps) match; transfer ${second.log.join(", ")}; range of ${wanted.length} bytes; ${selections.length} selection sequences (${selected} steps) and ${discoveries.length} discovery sequences (${discovered} steps) match`);
+  console.log(`${label}: ${vectors.cases.length} vectors match; ${traces.length} link traces (${steps} steps) match; transfer ${second.log.join(", ")}; range of ${wanted.length} bytes; ${selections.length} selection sequences (${selected} steps) and ${discoveries.length} discovery sequences (${discovered} steps) match`);
 }
 
 // --- build and run -----------------------------------------------------------
 
-const work = mkdtempSync(join(tmpdir(), "relayswarm-ffi-"));
-try {
-  run("cargo", ["build", "--locked", "-p", "relayswarm-ffi"], { stdio: "inherit" });
-  const bindings = join(work, "bindings");
-  run("cargo", ["run", "--locked", "--quiet", "--features", "bindgen", "--bin", "uniffi-bindgen", "--",
-    "generate", "--library", library, "--language", language, "--no-format", "--out-dir", bindings], { stdio: "inherit" });
-  const generated = language === "swift" ? join(bindings, "relayswarm_ffi.swift") : join(bindings, "uniffi/relayswarm_ffi/relayswarm_ffi.kt");
-  if (!existsSync(generated)) throw new Error(`The binding generator wrote no ${language}; check the library still carries its UniFFI metadata.`);
-
-  let program;
-  if (language === "swift") {
-    const binary = join(work, "smoke");
-    run("swiftc", ["-O", "-module-name", "smoke", "-I", bindings,
-      "-Xcc", `-fmodule-map-file=${join(bindings, "relayswarm_ffiFFI.modulemap")}`,
-      generated, join(ffi, "smoke/main.swift"),
-      "-L", libraryDir, "-lrelayswarm_ffi", "-Xlinker", "-rpath", "-Xlinker", libraryDir, "-o", binary], { stdio: "inherit" });
-    program = [binary, []];
-  } else {
-    const jar = await jna();
-    const smoke = join(work, "smoke.jar");
-    run("kotlinc", ["-nowarn", "-include-runtime", "-cp", jar, "-d", smoke, generated, join(ffi, "smoke/Main.kt")], { stdio: "inherit" });
-    program = ["java", [`-Djna.library.path=${libraryDir}`, "-cp", [smoke, jar].join(delimiter), "MainKt"]];
-  }
-  const [command, args] = program;
+if (prebuilt) {
+  const [command, ...args] = prebuilt;
   check(execFileSync(command, args, { input: input(), maxBuffer: 256 * 1024 * 1024 }).toString("utf8"));
-} finally {
-  rmSync(work, { recursive: true, force: true });
+} else {
+  const work = mkdtempSync(join(tmpdir(), "relayswarm-ffi-"));
+  try {
+    run("cargo", ["build", "--locked", "-p", "relayswarm-ffi"], { stdio: "inherit" });
+    const bindings = join(work, "bindings");
+    run("cargo", ["run", "--locked", "--quiet", "--features", "bindgen", "--bin", "uniffi-bindgen", "--",
+      "generate", "--library", library, "--language", language, "--no-format", "--out-dir", bindings], { stdio: "inherit" });
+    const generated = language === "swift" ? join(bindings, "relayswarm_ffi.swift") : join(bindings, "uniffi/relayswarm_ffi/relayswarm_ffi.kt");
+    if (!existsSync(generated)) throw new Error(`The binding generator wrote no ${language}; check the library still carries its UniFFI metadata.`);
+
+    let program;
+    if (language === "swift") {
+      const binary = join(work, "smoke");
+      run("swiftc", ["-O", "-module-name", "smoke", "-I", bindings,
+        "-Xcc", `-fmodule-map-file=${join(bindings, "relayswarm_ffiFFI.modulemap")}`,
+        generated, join(ffi, "smoke/main.swift"),
+        "-L", libraryDir, "-lrelayswarm_ffi", "-Xlinker", "-rpath", "-Xlinker", libraryDir, "-o", binary], { stdio: "inherit" });
+      program = [binary, []];
+    } else {
+      const jar = await jna();
+      const smoke = join(work, "smoke.jar");
+      run("kotlinc", ["-nowarn", "-include-runtime", "-cp", jar, "-d", smoke, generated, join(ffi, "smoke/Main.kt")], { stdio: "inherit" });
+      program = ["java", [`-Djna.library.path=${libraryDir}`, "-cp", [smoke, jar].join(delimiter), "MainKt"]];
+    }
+    const [command, args] = program;
+    check(execFileSync(command, args, { input: input(), maxBuffer: 256 * 1024 * 1024 }).toString("utf8"));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }

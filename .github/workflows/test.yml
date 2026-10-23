@@ -206,6 +206,29 @@ jobs:
           kotlinc -version
           npm run test:ffi:kotlin
 
+  apple-package:
+    name: Apple package of the Rust core
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run proto:traces
+      # In core/, so the targets go to the toolchain rust-toolchain.toml pins.
+      - name: Rust targets for iPhone, the simulator and macOS
+        working-directory: core
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios aarch64-apple-darwin x86_64-apple-darwin
+      # Builds the XCFramework and package, links the smoke for iPhone and
+      # runs it on macOS and in an iPhone simulator.
+      - name: Package, link and replay
+        run: |
+          xcodebuild -version
+          npm run test:ffi:apple
+
   live-relays:
     name: browser transport against live relays
     needs: native

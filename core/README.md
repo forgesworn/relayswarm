@@ -197,9 +197,24 @@ records them first if they are missing); CI runs both on Linux. The
 Kotlin check downloads JNA 5.14.0 from Maven Central into `core/target/` and
 verifies its SHA-256. Generate bindings from an unstripped build: the release
 profile strips symbols, and on Linux that removes the UniFFI metadata.
-There is no packaged Apple
-framework or Android library, and RelaySwarmKit does not use it yet. Release
-builds abort on panic, so a panic in the core ends the host process rather
+
+`npm run build:ffi:apple` packages the facade for Apple platforms as the
+Swift package in `core/apple`: release static libraries for iPhone (arm64),
+the iOS simulator (arm64, x86_64) and macOS (arm64, x86_64), for iOS 16 and
+macOS 14 as RelaySwarmKit requires, in `relayswarm_ffiFFI.xcframework`, with
+the generated bindings as the `RelaySwarmCore` library. Both are built into
+`core/apple` and git-ignored, so run the script before using the package; it
+needs Xcode and the five Rust targets it names. It refuses a library with an
+object built for a newer OS than the package declares.
+`npm run test:ffi:apple` also links the smoke program against the package
+with `xcodebuild` for iPhone, the simulator and macOS, and runs the same
+checks on macOS (arm64, and x86_64 under Rosetta) and in an iPhone simulator;
+CI runs it on macOS. The iPhone build is only linked: nothing here runs on a
+phone. The package sits in a subdirectory, so it is used by local path, not
+by Git URL, and there is no Android library. RelaySwarmKit does not use the
+package yet.
+
+Release builds abort on panic, so a panic in the core ends the host process rather
 than raising an error.
 
 ```sh
@@ -209,6 +224,7 @@ cargo build --target wasm32-unknown-unknown -p relayswarm-proto
 cd .. && npm run core:wasm
 npm run test:ffi:swift
 npm run test:ffi:kotlin
+npm run test:ffi:apple
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. Builds use `core/target/`.
