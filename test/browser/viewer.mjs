@@ -56,6 +56,7 @@ const swarm = useSwarm
       iceServers: [],
       originFallbackMs: Number(params.get("fallbackMs") || 1500),
       ...(params.get("core") === "1" ? { coreWasm: "/relayswarm-core.wasm" } : {}),
+      ...(params.get("multi") === "1" ? { multiHolder: true } : {}),
       metricsIntervalMs: 5000,
       onMetrics: (metrics) => {
         const atMs = Math.round(performance.now());
