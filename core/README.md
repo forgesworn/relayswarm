@@ -158,11 +158,29 @@ Measured on 22 and 23 October 2026:
 The module is fetched separately rather than inlined: inlining it as base64
 measured 1,002,411 bytes (352,844 gzip) for the demo client.
 
+`relayswarm-ffi` is the UniFFI facade (spec step 4) for Swift and Kotlin.
+It exposes the commitment verifiers, taking the event and the options
+`segment-commitment.mjs` takes as JSON text and returning the verified content
+as JSON or nothing; the schema 3 piece helpers; and the multi-holder
+`Transfer` as an object whose inputs and commands are typed records. The
+facade restores the loader's key order in the fragment context's `media` and
+`encryption` before verifying, because the core compares `encryption` as
+`JSON.stringify` text and a host serialising a dictionary may reorder it.
+UniFFI exports no constants, so `default_transfer_settings()` returns the
+core's defaults. `cargo test` runs the shared vectors through it and replays
+a scripted transfer through both the facade and the core, expecting the same
+commands. `npm run test:ffi:swift` builds the library, generates Swift
+bindings, compiles a small program against them and checks every vector and
+one transfer; CI runs it on Linux. RelaySwarmKit does not use it yet, and no
+Kotlin bindings are generated or tested. Release builds abort on panic, so a
+panic in the core ends the host process rather than raising an error.
+
 ```sh
 cd core
 cargo test
 cargo build --target wasm32-unknown-unknown -p relayswarm-proto
 cd .. && npm run core:wasm
+npm run test:ffi:swift
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. Builds use `core/target/`.

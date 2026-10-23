@@ -162,7 +162,7 @@ jobs:
   rust-core:
     name: Rust core and shared vectors
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -192,6 +192,10 @@ jobs:
       # it twice per Windows job doubles their chance of a slow-runner miss.
       - name: Loader suite with links, selection and verification in the Rust core
         run: npm run test:swarm:core
+      # The runner image ships Swift, so the UniFFI bindings compile and run
+      # against the shared vectors here, not only on a Mac.
+      - name: Swift bindings through UniFFI
+        run: npm run test:ffi:swift
 
   live-relays:
     name: browser transport against live relays

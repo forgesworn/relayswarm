@@ -104,6 +104,11 @@
   requests stopped because the segment is done or another holder won count
   as aborts rather than abandonments, and a closed link's last result no
   longer leaves an entry in the core's peer selection.
+- Add `core/relayswarm-ffi`, a UniFFI facade over the Rust core for Swift and
+  Kotlin: the commitment verifiers (JSON in and out), the schema 3 piece
+  helpers and the multi-holder transfer scheduler. `npm run test:ffi:swift`
+  checks all 140 vectors and a transfer through generated Swift bindings, and
+  CI runs it. RelaySwarmKit does not use it yet.
 
 ## v0.2.1 (21 October 2026)
 

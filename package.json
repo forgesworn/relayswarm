@@ -12,6 +12,7 @@
     "test:browser": "node test/hls-swarm-browser.mjs",
     "test:proto": "node --test test/proto-vectors.test.mjs test/core-wasm.test.mjs test/core-link.test.mjs test/core-transfer.test.mjs test/trace-report.test.mjs",
     "core:wasm": "node scripts/build-core-wasm.mjs",
+    "test:ffi:swift": "node scripts/ffi-swift-smoke.mjs",
     "proto:vectors": "node scripts/generate-proto-vectors.mjs",
     "proto:traces": "node scripts/generate-selection-traces.mjs",
     "test:swarm": "node --test test/hls-swarm.test.mjs test/browser-hardening.test.mjs test/stream-discovery.test.mjs test/origin-range.test.mjs",

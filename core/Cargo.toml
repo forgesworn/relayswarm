@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["relayswarm-proto", "relayswarm-wasm"]
+members = ["relayswarm-proto", "relayswarm-wasm", "relayswarm-ffi"]
 
 [workspace.package]
 edition = "2021"
