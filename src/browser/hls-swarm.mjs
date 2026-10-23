@@ -106,6 +106,9 @@ const DEFAULTS = Object.freeze({
   // Rows kept for trace(): every load, eligibility decision, peer and origin
   // request, and each multi-holder scheduler call. 0 keeps none.
   traceRequests: 0,
+  // Peer-first: keep peer-delivered segments out of the hls.js bandwidth and
+  // first-byte estimates, so ABR reflects the origin path (CORE-SPEC 6.3.1).
+  abrIgnorePeers: false,
 });
 const TRACE_LIMIT = 32_768;
 const SAMPLE_LIMIT = 500;
@@ -384,12 +387,15 @@ class HlsSwarm {
     this.uploadQuotaBytes = 0;
     this.uploadTokens = this.options.maxUploadBytesPerSecond;
     this.uploadRefilledAt = now();
+    this.peerFragments = new WeakSet();
+    this.originalTrigger = null;
     this.counters = {
       originLoaded: 0,
       sampledOriginBytes: 0,
       peerInTimeBytes: 0,
       peerFirstLoaded: 0,
       peerFirstBytes: 0,
+      abrPeerSamplesWithheld: 0,
       originFallbacks: 0,
       coordinatedWaits: 0,
       coordinatedPeerLoads: 0,
@@ -474,6 +480,7 @@ class HlsSwarm {
     if (typeof this.options.multiHolder !== "boolean" || !Number.isSafeInteger(this.options.maxHoldersPerObject)
       || this.options.maxHoldersPerObject < 1 || this.options.maxHoldersPerObject > 8) return "invalid-multi-holder";
     if (!Number.isSafeInteger(this.options.traceRequests) || this.options.traceRequests < 0 || this.options.traceRequests > TRACE_LIMIT) return "invalid-trace";
+    if (typeof this.options.abrIgnorePeers !== "boolean") return "invalid-abr-option";
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (this.options.reserveUploadBytes !== undefined && typeof this.options.reserveUploadBytes !== "function") return "invalid-upload-reservation";
     if (typeof this.options.serve !== "boolean" || typeof this.options.serveOnCellular !== "boolean") return "invalid-serve-option";
@@ -496,6 +503,7 @@ class HlsSwarm {
       this.originalFragmentLoader = hls.config.fLoader;
       const BaseLoader = hls.config.fLoader || hls.config.loader;
       hls.config.fLoader = this.options.mode === "peer-first" ? this.#peerFirstLoader(BaseLoader) : this.#shadowLoader(BaseLoader);
+      if (this.options.mode === "peer-first" && this.options.abrIgnorePeers) this.#withholdPeerAbrSamples(hls);
       if (this.options.mode === "peer-first" && this.options.coreWasm !== undefined) {
         let release;
         const settled = new Promise((resolve) => { release = resolve; });
@@ -517,6 +525,30 @@ class HlsSwarm {
     } catch (error) {
       this.#noteError("attach", error);
     }
+  }
+
+  // hls.js samples bandwidth and first byte while it dispatches FRAG_LOADED
+  // and FRAG_BUFFERED. For a peer-delivered fragment those samples are
+  // dropped for the length of that dispatch only; the estimator is looked up
+  // each time because hls.js replaces it on an emergency switch.
+  #withholdPeerAbrSamples(hls) {
+    const swarm = this, trigger = hls.trigger;
+    if (typeof trigger !== "function") return;
+    this.originalTrigger = trigger;
+    this.triggerWasOwn = Object.hasOwn(hls, "trigger");
+    this.withheldTrigger = function (event, data) {
+      const estimator = (event === "hlsFragLoaded" || event === "hlsFragBuffered") && data?.frag && swarm.peerFragments.has(data.frag)
+        ? hls.abrController?.bwEstimator : null;
+      if (!estimator || typeof estimator.sample !== "function" || typeof estimator.sampleTTFB !== "function") return trigger.call(this, event, data);
+      const skip = () => { swarm.counters.abrPeerSamplesWithheld += 1; };
+      const saved = ["sample", "sampleTTFB"].map((name) => [name, Object.getOwnPropertyDescriptor(estimator, name)]);
+      estimator.sample = skip;
+      estimator.sampleTTFB = skip;
+      try { return trigger.call(this, event, data); } finally {
+        for (const [name, own] of saved) { if (own) Object.defineProperty(estimator, name, own); else delete estimator[name]; }
+      }
+    };
+    hls.trigger = this.withheldTrigger;
   }
 
   // The host validates its own credential and lifetime. Replacing that opaque
@@ -543,6 +575,12 @@ class HlsSwarm {
     try {
       if (this.hls && this.hls.config.fLoader?.relayswarmShadow) this.hls.config.fLoader = this.originalFragmentLoader;
     } catch {}
+    try {
+      if (this.originalTrigger && this.hls?.trigger === this.withheldTrigger) {
+        if (this.triggerWasOwn) this.hls.trigger = this.originalTrigger; else delete this.hls.trigger;
+      }
+    } catch {}
+    this.originalTrigger = null;
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
     this.coreRelease?.();
@@ -703,6 +741,7 @@ class HlsSwarm {
         peerFirstShare: shadow ? null : share(c.peerFirstLoaded, c.peerFirstLoaded + c.originLoaded),
         peerFirstByteShare: shadow ? null : share(c.peerFirstBytes, c.peerFirstBytes + c.bytesFromOrigin),
         peerFirstLoaded: c.peerFirstLoaded,
+        abrPeerSamplesWithheld: c.abrPeerSamplesWithheld,
         originFallbacks: c.originFallbacks,
         coordinatedWaits: c.coordinatedWaits,
         coordinatedPeerLoads: c.coordinatedPeerLoads,
@@ -835,6 +874,7 @@ class HlsSwarm {
         this.releaseFetch = null;
         this.peerStats = null;
         this.peerContext = context;
+        if (context?.frag) swarm.peerFragments.delete(context.frag);
         const budgetGeometry = { source: "unobserved", positionSource: null, currentTime: null, bufferedEnd: null, playableEnd: null, fragmentStart: null, originReserveMs: null, uncappedMs: null };
         const budgetMs = swarm.#peerBudget(context, budgetGeometry);
         swarm.#contributionContext(context);
@@ -959,6 +999,7 @@ class HlsSwarm {
           if (swarm.firstPeerSegmentAtMs === null) swarm.firstPeerSegmentAtMs = Date.now() - swarm.startedAt;
           pushSample(swarm.peerLatencySamples, end - t0);
           swarm.#hold(result.key, result.bytes.slice());
+          if (context.frag) swarm.peerFragments.add(context.frag);
           callbacks.onSuccess({ url: context.url, data: result.bytes.buffer, code: 200 }, this.peerStats, context, null);
         }).catch((error) => {
           if (this.active === token) {

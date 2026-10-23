@@ -92,6 +92,11 @@
 - The demo player takes `multiHolder=1` and `trace=N` page URL parameters
   and keeps the latest scheduler traces in its receipt, which
   `scripts/trace-report.mjs` reads.
+- `abrIgnorePeers` (off by default) keeps peer-delivered fragments out of the
+  hls.js bandwidth and first-byte estimates; without it the time a peer
+  delivery took, holder waits included, is sampled as origin throughput. The
+  demo takes it as `abrIgnorePeers=1`, and its receipt records hls.js's
+  bandwidth estimate with each fragment.
 - The Rust verifier now rejects a commitment whose content omits `part`, as
   the JavaScript one does (a new shared vector, 140 in all). Under
   `multiHolder`, an untested holder is planned with the shared first-byte

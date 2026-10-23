@@ -549,25 +549,27 @@ test("field-run URL options reach the loader and the receipt keeps the latest ei
   const plain = await page();
   plain.element("mode").value = "peer-first"; await plain.submit();
   assert.equal(plain.fixture.swarms.at(-1).options.multiHolder, false);
+  assert.equal(plain.fixture.swarms.at(-1).options.abrIgnorePeers, false);
   assert.equal(plain.fixture.swarms.at(-1).options.traceRequests, 0);
   const plainReport = plain.context.window.relaySwarmDemo.report();
   assert.equal(plainReport.current.trace, undefined);
   assert.equal(plainReport.sessions.some((entry) => "trace" in entry), false);
   plain.close();
-  for (const search of ["?trace=32769", "?trace=-1", "?trace=1.5", "?multiHolder=true"]) {
+  for (const search of ["?trace=32769", "?trace=-1", "?trace=1.5", "?multiHolder=true", "?abrIgnorePeers=true"]) {
     const p = await page(new Map(), { search }); p.element("mode").value = "peer-first"; await p.submit();
     assert.equal(p.fixture.swarms.at(-1).options.multiHolder, false, search);
+    assert.equal(p.fixture.swarms.at(-1).options.abrIgnorePeers, false, search);
     assert.equal(p.fixture.swarms.at(-1).options.traceRequests, 0, search);
     p.close();
   }
-  const p = await page(new Map(), { search: "?multiHolder=1&trace=4096" });
+  const p = await page(new Map(), { search: "?multiHolder=1&trace=4096&abrIgnorePeers=1" });
   p.element("mode").value = "peer-first";
   for (let i = 0; i < 10; i++) await p.submit();
   const active = p.fixture.swarms.at(-1);
-  assert.equal(active.options.multiHolder, true);
+  assert.equal(active.options.multiHolder, true); assert.equal(active.options.abrIgnorePeers, true);
   assert.equal(active.options.traceRequests, 4096);
   const receipt = JSON.parse(JSON.stringify(p.context.window.relaySwarmDemo.report()));
-  assert.equal(receipt.current.multiHolder, true); assert.equal(receipt.current.traceRequests, 4096);
+  assert.equal(receipt.current.multiHolder, true); assert.equal(receipt.current.abrIgnorePeers, true); assert.equal(receipt.current.traceRequests, 4096);
   assert.deepEqual(receipt.current.trace.rows, [{ k: "load", load: p.fixture.swarms.length - 1 }]);
   const traced = receipt.sessions.filter((entry) => entry.trace);
   assert.equal(traced.length, 8);

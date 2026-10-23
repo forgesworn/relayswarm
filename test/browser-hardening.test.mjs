@@ -69,14 +69,14 @@ class RecordedChannel extends Channel {
 const testCore = process.env.RELAYSWARM_TEST_CORE === "1"
   ? await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url))) : null;
 
-async function linkedFixture(options = {}, LoaderImpl = Loader) {
+async function linkedFixture(options = {}, LoaderImpl = Loader, player = {}) {
   if (testCore && options.mode === "peer-first" && options.coreWasm === undefined) options = { ...options, coreWasm: testCore };
   const relay = options.WebSocketImpl ? { url: "wss://memory-relay.example", close: async () => {} } : await startLocalRelay();
   const connections = [], peers = [];
   let peakLiveConnections = 0;
   class Connection extends PC { constructor(configuration) { super(configuration); connections.push(this); peakLiveConnections = Math.max(peakLiveConnections, connections.filter(pc => !pc.closed).length); } }
   const swarm = createHlsSwarm({ ...base, relays: [relay.url], RTCPeerConnectionImpl: Connection, shadowSampleRate: 0, ...options });
-  const hls = { config: { loader: LoaderImpl } };
+  const hls = { ...player, config: { loader: LoaderImpl } };
   swarm.attach(hls);
   const pool = new RelayPool([relay.url], { WebSocketImpl: options.WebSocketImpl }); await pool.connect();
   await until(() => swarm.metrics().pubkey);
@@ -786,6 +786,32 @@ test("a peer request is skipped for origin when the time left is below the faste
     assert.equal(segments.peerFirstLoaded, 1);
     assert.equal(segments.originLoaded, 1);
   } finally { await fixture.close(); }
+});
+
+// hls.js samples its bandwidth and first-byte estimates while it dispatches
+// these two events; the fake player does the same.
+test("abrIgnorePeers keeps a peer-delivered fragment out of the player's ABR estimate", async () => {
+  const samples = [];
+  const estimator = { sample: (ms, bytes) => samples.push(["bandwidth", ms, bytes]), sampleTTFB: (ms) => samples.push(["ttfb", ms]) };
+  function trigger(event, data) { this.abrController.bwEstimator.sampleTTFB(5); this.abrController.bwEstimator.sample(10, data.bytes); return event; }
+  const playback = peerPlaybackOptions(1000);
+  const fixture = await linkedFixture({ ...playback.options, abrIgnorePeers: true, WebSocketImpl: memoryRelaySocket() }, Loader, { abrController: { bwEstimator: estimator }, trigger });
+  try {
+    const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder"));
+    channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+    assert.equal(fixture.hls.trigger("hlsFragLoaded", { frag: context.frag, bytes: 32 }), "hlsFragLoaded");
+    fixture.hls.trigger("hlsFragBuffered", { frag: context.frag, bytes: 32 });
+    assert.deepEqual(samples, [], "the peer delivery is not sampled");
+    fixture.hls.trigger("hlsFragBuffered", { frag: { sn: 2, level: 0, cc: 0 }, bytes: 64 });
+    fixture.hls.trigger("hlsLevelLoaded", { frag: context.frag, bytes: 16 });
+    assert.deepEqual(samples, [["ttfb", 5], ["bandwidth", 10, 64], ["ttfb", 5], ["bandwidth", 10, 16]], "other fragments and events are sampled as before");
+    assert.equal(fixture.swarm.metrics().segments.abrPeerSamplesWithheld, 4);
+  } finally { await fixture.close(); }
+  assert.equal(fixture.hls.trigger, trigger, "stop restores the player's dispatch");
+  const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], mode: "shadow", abrIgnorePeers: "yes" });
+  assert.equal(swarm.metrics().disabledReason, "invalid-abr-option");
+  swarm.stop();
 });
 
 const coreWasm = await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url));

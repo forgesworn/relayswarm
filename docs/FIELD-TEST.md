@@ -305,9 +305,14 @@ default, record what the multi-holder scheduler needs offline:
   schema 2 and the option does nothing.
 - `trace=N`, with N from 1 to 32,768, keeps N trace rows per mode session
   (`traceRequests`). Any other value records nothing.
+- `abrIgnorePeers=1` keeps peer-delivered segments out of the player's
+  bandwidth estimate (`abrIgnorePeers`), so automatic quality follows the
+  origin path.
 
-For example `https://demo.example/?multiHolder=1&trace=4096`. Each viewer opens
-the same URL. The receipt records both values in `current` and `sessions`. It
+For example `https://demo.example/?multiHolder=1&trace=4096&abrIgnorePeers=1`.
+Each viewer opens the same URL. The receipt records all three values in
+`current` and `sessions`, and each fragment record carries hls.js's
+`bandwidthEstimate` as that fragment arrived. It
 keeps the trace of the running session and of the latest eight stopped ones.
 Traces name holders only by per-session labels.
 

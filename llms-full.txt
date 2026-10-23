@@ -378,6 +378,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The relay session starts once the module has loaded or failed, after at most 2 seconds; fragments loaded meanwhile go to origin. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
 | `multiHolder` | `false` | Experimental; needs `coreWasm`. A schema 3 segment (signed with the publisher's `pieceCommitments`) is fetched from several holders at once by piece range, with an HTTP `Range` fetch from origin for any tail the peers are projected to miss; every piece is verified against the commitment before the segment is delivered. A holder that stays silent or whose flow cannot finish its range in time is abandoned early, by the single-holder rules, and its pieces move to the other sources; unlike the single-holder path, a flow that stops after its first byte is also checked every 250 ms rather than left to its timeout. Used only with holders whose presence advertises object framing 2, and the viewer advertises it only while every one of its links runs in the core. Ranged origin requests go through the player's own fragment loader with `rangeStart` and `rangeEnd` set, as for an `EXT-X-BYTERANGE` segment, so headers and credentials from hls.js `xhrSetup`, `fetchSetup` or a custom loader apply. A body that is not exactly the range (a server that ignored `Range` and sent the whole segment) is discarded, and a refused range sends the segment to the whole-segment origin load. A ranged upload is charged by the bytes it sends. |
 | `maxHoldersPerObject` | `3` | Holders per segment under `multiHolder`, 1 to 8. Provisional: not yet set from a replayed field trace. |
+| `abrIgnorePeers` | `false` | Peer-first. Keeps a peer-delivered fragment out of the hls.js bandwidth and first-byte estimates, so automatic quality follows the origin path; otherwise the time a peer delivery took, including any wait for a holder, is sampled as if it were an origin download. The loader skips the estimator's samples only while hls.js dispatches `FRAG_LOADED` and `FRAG_BUFFERED` for that fragment, and puts hls.js back on `stop()`. A fragment fetched under `multiHolder` counts as peer-delivered even when origin sent part of it. `metrics().segments.abrPeerSamplesWithheld` counts the skipped samples. Needs the default hls.js ABR controller; with another one it does nothing. |
 | `traceRequests` | `0` | Rows kept for `trace()`, 0 to 32,768, oldest dropped first: loads, eligibility decisions, peer and origin requests and multi-holder scheduler calls, enough to replay a transfer offline. For field runs that need a replayable input; it is not part of `metrics()`, so a receipt must take `trace()` itself. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
@@ -973,6 +974,11 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 - The demo player takes `multiHolder=1` and `trace=N` page URL parameters
   and keeps the latest scheduler traces in its receipt, which
   `scripts/trace-report.mjs` reads.
+- `abrIgnorePeers` (off by default) keeps peer-delivered fragments out of the
+  hls.js bandwidth and first-byte estimates; without it the time a peer
+  delivery took, holder waits included, is sampled as origin throughput. The
+  demo takes it as `abrIgnorePeers=1`, and its receipt records hls.js's
+  bandwidth estimate with each fragment.
 - The Rust verifier now rejects a commitment whose content omits `part`, as
   the JavaScript one does (a new shared vector, 140 in all). Under
   `multiHolder`, an untested holder is planned with the shared first-byte
@@ -4920,9 +4926,14 @@ default, record what the multi-holder scheduler needs offline:
   schema 2 and the option does nothing.
 - `trace=N`, with N from 1 to 32,768, keeps N trace rows per mode session
   (`traceRequests`). Any other value records nothing.
+- `abrIgnorePeers=1` keeps peer-delivered segments out of the player's
+  bandwidth estimate (`abrIgnorePeers`), so automatic quality follows the
+  origin path.
 
-For example `https://demo.example/?multiHolder=1&trace=4096`. Each viewer opens
-the same URL. The receipt records both values in `current` and `sessions`. It
+For example `https://demo.example/?multiHolder=1&trace=4096&abrIgnorePeers=1`.
+Each viewer opens the same URL. The receipt records all three values in
+`current` and `sessions`, and each fragment record carries hls.js's
+`bandwidthEstimate` as that fragment arrived. It
 keeps the trace of the running session and of the latest eight stopped ones.
 Traces name holders only by per-session labels.
 

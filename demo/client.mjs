@@ -27,11 +27,11 @@ const bytes = (amount) => amount < 1000 ? `${amount} B` : amount < 1e6 ? `${(amo
 const player = { engine: "pending", firstPlayingAtMs: null, startupMs: null, stalls: 0, stallMs: 0, seeks: 0, seekRecoveryMs: [], fatalErrors: 0, errors: {}, fragmentsLoaded: 0, fragments: [], levelChanges: [], errorRecords: [], nativeErrors: [], resumeAttempts: 0, resumeRecords: [] };
 const network = { originMediaRequests: 0, encodedOriginMediaBytes: 0, transferOriginMediaBytes: 0 };
 const sessions = [], snapshots = [];
-// Field-run options, off unless the page URL asks, e.g. ?multiHolder=1&trace=4096.
+// Field-run options, off unless the page URL asks, e.g. ?multiHolder=1&trace=4096&abrIgnorePeers=1.
 // An out-of-range trace count records nothing rather than disabling peer delivery.
 const fieldOptions = (() => {
   const query = new URLSearchParams(location.search ?? ""), trace = Number(query.get("trace") ?? 0);
-  return { multiHolder: query.get("multiHolder") === "1", traceRequests: Number.isSafeInteger(trace) && trace > 0 && trace <= 32768 ? trace : 0 };
+  return { multiHolder: query.get("multiHolder") === "1", abrIgnorePeers: query.get("abrIgnorePeers") === "1", traceRequests: Number.isSafeInteger(trace) && trace > 0 && trace <= 32768 ? trace : 0 };
 })();
 const swarmTrace = () => fieldOptions.traceRequests && swarm ? { trace: swarm.trace() } : {};
 let deliveryPolicy = { mode: null, revision: 0, telemetry: false }, policyUnavailable = true;
@@ -247,7 +247,9 @@ function mountPlayer({ reloadNative = false } = {}) {
         player.fragmentsLoaded++;
         push(player.fragments, { atMs: elapsed(), level: frag.level, sequence: frag.sn, part: part?.index ?? null, mediaType: frag.type ?? "video", playlist: segmentMediaContext({ frag, url: frag.url })?.playlist ?? null, discontinuity: frag.cc, rangeStart: frag.byteRangeStartOffset ?? null, rangeEnd: frag.byteRangeEndOffset ?? null, size: payload.byteLength,
           source: networkDetails ? "origin" : activeConfig.mode === "peer-first" ? "peer" : "unknown", statsLoaded: frag.stats.loaded,
-          loadingMs: frag.stats.loading.end - frag.stats.loading.start });
+          loadingMs: frag.stats.loading.end - frag.stats.loading.start,
+          // hls.js's estimate as this fragment arrives, before it samples this fragment's throughput.
+          bandwidthEstimate: Number.isFinite(hls.bandwidthEstimate) ? Math.round(hls.bandwidthEstimate) : null });
         render();
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => { if (hls === mountedHls) push(player.levelChanges, { atMs: elapsed(), level: data.level }); });
