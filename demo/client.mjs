@@ -27,6 +27,13 @@ const bytes = (amount) => amount < 1000 ? `${amount} B` : amount < 1e6 ? `${(amo
 const player = { engine: "pending", firstPlayingAtMs: null, startupMs: null, stalls: 0, stallMs: 0, seeks: 0, seekRecoveryMs: [], fatalErrors: 0, errors: {}, fragmentsLoaded: 0, fragments: [], levelChanges: [], errorRecords: [], nativeErrors: [], resumeAttempts: 0, resumeRecords: [] };
 const network = { originMediaRequests: 0, encodedOriginMediaBytes: 0, transferOriginMediaBytes: 0 };
 const sessions = [], snapshots = [];
+// Field-run options, off unless the page URL asks, e.g. ?multiHolder=1&trace=4096.
+// An out-of-range trace count records nothing rather than disabling peer delivery.
+const fieldOptions = (() => {
+  const query = new URLSearchParams(location.search ?? ""), trace = Number(query.get("trace") ?? 0);
+  return { multiHolder: query.get("multiHolder") === "1", traceRequests: Number.isSafeInteger(trace) && trace > 0 && trace <= 32768 ? trace : 0 };
+})();
+const swarmTrace = () => fieldOptions.traceRequests && swarm ? { trace: swarm.trace() } : {};
 let deliveryPolicy = { mode: null, revision: 0, telemetry: false }, policyUnavailable = true;
 const archivedTotals = { peerFirstBytes: 0, uploaded: 0, peerFirstLoads: 0, sessions: 0 };
 let session, hls, swarm, initialLoader, startRequestedAt = null, stallAt = null, seekAt = null, native = false, playerHasPlayed = false, activeConfig, needsViewerApply = false, suspensionGeneration = 0;
@@ -91,7 +98,9 @@ function stopSwarm() {
   turnCredentials.setActive(false);
   if (!swarm) return;
   swarm.stop();
-  sessions.push({ ...activeConfig, endedAtMs: elapsed(), metrics: swarm.metrics() });
+  sessions.push({ ...activeConfig, endedAtMs: elapsed(), metrics: swarm.metrics(), ...swarmTrace() });
+  const traced = sessions.filter((entry) => entry.trace);
+  if (traced.length > 8) delete traced[0].trace;
   if (sessions.length > 64) {
     const removed = sessions.shift().metrics;
     archivedTotals.peerFirstBytes += removed.bytes.peerFirst; archivedTotals.uploaded += removed.bytes.uploaded;
@@ -112,8 +121,8 @@ function configure() {
   const remaining = account.required ? Math.min(budget.remaining, account.available ? account.remaining : 0) : budget.remaining;
   const admissionReady = ownCredentialFresh(session);
   const iceServers = session.turnCredentials ? turnCredentials.servers() : session.iceServers;
-  activeConfig = { mode, upload: byId("upload").checked && mode !== "off" && budget.available && remaining > 0 && admissionReady, uploadAllowance: allowance, uploadLimit: Number(byId("limit").value), cellular: byId("cellular").checked, startedAtMs: elapsed() };
-  swarm = createHlsSwarm({ mode, coreWasm: "/relayswarm-core.wasm", swarmId: session.swarmId, relays: session.relays, streamEvent: session.streamEvent, delegation: session.delegation, revokedDelegationIds: session.revokedDelegationIds, delegationRevocations: session.delegationRevocations, swarmParts: session.mediaCapabilities?.parts === true, originReserveMs: session.mediaCapabilities?.parts === true ? 500 : 2000,
+  activeConfig = { mode, upload: byId("upload").checked && mode !== "off" && budget.available && remaining > 0 && admissionReady, uploadAllowance: allowance, uploadLimit: Number(byId("limit").value), cellular: byId("cellular").checked, ...fieldOptions, startedAtMs: elapsed() };
+  swarm = createHlsSwarm({ mode, coreWasm: "/relayswarm-core.wasm", ...fieldOptions, swarmId: session.swarmId, relays: session.relays, streamEvent: session.streamEvent, delegation: session.delegation, revokedDelegationIds: session.revokedDelegationIds, delegationRevocations: session.delegationRevocations, swarmParts: session.mediaCapabilities?.parts === true, originReserveMs: session.mediaCapabilities?.parts === true ? 500 : 2000,
     getCommitment: async (context, { signal }) => {
       const query = new URLSearchParams({ path: new URL(context.url).pathname, level: String(context.frag.level), sequence: String(context.frag.sn), cc: String(context.frag.cc ?? 0) });
       const mediaContext = segmentMediaContext(context);
@@ -174,9 +183,9 @@ function report() {
     player: { ...player, mediaRecovery: mediaRecovery.snapshot(), isLive: hls?.latestLevelDetails?.live === true, liveLatencySeconds: Number.isFinite(hls?.latency) ? hls.latency : null, targetLatencySeconds: Number.isFinite(hls?.targetLatency) ? hls.targetLatency : null, liveSyncPosition: Number.isFinite(hls?.liveSyncPosition) ? hls.liveSyncPosition : null, currentTime: video.currentTime, paused: video.paused, bufferedSeconds: hls?.mainForwardBufferInfo?.len ?? null, activeStallMs: stallAt === null ? 0 : elapsed() - stallAt },
     network: { ...network, ...(native ? { originMediaRequests: null, encodedOriginMediaBytes: null, transferOriginMediaBytes: null } : {}), supported: Boolean(observer) && !native,
       scope: "same-origin media resource timings; includes init segments and cache hits; encoded bytes exclude protocol overhead; native HLS requests are not measured" },
-    totals: totals(), uploadBudget: uploadBudget.snapshot(), accountBudget: account, deliveryPolicy: { ...deliveryPolicy, unavailable: policyUnavailable }, current: swarm ? { ...activeConfig, metrics: swarm.metrics() } : null, sessions: [...sessions], snapshots: [...snapshots],
-    retention: { fragments: "latest 256", snapshots: "latest 60, every five seconds", sessions: "latest 64", archivedSessions: archivedTotals.sessions, totals: "whole page session" },
-    loaderRestored: !hls || hls.config.fLoader === initialLoader, controlTimings: fetchDiagnostics.snapshot(), policyRenewal: policyRenewal.snapshot(), turnCredentials: turn, limits: ["Network and device labels are supplied by the viewer.", "No peer IP addresses or private signing keys are recorded.", "A receipt is evidence for this session only; it is not a production-readiness claim."],
+    totals: totals(), uploadBudget: uploadBudget.snapshot(), accountBudget: account, deliveryPolicy: { ...deliveryPolicy, unavailable: policyUnavailable }, current: swarm ? { ...activeConfig, metrics: swarm.metrics(), ...swarmTrace() } : null, sessions: [...sessions], snapshots: [...snapshots],
+    retention: { fragments: "latest 256", snapshots: "latest 60, every five seconds", sessions: "latest 64", traces: "latest 8 sessions, only when the page URL sets trace", archivedSessions: archivedTotals.sessions, totals: "whole page session" },
+    loaderRestored: !hls || hls.config.fLoader === initialLoader, controlTimings: fetchDiagnostics.snapshot(), policyRenewal: policyRenewal.snapshot(), turnCredentials: turn, limits: ["Network and device labels are supplied by the viewer.", "No peer IP addresses or private signing keys are recorded; a trace names holders by per-session labels.", "A receipt is evidence for this session only; it is not a production-readiness claim."],
   };
 }
 

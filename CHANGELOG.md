@@ -89,6 +89,9 @@
   ignores shared uplinks).
 - Document commitment schema 3, object framing 2 and the presence `obj`
   field in `docs/NIP-DRAFT.md`.
+- The demo player takes `multiHolder=1` and `trace=N` page URL parameters
+  and keeps the latest scheduler traces in its receipt, which
+  `scripts/trace-report.mjs` reads.
 - The Rust verifier now rejects a commitment whose content omits `part`, as
   the JavaScript one does (a new shared vector, 140 in all). Under
   `multiHolder`, an untested holder is planned with the shared first-byte

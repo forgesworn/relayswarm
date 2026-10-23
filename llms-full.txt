@@ -970,6 +970,9 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
   ignores shared uplinks).
 - Document commitment schema 3, object framing 2 and the presence `obj`
   field in `docs/NIP-DRAFT.md`.
+- The demo player takes `multiHolder=1` and `trace=N` page URL parameters
+  and keeps the latest scheduler traces in its receipt, which
+  `scripts/trace-report.mjs` reads.
 - The Rust verifier now rejects a commitment whose content omits `part`, as
   the JavaScript one does (a new shared vector, 140 in all). Under
   `multiHolder`, an untested holder is planned with the shared first-byte
@@ -1405,7 +1408,7 @@ returned, so a recorded transfer replays against the module offline. Times are
 whole milliseconds from the swarm's creation; holders are session labels, not
 keys. It is kept out of `metrics()`, which receipts snapshot repeatedly.
 `node scripts/trace-report.mjs file.json...` summarises saved traces (from a
-harness receipt, a bare trace or a list of either): it replays every
+harness receipt, a demo field receipt, a bare trace or a list of any of them): it replays every
 transfer against the committed module and reports a mismatch, then gives
 holders offered and used, bytes by holder rank, origin and redundant shares,
 slack at finish, request timing and buffer ahead of the playhead.
@@ -4905,6 +4908,28 @@ Aggregate counts cover the whole page session. Detail is bounded to the last
 256 fragments, 60 snapshots (five-minute window) and 64 mode sessions; older
 session totals are retained. Stalls exclude user seeks, whose recovery is
 recorded separately. Startup begins at the Start playback action.
+
+### Scheduler traces
+
+The demo player always loads the Rust core. Two page URL parameters, off by
+default, record what the multi-holder scheduler needs offline:
+
+- `multiHolder=1` turns on multi-holder transfers (`multiHolder` in
+  [INTEGRATION.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md)). They need schema 3 commitments, so start
+  the server with `--piece-commitments`. Without it every segment carries
+  schema 2 and the option does nothing.
+- `trace=N`, with N from 1 to 32,768, keeps N trace rows per mode session
+  (`traceRequests`). Any other value records nothing.
+
+For example `https://demo.example/?multiHolder=1&trace=4096`. Each viewer opens
+the same URL. The receipt records both values in `current` and `sessions`. It
+keeps the trace of the running session and of the latest eight stopped ones.
+Traces name holders only by per-session labels.
+
+`node scripts/trace-report.mjs receipt.json...` replays every multi-holder
+transfer in the receipts through the committed module and reports holder
+shares, request timing and buffer ahead; `--what-if 1,2,3` adds an estimate
+for other holder limits. Loopback traces test the tool only; they do not set scheduler defaults.
 
 ## Automated coverage and remaining field gates
 

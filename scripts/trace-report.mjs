@@ -35,6 +35,11 @@ export function traceSets(input, name = "trace") {
   if (Array.isArray(input.viewers)) {
     return input.viewers.flatMap((viewer, index) => viewer?.trace ? traceSets(viewer.trace, `${name} viewer ${viewer.viewer ?? index}`) : []);
   }
+  // A demo field receipt: stopped sessions, then the running one.
+  if (Array.isArray(input.sessions) || input.current) {
+    return [...(Array.isArray(input.sessions) ? input.sessions : []).flatMap((entry, index) => entry?.trace ? traceSets(entry.trace, `${name} session ${index}`) : []),
+      ...(input.current?.trace ? traceSets(input.current.trace, `${name} current`) : [])];
+  }
   return input.trace ? traceSets(input.trace, name) : [];
 }
 

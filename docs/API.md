@@ -47,7 +47,7 @@ returned, so a recorded transfer replays against the module offline. Times are
 whole milliseconds from the swarm's creation; holders are session labels, not
 keys. It is kept out of `metrics()`, which receipts snapshot repeatedly.
 `node scripts/trace-report.mjs file.json...` summarises saved traces (from a
-harness receipt, a bare trace or a list of either): it replays every
+harness receipt, a demo field receipt, a bare trace or a list of any of them): it replays every
 transfer against the committed module and reports a mismatch, then gives
 holders offered and used, bytes by holder rank, origin and redundant shares,
 slack at finish, request timing and buffer ahead of the playhead.

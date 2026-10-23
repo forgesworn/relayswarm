@@ -50,6 +50,9 @@ test("traces are found in receipts, bare traces and lists", () => {
   assert.equal(traceSets({ viewers: [{ viewer: 0 }, { viewer: 1, trace }, { viewer: 2, trace: { ...trace, rows: [] } }] }).length, 2);
   assert.equal(traceSets([trace, { trace }]).length, 2);
   assert.deepEqual(traceSets(null), []);
+  const receipt = { kind: "relayswarm-field-receipt", sessions: [{ mode: "peer-first" }, { mode: "peer-first", trace }], current: { mode: "peer-first", trace } };
+  assert.deepEqual(traceSets(receipt).map(({ name }) => name), ["trace session 1", "trace current"]);
+  assert.deepEqual(traceSets({ sessions: [], current: null }), []);
 });
 
 test("a recorded transfer replays to its commands, and a changed row is caught", () => {
