@@ -78,13 +78,17 @@ fun range(field: List<String>) {
     val toRequester = mutableListOf<PeerLinkEvent>()
     var resolved: ByteArray? = null
     var done = false
+    var heldBack: Boolean? = null
     for (round in 0 until 64) {
         if (done) break
         for (frame in toHolder) {
             val update = holder.handleText(0uL, (frame as PeerLinkEvent.SendText).text)
             if (update.events.any { it is PeerLinkEvent.ServeRange }) {
-                holder.observeBuffered(0uL)
-                toRequester += frames(holder.serveResponse(0uL, objectBytes).events)
+                // A full send buffer: the holder sends its meta and holds the data for a drain.
+                holder.observeBuffered(200_000uL)
+                val sent = frames(holder.serveResponse(0uL, objectBytes).events)
+                heldBack = sent.none { it is PeerLinkEvent.SendBinary }
+                toRequester += sent
             }
         }
         toHolder = emptyList()
@@ -114,7 +118,7 @@ fun range(field: List<String>) {
         val id = link.request(0uL, "k", 5_000uL, null).requestId!!
         return link.abort(0uL, id, false).closed.also { link.close() }
     }
-    println(json(mapOf("range" to resolved?.let(::base64), "closedSends" to closedSends, "openSends" to openSends,
+    println(json(mapOf("range" to resolved?.let(::base64), "heldBack" to heldBack, "closedSends" to closedSends, "openSends" to openSends,
         "unreliableAbortCloses" to abortCloses(false), "reliableAbortCloses" to abortCloses(true))))
 }
 

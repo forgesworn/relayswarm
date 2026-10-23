@@ -82,12 +82,16 @@ func range(_ field: [Substring]) {
     var toRequester: [PeerLinkEvent] = []
     var resolved: Data? = nil
     var done = false
+    var heldBack: Bool? = nil
     for _ in 0..<64 where !done {
         for case let .sendText(text) in toHolder {
             let update = holder.handleText(now: 0, text: text)
             if update.events.contains(where: { if case .serveRange = $0 { return true }; return false }) {
-                holder.observeBuffered(buffered: 0)
-                toRequester += frames(holder.serveResponse(now: 0, bytes: object).events)
+                // A full send buffer: the holder sends its meta and holds the data for a drain.
+                holder.observeBuffered(buffered: 200_000)
+                let sent = frames(holder.serveResponse(now: 0, bytes: object).events)
+                heldBack = !sent.contains { if case .sendBinary = $0 { return true }; return false }
+                toRequester += sent
             }
         }
         toHolder = []
@@ -118,7 +122,7 @@ func range(_ field: [Substring]) {
         let id = link.request(now: 0, key: "k", timeoutMs: 5_000, expectedSize: nil).requestId!
         return link.abort(now: 0, id: id, abandoned: false).closed
     }
-    print(json(["range": orNull(resolved?.base64EncodedString()), "closedSends": closedSends, "openSends": openSends,
+    print(json(["range": orNull(resolved?.base64EncodedString()), "heldBack": orNull(heldBack), "closedSends": closedSends, "openSends": openSends,
                 "unreliableAbortCloses": abortCloses(false), "reliableAbortCloses": abortCloses(true)]))
 }
 

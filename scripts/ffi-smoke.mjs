@@ -165,7 +165,7 @@ function check(output) {
   const wanted = object.subarray(span.start * pieceSize, Math.min(span.end * pieceSize, size));
   const { range, ...channel } = third;
   assert.ok(range !== null && Buffer.from(range, "base64").equals(wanted), "the holder serves the piece range");
-  assert.deepEqual(channel, { closedSends: 0, openSends: 1, unreliableAbortCloses: true, reliableAbortCloses: false },
+  assert.deepEqual(channel, { heldBack: true, closedSends: 0, openSends: 1, unreliableAbortCloses: true, reliableAbortCloses: false },
     "channel state reaches the link");
 
   assert.equal(links.length, traces.length, "one result per link trace");
