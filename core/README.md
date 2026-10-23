@@ -179,7 +179,8 @@ a host serialising a dictionary may reorder it. Discovery takes media types
 as the strings HLS uses and has no context for any but `main` and `audio`, as
 in JavaScript; contexts and attempts are numeric IDs, and `begin` starts an
 attempt on the holder the latest `choose` or `hinted` returned, as the
-WebAssembly bridge does. UniFFI exports no constants,
+WebAssembly bridge does; a call that finds no holder clears it, and each
+result begins at most once. UniFFI exports no constants,
 so `default_transfer_settings()` and `link_limits()` return the core's values.
 
 `cargo test` runs the shared vectors and every recorded link trace through
