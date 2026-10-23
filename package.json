@@ -16,6 +16,8 @@
     "test:ffi:kotlin": "node scripts/ffi-smoke.mjs kotlin",
     "build:ffi:apple": "node scripts/ffi-apple.mjs",
     "test:ffi:apple": "node scripts/ffi-apple.mjs --check --simulator",
+    "build:ffi:android": "node scripts/ffi-android.mjs",
+    "test:ffi:android": "node scripts/ffi-android.mjs --check",
     "proto:vectors": "node scripts/generate-proto-vectors.mjs",
     "proto:traces": "node scripts/generate-selection-traces.mjs",
     "test:swarm": "node --test test/hls-swarm.test.mjs test/browser-hardening.test.mjs test/stream-discovery.test.mjs test/origin-range.test.mjs",

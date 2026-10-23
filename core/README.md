@@ -213,8 +213,24 @@ CI runs it on macOS. The iPhone build is only linked: nothing here runs on a
 phone. There are no Intel slices, so an app's release build for the
 simulator or macOS must build arm64 alone (`ARCHS=arm64` or
 `EXCLUDED_ARCHS=x86_64`). The package sits in a subdirectory, so it is used
-by local path, not by Git URL, and there is no Android library. RelaySwarmKit does not use the
-package yet.
+by local path, not by Git URL. RelaySwarmKit does not use the package yet.
+
+`npm run build:ffi:android` packages the facade for Android as
+`core/target/android/relayswarm-core.aar`: release shared libraries for
+arm64-v8a, armeabi-v7a and x86_64, built with `cargo-ndk` for API 26 and
+later, and the generated Kotlin bindings compiled against `android.jar`. It
+needs the Android SDK and an NDK (`ANDROID_HOME` and `ANDROID_NDK_HOME`, or
+their defaults under `~/Library/Android/sdk`), `cargo-ndk`, `kotlinc` and the
+three Rust targets it names. It refuses a library built for the wrong
+machine, a 64-bit library without 16 KB page alignment, and one that needs a
+library beyond Android's own. The AAR names no dependencies, so an app adds
+`net.java.dev.jna:jna:5.14.0@aar` itself and needs Kotlin 2.2 or later; its
+R8 rules keep JNA and the bindings. `npm run test:ffi:android` also builds a
+throwaway app against the AAR with the Android Gradle plugin, and
+`node scripts/ffi-android.mjs --device` runs that app's code through
+`app_process` on the device or emulator adb reaches and checks it the same
+way. CI builds the AAR and the app on Linux; the device run is local, and it
+has passed on an API 35 arm64 emulator. Nothing here has run on a phone.
 
 Release builds abort on panic, so a panic in the core ends the host process rather
 than raising an error.
@@ -227,6 +243,7 @@ cd .. && npm run core:wasm
 npm run test:ffi:swift
 npm run test:ffi:kotlin
 npm run test:ffi:apple
+npm run test:ffi:android
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. Builds use `core/target/`.

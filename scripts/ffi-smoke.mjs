@@ -8,11 +8,11 @@
 // pinned JNA jar into core/target.
 //
 //   node scripts/ffi-smoke.mjs swift|kotlin
-//   node scripts/ffi-smoke.mjs swift <label> -- <command> [args...]
+//   node scripts/ffi-smoke.mjs swift|kotlin <label> -- <command> [args...]
 //
-// The second form checks a program built elsewhere, such as the smoke that
-// scripts/ffi-apple.mjs builds against the packaged library, and reports it
-// under <label>.
+// The second form checks a program built elsewhere, such as the smokes that
+// scripts/ffi-apple.mjs and scripts/ffi-android.mjs build against the
+// packaged libraries, and reports it under <label>.
 //
 // The program reads one line per input and prints one JSON line per result.
 // Strings travel as "." plus base64, so no field is empty; "-" is none.

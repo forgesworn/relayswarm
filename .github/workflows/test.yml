@@ -229,6 +229,32 @@ jobs:
           xcodebuild -version
           npm run test:ffi:apple
 
+  android-package:
+    name: Android library of the Rust core
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # In core/, so the targets go to the toolchain rust-toolchain.toml pins.
+      - name: Rust targets and cargo-ndk
+        working-directory: core
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          cargo install --locked cargo-ndk --version 4.1.2
+      # The image ships the SDK, NDKs, kotlinc and Gradle. Builds the AAR and
+      # an app against it; the emulator run stays local.
+      - name: Package and build an app against it
+        run: |
+          echo "SDK $ANDROID_HOME, NDK ${ANDROID_NDK_HOME:-newest under the SDK}"
+          kotlinc -version
+          gradle --version
+          npm run test:ffi:android
+
   live-relays:
     name: browser transport against live relays
     needs: native

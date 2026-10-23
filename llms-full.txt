@@ -997,7 +997,10 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
   arm64 XCFramework for iPhone, the iOS simulator and macOS (iOS 16, macOS 14);
   `npm run test:ffi:apple` runs the same checks against the package on macOS
   and in an iPhone simulator, and links it for iPhone. RelaySwarmKit does not
-  use it yet.
+  use it yet. `npm run build:ffi:android` packages it as an Android library
+  (AAR) for arm64-v8a, armeabi-v7a and x86_64, API 26 and later;
+  `npm run test:ffi:android` builds an app against it with the Android Gradle
+  plugin, and the same checks pass on an API 35 arm64 emulator.
 
 ## v0.2.1 (21 October 2026)
 
