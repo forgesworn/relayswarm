@@ -8,21 +8,24 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const core = join(root, "core");
-const library = join(core, "target/release", process.platform === "darwin" ? "librelayswarm_ffi.dylib" : "librelayswarm_ffi.so");
+// The debug build: release strips symbols, and on Linux that removes the
+// metadata the binding generator reads.
+const library = join(core, "target/debug", process.platform === "darwin" ? "librelayswarm_ffi.dylib" : "librelayswarm_ffi.so");
 const work = mkdtempSync(join(tmpdir(), "relayswarm-ffi-"));
 const run = (command, args, options = {}) => execFileSync(command, args, { cwd: core, maxBuffer: 64 * 1024 * 1024, ...options });
 
 try {
-  run("cargo", ["build", "--locked", "--release", "-p", "relayswarm-ffi"], { stdio: "inherit" });
+  run("cargo", ["build", "--locked", "-p", "relayswarm-ffi"], { stdio: "inherit" });
   run("cargo", ["run", "--locked", "--quiet", "--features", "bindgen", "--bin", "uniffi-bindgen", "--",
     "generate", "--library", library, "--language", "swift", "--out-dir", join(work, "bindings")], { stdio: "inherit" });
+  if (!existsSync(join(work, "bindings/relayswarm_ffi.swift"))) throw new Error("The binding generator wrote no Swift; check the library still carries its UniFFI metadata.");
   const binary = join(work, "smoke");
   run("swiftc", ["-O", "-module-name", "smoke", "-I", join(work, "bindings"),
     "-Xcc", `-fmodule-map-file=${join(work, "bindings/relayswarm_ffiFFI.modulemap")}`,

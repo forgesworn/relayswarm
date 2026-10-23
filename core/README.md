@@ -169,9 +169,10 @@ facade restores the loader's key order in the fragment context's `media` and
 UniFFI exports no constants, so `default_transfer_settings()` returns the
 core's defaults. `cargo test` runs the shared vectors through it and replays
 a scripted transfer through both the facade and the core, expecting the same
-commands. `npm run test:ffi:swift` builds the library, generates Swift
+commands. `npm run test:ffi:swift` builds the debug library, generates Swift
 bindings, compiles a small program against them and checks every vector and
-one transfer; CI runs it on Linux. RelaySwarmKit does not use it yet, and no
+one transfer. Generate bindings from an unstripped build: the release profile
+strips symbols, and on Linux that removes the UniFFI metadata; CI runs it on Linux. RelaySwarmKit does not use it yet, and no
 Kotlin bindings are generated or tested. Release builds abort on panic, so a
 panic in the core ends the host process rather than raising an error.
 
