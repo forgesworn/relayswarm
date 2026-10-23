@@ -2,7 +2,9 @@
 //! from `src/browser/peer-link.mjs` as a state machine with no I/O.
 //!
 //! Text frames are JSON control messages; binary frames are chunks of one
-//! response. Responses on a link are serialised, so the chunks between a
+//! response. Framing 2 adds a piece range to `want` and `meta`
+//! (`"p":[start,end]`, end exclusive) for schema 3 multi-holder transfer.
+//! The requester sends one only to a holder that advertised framing 2. Responses on a link are serialised, so the chunks between a
 //! `meta` and its `eof` belong to that one response. Integrity is decided by
 //! the caller, which hashes what arrives.
 //!
@@ -18,6 +20,7 @@ use indexmap::{IndexMap, IndexSet};
 use serde_json::{Map, Value};
 
 use crate::js;
+use crate::pieces::{range_bytes, PieceRange, MAX_PIECES};
 
 pub const CHUNK_BYTES: usize = 16 * 1024;
 /// A response is handed to the channel only while at most this much is queued.
@@ -131,6 +134,8 @@ pub struct LinkConfig {
 struct Pending {
     id: u64,
     expected: Option<u64>,
+    /// Framing 2: the requested pieces, echoed by the holder's `meta`.
+    range: Option<PieceRange>,
     size: Option<u64>,
     parts: Vec<u8>,
     chunks: u64,
@@ -150,6 +155,7 @@ struct Upload {
     id: f64,
     key: String,
     cancelled: bool,
+    range: Option<PieceRange>,
 }
 
 #[derive(Debug)]
@@ -225,6 +231,16 @@ fn valid_keys(list: Option<&Value>) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// A framing 2 piece range: `Some(None)` when absent, `Some(Some(range))`
+/// for two safe integers `0 <= start < end <= 64`, `None` when malformed.
+fn parse_range(value: Option<&Value>) -> Option<Option<PieceRange>> {
+    let Some(value) = value else { return Some(None) };
+    let [start, end] = value.as_array()?.as_slice() else { return None };
+    let start = u32::try_from(js::safe_integer(start)?).ok()?;
+    let end = u32::try_from(js::safe_integer(end)?).ok()?;
+    (start < end && end <= MAX_PIECES).then_some(Some(PieceRange { start, end }))
 }
 
 fn same_number(value: Option<&Value>, number: f64) -> bool {
@@ -403,6 +419,26 @@ impl Link {
     /// Request one object. Returns the request ID, or `None` with an
     /// immediate `closed` or `busy` report.
     pub fn request(&mut self, now: u64, key: &str, timeout_ms: u64, expected_size: Option<u64>) -> Option<u64> {
+        self.start_request(now, key, timeout_ms, expected_size, None)
+    }
+
+    /// Framing 2: request pieces `range` of an object of `object_size` bytes
+    /// from a holder that advertised framing 2. The holder's `meta` must
+    /// echo the range and carry its exact byte length. Returns `None`, with
+    /// no events, when the range does not fit the object.
+    pub fn request_range(&mut self, now: u64, key: &str, timeout_ms: u64, range: PieceRange, object_size: u64) -> Option<u64> {
+        let (from, to) = range_bytes(object_size, range)?;
+        self.start_request(now, key, timeout_ms, Some(to - from), Some(range))
+    }
+
+    fn start_request(
+        &mut self,
+        now: u64,
+        key: &str,
+        timeout_ms: u64,
+        expected_size: Option<u64>,
+        range: Option<PieceRange>,
+    ) -> Option<u64> {
         self.clock = now;
         if self.closed || self.pending.is_some() {
             let outcome = if self.closed { Outcome::Closed } else { Outcome::Busy };
@@ -423,6 +459,7 @@ impl Link {
         self.pending = Some(Pending {
             id,
             expected: expected_size,
+            range,
             size: None,
             parts: Vec::new(),
             chunks: 0,
@@ -435,7 +472,11 @@ impl Link {
             deadline: now + timeout_ms.max(1),
             timer,
         });
-        let want = [("t", &Value::from("want")), ("id", &Value::from(id)), ("k", &Value::from(key))];
+        let mut want = vec![("t", Value::from("want")), ("id", Value::from(id)), ("k", Value::from(key))];
+        if let Some(range) = range {
+            want.push(("p", Value::from(vec![range.start, range.end])));
+        }
+        let want: Vec<(&str, &Value)> = want.iter().map(|(name, value)| (*name, value)).collect();
         if !self.send_text(&want) {
             self.finish(None, Some(Outcome::SendError), true);
         }
@@ -673,6 +714,13 @@ impl Link {
         if pending.size.is_some() {
             return self.close("protocol");
         }
+        // A framing 1 holder ignores the range and sends the whole object.
+        if pending
+            .range
+            .is_some_and(|range| parse_range(message.get("p")) != Some(Some(range)))
+        {
+            return self.close("protocol");
+        }
         if let Some(expected) = pending.expected {
             if !same_number(message.get("size"), expected as f64) {
                 return self.close("protocol");
@@ -790,6 +838,9 @@ impl Link {
         let Some(key) = message.get("k").filter(|key| is_hex64(key)).and_then(Value::as_str) else {
             return;
         };
+        let Some(range) = parse_range(message.get("p")) else {
+            return self.close("protocol");
+        };
         if self.in_flight >= self.config.max_queued_requests {
             return self.close("upload-queue");
         }
@@ -798,6 +849,7 @@ impl Link {
             id: id as f64,
             key: key.to_owned(),
             cancelled: false,
+            range,
         });
         self.start_next();
     }
@@ -842,20 +894,33 @@ impl Link {
             return;
         };
         let none = [("t", &Value::from("none")), ("id", &Value::from(upload.id))];
-        let Some(bytes) = bytes else {
+        let Some(mut bytes) = bytes else {
             self.send_text(&none);
             return self.finish_upload();
         };
+        // A range the held object does not have is answered with `none`.
+        if let Some(range) = upload.range {
+            let Some((from, to)) = range_bytes(bytes.len() as u64, range) else {
+                self.send_text(&none);
+                return self.finish_upload();
+            };
+            bytes.truncate(to as usize);
+            bytes.drain(..from as usize);
+        }
         if upload.cancelled {
             self.events.push(LinkEvent::UploadCancelled(bytes.len() as u64));
             self.send_text(&none);
             return self.finish_upload();
         }
-        let meta = [
-            ("t", &Value::from("meta")),
-            ("id", &Value::from(upload.id)),
-            ("size", &Value::from(bytes.len())),
+        let mut meta = vec![
+            ("t", Value::from("meta")),
+            ("id", Value::from(upload.id)),
+            ("size", Value::from(bytes.len())),
         ];
+        if let Some(range) = upload.range {
+            meta.push(("p", Value::from(vec![range.start, range.end])));
+        }
+        let meta: Vec<(&str, &Value)> = meta.iter().map(|(name, value)| (*name, value)).collect();
         if !self.send_text(&meta) {
             return self.finish_upload();
         }

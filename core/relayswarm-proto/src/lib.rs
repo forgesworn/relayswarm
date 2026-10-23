@@ -9,4 +9,5 @@ pub mod discovery;
 pub mod event;
 pub mod js;
 pub mod link;
+pub mod pieces;
 pub mod selection;

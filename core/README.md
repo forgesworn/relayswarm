@@ -19,7 +19,13 @@ equality and `Number.isSafeInteger`.
 [`peer-link.mjs`](../src/browser/peer-link.mjs) as a state machine: requests
 with `meta`/chunks/`eof`/`none`, timeout and abandonment with `cancel` and
 bounded draining, the serialised upload queue with backpressure, and the
-`have`, `contribution` and `fetching` controls. The shell sends what it emits,
+`have`, `contribution` and `fetching` controls. Framing 2, which is not in the
+JavaScript link, adds a piece range to `want` and `meta` (`"p":[start,end]`):
+`Link::request_range` asks for pieces of an object, the holder slices its
+held object by the schema 3 piece size, and a `meta` that does not echo the
+range with its exact length closes the link. `relayswarm_proto::pieces` holds
+the offsets; `tests/link_ranges.rs` covers it, as there is no JavaScript
+reference to record traces from. The shell sends what it emits,
 answers its serve requests and reports timers and channel draining. The native
 HyperDHT framing in `object-transfer.mjs` stays with the Node adapter.
 
