@@ -745,7 +745,7 @@ test("ticket updates reject unusable swarms and bounded invalid credentials", ()
   } finally { gated.stop(); }
 });
 
-test("active ticket refresh floods retain only the latest credential within sixteen real HTTP checks", async () => {
+test("active ticket refresh floods retain only the latest credential within sixteen real HTTP checks", async t => {
   const received = [], completed = [], held = new Map(); let peak = 0;
   const http = createServer(async (request, response) => {
     const chunks = []; for await (const chunk of request) chunks.push(chunk);
@@ -762,35 +762,40 @@ test("active ticket refresh floods retain only the latest credential within sixt
   } });
   const extraPool = new RelayPool(fixture.pool.urls); await extraPool.connect();
   const witness = new RelaySwarmSession({ pool: extraPool, swarmId: base.swarmId }); witness.start();
+  const clock = virtualClock(t);
   try {
-    const channels = []; for (let i = 0; i < 17; i++) channels.push(await fixture.addPeer(new RecordedChannel(), i < 16 ? fixture.pool : extraPool));
-    let observed = 0;
-    witness.onPresence(({ payload }) => { if (payload.have.length) observed++; });
-    let serial = 0;
-    const announce = (peer, ticket) => peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }], ticket,
-      have: [createHash("sha256").update(String(++serial)).digest("hex")] });
-    const before = received.length;
-    for (let i = 0; i < 16; i++) announce(fixture.peers[i], `old-${i}`);
-    await until(() => held.size === 16);
-    announce(fixture.peers[16], "seventeenth");
-    for (let round = 0; round < 4; round++) for (let i = 0; i < 16; i++) announce(fixture.peers[i], `latest-${round}-${i}`);
-    await until(() => observed === 81);
-    assert.equal(received.length, before + 16, "neither same-peer floods nor a seventeenth check start extra HTTP work");
-    for (const response of held.values()) response.writeHead(200, { "content-type": "application/json" }).end('{"admitted":true}');
-    await until(() => completed.filter((ticket) => ticket.startsWith("latest-3-")).length === 16);
-    assert.equal(received.length, before + 32); assert.equal(peak, 16);
-    assert.equal(received.some(({ ticket }) => /^latest-[012]-/.test(ticket)), false);
-    assert.equal(fixture.swarm.metrics().peers.connected, 17); assert.equal(fixture.swarm.metrics().peers.linksClosed, 0);
-    await fixture.load(); await until(() => fixture.swarm.metrics().bytes.held === 32);
-    const key = channels[0].sent.find((frame) => frame.t === "have" && frame.add?.length).add[0];
-    channels[0].receive(JSON.stringify({ t: "want", id: 2001, k: key }));
-    await until(() => fixture.swarm.metrics().bytes.uploaded === 32);
-    assert.equal(received.at(-1).ticket, "latest-3-0", "the old completion cannot overwrite the accepted new credential");
-    announce(fixture.peers[0], "old-stop"); await until(() => held.size === 1);
-    announce(fixture.peers[0], "never-after-stop"); await until(() => observed === 83);
-    fixture.swarm.stop(); await until(() => held.size === 0);
-    assert.equal(received.some(({ ticket }) => ticket === "never-after-stop"), false);
-  } finally { witness.close(); extraPool.close(); await fixture.close(); http.closeAllConnections(); await new Promise((resolve) => http.close(resolve)); }
+    // Keep the existing three-second admission allowance independent of the
+    // wall time spent signing the flood; HTTP itself remains real.
+    await clock.settle((async () => {
+      const channels = []; for (let i = 0; i < 17; i++) channels.push(await fixture.addPeer(new RecordedChannel(), i < 16 ? fixture.pool : extraPool));
+      let observed = 0;
+      witness.onPresence(({ payload }) => { if (payload.have.length) observed++; });
+      let serial = 0;
+      const announce = (peer, ticket) => peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }], ticket,
+        have: [createHash("sha256").update(String(++serial)).digest("hex")] });
+      const before = received.length;
+      for (let i = 0; i < 16; i++) announce(fixture.peers[i], `old-${i}`);
+      await until(() => held.size === 16);
+      announce(fixture.peers[16], "seventeenth");
+      for (let round = 0; round < 4; round++) for (let i = 0; i < 16; i++) announce(fixture.peers[i], `latest-${round}-${i}`);
+      await until(() => observed === 81);
+      assert.equal(received.length, before + 16, "neither same-peer floods nor a seventeenth check start extra HTTP work");
+      for (const response of held.values()) response.writeHead(200, { "content-type": "application/json" }).end('{"admitted":true}');
+      await until(() => completed.filter((ticket) => ticket.startsWith("latest-3-")).length === 16);
+      assert.equal(received.length, before + 32); assert.equal(peak, 16);
+      assert.equal(received.some(({ ticket }) => /^latest-[012]-/.test(ticket)), false);
+      assert.equal(fixture.swarm.metrics().peers.connected, 17); assert.equal(fixture.swarm.metrics().peers.linksClosed, 0);
+      await fixture.load(); await until(() => fixture.swarm.metrics().bytes.held === 32);
+      const key = channels[0].sent.find((frame) => frame.t === "have" && frame.add?.length).add[0];
+      channels[0].receive(JSON.stringify({ t: "want", id: 2001, k: key }));
+      await until(() => fixture.swarm.metrics().bytes.uploaded === 32);
+      assert.equal(received.at(-1).ticket, "latest-3-0", "the old completion cannot overwrite the accepted new credential");
+      announce(fixture.peers[0], "old-stop"); await until(() => held.size === 1);
+      announce(fixture.peers[0], "never-after-stop"); await until(() => observed === 83);
+      fixture.swarm.stop(); await until(() => held.size === 0);
+      assert.equal(received.some(({ ticket }) => ticket === "never-after-stop"), false);
+    })());
+  } finally { clock.restore(); witness.close(); extraPool.close(); await fixture.close(); http.closeAllConnections(); await new Promise((resolve) => http.close(resolve)); }
 });
 
 test("full outgoing dial slots skip new presence checks but admit changed active tickets and incoming offers", async () => {
@@ -3826,7 +3831,7 @@ test("only the serving links that held the key take the held miss", async t => {
   try {
     const via = f.candidate(), holder = f.label(f.holderKey), other = f.label(f.peers[0].pubkey);
     assert.notEqual(holder, other);
-    for (let i = 0; i < 4; i++) await f.fail(via);
+    await f.failUntil(via, 4);
     assert.equal(f.discovery().heldMiss, 4, "counted for the holder only");
     assert.ok(f.rows().filter(row => row.heldMissHolders?.length).every(row => row.heldMissHolders.length === 1 && row.heldMissHolders[0] === holder));
     assert.equal(f.rows().filter(row => row.heldMissHolders?.length).length, 4);
@@ -4267,7 +4272,7 @@ test("a re-armed replacement is still bounded by the eviction cooldown and the d
   const f = await staleHolderFixture(t, { answering: true, evictionCooldownMs: 25_000, serve: { bytes: bytes32, delayMs: null } });
   try {
     const first = f.candidate(), second = f.candidate();
-    for (let i = 0; i < 4; i++) await f.fail(first);
+    await f.failUntil(first, 4);
     f.shift.ms += 10_001; f.touch();
     const segment = f.next(); first.announce(segment.key); await sleep(30);
     const opening = f.load(segment.name);
@@ -4687,36 +4692,45 @@ test("zero-budget cached race preserves pending HTTP on stop and cancels both ar
 
 test("zero-budget cached race rejects corrupt pieces and expires only the peer arm", async t => {
   for (const variant of ["corrupt", "timeout"]) await t.test(variant, async t => {
-    const observed = [];
-    const f = await multiFixture(t, { holders: [variant === "corrupt" ? { corrupt: true } : { silent: true }], wholeOriginDelayMs: 75,
-      onPeerDelivery: value => observed.push(value), swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 30 } });
-    f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    const clock = virtualClock(t), observed = [];
+    let f;
     try {
+      f = await clock.settle(multiFixture(t, { holders: [variant === "corrupt" ? { corrupt: true } : { silent: true }], wholeOriginDelayMs: 75,
+        onPeerDelivery: value => observed.push(value), swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 30 } }));
+      f.hls.media = { currentTime: 0, buffered: { length: 0 } };
       const load = beginCountedMultiLoad(f);
-      sameBytes(await load.response, f.bytes);
+      sameBytes(await clock.settle(load.response), f.bytes);
+      assert.ok(f.channels[0].wants.length > 0, "the peer arm was exercised inside its original 30 ms deadline");
       assert.equal(load.calls.success.length, 1); assert.equal(load.calls.abort.length, 0);
       assert.equal(f.wholeLoads[0].loader.aborted === true, false);
       assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.deepEqual(observed, []);
       if (variant === "corrupt") assert.equal(f.swarm.metrics().core.multiHolder.bans, 1);
       assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
-    } finally { await f.close(); }
+    } finally {
+      if (f) await clock.settle(f.close());
+      clock.restore();
+    }
   });
 });
 
 test("zero-budget cached race locks to HTTP before forwarding unexpected progressive media", async t => {
-  const observed = [];
-  const f = await multiFixture(t, { holders: [{ delayMs: 40 }], wholeOriginDelayMs: 75, onPeerDelivery: value => observed.push(value),
-    swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 500 } });
-  f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+  const clock = virtualClock(t), observed = [];
+  let f;
   try {
+    f = await clock.settle(multiFixture(t, { holders: [{ delayMs: 40 }], wholeOriginDelayMs: 75, onPeerDelivery: value => observed.push(value),
+      swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 500 } }));
+    f.hls.media = { currentTime: 0, buffered: { length: 0 } };
     const load = beginCountedMultiLoad(f);
-    await until(() => f.channels[0].wants.length > 0);
+    await clock.advanceUntil(() => f.channels[0].wants.length > 0, 500);
     f.wholeLoads[0].callbacks.onProgress({}, multiContext, new Uint8Array([1]).buffer, null);
-    sameBytes(await load.response, f.bytes);
+    sameBytes(await clock.settle(load.response), f.bytes);
     assert.equal(load.calls.progress.length, 1); assert.equal(load.calls.success.length, 1);
     assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.deepEqual(observed, []);
     assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
-  } finally { await f.close(); }
+  } finally {
+    if (f) await clock.settle(f.close());
+    clock.restore();
+  }
 });
 
 test("multi-holder: two framing 2 holders each send pieces of one schema 3 segment", async (t) => {
