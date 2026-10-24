@@ -8,6 +8,8 @@
 // A file is a harness receipt (`viewers[].trace`), a bare trace
 // (`{ v, capacity, dropped, rows }`), or an array of either. Each trace keeps
 // its own time base, so timelines are never merged across viewers.
+// Field receipts also report per-level switch costs from their player rows,
+// including when tracing was off; holder evidence stays unknown if absent.
 //
 // Every recorded transfer is first replayed through the committed module and
 // must give the recorded commands; a mismatch means the trace and the module
@@ -41,6 +43,65 @@ export function traceSets(input, name = "trace") {
       ...(input.current?.trace ? traceSets(input.current.trace, `${name} current`) : [])];
   }
   return input.trace ? traceSets(input.trace, name) : [];
+}
+
+// Receipt player times use the page clock; trace and diagnostic times use
+// their swarm session's clock. Never combine holder labels across sessions.
+function holderObservation(receipt, atMs, level) {
+  const entries = [...(receipt.sessions ?? []), ...(receipt.current ? [receipt.current] : [])];
+  const candidates = [];
+  entries.forEach((entry, session) => {
+    const start = entry.startedAtMs, end = entry.endedAtMs ?? receipt.durationMs ?? Infinity;
+    if (!Number.isFinite(start) || atMs < start || atMs >= end) return;
+    const add = (row, source) => {
+      const time = start + row.atMs;
+      if (row.level !== level || !Number.isFinite(time) || time > atMs || !Array.isArray(row.holders)) return;
+      candidates.push({ session, source, atMs: time, ageMs: atMs - time,
+        holders: [...row.holders], haveHolders: Array.isArray(row.haveHolders) ? [...row.haveHolders] : null,
+        staleHolders: Array.isArray(row.staleHolders) ? [...row.staleHolders] : null });
+    };
+    for (const row of entry.trace?.rows ?? []) if (row.k === "eligibility") add({ ...row, atMs: row.at }, "trace-eligibility");
+    for (const row of entry.metrics?.peerEligibilityDiagnostics?.records ?? []) add(row, "eligibility-diagnostic");
+    for (const snapshot of receipt.snapshots ?? []) {
+      if (snapshot.atMs < start || snapshot.atMs >= end) continue;
+      for (const row of snapshot.metrics?.peerEligibilityDiagnostics?.records ?? []) add(row, "snapshot-eligibility");
+    }
+  });
+  return candidates.sort((a, b) => b.atMs - a.atMs)[0] ?? null;
+}
+
+/** Switch costs from retained receipt rows, with no scheduler simulation.
+ * Prefer actual player level-switch events. Older receipts without them use
+ * observed fragment-level transitions, explicitly labelled as such. */
+export function switchCosts(input, name = "receipt") {
+  if (Array.isArray(input)) return input.flatMap((value, index) => switchCosts(value, `${name}[${index}]`));
+  if (!input || typeof input !== "object") return [];
+  if (Array.isArray(input.viewers)) return input.viewers.flatMap((viewer, index) => switchCosts(viewer, `${name} viewer ${viewer.viewer ?? index}`));
+  if (!Array.isArray(input.player?.fragments)) return [];
+  const fragments = input.player.fragments.filter((row) => Number.isFinite(row.atMs) && Number.isSafeInteger(row.level)
+    && row.level >= 0 && row.part == null && (!row.mediaType || row.mediaType === "main" || row.mediaType === "video"))
+    .sort((a, b) => a.atMs - b.atMs);
+  const events = (input.player.levelChanges ?? []).filter((row) => Number.isFinite(row.atMs) && Number.isSafeInteger(row.level) && row.level >= 0)
+    .sort((a, b) => a.atMs - b.atMs);
+  const basis = events.length ? "player-level-event" : "fragment-level-transition";
+  const changes = [];
+  let previous = null;
+  for (const row of events.length ? events : fragments) {
+    if (previous !== null && previous !== row.level) changes.push({ atMs: row.atMs, fromLevel: previous, toLevel: row.level });
+    previous = row.level;
+  }
+  const switches = changes.map((change, index) => {
+    const untilMs = changes[index + 1]?.atMs ?? (Number.isFinite(input.durationMs) ? input.durationMs : null);
+    const after = fragments.filter((row) => row.atMs >= change.atMs && (untilMs === null || row.atMs < untilMs) && row.level === change.toLevel);
+    const counts = { peer: 0, origin: 0, unknown: 0 };
+    for (const row of after) counts[row.source === "peer" || row.source === "origin" ? row.source : "unknown"]++;
+    const peer = after.find((row) => row.source === "peer");
+    return { ...change, untilMs, segments: counts, firstPeerMs: peer ? peer.atMs - change.atMs : null,
+      bandwidthEstimate: after.find((row) => Number.isFinite(row.bandwidthEstimate))?.bandwidthEstimate ?? null,
+      holdersAtSwitch: holderObservation(input, change.atMs, change.toLevel) };
+  });
+  return [{ name, basis, scope: "Retained main/video whole-fragment loads at the target level, from the switch through the next switch (exclusive). Initial level announcements are not switches. Parts and audio are excluded. Counts use receipt source labels, not byte shares. Null firstPeerMs means none observed in that interval. Holder rows are the latest recorded target-level observation at or before the switch, with its age; they are not a complete live inventory. Missing holder evidence is null.",
+    switches }];
 }
 
 /** The scheduler calls of each multi-holder transfer in one trace, by load. */
@@ -235,7 +296,7 @@ export function simulate(core, calls, model, maxHolders) {
 }
 
 /** The report for a set of traces. */
-export async function report(sets, { whatIf = [], core = null } = {}) {
+export async function report(sets, { whatIf = [], core = null, receipts = [] } = {}) {
   core ??= await loadCore(await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url))));
   const all = [], loads = [], eligibility = {}, mismatches = [];
   let dropped = 0, rows = 0;
@@ -265,6 +326,7 @@ export async function report(sets, { whatIf = [], core = null } = {}) {
   const requests = measured.flatMap((m) => m.requests);
   const out = {
     traces: sets.length, rows, dropped, replayMismatches: mismatches,
+    switchCosts: receipts.flatMap(({ input, name }) => switchCosts(input, name)),
     transfers: measured.length,
     failed: measured.filter((m) => m.failed).length,
     lateAtStart: measured.filter((m) => m.late).length,
@@ -321,6 +383,11 @@ function print(out) {
   line("request bytes/ms", out.requestBytesPerMs);
   line("buffer ahead (s)", out.bufferAheadS);
   line("eligibility", out.eligibility);
+  for (const receipt of out.switchCosts) {
+    line("level switches", `${receipt.name} (${receipt.basis})`);
+    line("  scope", receipt.scope);
+    for (const change of receipt.switches) line(`  ${change.fromLevel} -> ${change.toLevel} at ${change.atMs}ms`, change);
+  }
   if (out.whatIf) {
     console.log(`\nwhat-if over ${out.whatIf.transfers} transfers. ${out.whatIf.note}`);
     line(`  recorded (${out.whatIf.recorded.maxHolders})`, { slackMs: out.whatIf.recorded.slackMs, originShare: out.whatIf.recorded.originShare });
@@ -335,9 +402,12 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const whatIf = whatIfAt >= 0 ? args[whatIfAt + 1].split(",").map(Number) : [];
   const files = args.filter((arg, index) => !arg.startsWith("--") && (whatIfAt < 0 || index !== whatIfAt + 1));
   if (!files.length) { console.error("usage: trace-report.mjs [--json] [--what-if 1,2,3] file.json..."); process.exit(2); }
-  const sets = [];
-  for (const file of files) sets.push(...traceSets(JSON.parse(await readFile(file, "utf8")), file));
-  const out = await report(sets, { whatIf });
+  const sets = [], receipts = [];
+  for (const file of files) {
+    const input = JSON.parse(await readFile(file, "utf8"));
+    sets.push(...traceSets(input, file)); receipts.push({ input, name: file });
+  }
+  const out = await report(sets, { whatIf, receipts });
   if (json) console.log(JSON.stringify(out, null, 2)); else print(out);
   if (out.replayMismatches.length) process.exitCode = 1;
 }
