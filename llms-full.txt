@@ -2438,7 +2438,15 @@ It is not a measured throughput, CPU-time or smooth-playback claim.
 The focused Node loader sweep passed 32 tests covering the new measured
 deadline, complete verified cached-peer contribution, cancellation and the
 existing origin-recovery reserve. It uses real committed WASM and simulated
-browser connections. These checks do not establish actual iPhone/iPad,
+browser connections. The combined `npm run test:swarm:core` sweep against the
+rebuilt module passed 291 tests, with one expected skip and zero failures
+(292 total). That skip patches JavaScript selection's prototype, which the
+WASM selection path does not use. The protocol/ABI suite passed 42 tests;
+13 Rust range tests also passed. The actual WASM allocation regression sends
+the same 6 MiB object in 16 ranges: boundary input falls from 96 MiB
+with the legacy ABI to 6 MiB with the new ABI. This is a byte-copy measurement
+using synthetic links, not a device or streaming throughput comparison.
+These checks do not establish actual iPhone/iPad,
 Pixel/Vanadium, varied-NAT or sustained distributed continuity. The v0.4.2
 failed hosted-browser attempts below remain historical RED.
 
