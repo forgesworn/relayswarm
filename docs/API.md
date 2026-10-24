@@ -504,3 +504,31 @@ The installed `relayswarm-native` executable accepts `--descriptor`,
 `--output`, repeated `--bootstrap`, `--peer-timeout` and `--allow-loopback`.
 It requires Node and atomically creates a new verified output without
 replacing an existing path. `npm run native:fetch -- --help` shows usage.
+
+
+## Experimental PlayerHint command
+
+The browser loader accepts `peerSupplyHint: true` with `coreWasm` in
+peer-first mode and optional `onPlayerHint(rows)`. It exposes the same rows in
+`metrics().playerHint`; the field is absent when disabled. See the
+[host contract](../INTEGRATION.md#experimental-peer-supply-hint) for row fields,
+unknown estimates and the restriction to tie-breaking between levels the
+origin already sustains. No hls.js level is assigned by this adapter.
+
+`loadCore(...).playerHint(supply)` returns
+`{ t: "playerHint", rendition, eligibleHolders, projectedMs }` or null if the
+core is unavailable. Supply contains `rendition`, `size` (nullable estimate),
+`peers` (`[id, firstByteMs, bytesPerMs]`), `origin`
+(`[firstByteMs, bytesPerMs]`, both null if unknown), `sharedFirstByteMs`,
+`sharedRate`, `availableMs` and `maxHolders`. Times are durations in milliseconds;
+the projection is not a wall-clock finish timestamp. The host filters eligible
+HAVE holders before the call. The function does no I/O and reserves no pieces.
+
+UniFFI exposes `player_hint(PlayerSupply) -> PlayerCommand::PlayerHint`, with
+`PlayerHint { rendition, eligible_holders, projected_ms }`. `PlayerSupply`
+uses typed `PeerTiming`, optional origin `Timing`, shared `Timing`, optional
+size, available milliseconds and maximum holders. Swift and Kotlin use their
+generated naming conventions. Native hosts retain origin-sustainability checks
+and the same eligibility filters. Discovery remains one context per media type;
+other rendition counts reflect linked HAVE advertisements only. This API is
+experimental and has no field acceptance evidence.

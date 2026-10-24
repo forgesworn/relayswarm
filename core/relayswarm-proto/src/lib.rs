@@ -10,5 +10,6 @@ pub mod event;
 pub mod js;
 pub mod link;
 pub mod pieces;
+pub mod player_hint;
 pub mod scheduler;
 pub mod selection;

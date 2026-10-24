@@ -19,6 +19,7 @@ use std::cell::RefCell;
 pub const OP_STREAM: u32 = 0;
 pub const OP_DELEGATION: u32 = 1;
 pub const OP_COMMITMENT: u32 = 2;
+pub const OP_PLAYER_HINT: u32 = 3;
 
 thread_local! {
     static RESULT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
@@ -43,6 +44,26 @@ fn content(value: Option<Map<String, Value>>) -> Option<Value> {
 
 /// One verifier call on parsed input; `None` is rejection.
 pub fn call(op: u32, input: &Value) -> Option<Value> {
+    if op == OP_PLAYER_HINT {
+        let (peers, origin, first_byte, rate) = estimates(input)?;
+        let origin = input
+            .get("origin")
+            .filter(|value| value.as_array().is_some_and(|v| v.iter().any(|n| n.is_number())))
+            .map(|_| origin);
+        let relayswarm_proto::player_hint::Command::PlayerHint(hint) =
+            relayswarm_proto::player_hint::player_hint(&relayswarm_proto::player_hint::Supply {
+                rendition: input["rendition"].as_str()?,
+                size: input["size"].as_u64(),
+                peers: &peers,
+                origin,
+                shared_first_byte_ms: first_byte,
+                shared_rate: rate,
+                available_ms: input["availableMs"].as_f64()?,
+                max_holders: input["maxHolders"].as_u64()? as usize,
+            });
+        return Some(serde_json::json!({"t": "playerHint", "rendition": hint.rendition,
+            "eligibleHolders": hint.eligible_holders, "projectedMs": hint.projected_ms}));
+    }
     let event = input.get(0)?;
     if op == OP_STREAM {
         return commitment::valid_stream_authorisation(event).then_some(Value::Bool(true));

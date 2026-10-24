@@ -23,6 +23,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { loadCore } from "../src/browser/core-wasm.mjs";
 
 const PROGRESS_MS = 50;
@@ -247,6 +248,9 @@ export async function report(sets, { whatIf = [], core = null } = {}) {
       const geometry = row.budgetGeometry;
       if (row.k === "load" && Number.isFinite(geometry?.bufferedEnd) && Number.isFinite(geometry?.currentTime)) {
         loads.push({ aheadS: round(geometry.bufferedEnd - geometry.currentTime), budgetMs: row.budgetMs });
+      }
+      if (row.k === "playerHint" && !isDeepStrictEqual(core.playerHint(row.input), row.out)) {
+        mismatches.push(`${set.name} playerHint at ${row.at} gave a different command`);
       }
       if (row.k === "eligibility") eligibility[row.reason ?? "eligible"] = (eligibility[row.reason ?? "eligible"] ?? 0) + 1;
     }

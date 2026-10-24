@@ -87,3 +87,13 @@ test("the report replays every transfer and labels the what-if as an estimate", 
   assert.deepEqual(out.whatIf.limits.map((limit) => limit.maxHolders), [1, 2, 3]);
   for (const limit of out.whatIf.limits) assert.equal(limit.failed, 0);
 });
+
+test("PlayerHint trace replays shared supply changes and catches a changed command", async () => {
+  const trace = JSON.parse(await readFile(new URL("../core/vectors/player-hint-traces.json", import.meta.url)));
+  const rows = trace.steps.map((row) => ({ k: "playerHint", ...row }));
+  for (const row of rows) assert.deepEqual(core.playerHint(row.input), row.out);
+  const sets = traceSets({ rows, dropped: 0 });
+  assert.deepEqual((await report(sets, { core })).replayMismatches, []);
+  rows[1].out.eligibleHolders++;
+  assert.equal((await report(sets, { core })).replayMismatches.length, 1);
+});
