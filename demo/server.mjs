@@ -1,11 +1,13 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import { createServer as httpServer } from "node:http";
 import { createServer as httpsServer } from "node:https";
 import { readFile, open } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
-import { parseArgs } from "node:util";
+import { parseArgs, promisify } from "node:util";
+import { brotliCompress, gzip, constants as zlib } from "node:zlib";
 import { build } from "esbuild";
 import { createHlsPublisher, PublisherError } from "../src/hls-publisher.mjs";
 import { createBlockingPlaylistReload, sendPlaylistResponse } from "./blocking-playlist-reload.mjs";
@@ -26,6 +28,56 @@ const here = dirname(fileURLToPath(import.meta.url));
 function sendBufferedResponse(request, response, status, type, body) {
   const bytes = Buffer.isBuffer(body) ? body : typeof body === "string" ? Buffer.from(body, "utf8") : Buffer.from(body);
   response.writeHead(status, { "content-type": type, "content-length": bytes.length });
+  response.end(request.method === "HEAD" ? undefined : bytes);
+}
+
+const compressBrotli = promisify(brotliCompress), compressGzip = promisify(gzip);
+const CODINGS = ["br", "gzip", "identity"];
+
+/** Fixed page assets, encoded once at startup with a strong ETag per coding. */
+export async function staticAsset(type, body) {
+  const identity = Buffer.from(body), tag = createHash("sha256").update(identity).digest("base64url");
+  const [br, gz] = await Promise.all([
+    compressBrotli(identity, { params: { [zlib.BROTLI_PARAM_QUALITY]: 6, [zlib.BROTLI_PARAM_SIZE_HINT]: identity.length } }),
+    compressGzip(identity, { level: 6 }),
+  ]);
+  const representations = new Map([["identity", { bytes: identity, etag: `"${tag}"` }]]);
+  for (const [coding, bytes] of [["br", br], ["gzip", gz]]) if (bytes.length < identity.length) representations.set(coding, { bytes, etag: `"${tag}-${coding}"` });
+  return { type, representations };
+}
+
+/** Highest-weighted available coding; ties prefer br, gzip, then identity.
+ * An absent header, or nothing acceptable, selects identity. */
+export function acceptedCoding(header, available) {
+  if (typeof header !== "string") return "identity";
+  const weights = new Map();
+  for (const entry of header.split(",")) {
+    const [name, ...parameters] = entry.trim().toLowerCase().split(";").map((value) => value.trim());
+    if (!name || weights.has(name)) continue;
+    const quality = parameters.find((value) => value.startsWith("q="));
+    weights.set(name, quality === undefined ? 1 : /^q=(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/u.test(quality) ? Number(quality.slice(2)) : 0);
+  }
+  const weight = (coding) => weights.get(coding) ?? weights.get("*") ?? (coding === "identity" ? 1 : 0);
+  let selected = "identity", best = 0;
+  for (const coding of CODINGS) if (available.has(coding) && weight(coding) > best) { selected = coding; best = weight(coding); }
+  return selected;
+}
+
+/** If-None-Match uses weak comparison (RFC 9110, section 13.1.2). */
+export function etagMatches(header, etag) {
+  return typeof header === "string" && header.split(",").some((value) => {
+    const tag = value.trim();
+    return tag === "*" || tag.replace(/^W\//u, "") === etag;
+  });
+}
+
+function sendStaticAsset(request, response, asset) {
+  const coding = acceptedCoding(request.headers["accept-encoding"], asset.representations);
+  const { bytes, etag } = asset.representations.get(coding);
+  // Revalidate on every use; other routes keep no-store.
+  const validators = { etag, vary: "accept-encoding", "cache-control": "no-cache" };
+  if (etagMatches(request.headers["if-none-match"], etag)) { response.writeHead(304, validators); response.end(); return; }
+  response.writeHead(200, { "content-type": asset.type, "content-length": bytes.length, ...(coding === "identity" ? {} : { "content-encoding": coding }), ...validators });
   response.end(request.method === "HEAD" ? undefined : bytes);
 }
 
@@ -66,6 +118,9 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
     readFile(join(here, "index.html")), readFile(join(here, "style.css")), readFile(join(here, "../src/browser/relayswarm-core.wasm")),
     build({ entryPoints: [join(here, "client.mjs")], bundle: true, format: "esm", platform: "browser", write: false, minify: true, logLevel: "silent" }),
   ]);
+  const staticAssets = new Map(await Promise.all([["/", "text/html; charset=utf-8", page], ["/style.css", "text/css; charset=utf-8", css],
+    ["/client.js", "text/javascript; charset=utf-8", bundle.outputFiles[0].contents], ["/relayswarm-core.wasm", "application/wasm", coreWasm]]
+    .map(async ([path, type, body]) => [path, await staticAsset(type, body)])));
   const admission = createAdmissionControls({ ...admissionOptions, swarmId: publisher.swarmId });
   const controls = createOperatorControls({ token, telemetry, reportCapacity, reportTtlMs, operatorExtraStatus, statePath: operatorState, admission,
     requestDiagnostics: () => requestDiagnostics.snapshot() });
@@ -103,10 +158,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
         response.end = (chunk, encoding, callback) => { count(chunk, encoding); return end(chunk, encoding, callback); };
       }
       const send = (type, body) => sendBufferedResponse(request, response, 200, type, body);
-      if (url.pathname === "/") return send("text/html; charset=utf-8", page);
-      if (url.pathname === "/style.css") return send("text/css; charset=utf-8", css);
-      if (url.pathname === "/client.js") return send("text/javascript; charset=utf-8", bundle.outputFiles[0].contents);
-      if (url.pathname === "/relayswarm-core.wasm") return send("application/wasm", coreWasm);
+      if (staticAssets.has(url.pathname)) return sendStaticAsset(request, response, staticAssets.get(url.pathname));
       if (url.pathname === "/stream.json") return send("application/json", JSON.stringify(advertisement));
       if (url.pathname === "/session.json") return send("application/json", JSON.stringify(publicSession()));
       if (url.pathname === "/commitment") {

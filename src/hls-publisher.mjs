@@ -51,19 +51,25 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
     return scope;
   }
   signingScope(now());
-  const hashes = new Map(), commitments = new Map(), pendingHashes = new Map();
+  const hashes = new Map(), commitments = new Map(), pendingHashes = new Map(), pendingCommitments = new Map();
   const changedPlaylists = new WeakSet();
   const metrics = { requests: 0, cacheHits: 0, hashCacheHits: 0, hashReads: 0, hashesComputed: 0, commitmentsSigned: 0,
-    renewals: 0, cacheEvictions: 0, changedReads: 0, playlistRetries: 0, busyRejected: 0, inFlight: 0, peakInFlight: 0 };
+    renewals: 0, cacheEvictions: 0, changedReads: 0, playlistRetries: 0, busyRejected: 0, inFlight: 0, peakInFlight: 0, commitmentJoins: 0 };
   let snapshot, pendingRefresh;
   function retain(map, key, value) {
     map.delete(key); map.set(key, value);
     while (map.size > maxCacheEntries) { map.delete(map.keys().next().value); metrics.cacheEvictions++; }
   }
+  // A changed playlist read is counted when it is reported (counted()), so
+  // concurrent catalogue reads count only the read a sequential pass would.
   function changed(isPlaylist = false) {
-    metrics.changedReads++;
+    if (!isPlaylist) metrics.changedReads++;
     const error = new PublisherError("Media changed during reading.", 503);
     if (isPlaylist) changedPlaylists.add(error);
+    return error;
+  }
+  function counted(error) {
+    if (changedPlaylists.has(error)) metrics.changedReads++;
     return error;
   }
   async function localFile(path) {
@@ -78,36 +84,65 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
     const current = await fileStat(file, { bigint: true });
     if (stamp(before) !== stamp(after) || stamp(after) !== stamp(current)) throw changed(isPlaylist);
   }
+  async function readFrom(handle, length) {
+    const bytes = Buffer.alloc(length);
+    let size = 0;
+    while (size < length) {
+      const { bytesRead } = await handle.read(bytes, size, length - size, size);
+      if (!bytesRead) break;
+      size += bytesRead;
+    }
+    return bytes.subarray(0, size);
+  }
   async function playlist(path) {
     const file = await localFile(path), handle = await open(file, "r");
     try {
       const before = await handle.stat({ bigint: true });
       if (!before.isFile() || before.size > BigInt(MAX_PLAYLIST)) throw new PublisherError("Excessive playlist.");
-      const bytes = Buffer.alloc(MAX_PLAYLIST + 1);
-      let size = 0;
-      while (size < bytes.length) {
-        const { bytesRead } = await handle.read(bytes, size, bytes.length - size, size);
-        if (!bytesRead) break;
-        size += bytesRead;
-      }
-      if (size > MAX_PLAYLIST) throw new PublisherError("Excessive playlist.");
+      // The spare byte detects growth after stat; growth repeats the bounded read.
+      let bytes = await readFrom(handle, Number(before.size) + 1);
+      if (bytes.length > before.size) bytes = await readFrom(handle, MAX_PLAYLIST + 1);
+      if (bytes.length > MAX_PLAYLIST) throw new PublisherError("Excessive playlist.");
       await unchanged(handle, file, before, true);
-      if (BigInt(size) !== before.size) throw changed(true);
-      return { file, bytes: bytes.subarray(0, size), text: bytes.subarray(0, size).toString("utf8") };
+      if (BigInt(bytes.length) !== before.size) throw changed(true);
+      return { file, bytes, text: bytes.toString("utf8") };
     } finally { await handle.close(); }
   }
   async function catalogue() {
-    const initial = await playlist(manifestPath), text = initial.text;
+    const previous = snapshot;
+    // The same bytes from the same file parse identically, except a delta
+    // playlist, whose records also depend on the previous catalogue.
+    const same = (path, body) => {
+      const prior = previous?.playlists.get(path);
+      return prior?.file === body.file && prior.bytes.equals(body.bytes) && !body.text.includes("#EXT-X-SKIP");
+    };
+    const initial = await playlist(manifestPath).catch((error) => { throw counted(error); }), text = initial.text;
     const playlists = new Map([[manifestPath, initial]]);
     const master = parseHlsMaster(text, manifestPath);
     const entries = master.variants.length ? [...master.variants, ...master.audio] : [{ path: manifestPath, mediaType: "main" }];
+    // Renditions are read concurrently; outcomes are taken in catalogue order,
+    // with each changed media playlist parsed at its sequential position.
+    const reads = entries.map((entry) => master.variants.length ? playlist(entry.path) : Promise.resolve(initial));
+    for (const read of reads) read.catch(() => {});
+    const bodies = [], parsed = [];
+    let reusable = same(manifestPath, initial);
+    for (const [level, entry] of entries.entries()) {
+      const body = await reads[level].catch((error) => { throw counted(error); });
+      bodies.push(body);
+      if (same(entry.path, body)) continue;
+      reusable = false;
+      parsed[level] = parseHlsMedia(body.text, entry.path, level,
+        { mediaType: entry.mediaType, allowEncryptedMedia, previousCatalogue: previous?.mediaCatalogues.get(entry.path) });
+    }
+    // Every playlist was freshly read and stat-checked above.
+    if (reusable) return previous;
     const records = [], assets = new Set([manifestPath]), keys = new Set(), mediaCatalogues = new Map();
     for (const [level, entry] of entries.entries()) {
       assets.add(entry.path);
-      const body = master.variants.length ? await playlist(entry.path) : initial;
+      const body = bodies[level];
       playlists.set(entry.path, body);
-      const media = parseHlsMedia(body.text, entry.path, level,
-        { mediaType: entry.mediaType, allowEncryptedMedia, previousCatalogue: snapshot?.mediaCatalogues.get(entry.path) });
+      const media = parsed[level] ?? parseHlsMedia(body.text, entry.path, level,
+        { mediaType: entry.mediaType, allowEncryptedMedia, previousCatalogue: previous?.mediaCatalogues.get(entry.path) });
       mediaCatalogues.set(entry.path, media);
       records.push(...media.records);
       for (const asset of media.assets) assets.add(asset);
@@ -179,6 +214,71 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
     try { return await task; } finally { pendingHashes.delete(pendingKey); }
   }
 
+  // Normalised identity of a well-formed request; null leaves validation to
+  // an ordinary slot, which reports the same errors as before.
+  function requestKey(request) {
+    try {
+      const optional = (value) => value === undefined || value === null ? null : integer(value);
+      const playlist = request.playlist ?? null, mediaType = request.mediaType ?? "main";
+      if (typeof request.path !== "string" || (playlist !== null && typeof playlist !== "string") || typeof mediaType !== "string") return null;
+      return JSON.stringify([request.path, integer(request.level), integer(request.sequence), integer(request.discontinuity),
+        optional(request.rangeStart), optional(request.rangeEnd), optional(request.part), playlist, mediaType]);
+    } catch { return null; }
+  }
+  async function signCommitment(input) {
+    const level = integer(input.level), sequence = integer(input.sequence), discontinuity = integer(input.discontinuity);
+    const rangeStart = input.rangeStart === undefined || input.rangeStart === null ? null : integer(input.rangeStart);
+    const rangeEnd = input.rangeEnd === undefined || input.rangeEnd === null ? null : integer(input.rangeEnd);
+    const part = input.part === undefined || input.part === null ? null : integer(input.part);
+    const next = await refresh(), wide = input.playlist !== undefined && input.playlist !== null;
+    const mediaType = input.mediaType ?? "main";
+    if (!["main", "audio"].includes(mediaType)) throw new PublisherError("Invalid media type.");
+    if (!wide && (next.wide || mediaType !== "main")) throw new PublisherError("Exact playlist identity is required for these renditions.");
+    const record = next.records.find((entry) => entry.path === input.path && entry.sequence === sequence && entry.discontinuity === discontinuity
+      && entry.rangeStart === rangeStart && entry.rangeEnd === rangeEnd && entry.part === part
+      && (wide ? entry.playlist === input.playlist && entry.mediaType === mediaType : entry.level === level && !entry.encryption));
+    if (!record) throw new PublisherError("Context is absent from the published playlists.", 404);
+    // Piece commitments need exact playlist identity, as schema 2 does.
+    const schema = wide ? (pieceCommitments ? 3 : 2) : 1;
+    const contextId = contextKey(record), key = `v${schema}:${contextId}`, scope = signingScope(now());
+    const rendition = wide ? record.playlist : String(level);
+    if (scope && (!scope.renditions.includes(rendition) || !scope.mediaTypes.includes(record.mediaType) || part !== null && !scope.allowParts)) throw new PublisherError("Media is outside the commitment delegation scope.", 403);
+    const file = await localFile(record.path), handle = await open(file, "r");
+    try {
+      const before = await handle.stat({ bigint: true }), version = stamp(before);
+      const seconds = Math.floor(now() / 1000), cached = commitments.get(key);
+      if (cached?.version === version && cached.expiresAt > seconds + 5 && (!scope || cached.expiresAt <= scope.expiresAt) && cached.event.created_at <= seconds + 30 && cached.event.created_at >= seconds - 120) {
+        if (!(await refresh()).contexts.has(contextId)) throw new PublisherError("Context is absent from the published playlists.", 404);
+        await unchanged(handle, file, before);
+        signingScope(now());
+        metrics.cacheHits++; retain(commitments, key, cached);
+        return cached.event;
+      }
+      const hash = await hashRecord(record, file, handle, before);
+      await unchanged(handle, file, before);
+      if (!(await refresh()).contexts.has(contextId)) throw new PublisherError("Context is absent from the published playlists.", 404);
+      await unchanged(handle, file, before);
+      retain(hashes, assetKey(record), hash);
+      // Another caller may have signed this same digest while we awaited IO.
+      const signedAt = Math.floor(now() / 1000), ready = commitments.get(key);
+      if (ready?.version === version && ready.expiresAt > signedAt + 5 && (!scope || ready.expiresAt <= scope.expiresAt) && ready.event.created_at <= signedAt + 30 && ready.event.created_at >= signedAt - 120) {
+        signingScope(now());
+        metrics.cacheHits++; return ready.event;
+      }
+      const range = record.rangeEnd === null ? "" : `#${record.rangeStart}-${record.rangeEnd}`;
+      const currentScope = signingScope(now());
+      if (currentScope && hash.size > currentScope.maxSegmentBytes) throw new PublisherError("Media exceeds the delegation size limit.", 403);
+      const fields = { ...(wide ? { v: schema, playlist: record.playlist, mediaType: record.mediaType, encryption: record.encryption } : {}),
+        ...(schema === 3 ? { pieceSize: hash.pieceSize, pieces: hash.pieces } : {}), streamEventId: streamEvent.id, swarmId, key: digest(`${swarmId}\n${record.path}${range}`), rendition, sequence, discontinuity, part,
+        sha256: hash.sha256, size: hash.size, expiresAt: Math.min(signedAt + 60, currentScope?.expiresAt ?? Infinity) };
+      const event = finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: signedAt, tags: [["x", swarmId], ["e", streamEvent.id], ...(currentScope ? [["delegation", delegation.id]] : [])], content: commitmentContent(fields) }, signingKey);
+      if (cached?.version === version) metrics.renewals++;
+      metrics.commitmentsSigned++;
+      retain(commitments, key, { version, expiresAt: fields.expiresAt, event });
+      return event;
+    } finally { await handle.close(); }
+  }
+
   await refresh();
   return {
     swarmId, streamEvent: structuredClone(streamEvent), manifestPath,
@@ -202,7 +302,7 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
       if (fresh && pendingRefresh) await pendingRefresh;
       const next = await refresh(), body = next.playlists.get(path);
       if (!body || !next.assets.has(path)) throw new PublisherError("Unknown playlist.", 404);
-      if (await localFile(path) !== body.file) throw changed(true);
+      if (await localFile(path) !== body.file) throw counted(changed(true));
       return { file: body.file, bytes: Buffer.from(body.bytes), playlistFiles: [...next.playlists.values()].map(entry => entry.file), isMedia: next.mediaCatalogues.has(path),
         mediaPlaylists: [...next.mediaCatalogues.keys()].map((key) => ({ file: next.playlists.get(key).file, text: next.playlists.get(key).text })) };
     },
@@ -220,61 +320,18 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
     },
     async commitment(input) {
       metrics.requests++;
+      // Fields are copied once: a joined caller shares this exact request.
+      const request = input === null || input === undefined ? input : { path: input.path, level: input.level, sequence: input.sequence, discontinuity: input.discontinuity,
+        rangeStart: input.rangeStart, rangeEnd: input.rangeEnd, part: input.part, playlist: input.playlist, mediaType: input.mediaType };
+      const id = requestKey(request), joined = id === null ? undefined : pendingCommitments.get(id);
+      // An identical in-flight request is joined without a slot. Its failure
+      // reaches every caller and is never retained.
+      if (joined) { metrics.commitmentJoins++; return structuredClone(await joined); }
       if (metrics.inFlight >= maxConcurrent) { metrics.busyRejected++; throw new PublisherError("Publisher busy.", 503); }
       metrics.inFlight++; metrics.peakInFlight = Math.max(metrics.peakInFlight, metrics.inFlight);
-      try {
-        const level = integer(input.level), sequence = integer(input.sequence), discontinuity = integer(input.discontinuity);
-        const rangeStart = input.rangeStart === undefined || input.rangeStart === null ? null : integer(input.rangeStart);
-        const rangeEnd = input.rangeEnd === undefined || input.rangeEnd === null ? null : integer(input.rangeEnd);
-        const part = input.part === undefined || input.part === null ? null : integer(input.part);
-        const next = await refresh(), wide = input.playlist !== undefined && input.playlist !== null;
-        const mediaType = input.mediaType ?? "main";
-        if (!["main", "audio"].includes(mediaType)) throw new PublisherError("Invalid media type.");
-        if (!wide && (next.wide || mediaType !== "main")) throw new PublisherError("Exact playlist identity is required for these renditions.");
-        const record = next.records.find((entry) => entry.path === input.path && entry.sequence === sequence && entry.discontinuity === discontinuity
-          && entry.rangeStart === rangeStart && entry.rangeEnd === rangeEnd && entry.part === part
-          && (wide ? entry.playlist === input.playlist && entry.mediaType === mediaType : entry.level === level && !entry.encryption));
-        if (!record) throw new PublisherError("Context is absent from the published playlists.", 404);
-        // Piece commitments need exact playlist identity, as schema 2 does.
-        const schema = wide ? (pieceCommitments ? 3 : 2) : 1;
-        const contextId = contextKey(record), key = `v${schema}:${contextId}`, scope = signingScope(now());
-        const rendition = wide ? record.playlist : String(level);
-        if (scope && (!scope.renditions.includes(rendition) || !scope.mediaTypes.includes(record.mediaType) || part !== null && !scope.allowParts)) throw new PublisherError("Media is outside the commitment delegation scope.", 403);
-        const file = await localFile(record.path), handle = await open(file, "r");
-        try {
-          const before = await handle.stat({ bigint: true }), version = stamp(before);
-          const seconds = Math.floor(now() / 1000), cached = commitments.get(key);
-          if (cached?.version === version && cached.expiresAt > seconds + 5 && (!scope || cached.expiresAt <= scope.expiresAt) && cached.event.created_at <= seconds + 30 && cached.event.created_at >= seconds - 120) {
-            if (!(await refresh()).contexts.has(contextId)) throw new PublisherError("Context is absent from the published playlists.", 404);
-            await unchanged(handle, file, before);
-            signingScope(now());
-            metrics.cacheHits++; retain(commitments, key, cached);
-            return structuredClone(cached.event);
-          }
-          const hash = await hashRecord(record, file, handle, before);
-          await unchanged(handle, file, before);
-          if (!(await refresh()).contexts.has(contextId)) throw new PublisherError("Context is absent from the published playlists.", 404);
-          await unchanged(handle, file, before);
-          retain(hashes, assetKey(record), hash);
-          // Another caller may have signed this same digest while we awaited IO.
-          const signedAt = Math.floor(now() / 1000), ready = commitments.get(key);
-          if (ready?.version === version && ready.expiresAt > signedAt + 5 && (!scope || ready.expiresAt <= scope.expiresAt) && ready.event.created_at <= signedAt + 30 && ready.event.created_at >= signedAt - 120) {
-            signingScope(now());
-            metrics.cacheHits++; return structuredClone(ready.event);
-          }
-          const range = record.rangeEnd === null ? "" : `#${record.rangeStart}-${record.rangeEnd}`;
-          const currentScope = signingScope(now());
-          if (currentScope && hash.size > currentScope.maxSegmentBytes) throw new PublisherError("Media exceeds the delegation size limit.", 403);
-          const fields = { ...(wide ? { v: schema, playlist: record.playlist, mediaType: record.mediaType, encryption: record.encryption } : {}),
-            ...(schema === 3 ? { pieceSize: hash.pieceSize, pieces: hash.pieces } : {}), streamEventId: streamEvent.id, swarmId, key: digest(`${swarmId}\n${record.path}${range}`), rendition, sequence, discontinuity, part,
-            sha256: hash.sha256, size: hash.size, expiresAt: Math.min(signedAt + 60, currentScope?.expiresAt ?? Infinity) };
-          const event = finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: signedAt, tags: [["x", swarmId], ["e", streamEvent.id], ...(currentScope ? [["delegation", delegation.id]] : [])], content: commitmentContent(fields) }, signingKey);
-          if (cached?.version === version) metrics.renewals++;
-          metrics.commitmentsSigned++;
-          retain(commitments, key, { version, expiresAt: fields.expiresAt, event });
-          return structuredClone(event);
-        } finally { await handle.close(); }
-      } finally { metrics.inFlight--; }
+      const task = signCommitment(request).finally(() => { metrics.inFlight--; if (id !== null) pendingCommitments.delete(id); });
+      if (id !== null) pendingCommitments.set(id, task);
+      return structuredClone(await task);
     },
   };
 }
