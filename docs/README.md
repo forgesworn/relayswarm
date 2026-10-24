@@ -27,6 +27,7 @@ its measured scope and acceptance gaps in [Status](STATUS.md).
 | Review integrity, privacy and resource boundaries | [Threat model](THREAT-MODEL.md) |
 | Separate tested, released and outstanding capabilities | [Evidence and remaining work](STATUS.md) |
 | Answer common questions and compare other projects | [FAQ](FAQ.md), [Landscape](LANDSCAPE.md) |
+| Compare core and imported signature verification costs | [Signature budget](CORE-SIGNATURE-BUDGET.md) |
 | Inspect dated measurements and reproduction commands | [Spike results](../spikes/RESULTS.md) |
 | Follow release and documentation changes | [Changelog](../CHANGELOG.md) |
 | Maintain AI entry points and check links | [Maintaining the docs](MAINTAINING-DOCS.md) |
