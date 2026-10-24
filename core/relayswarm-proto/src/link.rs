@@ -909,11 +909,23 @@ impl Link {
     /// `None` when they are not held or serving is declined. Upload already
     /// charged for a cancelled response is not refunded.
     pub fn serve_response(&mut self, now: u64, bytes: Option<Vec<u8>>) {
+        self.serve_response_inner(now, bytes, None);
+    }
+
+    /// Answer an active range with only its bytes, rather than copying a whole
+    /// held object across the host boundary. The original object size fixes the
+    /// canonical piece size; a mismatched length, missing range or oversized
+    /// object is declined. Wire framing and receiver verification are unchanged.
+    pub fn serve_range_response(&mut self, now: u64, object_size: u64, bytes: Vec<u8>) {
+        self.serve_response_inner(now, Some(bytes), Some(object_size));
+    }
+
+    fn serve_response_inner(&mut self, now: u64, bytes: Option<Vec<u8>>, range_object_size: Option<u64>) {
         self.clock = now;
         let Some(Active {
             upload,
             stage: Stage::AwaitingBytes,
-        }) = self.active.take()
+        }) = self.active.take_if(|active| matches!(active.stage, Stage::AwaitingBytes))
         else {
             return;
         };
@@ -922,8 +934,17 @@ impl Link {
             self.send_text(&none);
             return self.finish_upload();
         };
-        // A range the held object does not have is answered with `none`.
-        if let Some(range) = upload.range {
+        if let Some(object_size) = range_object_size {
+            let expected = upload
+                .range
+                .filter(|_| object_size <= self.config.max_segment_bytes)
+                .and_then(|range| range_bytes(object_size, range));
+            if !expected.is_some_and(|(from, to)| to - from == bytes.len() as u64) {
+                self.send_text(&none);
+                return self.finish_upload();
+            }
+        } else if let Some(range) = upload.range {
+            // A range the held object does not have is answered with `none`.
             let Some((from, to)) = range_bytes(bytes.len() as u64, range) else {
                 self.send_text(&none);
                 return self.finish_upload();

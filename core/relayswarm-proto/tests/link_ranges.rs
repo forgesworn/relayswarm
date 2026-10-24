@@ -260,3 +260,106 @@ fn a_matching_cancel_ends_a_backpressured_range_without_a_low_water_event() {
     assert_eq!(holder.bytes_out(), sent + 98_304);
     assert!(!holder.closed());
 }
+
+#[test]
+fn a_pre_sliced_host_response_preserves_middle_and_final_range_bytes() {
+    let bytes = object(SIZE);
+    let mut holder = Link::new(config(), NOW);
+    for (id, requested) in [(1, range(1, 3)), (2, range(3, 4))] {
+        holder.handle_text(NOW, &json!({ "t": "want", "id": id, "k": KEY, "p": [requested.start, requested.end] }).to_string());
+        holder.drain_events();
+        let (from, to) = range_bytes(SIZE as u64, requested).unwrap();
+        holder.observe_buffered(0);
+        holder.serve_range_response(NOW, SIZE as u64, bytes[from as usize..to as usize].to_vec());
+        for _ in 0..64 {
+            holder.buffered_amount_low(NOW, 0);
+        }
+        let events = holder.drain_events();
+        let text = texts(&events);
+        assert_eq!(text[0], json!({ "t": "meta", "id": id, "size": to - from, "p": [requested.start, requested.end] }));
+        assert_eq!(text.last(), Some(&json!({ "t": "eof", "id": id })));
+        let body: Vec<u8> = events.iter().filter_map(|event| match event {
+            LinkEvent::SendBinary(chunk) => Some(chunk.as_slice()),
+            _ => None,
+        }).flatten().copied().collect();
+        assert_eq!(body, bytes[from as usize..to as usize]);
+    }
+    assert!(!holder.closed());
+    assert_eq!(holder.outbound_in_flight(), 0);
+}
+
+#[test]
+fn a_pre_sliced_host_response_rejects_invalid_geometry_without_poisoning_the_queue() {
+    for (object_size, requested, len) in [
+        (0, range(0, 1), 65_536),
+        (1024 * 1024 + 1, range(0, 1), 65_536),
+        (SIZE as u64, range(3, 5), 65_536),
+        (SIZE as u64, range(1, 3), 131_071),
+        (SIZE as u64, range(3, 4), 65_536),
+    ] {
+        let mut holder = Link::new(config(), NOW);
+        holder.handle_text(NOW, &json!({ "t": "want", "id": 1, "k": KEY, "p": [requested.start, requested.end] }).to_string());
+        holder.drain_events();
+        holder.serve_range_response(NOW, object_size, vec![0; len]);
+        assert_eq!(texts(&holder.drain_events()), vec![json!({ "t": "none", "id": 1 })]);
+        assert!(!holder.closed());
+        assert_eq!(holder.outbound_in_flight(), 0);
+        let events = serve(&mut holder, json!({ "t": "want", "id": 2, "k": KEY }), Some(object(SIZE)));
+        assert_eq!(texts(&events)[0], json!({ "t": "meta", "id": 2, "size": SIZE }));
+    }
+}
+
+#[test]
+fn a_pre_sliced_response_cannot_answer_a_whole_object_request() {
+    let mut holder = Link::new(config(), NOW);
+    holder.handle_text(NOW, &json!({ "t": "want", "id": 1, "k": KEY }).to_string());
+    holder.drain_events();
+    holder.serve_range_response(NOW, SIZE as u64, object(SIZE));
+    assert_eq!(texts(&holder.drain_events()), vec![json!({ "t": "none", "id": 1 })]);
+    assert_eq!(holder.outbound_in_flight(), 0);
+    assert!(!holder.closed());
+}
+
+#[test]
+fn a_cancelled_pre_sliced_response_accounts_only_the_range_and_serves_the_next_request() {
+    let mut holder = Link::new(config(), NOW);
+    holder.handle_text(NOW, &json!({ "t": "want", "id": 1, "k": KEY, "p": [1, 3] }).to_string());
+    holder.handle_text(NOW, &json!({ "t": "want", "id": 2, "k": KEY, "p": [3, 4] }).to_string());
+    holder.drain_events();
+    holder.handle_text(NOW, &json!({ "t": "cancel", "id": 1 }).to_string());
+    holder.serve_range_response(NOW, SIZE as u64, vec![1; 131_072]);
+    let cancelled = holder.drain_events();
+    assert!(cancelled.contains(&LinkEvent::UploadCancelled(131_072)));
+    assert_eq!(texts(&cancelled), vec![json!({ "t": "none", "id": 1 })]);
+    assert!(cancelled.iter().all(|event| !matches!(event, LinkEvent::SendBinary(_))));
+    let (from, to) = range_bytes(SIZE as u64, range(3, 4)).unwrap();
+    holder.serve_range_response(NOW, SIZE as u64, vec![2; (to - from) as usize]);
+    let next = holder.drain_events();
+    assert_eq!(texts(&next).last(), Some(&json!({ "t": "eof", "id": 2 })));
+    assert_eq!(holder.bytes_out(), to - from);
+    assert_eq!(holder.outbound_in_flight(), 0);
+}
+
+#[test]
+fn a_late_host_response_cannot_discard_an_active_upload() {
+    let size = 6 * 1024 * 1024;
+    let mut holder = Link::new(LinkConfig { max_segment_bytes: size, ..config() }, NOW);
+    holder.handle_text(NOW, &json!({ "t": "want", "id": 1, "k": KEY, "p": [0, 4] }).to_string());
+    holder.drain_events();
+    let (_, to) = range_bytes(size, range(0, 4)).unwrap();
+    holder.serve_range_response(NOW, size, vec![1; to as usize]);
+    let sent: u64 = holder.drain_events().iter().filter_map(|event| match event {
+        LinkEvent::SendBinary(bytes) => Some(bytes.len() as u64),
+        _ => None,
+    }).sum();
+    assert!(holder.upload_waiting());
+    holder.serve_range_response(NOW, size, vec![2; to as usize]);
+    holder.serve_response(NOW, None);
+    assert!(holder.drain_events().is_empty());
+    assert!(holder.upload_waiting());
+    holder.handle_text(NOW, &json!({ "t": "cancel", "id": 1 }).to_string());
+    let cancelled = holder.drain_events();
+    assert_eq!(texts(&cancelled), vec![json!({ "t": "eof", "id": 1 })]);
+    assert!(cancelled.contains(&LinkEvent::UploadCancelled(to - sent)));
+    assert_eq!(holder.outbound_in_flight(), 0);
+}
