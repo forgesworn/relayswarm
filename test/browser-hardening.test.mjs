@@ -516,6 +516,35 @@ test("non-reconnecting readiness still waits for all attempts and bounds an all-
   });
 });
 
+test("one-shot readiness on the first relay still fails only when every attempt has, without retrying", async t => {
+  for (const healthy of [true, false]) await t.test(healthy ? "one usable relay" : "all failed", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { Socket, sockets } = controlledRelaySockets();
+    const pool = new RelayPool(["wss://first.example", "wss://hung.example"], { WebSocketImpl: Socket, readyOnFirstRelay: true });
+    let completed = false;
+    const connecting = pool.connect().then(() => { completed = true; });
+    if (healthy) {
+      sockets[0].open(); await relayTurns();
+      assert.equal(completed, true, "ready before the other attempt settles");
+      assert.equal(pool.pendingSockets.size, 1);
+      sockets[1].open(); await relayTurns();
+      assert.equal(pool.sockets.length, 2, "a slower relay joins when it opens");
+      sockets[1].close(); await relayTurns();
+      t.mock.timers.tick(60_000); await relayTurns();
+      assert.equal(sockets.length, 2, "no redial without reconnect");
+      await connecting;
+    } else {
+      const outcome = assert.rejects(connecting, /No relay reachable.*closed.*timed out/);
+      sockets[0].close(); await relayTurns();
+      assert.equal(completed, false);
+      t.mock.timers.tick(7_999); await relayTurns(); assert.equal(completed, false);
+      t.mock.timers.tick(1); await outcome;
+    }
+    assert.equal(pool.retryTimers.size, 0);
+    pool.close();
+  });
+});
+
 test("relay reconnect cannot resurrect a socket after close", async () => {
   const sockets = [];
   class Socket extends EventTarget {
@@ -943,6 +972,63 @@ test("defaults are receive-only and sampled coverage includes fragments with no 
     assert.equal(metrics.segments.sampledInTimeByteShare, 0);
     assert.equal(metrics.bytes.held, 0);
   } finally { swarm.stop(); await relay.close(); }
+});
+
+test("origin media is copied only to compare or serve it, and hashed only to compare it", async t => {
+  const size = 64 * 1024, digest = t.mock.method(globalThis.crypto.subtle, "digest");
+  const run = async (options, media, settled = () => true) => {
+    let copies = 0;
+    const data = new Uint8Array(size).fill(5).buffer;
+    data.slice = function (...args) { copies++; return ArrayBuffer.prototype.slice.apply(this, args); };
+    class Origin extends Loader { load(context, _config, callbacks) { callbacks.onSuccess({ data }, this.stats, context, null); } }
+    const swarm = createHlsSwarm({ ...base, relays: ["wss://memory-relay.example"], WebSocketImpl: memoryRelaySocket(), lateWindowMs: 20, ...options });
+    const hls = { config: { loader: Origin }, ...(media ? { media } : {}) };
+    digest.mock.resetCalls();
+    try {
+      swarm.attach(hls);
+      let delivered = null;
+      new hls.config.fLoader({}).load(context, {}, { onSuccess(response) { delivered = response.data; }, onError() {}, onTimeout() {} });
+      assert.equal(delivered, data, "the player receives the original buffer");
+      await until(() => swarm.metrics().segments.originLoaded === 1 && settled(swarm.metrics()));
+      await sleep(20);
+      const metrics = swarm.metrics();
+      assert.equal(metrics.bytes.fromOrigin, size);
+      return { copies, hashed: digest.mock.calls.filter(call => call.arguments[1].byteLength === size).length, metrics };
+    } finally { swarm.stop(); }
+  };
+  const resolved = (metrics) => metrics.segments.sampledOut + metrics.segments.noPeers === 1;
+  const unsampled = await run({ shadowSampleRate: 0 }, null, resolved);
+  assert.deepEqual([unsampled.copies, unsampled.hashed, unsampled.metrics.segments.sampledOut, unsampled.metrics.bytes.held], [0, 0, 1, 0]);
+  const sampled = await run({ shadowSampleRate: 1 }, null, resolved);
+  assert.deepEqual([sampled.copies, sampled.hashed, sampled.metrics.segments.noPeers, sampled.metrics.bytes.held], [1, 1, 1, 0]);
+  const serving = await run({ shadowSampleRate: 0, serve: true }, null, metrics => resolved(metrics) && metrics.bytes.held > 0);
+  assert.deepEqual([serving.copies, serving.hashed, serving.metrics.segments.sampledOut, serving.metrics.bytes.held], [1, 0, 1, size]);
+  const playback = peerPlaybackOptions(), empty = { currentTime: 0, buffered: { length: 0 } };
+  const receiveOnly = await run(playback.options, empty);
+  assert.deepEqual([receiveOnly.copies, receiveOnly.hashed, receiveOnly.metrics.bytes.held], [0, 0, 0]);
+  const peerServing = await run({ ...playback.options, serve: true }, empty, metrics => metrics.bytes.held > 0);
+  assert.deepEqual([peerServing.copies, peerServing.hashed, peerServing.metrics.bytes.held], [1, 0, size]);
+});
+
+test("core discovery reads candidates again after a hint or clear", async () => {
+  const core = await loadCore(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url)));
+  const at = 1_792_000_000_000, wasm = core.neighbourDiscovery(() => at), js = new NeighbourDiscovery(() => at);
+  const [wanted, other, holder] = ["b", "c", "e"].map(digit => digit.repeat(64));
+  const both = (operation) => [wasm, js].map(operation);
+  const found = () => both(discovery => discovery.hinted(discovery.contexts.get("main"), () => true)?.candidate.pubkey ?? null);
+  both(discovery => discovery.demand("main", "r", wanted));
+  both(discovery => discovery.hint(other, ["d".repeat(64)], null));
+  assert.deepEqual(found(), [null, null]);
+  both(discovery => discovery.hint(holder, [wanted], null));
+  assert.deepEqual(found(), [holder, holder]);
+  both(discovery => discovery.hint(holder, [], null));
+  assert.deepEqual(found(), [null, null]);
+  both(discovery => discovery.hint(holder, [wanted], null));
+  assert.deepEqual(both(discovery => discovery.choose(() => true, () => true, true)?.candidate.pubkey), [holder, holder]);
+  both(discovery => discovery.clear());
+  both(discovery => discovery.demand("main", "r", wanted));
+  assert.deepEqual(found(), [null, null]);
+  assert.equal(wasm.kind, "wasm");
 });
 
 function signedFixture(overrides = {}, signer) {
