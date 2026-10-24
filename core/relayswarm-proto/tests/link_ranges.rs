@@ -204,3 +204,59 @@ fn a_range_outside_the_object_is_not_requested() {
     assert!(requester.drain_events().is_empty());
     assert!(!requester.busy());
 }
+
+#[test]
+fn a_matching_cancel_ends_a_backpressured_range_without_a_low_water_event() {
+    let size = 6 * 1024 * 1024;
+    let bytes = object(size);
+    let mut holder = Link::new(
+        LinkConfig {
+            max_segment_bytes: size as u64,
+            drain_timeout_ms: 3_000,
+            ..config()
+        },
+        NOW,
+    );
+    holder.handle_text(NOW, &json!({ "t": "want", "id": 7, "k": KEY, "p": [0, 64] }).to_string());
+    holder.drain_events();
+    holder.serve_response(NOW, Some(bytes));
+    let queued = holder.drain_events();
+    let sent: u64 = queued
+        .iter()
+        .filter_map(|event| match event {
+            LinkEvent::SendBinary(bytes) => Some(bytes.len() as u64),
+            _ => None,
+        })
+        .sum();
+    assert!(sent > 128 * 1024 && sent < size as u64);
+    assert!(holder.upload_waiting());
+
+    for id in [json!(8), json!("7"), json!(7.5), Value::Null] {
+        holder.handle_text(NOW + 100, &json!({ "t": "cancel", "id": id }).to_string());
+        assert!(holder.drain_events().is_empty(), "an unmatched cancel cannot bypass backpressure");
+        assert!(holder.upload_waiting());
+    }
+    holder.handle_text(NOW + 100, &json!({ "t": "cancel", "id": 7 }).to_string());
+    let cancelled = holder.drain_events();
+    assert_eq!(texts(&cancelled), vec![json!({ "t": "eof", "id": 7 })]);
+    assert!(cancelled.iter().all(|event| !matches!(event, LinkEvent::SendBinary(_))));
+    assert!(cancelled.contains(&LinkEvent::UploadCancelled(size as u64 - sent)));
+    assert_eq!(holder.bytes_out(), sent);
+    assert_eq!(holder.outbound_in_flight(), 0);
+    assert_eq!(holder.next_deadline(), None);
+    holder.tick(NOW + 10_000);
+    assert!(!holder.closed(), "the cancelled upload no longer owns a drain timer");
+    holder.buffered_amount_low(NOW + 10_000, 0);
+    assert!(
+        holder.drain_events().is_empty(),
+        "a late low-water event cannot resume the cancelled upload"
+    );
+
+    holder.handle_text(NOW + 10_001, &json!({ "t": "want", "id": 9, "k": KEY, "p": [0, 1] }).to_string());
+    holder.drain_events();
+    holder.serve_response(NOW + 10_001, Some(object(size)));
+    let next = holder.drain_events();
+    assert_eq!(texts(&next).last(), Some(&json!({ "t": "eof", "id": 9 })));
+    assert_eq!(holder.bytes_out(), sent + 98_304);
+    assert!(!holder.closed());
+}

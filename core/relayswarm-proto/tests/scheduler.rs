@@ -1,8 +1,11 @@
 //! Multi-holder planning and transfer (CORE-SPEC section 6). Rust-only, as
 //! the JavaScript loader has no counterpart.
 
+use relayswarm_proto::commitment::commitment_piece_size;
 use relayswarm_proto::pieces::{piece_count, range_bytes, PieceRange};
-use relayswarm_proto::scheduler::{plan, Command, Estimate, Plan, PlanInput, Source, Transfer, TransferConfig, MIN_RATE};
+use relayswarm_proto::scheduler::{
+    plan, Command, Estimate, Plan, PlanInput, Source, Transfer, TransferConfig, MAX_PEER_REQUEST_BYTES, MAX_PEER_REQUEST_PIECES, MIN_RATE,
+};
 use sha2::{Digest, Sha256};
 
 const MS: f64 = 1.0;
@@ -205,7 +208,11 @@ const NOW: u64 = 1_000_000;
 const SIZE: usize = 5 * 65_536 + 1_000;
 
 fn object() -> Vec<u8> {
-    (0..SIZE).map(|i| ((i * 131 + 17) % 251) as u8).collect()
+    object_sized(SIZE)
+}
+
+fn object_sized(size: usize) -> Vec<u8> {
+    (0..size).map(|i| ((i * 131 + 17) % 251) as u8).collect()
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -213,7 +220,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn transfer(bytes: &[u8], deadline: u64) -> Transfer {
-    let hashes: Vec<String> = bytes.chunks(65_536).map(hex).collect();
+    let hashes: Vec<String> = bytes.chunks(commitment_piece_size(bytes.len() as i64) as usize).map(hex).collect();
     let refs: Vec<&str> = hashes.iter().map(String::as_str).collect();
     Transfer::new(TransferConfig::default(), bytes.len() as u64, &hex(bytes), &refs, deadline).unwrap()
 }
@@ -699,4 +706,144 @@ fn slow_trials_leave_origin_its_work() {
     let origin_range = range_of(&first, Source::Origin);
     transfer.delivered(NOW + 1_400, Source::Origin, origin_range, slice(&bytes, origin_range));
     assert!(transfer.finished());
+}
+
+// --- Bounded peer requests --------------------------------------------------
+
+#[test]
+fn peer_batches_preserve_disjoint_queued_work_and_one_in_flight_request() {
+    let bytes = object_sized(9 * 65_536 + 17);
+    let mut transfer = transfer(&bytes, NOW + 10_000);
+    transfer.start(NOW, &[peer(1, Some(1.0), Some(1_000.0))], origin(10_000.0, 0.01), None, None);
+    let first = transfer.drain_commands();
+    let asked = requests(&first);
+    assert_eq!(asked, vec![(Source::Peer(1), PieceRange { start: 0, end: 4 })]);
+    transfer.tick(NOW + 1);
+    assert!(
+        requests(&transfer.drain_commands()).is_empty(),
+        "queued work must wait for the current batch"
+    );
+
+    let mut commands = first;
+    let mut covered = Vec::new();
+    let mut at = NOW + 10;
+    let mut ranges = Vec::new();
+    loop {
+        let asked = requests(&commands);
+        assert_eq!(asked.len(), 1, "{commands:?}");
+        let (source, range) = asked[0];
+        assert_eq!(source, Source::Peer(1));
+        assert!(range.end - range.start <= MAX_PEER_REQUEST_PIECES);
+        assert!(slice(&bytes, range).len() as u64 <= MAX_PEER_REQUEST_BYTES);
+        covered.extend(range.start..range.end);
+        ranges.push(range);
+        transfer.delivered(at, source, range, slice(&bytes, range));
+        commands = transfer.drain_commands();
+        if transfer.finished() {
+            assert_eq!(delivered(&commands), Some(&bytes));
+            break;
+        }
+        at += 10;
+    }
+    assert_eq!(
+        covered,
+        all(bytes.len() as u64),
+        "pieces must not overlap or vanish between batches"
+    );
+    assert_eq!(
+        ranges,
+        vec![
+            PieceRange { start: 0, end: 4 },
+            PieceRange { start: 4, end: 8 },
+            PieceRange { start: 8, end: 10 }
+        ]
+    );
+    assert_eq!(slice(&bytes, ranges[2]).len(), 65_536 + 17, "the final piece can be shorter");
+}
+
+#[test]
+fn peer_batches_respect_the_byte_cap_with_maximum_canonical_pieces() {
+    let bytes = object_sized(16 * 1024 * 1024);
+    assert_eq!(commitment_piece_size(bytes.len() as i64), 256 * 1024);
+    let mut transfer = transfer(&bytes, NOW + 100_000);
+    transfer.start(NOW, &[peer(1, Some(1.0), Some(1_000.0))], origin(10_000.0, 0.01), None, None);
+    let asked = requests(&transfer.drain_commands());
+    assert_eq!(asked, vec![(Source::Peer(1), PieceRange { start: 0, end: 2 })]);
+    assert_eq!(slice(&bytes, asked[0].1).len() as u64, MAX_PEER_REQUEST_BYTES);
+}
+
+#[test]
+fn peer_batches_accept_single_and_short_final_pieces_without_empty_requests() {
+    for size in [1, 65_536, 65_537, 3 * 65_536 + 17] {
+        let bytes = object_sized(size);
+        let mut transfer = transfer(&bytes, NOW + 10_000);
+        transfer.start(NOW, &[peer(1, Some(1.0), Some(1_000.0))], origin(10_000.0, 0.01), None, None);
+        let asked = requests(&transfer.drain_commands());
+        assert_eq!(
+            asked,
+            vec![(
+                Source::Peer(1),
+                PieceRange {
+                    start: 0,
+                    end: piece_count(size as u64).unwrap()
+                }
+            )]
+        );
+        transfer.delivered(NOW + 10, Source::Peer(1), asked[0].1, &bytes);
+        let done = transfer.drain_commands();
+        assert_eq!(delivered(&done), Some(&bytes));
+        assert!(requests(&done).is_empty());
+    }
+}
+
+#[test]
+fn a_failed_batch_preserves_verified_pieces_and_reassigns_the_unfinished_queue() {
+    let bytes = object_sized(13 * 65_536 + 17);
+    let mut transfer = transfer(&bytes, NOW + 10_000);
+    transfer.start(NOW, &[peer(1, Some(1.0), Some(1_000.0))], origin(10_000.0, 0.01), None, None);
+    let first = requests(&transfer.drain_commands())[0].1;
+    transfer.delivered(NOW + 10, Source::Peer(1), first, slice(&bytes, first));
+    let second = requests(&transfer.drain_commands())[0].1;
+    assert_eq!(second, PieceRange { start: 4, end: 8 });
+    transfer.failed(NOW + 20, Source::Peer(1));
+    let asked = requests(&transfer.drain_commands());
+    assert_eq!(asked, vec![(Source::Origin, PieceRange { start: 4, end: 14 })]);
+    assert!(
+        slice(&bytes, asked[0].1).len() as u64 > MAX_PEER_REQUEST_BYTES,
+        "origin ranges remain uncapped"
+    );
+    transfer.delivered(NOW + 30, Source::Origin, asked[0].1, slice(&bytes, asked[0].1));
+    assert_eq!(delivered(&transfer.drain_commands()), Some(&bytes));
+}
+
+#[test]
+fn the_origin_floor_reassigns_in_flight_and_queued_batches_but_keeps_verified_progress() {
+    let bytes = object_sized(13 * 65_536 + 17);
+    let deadline = NOW + 4_000;
+    let mut transfer = transfer(&bytes, deadline);
+    transfer.start(NOW, &[peer(1, Some(1.0), Some(1_000.0))], origin(10_000.0, 0.01), None, None);
+    let first = requests(&transfer.drain_commands())[0].1;
+    transfer.delivered(NOW + 10, Source::Peer(1), first, slice(&bytes, first));
+    let second = requests(&transfer.drain_commands())[0].1;
+    transfer.tick(deadline - 2_000);
+    let commands = transfer.drain_commands();
+    assert!(commands.contains(&Command::Cancel { peer: 1 }));
+    let asked = requests(&commands);
+    assert_eq!(asked, vec![(Source::Origin, PieceRange { start: 4, end: 14 })]);
+    transfer.delivered(deadline - 1_999, Source::Peer(1), second, slice(&bytes, second));
+    assert!(transfer.drain_commands().is_empty(), "a late cancelled batch cannot claim progress");
+    transfer.delivered(deadline - 1_900, Source::Origin, asked[0].1, slice(&bytes, asked[0].1));
+    assert_eq!(delivered(&transfer.drain_commands()), Some(&bytes));
+}
+
+#[test]
+fn whole_origin_ranges_are_not_split_into_peer_sized_batches() {
+    let bytes = object_sized(13 * 65_536 + 17);
+    let mut transfer = transfer(&bytes, NOW + 10_000);
+    transfer.start(NOW, &[], origin(1.0, 1_000.0), None, None);
+    let asked = requests(&transfer.drain_commands());
+    assert_eq!(asked, vec![(Source::Origin, PieceRange { start: 0, end: 14 })]);
+    assert!(slice(&bytes, asked[0].1).len() as u64 > MAX_PEER_REQUEST_BYTES);
+    transfer.delivered(NOW + 10, Source::Origin, asked[0].1, &bytes);
+    assert_eq!(delivered(&transfer.drain_commands()), Some(&bytes));
 }

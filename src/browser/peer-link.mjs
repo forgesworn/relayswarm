@@ -268,7 +268,12 @@ export class PeerLink {
       case "want": return this.#onWant(message);
       case "cancel": {
         if (!Number.isSafeInteger(message.id)) return;
-        for (const upload of this.uploads) if (upload.id === message.id) upload.cancelled = true;
+        for (const upload of this.uploads) if (upload.id === message.id) {
+          upload.cancelled = true;
+          // EOF queues behind the binary already sent on this ordered
+          // channel; cancellation need not wait for the buffer-low event.
+          upload.resume?.();
+        }
         return;
       }
       case "meta": {
@@ -357,7 +362,7 @@ export class PeerLink {
     let sent = 0;
     while (sent < bytes.byteLength) {
       if (this.closed) return;
-      if (this.channel.bufferedAmount > HIGH_WATER_BYTES) await this.#drained();
+      if (this.channel.bufferedAmount > HIGH_WATER_BYTES) await this.#drained(upload);
       if (this.closed) return;
       if (upload.cancelled) break;
       const end = Math.min(sent + CHUNK_BYTES, bytes.byteLength);
@@ -370,7 +375,7 @@ export class PeerLink {
     this.#sendText({ t: "eof", id });
   }
 
-  #drained() {
+  #drained(upload) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         cleanup();
@@ -381,6 +386,7 @@ export class PeerLink {
         clearTimeout(timer);
         this.channel.removeEventListener("bufferedamountlow", done);
         this.channel.removeEventListener("close", done);
+        if (upload.resume === done) delete upload.resume;
       };
       const done = () => {
         cleanup();
@@ -388,6 +394,7 @@ export class PeerLink {
       };
       this.channel.addEventListener("bufferedamountlow", done);
       this.channel.addEventListener("close", done);
+      upload.resume = done;
     });
   }
 }

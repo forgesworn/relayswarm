@@ -8074,21 +8074,6 @@
      }
     },
     {
-     "events": [],
-     "state": {
-      "have": [],
-      "fetching": [],
-      "renditions": [],
-      "serving": false,
-      "rendition": null,
-      "busy": false,
-      "outboundInFlight": 1,
-      "closed": false,
-      "bytesIn": 0,
-      "bytesOut": 0
-     }
-    },
-    {
      "events": [
       {
        "uploadCancelled": 52544
@@ -8097,6 +8082,21 @@
        "sendText": "{\"t\":\"eof\",\"id\":1}"
       }
      ],
+     "state": {
+      "have": [],
+      "fetching": [],
+      "renditions": [],
+      "serving": false,
+      "rendition": null,
+      "busy": false,
+      "outboundInFlight": 0,
+      "closed": false,
+      "bytesIn": 0,
+      "bytesOut": 147456
+     }
+    },
+    {
+     "events": [],
      "state": {
       "have": [],
       "fetching": [],

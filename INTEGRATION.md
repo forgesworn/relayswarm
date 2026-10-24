@@ -418,11 +418,19 @@ A timed-out or cancelled request resolves promptly for origin fallback. On a
 known ordered, fully reliable channel, the link stays busy while discarding
 that response up to a matching validated EOF, or a refusal before metadata.
 Only then can another request use the channel. The receiver also sends
-`cancel`; a holder that honours it stops at its next chunk and sends EOF early,
-or refuses before metadata. Holders without `cancel` send the response in full.
+`cancel`; a holder that honours it stops adding binary data and queues EOF
+behind the bytes already sent, including when it is waiting for the channel's
+buffer-low event, or refuses before metadata. Holders without `cancel` send the response in full.
 A holder queues more of a response only while at most 128 KiB is waiting to
 be sent on the channel, so chunks queued before a cancel arrives still flow. The existing drain limit closes
 an incomplete response; host stop and admission withdrawal close immediately.
+Schema 3 multi-holder peer requests verify progress in batches of at most four
+canonical pieces and 512 KiB; a canonical piece larger than that is requested
+alone. The remaining pieces stay queued for that holder, so a later abandoned
+request preserves earlier verified pieces. Origin keeps its contiguous HTTP
+ranges. Run `npm run test:core-link:browser` for native Chrome loopback coverage
+of a cancelled six-MiB ranged response and a subsequent hash-checked range on
+the same reliable connection.
 Fresh-origin coordination is bounded by safe buffered playback and measured
 HTTP fallback time. hls.js owns quality selection. These mechanisms do not
 prove optimal internet scheduling or net savings.

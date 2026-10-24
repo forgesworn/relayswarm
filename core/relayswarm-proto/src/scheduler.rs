@@ -25,6 +25,10 @@ pub const DEFAULT_MAX_HOLDERS: usize = 3;
 pub const DEFAULT_LOOKAHEAD_SEGMENTS: usize = 2;
 /// Time kept for origin before the player's deadline (`originReserveMs`).
 pub const DEFAULT_ORIGIN_RESERVE_MS: f64 = 2_000.0;
+/// Peer requests verify progress in bounded batches, so abandoning a later
+/// request keeps earlier pieces. Origin retains contiguous HTTP ranges.
+pub const MAX_PEER_REQUEST_PIECES: u32 = 4;
+pub const MAX_PEER_REQUEST_BYTES: u64 = 512 * 1024;
 /// At most this many unverified pieces left starts the endgame.
 pub const ENDGAME_PIECES: usize = 2;
 /// A request is never abandoned for silence sooner than this
@@ -690,14 +694,27 @@ impl Transfer {
         }
     }
 
-    /// Send queued work: one range at a time to a peer, all of it to origin.
+    /// Send queued work: one bounded range to a peer, all of it to origin.
     fn issue(&mut self, now: u64, source: Source) {
+        let peer_piece_cap = (MAX_PEER_REQUEST_BYTES / self.piece_size)
+            .max(1)
+            .min(u64::from(MAX_PEER_REQUEST_PIECES)) as u32;
         let Some(lane) = self.lanes.get_mut(&source) else { return };
-        while let Some(range) = lane.queue.front().copied() {
+        while let Some(mut range) = lane.queue.front().copied() {
             if matches!(source, Source::Peer(_)) && !lane.in_flight.is_empty() {
                 return;
             }
             lane.queue.pop_front();
+            if matches!(source, Source::Peer(_)) {
+                let end = range.start.saturating_add(peer_piece_cap).min(range.end);
+                if end < range.end {
+                    lane.queue.push_front(PieceRange {
+                        start: end,
+                        end: range.end,
+                    });
+                    range.end = end;
+                }
+            }
             lane.in_flight.push((range, now));
             lane.first_byte_at = None;
             lane.flow.clear();
