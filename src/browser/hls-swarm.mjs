@@ -109,6 +109,9 @@ const DEFAULTS = Object.freeze({
   // Peer-first: keep peer-delivered segments out of the hls.js bandwidth and
   // first-byte estimates, so ABR reflects the origin path (CORE-SPEC 6.3.1).
   abrIgnorePeers: false,
+  // Experimental, read-only supply observations; never sets a player level.
+  peerSupplyHint: false,
+  onPlayerHint: null,
 });
 const TRACE_LIMIT = 32_768;
 const SAMPLE_LIMIT = 500;
@@ -394,6 +397,10 @@ class HlsSwarm {
     this.uploadQuotaBytes = 0;
     this.uploadTokens = this.options.maxUploadBytesPerSecond;
     this.uploadRefilledAt = now();
+    this.playerHints = [];
+    this.hintSizes = new Map();
+    this.hintOriginRates = [];
+    this.hintGeneration = 0;
     this.peerFragments = new WeakSet();
     this.originalTrigger = null;
     this.counters = {
@@ -487,6 +494,7 @@ class HlsSwarm {
     if (typeof this.options.multiHolder !== "boolean" || !Number.isSafeInteger(this.options.maxHoldersPerObject)
       || this.options.maxHoldersPerObject < 1 || this.options.maxHoldersPerObject > 8) return "invalid-multi-holder";
     if (!Number.isSafeInteger(this.options.traceRequests) || this.options.traceRequests < 0 || this.options.traceRequests > TRACE_LIMIT) return "invalid-trace";
+    if (typeof this.options.peerSupplyHint !== "boolean" || (this.options.onPlayerHint !== null && typeof this.options.onPlayerHint !== "function")) return "invalid-player-hint-option";
     if (typeof this.options.abrIgnorePeers !== "boolean") return "invalid-abr-option";
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (this.options.reserveUploadBytes !== undefined && typeof this.options.reserveUploadBytes !== "function") return "invalid-upload-reservation";
@@ -606,6 +614,9 @@ class HlsSwarm {
     this.heldBytes = 0;
     this.originFetches.clear();
     this.renditions.clear();
+    this.playerHints = [];
+    this.hintSizes.clear();
+    this.hintOriginRates = [];
     try { this.session?.close(); } catch {}
     try { this.pool?.close(); } catch {}
     try { this.options.onMetrics?.(this.metrics()); } catch {}
@@ -698,6 +709,7 @@ class HlsSwarm {
         records: this.transportRecords.map((record) => ({ ...record })),
       },
       neighbourDiscovery: this.discovery.snapshot(),
+      ...(this.options.peerSupplyHint ? { playerHint: structuredClone(this.playerHints) } : {}),
       peerEligibilityDiagnostics: {
         capacity: 64,
         dropped: this.peerEligibilityDropped,
@@ -885,6 +897,7 @@ class HlsSwarm {
         const budgetGeometry = { source: "unobserved", positionSource: null, currentTime: null, bufferedEnd: null, playableEnd: null, fragmentStart: null, originReserveMs: null, uncappedMs: null };
         const budgetMs = swarm.#peerBudget(context, budgetGeometry);
         swarm.#contributionContext(context);
+        if (swarm.options.peerSupplyHint) swarm.#guard("player-hint", () => swarm.#reportPlayerHints(context, budgetMs));
         if (swarm.stopped || !context.frag || context.frag.sn === "initSegment" || (context.part && !swarm.options.swarmParts)
           || (!swarm.options.serveOnCellular && onCellular())) return this.inner.load(context, config, callbacks);
         const controller = new AbortController();
@@ -941,6 +954,13 @@ class HlsSwarm {
               completed = true;
               pushSample(swarm.originLatencySamples, now() - originStarted);
               swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - originStarted);
+              if (swarm.options.peerSupplyHint && copy) {
+                const rendition = swarm.#renditionContext(context);
+                if (!swarm.hintSizes.has(rendition) && swarm.hintSizes.size >= 16) swarm.hintSizes.delete(swarm.hintSizes.keys().next().value);
+                swarm.hintSizes.set(rendition, copy.byteLength);
+                const elapsedMs = now() - originStarted;
+                if (elapsedMs > 0) pushSample(swarm.hintOriginRates, copy.byteLength / elapsedMs);
+              }
               callbacks.onSuccess(response, stats, ctx, details);
               swarm.#noteOriginClock(details, receivedMs);
               if (copy && !swarm.stopped) swarm.#guard("peer-first-origin", async () => {
@@ -1030,6 +1050,49 @@ class HlsSwarm {
       getCacheAge() { return this.peerStats ? null : this.inner.getCacheAge?.() ?? null; }
       getResponseHeader(name) { return this.peerStats ? null : this.inner.getResponseHeader?.(name) ?? null; }
     };
+  }
+
+  // Observe the next demanded timeline position in each loaded rendition.
+  // Other playlists are never fetched here. HAVE knowledge is all we have
+  // for another rendition: discovery retains only the playing context.
+  async #reportPlayerHints(context, availableMs) {
+    if (!context?.frag || context.frag.sn === "initSegment" || context.part || this.stopped) return;
+    const generation = ++this.hintGeneration;
+    const levels = this.hls?.levels || [];
+    const contexts = levels.length ? levels.map((level, index) => {
+      if (index === context.frag.level) return context;
+      const frag = level.details?.fragments?.find((frag) => frag.sn === context.frag.sn && frag.cc === context.frag.cc);
+      return frag ? { url: frag.url, frag, rangeStart: frag.byteRangeStartOffset, rangeEnd: frag.byteRangeEndOffset } : null;
+    }) : [context];
+    const rows = await Promise.all(contexts.map(async (candidate, index) => {
+      const rendition = candidate ? this.#renditionContext(candidate) : `main:${index}`;
+      const key = candidate ? await this.#segmentKey(candidate) : null;
+      if (this.stopped || generation !== this.hintGeneration) return null;
+      const discovery = candidate && this.discovery.contexts.get(candidate.frag.type || "main");
+      const peers = key ? [...this.links.values()].filter((link) => !link.closed && !link.busy && link.have.has(key)
+        && link.supportsRanges === true && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !this.banned.has(link.pubkey)
+        && !(discovery?.rendition === rendition && this.discovery.stale(discovery, link.pubkey))).map((link, index) => {
+        const rate = this.peerSelection.summary(link).throughputBytesPerSecond;
+        return [index + 1, null, rate ? rate / 1000 : null];
+      }) : [];
+      // Size and origin timing are estimates from this rendition's previous
+      // loads, with playlist bitrate/segment duration as the size fallback,
+      // not a claim to know an unrequested commitment. Unknown stays null.
+      const observedSize = candidate ? this.renditionSizes.get(rendition) ?? this.hintSizes.get(rendition) ?? null : null;
+      const bitrateSize = candidate ? Math.ceil((levels[index]?.bitrate ?? 0) * (candidate.frag.duration ?? 0) / 8) : 0;
+      const size = observedSize ?? (bitrateSize > 0 && bitrateSize <= this.options.maxSegmentBytes ? bitrateSize : null);
+      const originMs = percentile(this.renditionOriginSamples.get(rendition) || [], 0.5);
+      const supply = { rendition, size, peers, origin: [null, size && originMs ? size / originMs : percentile(this.hintOriginRates, 0.5)],
+        sharedFirstByteMs: this.peerSelection.firstByteMs(), sharedRate: this.peerSelection.rate(),
+        availableMs, maxHolders: this.options.maxHoldersPerObject };
+      const command = this.core?.playerHint(supply);
+      if (command && this.options.traceRequests) this.#trace({ k: "playerHint", at: this.#traceAt(), input: supply, out: command });
+      return command ? { ...command, level: candidate?.frag.level ?? index, sequence: candidate?.frag.sn ?? null,
+        sizeEstimate: size, sizeEstimateSource: observedSize !== null ? "observed" : size !== null ? "playlist-bitrate" : null, knowledge: "linked-have" } : null;
+    }));
+    if (this.stopped || generation !== this.hintGeneration) return;
+    this.playerHints = rows.filter(Boolean);
+    if (this.playerHints.length) this.options.onPlayerHint?.(structuredClone(this.playerHints));
   }
 
   #renditionContext(context) {

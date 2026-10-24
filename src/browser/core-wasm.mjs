@@ -14,6 +14,7 @@ import { segmentMediaContext } from "./segment-commitment.mjs";
 const OP_STREAM = 0;
 const OP_DELEGATION = 1;
 const OP_COMMITMENT = 2;
+const OP_PLAYER_HINT = 3;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -264,6 +265,10 @@ export async function loadCore(source, { onFailure } = {}) {
   });
   return Object.freeze({
     verifier,
+    playerHint(supply) {
+      if (retired) return null;
+      try { return call(OP_PLAYER_HINT, supply); } catch (error) { fail(error); return null; }
+    },
     retire,
     get retired() { return retired; },
     peerSelection() {

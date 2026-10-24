@@ -267,6 +267,11 @@ fun snapshot(link: PeerLink, update: LinkUpdate): List<Any?> {
 }
 
 fun main() {
+    val hint = playerHint(PlayerSupply("main:0", 131_072uL,
+        listOf(PeerTiming(1uL, Timing(0.0, 1024.0)), PeerTiming(2uL, Timing(0.0, 1024.0))),
+        Timing(0.0, 512.0), Timing(null, null), 1000.0, 3u)) as PlayerCommand.PlayerHint
+    check(hint.hint.rendition == "main:0" && hint.hint.eligibleHolders == 2u && hint.hint.projectedMs == 64.0)
+
     var at = 0L
     val verdicts = mutableListOf<String>()
     var link: PeerLink? = null

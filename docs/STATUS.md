@@ -11,6 +11,18 @@ acceptance remains open. The previous prerelease,
 `3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. Later documentation corrections
 on `main` do not change either tag or its immutable downloaded assets.
 
+## Experimental core supply hint, 24 October 2026
+
+The next-source loader has an opt-in `peerSupplyHint` advisory command through
+WASM and UniFFI. It reports eligible linked HAVE holders and estimated
+peer-plus-origin completion duration per rendition's next segment, without
+assigning a player level. Hosts may use it only to break ties between
+origin-sustainable levels. Discovery retains one playing context per media
+type; target-rendition preparation is not implemented. Unknown sizes or timing
+remain explicit. Shared Rust/WASM replay and loader on/off tests exercise the
+contract; physical devices, public NAT and field acceptance remain open.
+See [integration details](../INTEGRATION.md#experimental-peer-supply-hint).
+
 ## Current delivery checkpoint
 
 Checkpoint: 21 October 2026. [PR 9](https://github.com/forgesworn/relayswarm/pull/9)

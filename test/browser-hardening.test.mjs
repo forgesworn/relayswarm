@@ -3573,7 +3573,7 @@ function sameBytes(actual, expected, message) {
     message ?? `got ${actual.length} bytes, expected ${expected.length}`);
 }
 
-async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, originFallbackMs = 3_000, originDelayMs = 0, ignoreRanges = false, traceRequests = 0 }) {
+async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, originFallbackMs = 3_000, originDelayMs = 0, ignoreRanges = false, traceRequests = 0, peerSupplyHint = false, onPlayerHint = null }) {
   const bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
   // The player's loader. It answers a range from the same object; its whole
   // segment is different bytes, so a whole-segment fallback shows.
@@ -3593,7 +3593,7 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
   const signed = signedFixture({ v: 3, key, rendition: "/media/index.m3u8", playlist: "/media/index.m3u8", mediaType: "main", encryption: null,
     sha256: createHash("sha256").update(bytes).digest("hex"), size, pieceSize, pieces });
   const f = await linkedFixture({ mode: "peer-first", streamEvent: signed.options.streamEvent, getCommitment: () => signed.event, originFallbackMs,
-    segmentKey: () => "/media/seg.ts", coreWasm: multiCore, multiHolder, traceRequests, WebSocketImpl: memoryRelaySocket() }, RangeLoader);
+    segmentKey: (url) => new URL(url).pathname, coreWasm: multiCore, multiHolder, traceRequests, peerSupplyHint, onPlayerHint, WebSocketImpl: memoryRelaySocket() }, RangeLoader);
   await until(() => f.swarm.metrics().core.state === "ready");
   const channels = [];
   for (const options of holders) {
@@ -3858,4 +3858,46 @@ test("multi-holder: a ranged serve sends and charges only the requested pieces",
     assert.deepEqual(reserved, [131_072]);
     assert.equal(f.swarm.metrics().bytes.uploaded, 131_072);
   } finally { await f.close(); }
+});
+
+
+test("peerSupplyHint reports known HAVE supply only when enabled and never sets a player level", async (t) => {
+  for (const enabled of [false, true]) {
+    const reported = [];
+    const f = await multiFixture(t, { holders: [{}], size: 65_536, originDelayMs: 100, peerSupplyHint: enabled, onPlayerHint: (rows) => reported.push(rows), traceRequests: 100 });
+    try {
+      const other = { ...multiContext.frag, level: 1, url: "https://origin.example/high/seg.ts", baseurl: "https://origin.example/high/index.m3u8" };
+      f.hls.levels = [{ details: { fragments: [multiContext.frag] } }, { details: { fragments: [other] } }];
+      for (const name of ["currentLevel", "nextLevel", "loadLevel", "nextLoadLevel"]) Object.defineProperty(f.hls, name, { set() { assert.fail(`hint forced ${name}`); } });
+      sameBytes(await f.load(), f.bytes);
+      sameBytes(await f.load(), f.bytes);
+      if (enabled) {
+        await until(() => reported.some((rows) => rows[0].projectedMs !== null));
+        const rows = reported.findLast((rows) => rows[0].projectedMs !== null);
+        assert.equal(rows.length, 2);
+        assert.equal(rows[0].sizeEstimate, f.bytes.length);
+        assert.equal(rows[0].eligibleHolders, 1);
+        assert.ok(rows[0].projectedMs > 0);
+        assert.equal(rows[1].eligibleHolders, 0);
+        assert.equal(rows[1].projectedMs, null, "an unmeasured rendition has no invented finish");
+        assert.equal(f.swarm.metrics().neighbourDiscovery.contexts, 1, "no target-rendition discovery");
+        assert.ok(f.swarm.trace().rows.some((row) => row.k === "playerHint"));
+        const highKey = createHash("sha256").update(`${base.swarmId}\n/high/seg.ts`).digest("hex");
+        const before = reported.length;
+        other.duration = 2; f.hls.levels[1].bitrate = 262_144;
+        f.channels[0].receive(JSON.stringify({ t: "have", keys: [createHash("sha256").update(`${base.swarmId}\n/media/seg.ts`).digest("hex"), highKey] }));
+        sameBytes(await f.load(), f.bytes);
+        await until(() => reported.length > before);
+        assert.equal(reported.at(-1)[1].eligibleHolders, 1, "other rendition supply comes from HAVE alone");
+        assert.equal(reported.at(-1)[1].sizeEstimateSource, "playlist-bitrate");
+        assert.equal(reported.at(-1)[1].sizeEstimate, 65_536);
+        assert.ok(reported.at(-1)[1].projectedMs > 0);
+        assert.equal(f.swarm.metrics().neighbourDiscovery.contexts, 1);
+      } else {
+        assert.equal(Object.hasOwn(f.swarm.metrics(), "playerHint"), false);
+        assert.deepEqual(reported, []);
+        assert.equal(f.swarm.trace().rows.some((row) => row.k === "playerHint"), false);
+      }
+    } finally { await f.close(); }
+  }
 });

@@ -328,3 +328,47 @@ fn the_media_context_may_arrive_in_any_key_order() {
         assert_eq!(verify(&shuffled, at), entry["expected"], "{}", entry["name"]);
     }
 }
+
+#[test]
+fn advisory_player_hint_crosses_the_facade() {
+    let command = ffi::player_hint(ffi::PlayerSupply {
+        rendition: "main:0".into(),
+        size: Some(131_072),
+        peers: vec![
+            ffi::PeerTiming {
+                peer: 1,
+                timing: ffi::Timing {
+                    first_byte_ms: Some(0.0),
+                    rate: Some(1024.0),
+                },
+            },
+            ffi::PeerTiming {
+                peer: 2,
+                timing: ffi::Timing {
+                    first_byte_ms: Some(0.0),
+                    rate: Some(1024.0),
+                },
+            },
+        ],
+        origin: Some(ffi::Timing {
+            first_byte_ms: Some(0.0),
+            rate: Some(512.0),
+        }),
+        shared: ffi::Timing {
+            first_byte_ms: None,
+            rate: None,
+        },
+        available_ms: 1000.0,
+        max_holders: 3,
+    });
+    assert_eq!(
+        command,
+        ffi::PlayerCommand::PlayerHint {
+            hint: ffi::PlayerSupplyHint {
+                rendition: "main:0".into(),
+                eligible_holders: 2,
+                projected_ms: Some(64.0),
+            }
+        }
+    );
+}

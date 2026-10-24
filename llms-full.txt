@@ -880,6 +880,42 @@ decide its own mode.
   signals. Relay frames must match a live subscription before signature work
   and dispatch; reconnect restores both subscriptions.
 
+
+## Experimental peer supply hint
+
+With `coreWasm` in peer-first mode, opt in with `peerSupplyHint: true`.
+`metrics().playerHint` and optional `onPlayerHint(rows)` report one advisory
+`PlayerHint` row per hls.js level at the next demanded segment's sequence and
+discontinuity. Without the option the field, callbacks and trace rows are absent.
+The adapter never assigns a player level. A host may use a hint only as a
+tie-breaker between two levels its **origin-only** estimate can sustain; keep
+`abrIgnorePeers: true` when evaluating that estimate. Never force a level from
+peer capacity or treat the hint as a bandwidth sample.
+
+Each row carries `rendition`, `level`, `sequence`, `eligibleHolders`,
+`projectedMs`, `sizeEstimate`, `sizeEstimateSource` and `knowledge: "linked-have"`. The projection is
+milliseconds from the observation, using the core scheduler, current peer
+budget and holder limit; origin joins when the peer plan would be late.
+Size comes from the previous verified commitment or origin load for that
+rendition, falling back to playlist bitrate times segment duration. The source
+is labelled `observed` or `playlist-bitrate` (null if neither is available).
+Origin timing comes from that rendition's earlier origin loads, falling back
+to this viewer's measured origin rate across renditions.
+These are estimates for the next segment, not knowledge of its signed size.
+Unknown size or unavailable sources yield `projectedMs: null`; an unloaded
+playlist has `sequence: null`. Cold peers retain the scheduler's 32 KiB/s floor.
+Only open, idle, unbanned, non-stale framing-2 links advertising the segment's
+HAVE count. The count can exceed `maxHoldersPerObject`, which limits the plan.
+
+Discovery still keeps one context per media type, for the playing rendition.
+Other rendition supply is limited to already linked holders advertising HAVE;
+the option fetches no playlists or commitments, starts no target discovery,
+and prepares no switch. An unavailable core produces no hints. Whole segments
+only; LL-HLS parts produce no new hint. This is experimental in-process and
+loopback behaviour, with no field or physical-device acceptance yet.
+`traceRequests` records replayable `playerHint` inputs and commands for
+`scripts/trace-report.mjs`.
+
 ---
 
 Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md)
@@ -1911,6 +1947,34 @@ The installed `relayswarm-native` executable accepts `--descriptor`,
 It requires Node and atomically creates a new verified output without
 replacing an existing path. `npm run native:fetch -- --help` shows usage.
 
+
+## Experimental PlayerHint command
+
+The browser loader accepts `peerSupplyHint: true` with `coreWasm` in
+peer-first mode and optional `onPlayerHint(rows)`. It exposes the same rows in
+`metrics().playerHint`; the field is absent when disabled. See the
+[host contract](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md#experimental-peer-supply-hint) for row fields,
+unknown estimates and the restriction to tie-breaking between levels the
+origin already sustains. No hls.js level is assigned by this adapter.
+
+`loadCore(...).playerHint(supply)` returns
+`{ t: "playerHint", rendition, eligibleHolders, projectedMs }` or null if the
+core is unavailable. Supply contains `rendition`, `size` (nullable estimate),
+`peers` (`[id, firstByteMs, bytesPerMs]`), `origin`
+(`[firstByteMs, bytesPerMs]`, both null if unknown), `sharedFirstByteMs`,
+`sharedRate`, `availableMs` and `maxHolders`. Times are durations in milliseconds;
+the projection is not a wall-clock finish timestamp. The host filters eligible
+HAVE holders before the call. The function does no I/O and reserves no pieces.
+
+UniFFI exposes `player_hint(PlayerSupply) -> PlayerCommand::PlayerHint`, with
+`PlayerSupplyHint { rendition, eligible_holders, projected_ms }`. `PlayerSupply`
+uses typed `PeerTiming`, optional origin `Timing`, shared `Timing`, optional
+size, available milliseconds and maximum holders. Swift and Kotlin use their
+generated naming conventions. Native hosts retain origin-sustainability checks
+and the same eligibility filters. Discovery remains one context per media type;
+other rendition counts reflect linked HAVE advertisements only. This API is
+experimental and has no field acceptance evidence.
+
 ---
 
 Source: [docs/STATUS.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md)
@@ -1927,6 +1991,18 @@ acceptance remains open. The previous prerelease,
 [v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0) points to
 `3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. Later documentation corrections
 on `main` do not change either tag or its immutable downloaded assets.
+
+## Experimental core supply hint, 24 October 2026
+
+The next-source loader has an opt-in `peerSupplyHint` advisory command through
+WASM and UniFFI. It reports eligible linked HAVE holders and estimated
+peer-plus-origin completion duration per rendition's next segment, without
+assigning a player level. Hosts may use it only to break ties between
+origin-sustainable levels. Discovery retains one playing context per media
+type; target-rendition preparation is not implemented. Unknown sizes or timing
+remain explicit. Shared Rust/WASM replay and loader on/off tests exercise the
+contract; physical devices, public NAT and field acceptance remain open.
+See [integration details](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md#experimental-peer-supply-hint).
 
 ## Current delivery checkpoint
 

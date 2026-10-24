@@ -614,3 +614,39 @@ decide its own mode.
   Sessions subscribe to swarm-wide presence and only their own recipient-tagged
   signals. Relay frames must match a live subscription before signature work
   and dispatch; reconnect restores both subscriptions.
+
+
+## Experimental peer supply hint
+
+With `coreWasm` in peer-first mode, opt in with `peerSupplyHint: true`.
+`metrics().playerHint` and optional `onPlayerHint(rows)` report one advisory
+`PlayerHint` row per hls.js level at the next demanded segment's sequence and
+discontinuity. Without the option the field, callbacks and trace rows are absent.
+The adapter never assigns a player level. A host may use a hint only as a
+tie-breaker between two levels its **origin-only** estimate can sustain; keep
+`abrIgnorePeers: true` when evaluating that estimate. Never force a level from
+peer capacity or treat the hint as a bandwidth sample.
+
+Each row carries `rendition`, `level`, `sequence`, `eligibleHolders`,
+`projectedMs`, `sizeEstimate`, `sizeEstimateSource` and `knowledge: "linked-have"`. The projection is
+milliseconds from the observation, using the core scheduler, current peer
+budget and holder limit; origin joins when the peer plan would be late.
+Size comes from the previous verified commitment or origin load for that
+rendition, falling back to playlist bitrate times segment duration. The source
+is labelled `observed` or `playlist-bitrate` (null if neither is available).
+Origin timing comes from that rendition's earlier origin loads, falling back
+to this viewer's measured origin rate across renditions.
+These are estimates for the next segment, not knowledge of its signed size.
+Unknown size or unavailable sources yield `projectedMs: null`; an unloaded
+playlist has `sequence: null`. Cold peers retain the scheduler's 32 KiB/s floor.
+Only open, idle, unbanned, non-stale framing-2 links advertising the segment's
+HAVE count. The count can exceed `maxHoldersPerObject`, which limits the plan.
+
+Discovery still keeps one context per media type, for the playing rendition.
+Other rendition supply is limited to already linked holders advertising HAVE;
+the option fetches no playlists or commitments, starts no target discovery,
+and prepares no switch. An unavailable core produces no hints. Whole segments
+only; LL-HLS parts produce no new hint. This is experimental in-process and
+loopback behaviour, with no field or physical-device acceptance yet.
+`traceRequests` records replayable `playerHint` inputs and commands for
+`scripts/trace-report.mjs`.

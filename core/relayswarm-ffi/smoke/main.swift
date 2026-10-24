@@ -27,6 +27,17 @@ func jsonNumber(_ value: Double?) -> Any {
 func double(_ field: Substring) -> Double? { field == "-" ? nil : Double(field)! }
 func hexList(_ field: Substring) -> [String] { field == "-" ? [] : field.split(separator: ",").map(String.init) }
 
+// Exercise the advisory command through generated bindings as well as Rust.
+let hint = playerHint(supply: PlayerSupply(rendition: "main:0", size: 131_072,
+    peers: [PeerTiming(peer: 1, timing: Timing(firstByteMs: 0, rate: 1024)),
+            PeerTiming(peer: 2, timing: Timing(firstByteMs: 0, rate: 1024))],
+    origin: Timing(firstByteMs: 0, rate: 512), shared: Timing(firstByteMs: nil, rate: nil),
+    availableMs: 1000, maxHolders: 3))
+switch hint {
+case let .playerHint(value):
+    precondition(value.rendition == "main:0" && value.eligibleHolders == 2 && value.projectedMs == 64)
+}
+
 let lines = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8)!
     .split(separator: "\n").map { $0.split(separator: " ", omittingEmptySubsequences: false) }
 

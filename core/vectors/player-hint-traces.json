@@ -1,0 +1,166 @@
+{
+  "description": "Hand-authored replay: known HAVE supply changes without another discovery context. Units: milliseconds and bytes per millisecond.",
+  "steps": [
+    {
+      "at": 0,
+      "input": {
+        "rendition": "main:0",
+        "size": 131072,
+        "peers": [
+          [
+            1,
+            0,
+            1024
+          ],
+          [
+            2,
+            0,
+            1024
+          ]
+        ],
+        "origin": [
+          0,
+          512
+        ],
+        "sharedFirstByteMs": null,
+        "sharedRate": null,
+        "availableMs": 1000,
+        "maxHolders": 3
+      },
+      "out": {
+        "t": "playerHint",
+        "rendition": "main:0",
+        "eligibleHolders": 2,
+        "projectedMs": 64
+      }
+    },
+    {
+      "at": 1,
+      "input": {
+        "rendition": "main:1",
+        "size": 262144,
+        "peers": [
+          [
+            2,
+            0,
+            1024
+          ]
+        ],
+        "origin": [
+          0,
+          512
+        ],
+        "sharedFirstByteMs": null,
+        "sharedRate": null,
+        "availableMs": 64,
+        "maxHolders": 3
+      },
+      "out": {
+        "t": "playerHint",
+        "rendition": "main:1",
+        "eligibleHolders": 1,
+        "projectedMs": 384
+      }
+    },
+    {
+      "at": 2,
+      "input": {
+        "rendition": "main:1",
+        "size": 262144,
+        "peers": [],
+        "origin": [
+          0,
+          512
+        ],
+        "sharedFirstByteMs": null,
+        "sharedRate": null,
+        "availableMs": 64,
+        "maxHolders": 3
+      },
+      "out": {
+        "t": "playerHint",
+        "rendition": "main:1",
+        "eligibleHolders": 0,
+        "projectedMs": 512
+      }
+    },
+    {
+      "at": 3,
+      "input": {
+        "rendition": "main:2",
+        "size": null,
+        "peers": [
+          [
+            3,
+            null,
+            null
+          ]
+        ],
+        "origin": [
+          null,
+          null
+        ],
+        "sharedFirstByteMs": null,
+        "sharedRate": null,
+        "availableMs": 1000,
+        "maxHolders": 3
+      },
+      "out": {
+        "t": "playerHint",
+        "rendition": "main:2",
+        "eligibleHolders": 1,
+        "projectedMs": null
+      }
+    },
+    {
+      "at": 4,
+      "input": {
+        "rendition": "main:2",
+        "size": 131072,
+        "peers": [],
+        "origin": [
+          null,
+          null
+        ],
+        "sharedFirstByteMs": null,
+        "sharedRate": null,
+        "availableMs": 1000,
+        "maxHolders": 3
+      },
+      "out": {
+        "t": "playerHint",
+        "rendition": "main:2",
+        "eligibleHolders": 0,
+        "projectedMs": null
+      }
+    },
+    {
+      "at": 5,
+      "input": {
+        "rendition": "main:2",
+        "size": 65536,
+        "peers": [
+          [
+            3,
+            null,
+            null
+          ]
+        ],
+        "origin": [
+          null,
+          null
+        ],
+        "sharedFirstByteMs": 0,
+        "sharedRate": null,
+        "availableMs": 5000,
+        "maxHolders": 3
+      },
+      "out": {
+        "t": "playerHint",
+        "rendition": "main:2",
+        "eligibleHolders": 1,
+        "projectedMs": 2000
+      }
+    }
+  ]
+}

@@ -1276,3 +1276,65 @@ impl NeighbourDiscovery {
         state.found = None;
     }
 }
+
+/// Supply already known for one rendition's next segment. The host filters
+/// open, idle, unbanned, non-stale framing 2 HAVE holders; no discovery runs.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct PlayerSupply {
+    pub rendition: String,
+    pub size: Option<u64>,
+    pub peers: Vec<PeerTiming>,
+    pub origin: Option<Timing>,
+    pub shared: Timing,
+    pub available_ms: f64,
+    pub max_holders: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct PlayerSupplyHint {
+    pub rendition: String,
+    pub eligible_holders: u32,
+    pub projected_ms: Option<f64>,
+}
+
+/// Advisory command; may only break ties between origin-sustainable levels.
+#[derive(Clone, Debug, PartialEq, uniffi::Enum)]
+pub enum PlayerCommand {
+    PlayerHint { hint: PlayerSupplyHint },
+}
+
+#[uniffi::export]
+pub fn player_hint(supply: PlayerSupply) -> PlayerCommand {
+    let peers: Vec<Estimate> = supply
+        .peers
+        .iter()
+        .map(|p| Estimate {
+            source: Source::Peer(p.peer),
+            first_byte_ms: p.timing.first_byte_ms,
+            rate: p.timing.rate,
+        })
+        .collect();
+    let origin = supply.origin.map(|timing| Estimate {
+        source: Source::Origin,
+        first_byte_ms: timing.first_byte_ms,
+        rate: timing.rate,
+    });
+    let relayswarm_proto::player_hint::Command::PlayerHint(hint) =
+        relayswarm_proto::player_hint::player_hint(&relayswarm_proto::player_hint::Supply {
+            rendition: &supply.rendition,
+            size: supply.size,
+            peers: &peers,
+            origin,
+            shared_first_byte_ms: supply.shared.first_byte_ms,
+            shared_rate: supply.shared.rate,
+            available_ms: supply.available_ms,
+            max_holders: supply.max_holders as usize,
+        });
+    PlayerCommand::PlayerHint {
+        hint: PlayerSupplyHint {
+            rendition: hint.rendition,
+            eligible_holders: hint.eligible_holders,
+            projected_ms: hint.projected_ms,
+        },
+    }
+}
