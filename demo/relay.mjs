@@ -11,7 +11,7 @@ export function attachDemoRelay(server, { swarmId, origin, maxClients = 64, publ
   function send(socket, frame) {
     if (socket.readyState !== socket.OPEN) return;
     if (socket.bufferedAmount > 1024 * 1024) { socket.terminate(); return; }
-    socket.send(JSON.stringify(frame));
+    socket.send(typeof frame === "string" ? frame : JSON.stringify(frame));
   }
   function matches(event, filter) {
     return (!filter.kinds || Array.isArray(filter.kinds) && filter.kinds.includes(event.kind))
@@ -41,10 +41,11 @@ export function attachDemoRelay(server, { swarmId, origin, maxClients = 64, publ
     if (previous && (previous.created_at > event.created_at || previous.created_at === event.created_at && previous.id <= event.id)) return;
     history.set(key, event);
     if (history.size > 512) {
-      const oldestPeerRecord = [...history].find(([, value]) => value.kind !== 30311)?.[0];
-      if (oldestPeerRecord !== undefined) history.delete(oldestPeerRecord);
+      for (const [oldest, value] of history) if (value.kind !== 30311) { history.delete(oldest); break; }
     }
-    for (const client of relay.clients) for (const [id, filter] of subscriptions.get(client) || []) if (matches(event, filter)) send(client, ["EVENT", id, event]);
+    // Serialised once; the frame is byte-identical to JSON.stringify(["EVENT", id, event]).
+    const body = JSON.stringify(event);
+    for (const client of relay.clients) for (const [id, filter] of subscriptions.get(client) || []) if (matches(event, filter)) send(client, `["EVENT",${JSON.stringify(id)},${body}]`);
   }
   const upgrade = (request, socket, head) => {
     if (request.url !== "/relay" || request.headers.origin !== origin() || paused || relay.clients.size >= maxClients) { socket.destroy(); return; }

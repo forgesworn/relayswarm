@@ -8,10 +8,11 @@ import WebSocket from "ws";
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { PublisherError } from "../src/hls-publisher.mjs";
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { resolveTrustedStream } from "../src/browser/stream-discovery.mjs";
-import { startDemoServer } from "../demo/server.mjs";
+import { startDemoServer, acceptedCoding, etagMatches } from "../demo/server.mjs";
 import { startBroadcastWaitingServer } from "../demo/broadcast-waiting.mjs";
 import { appServerTiming } from "../demo/fetch-diagnostics.mjs";
 import { startObservedFmp4Demo } from "./support/fmp4-observed-demo.mjs";
@@ -425,10 +426,57 @@ test("observed bundles retain their own exact HTTP lengths and production header
     assert.equal(createHash("sha256").update(reply.body).digest("hex"), demo.observation[hashField]);
     assert.equal(reply.headers["transfer-encoding"], undefined);
     assert.equal(reply.headers["content-type"], "text/javascript; charset=utf-8");
-    assert.equal(reply.headers["cache-control"], "no-store");
+    assert.equal(reply.headers["cache-control"], "no-cache");
+    assert.equal(reply.headers["content-encoding"], undefined); assert.equal(reply.headers.etag, undefined);
     assert.equal(reply.headers["x-content-type-options"], "nosniff");
     assert.ok(reply.headers["content-security-policy"].includes("default-src 'self'"));
     const head = await bufferedRoundtrip(demo.base, agent, "/client.js", { method: "HEAD" });
     assert.equal(head.reusedSocket, true); exactBufferedReply(head, 200, reply.body, { head: true });
   });
+});
+
+test("content-coding negotiation prefers brotli, honours exclusions and defaults to identity", () => {
+  const available = new Set(["br", "gzip", "identity"]);
+  for (const [header, expected] of [[undefined, "identity"], ["", "identity"], ["gzip, deflate, br, zstd", "br"], ["gzip", "gzip"], ["gzip;q=1, br;q=0.5", "gzip"],
+    ["br;q=0, gzip;q=0", "identity"], ["*", "br"], ["*;q=0", "identity"], ["identity;q=0", "identity"], ["BR;Q=0.9, Gzip", "gzip"], ["br;q=2", "identity"], ["deflate", "identity"]]) {
+    assert.equal(acceptedCoding(header, available), expected, String(header));
+  }
+  assert.equal(acceptedCoding("br, gzip", new Set(["gzip", "identity"])), "gzip");
+  assert.equal(etagMatches('W/"a", "b"', '"a"'), true); assert.equal(etagMatches("*", '"a"'), true);
+  assert.equal(etagMatches('"a-br"', '"a"'), false); assert.equal(etagMatches(undefined, '"a"'), false);
+});
+
+test("fixed page assets are encoded once, revalidate by strong ETag and keep security headers", { timeout: 15000 }, async (t) => {
+  const demo = await start(t), agent = new Agent({ keepAlive: true, maxSockets: 1 });
+  t.after(() => agent.destroy());
+  const wire = (path, options) => bufferedRoundtrip(demo.base, agent, path, options);
+  const secured = (reply) => { assert.ok(reply.headers["content-security-policy"].includes("default-src 'self'")); assert.equal(reply.headers["x-content-type-options"], "nosniff"); assert.equal(reply.headers["referrer-policy"], "no-referrer"); };
+  for (const path of ["/", "/style.css", "/client.js", "/relayswarm-core.wasm"]) {
+    const identity = await wire(path);
+    assert.equal(identity.status, 200); assert.equal(identity.headers["content-encoding"], undefined); secured(identity);
+    assert.equal(identity.headers["cache-control"], "no-cache"); assert.equal(identity.headers.vary, "accept-encoding");
+    assert.match(identity.headers.etag, /^"[A-Za-z0-9_-]{43}"$/u);
+    const tags = new Set([identity.headers.etag]);
+    for (const [coding, decode] of [["br", brotliDecompressSync], ["gzip", gunzipSync]]) {
+      const headers = { "accept-encoding": `identity;q=0.5, ${coding}` }, reply = await wire(path, { headers });
+      assert.equal(reply.status, 200); assert.equal(reply.headers["content-encoding"], coding); secured(reply);
+      assert.equal(reply.headers["content-length"], String(reply.body.length)); assert.ok(reply.body.length < identity.body.length);
+      assert.deepEqual(decode(reply.body), identity.body);
+      tags.add(reply.headers.etag);
+      const head = await wire(path, { method: "HEAD", headers });
+      assert.equal(head.headers["content-encoding"], coding); assert.equal(head.headers["content-length"], reply.headers["content-length"]); assert.equal(head.body.length, 0);
+      const cached = await wire(path, { headers: { ...headers, "if-none-match": `"other", W/${reply.headers.etag}` } });
+      assert.equal(cached.status, 304); assert.equal(cached.body.length, 0); assert.equal(cached.headers.etag, reply.headers.etag);
+      assert.equal(cached.headers["cache-control"], "no-cache"); assert.equal(cached.headers.vary, "accept-encoding"); secured(cached);
+      // A validator for another coding names a different representation.
+      assert.equal((await wire(path, { headers: { ...headers, "if-none-match": identity.headers.etag } })).status, 200);
+    }
+    assert.equal(tags.size, 3);
+    assert.equal((await wire(path, { headers: { "if-none-match": identity.headers.etag } })).status, 304);
+  }
+  for (const path of ["/session.json", "/delivery-policy.json", "/media/shared.ts"]) {
+    const reply = await wire(path, { headers: { "accept-encoding": "br, gzip", "if-none-match": "*" } });
+    assert.equal(reply.status, 200); assert.equal(reply.headers["cache-control"], "no-store"); secured(reply);
+    assert.equal(reply.headers["content-encoding"], undefined); assert.equal(reply.headers.etag, undefined);
+  }
 });

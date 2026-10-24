@@ -147,6 +147,7 @@ fixtures use temporary loopback servers, not a public pilot deployment.
 ## Optional
 
 - [Core signature budget](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-SIGNATURE-BUDGET.md): Dated compressed asset and actual Chrome verification measurements; an isolated prototype, with no production verifier change.
+- [Hot-path performance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PERFORMANCE.md): Dated in-memory micro-benchmarks of peer links, the WebAssembly boundary, commitment verification and native receive, with ranked follow-ups; not playback or field evidence.
 - [Native core packaging](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-PACKAGING.md): Tag-gated release attachments and dispatch-only native build artefacts, checksums and source verification; source-bound assets and an unchanged local-path Swift package.
 
 - [Full documentation context](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms-full.txt): Generated maintained guides with absolute links; larger than the index.

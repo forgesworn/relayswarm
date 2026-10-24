@@ -86,12 +86,18 @@ test("HTTP range handling uses inclusive HTTP ends and rejects multiple or inval
 
 test("publisher bounds concurrent signing and refuses oversized playlists and ranges", async (t) => {
   const directory = await fixture(t);
+  // Nine distinct contexts: identical requests share one slot.
+  await writeFile(join(directory, "index.m3u8"), `#EXTM3U\n${Array.from({ length: 9 }, (_, index) => `#EXTINF:2,\n#EXT-X-BYTERANGE:1@${index}\nshared.ts\n`).join("")}#EXT-X-ENDLIST\n`);
+  await writeFile(join(directory, "shared.ts"), "abcdefghi");
   const publisher = await createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8" });
-  const input = { path: "/media/shared.ts", level: 0, sequence: 20, discontinuity: 2, rangeStart: 0, rangeEnd: 4 };
-  const pending = Array.from({ length: 8 }, () => publisher.commitment(input));
-  await assert.rejects(publisher.commitment(input), { status: 503 });
+  const input = (sequence) => ({ path: "/media/shared.ts", level: 0, sequence, discontinuity: 0, rangeStart: sequence, rangeEnd: sequence + 1 });
+  const pending = Array.from({ length: 8 }, (_, sequence) => publisher.commitment(input(sequence)));
+  await assert.rejects(publisher.commitment(input(8)), { status: 503 });
+  pending.push(publisher.commitment(input(0)));
   await Promise.all(pending);
-  await publisher.commitment(input); // Rejected work does not retain a slot.
+  assert.equal(publisher.getMetrics().busyRejected, 1);
+  assert.equal(publisher.getMetrics().commitmentJoins, 1);
+  await publisher.commitment(input(8)); // Rejected work does not retain a slot.
   await writeFile(join(directory, "index.m3u8"), `${media}${"# padding\n".repeat(30000)}`);
   await assert.rejects(createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8" }), /Excessive playlist/u);
   await writeFile(join(directory, "index.m3u8"), media.replace("4@0", "16777217@0"));
@@ -144,8 +150,8 @@ test("publisher invalidates same-path changes immediately and keeps ranges disti
 
 test("publisher bounds cache entries and concurrent work without retaining rejected slots", async (t) => {
   const publisher = await createHlsPublisher({ mediaDir: await fixture(t), manifest: "index.m3u8", maxCacheEntries: 1, maxConcurrent: 2 });
-  const pending = [publisher.commitment(firstRange), publisher.commitment(firstRange)];
-  await assert.rejects(publisher.commitment(firstRange), { status: 503 });
+  const pending = [publisher.commitment(firstRange), publisher.commitment({ ...firstRange, sequence: 21, discontinuity: 3, rangeStart: 4, rangeEnd: 8 })];
+  await assert.rejects(publisher.commitment({ ...firstRange, playlist: "/media/index.m3u8", mediaType: "main" }), { status: 503 });
   await Promise.all(pending);
   await publisher.commitment({ ...firstRange, sequence: 21, discontinuity: 3, rangeStart: 4, rangeEnd: 8 });
   assert.equal(publisher.getMetrics().hashCacheEntries, 1);
@@ -193,7 +199,7 @@ test("atomic playlist races retry fresh verified data once, evict old contexts a
   let mode = "once", reads = 0, mutations = 0, replacementBody = replacement, reportedRenameError = false;
   t.mock.method(prototype, "read", async function (...args) {
     const result = await originalRead.apply(this, args);
-    if (args[0].length === 256 * 1024 + 1 && args[3] === 0 && result.bytesRead) {
+    if (args[3] === 0 && result.bytesRead && args[0].subarray(0, 7).toString() === "#EXTM3U") {
       reads++;
       if (mode !== "idle") {
         mutations++;
@@ -284,9 +290,129 @@ test("verified hashes remain deduplicated while an earlier caller waits on post-
   const first = publisher.commitment(firstRange);
   await gap;
   try {
-    const late = await publisher.commitment(firstRange);
+    // An identical request joins the waiting one; another schema for the same
+    // bytes completes from the verified digest without reading them again.
+    const joined = publisher.commitment(firstRange);
+    const late = await publisher.commitment({ ...firstRange, playlist: "/media/index.m3u8", mediaType: "main" });
     assert.equal(publisher.getMetrics().hashReads, 1);
+    assert.equal(publisher.getMetrics().commitmentJoins, 1);
     release();
-    assert.equal((await first).id, late.id);
+    const [early, shared] = await Promise.all([first, joined]);
+    assert.equal(early.id, shared.id);
+    assert.equal(JSON.parse(late.content).sha256, JSON.parse(early.content).sha256);
+    assert.notEqual(late.id, early.id);
   } finally { release(); }
+});
+
+test("identical concurrent commitments share one slot, return private copies and never retain failures", async (t) => {
+  const { open } = await import("node:fs/promises");
+  const directory = await fixture(t), file = join(directory, "shared.ts");
+  const probe = await open(file, "r"), prototype = Object.getPrototypeOf(probe), originalRead = prototype.read;
+  await probe.close();
+  let mutate = false;
+  t.mock.method(prototype, "read", async function (...args) {
+    const result = await originalRead.apply(this, args);
+    if (mutate && args[0].length === 4) { mutate = false; await writeFile(file, "12345678"); }
+    return result;
+  });
+  const publisher = await createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8", maxConcurrent: 1 });
+  const events = await Promise.all(Array.from({ length: 16 }, () => publisher.commitment(firstRange)));
+  assert.ok(events.every((event) => event.id === events[0].id));
+  const metrics = publisher.getMetrics();
+  assert.deepEqual([metrics.busyRejected, metrics.peakInFlight, metrics.commitmentJoins, metrics.commitmentsSigned, metrics.hashReads, metrics.inFlight], [0, 1, 15, 1, 1, 0]);
+  events[0].content = "caller mutation";
+  assert.equal(events[1].content, events[2].content);
+  assert.notEqual(events[1].content, "caller mutation");
+  assert.equal((await publisher.commitment(firstRange)).content, events[1].content);
+  // Joined callers get copies too, not the cached event or each other's.
+  const signed = events[2].content;
+  assert.notStrictEqual(events[1], events[2]);
+  events[1].content = "joined mutation";
+  assert.equal(events[2].content, signed);
+  assert.equal((await publisher.commitment(firstRange)).content, signed);
+
+  // A shared failure reaches every joined caller once; the next request starts afresh.
+  mutate = true;
+  const second = { ...firstRange, sequence: 21, discontinuity: 3, rangeStart: 4, rangeEnd: 8 };
+  const before = publisher.getMetrics();
+  const failed = await Promise.allSettled(Array.from({ length: 4 }, () => publisher.commitment(second)));
+  assert.ok(failed.every((result) => result.status === "rejected" && result.reason.status === 503 && /changed during reading/u.test(result.reason.message)));
+  assert.equal(publisher.getMetrics().changedReads - before.changedReads, 1);
+  assert.equal(publisher.getMetrics().commitmentJoins - before.commitmentJoins, 3);
+  assert.equal(publisher.getMetrics().busyRejected, 0);
+  assert.equal(publisher.getMetrics().inFlight, 0);
+  assert.equal(JSON.parse((await publisher.commitment(second)).content).sha256, digest("5678"));
+});
+
+test("a caller that joins after the leader's last check is held to a catalogue and file read after it arrived", async (t) => {
+  const { writeFileSync, renameSync, rmSync } = await import("node:fs");
+  const live = (sequence) => `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:${sequence}\n#EXTINF:2,\nseg${sequence}.ts\n#EXTINF:2,\nseg${sequence + 1}.ts\n`;
+  for (const mode of ["playlist", "segment"]) await t.test(mode, async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayswarm-publisher-join-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    for (const sequence of [20, 21, 22]) await writeFile(join(directory, `seg${sequence}.ts`), `bytes-${sequence}`);
+    await writeFile(join(directory, "index.m3u8"), live(20));
+    let hook = null, calls = 0, late = null;
+    const publisher = await createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8", now: () => { hook?.(++calls); return Date.now(); } });
+    const input = { path: "/media/seg20.ts", level: 0, sequence: 20, discontinuity: 0 };
+    // The leader's third clock read is its signing time, after its final
+    // catalogue and stat checks. The change and the joiner both follow it.
+    hook = (call) => {
+      if (call !== 3) return;
+      hook = null;
+      const [temporary, target, body] = mode === "playlist" ? ["next.m3u8", "index.m3u8", live(21)] : ["next.ts", "seg20.ts", "replaced-20"];
+      writeFileSync(join(directory, temporary), body);
+      try { renameSync(join(directory, temporary), join(directory, target)); }
+      catch (error) {
+        // Windows can refuse to replace the segment the leader holds open; a
+        // real in-place change exercises the same stat check.
+        if (process.platform !== "win32" || !["EPERM", "EACCES", "EBUSY"].includes(error.code)) throw error;
+        writeFileSync(join(directory, target), body); rmSync(join(directory, temporary));
+      }
+      late = publisher.commitment(input);
+      late.catch(() => {});
+    };
+    const leader = await publisher.commitment(input);
+    assert.equal(JSON.parse(leader.content).sha256, digest("bytes-20"));
+    assert.equal(publisher.getMetrics().commitmentJoins, 1);
+    if (mode === "playlist") await assert.rejects(late, { status: 404 });
+    else {
+      await assert.rejects(late, { status: 503 });
+      assert.equal(JSON.parse((await publisher.commitment(input)).content).sha256, digest("replaced-20"));
+    }
+  });
+});
+
+test("unchanged playlists reuse their parsed catalogue but every request rereads and compares exact bytes", async (t) => {
+  const { open, stat, utimes } = await import("node:fs/promises");
+  const directory = await fixture(t);
+  await writeFile(join(directory, "master.m3u8"), "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=640x360\nhigh.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=400000,RESOLUTION=426x240\nlow.m3u8\n");
+  await writeFile(join(directory, "high.m3u8"), media.replaceAll("shared.ts", "high.ts"));
+  await writeFile(join(directory, "low.m3u8"), media);
+  await writeFile(join(directory, "high.ts"), "12345678");
+  const probe = await open(join(directory, "low.m3u8"), "r"), prototype = Object.getPrototypeOf(probe), originalRead = prototype.read;
+  await probe.close();
+  let playlistReads = 0;
+  t.mock.method(prototype, "read", async function (...args) {
+    const result = await originalRead.apply(this, args);
+    if (args[3] === 0 && result.bytesRead && args[0].subarray(0, 7).toString() === "#EXTM3U") playlistReads++;
+    return result;
+  });
+  const publisher = await createHlsPublisher({ mediaDir: directory });
+  const low = { path: "/media/shared.ts", level: 0, sequence: 20, discontinuity: 2, rangeStart: 0, rangeEnd: 4 };
+  const high = { ...low, level: 1, path: "/media/high.ts" };
+  playlistReads = 0;
+  for (let index = 0; index < 3; index++) await publisher.media("/media/high.ts");
+  assert.equal(playlistReads, 9); // Master and both renditions on every refresh.
+  assert.equal(JSON.parse((await publisher.commitment(high)).content).sha256, digest("1234"));
+  // A same-size rewrite with restored modification time is still detected.
+  const path = join(directory, "high.m3u8"), times = await stat(path);
+  await writeFile(path, media.replace("SEQUENCE:20", "SEQUENCE:30").replaceAll("shared.ts", "high.ts"));
+  await utimes(path, times.atime, times.mtime);
+  await assert.rejects(publisher.commitment(high), { status: 404 });
+  assert.equal(JSON.parse((await publisher.commitment({ ...high, sequence: 30 })).content).sequence, 30);
+  // The unchanged rendition keeps its contexts when another rendition changes.
+  assert.equal(JSON.parse((await publisher.commitment(low)).content).sha256, digest("abcd"));
+  assert.equal(publisher.getMetrics().changedReads, 0);
+  assert.equal(publisher.getMetrics().playlistRetries, 0);
 });
