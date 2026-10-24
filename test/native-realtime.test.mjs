@@ -75,15 +75,25 @@ test('ICE defaults contain no STUN service and structured TURN keeps opaque cred
   new b.RTCPeerConnectionImpl(config());
   assert.deepEqual(f.peers[0].config.iceServers, []);
   new b.RTCPeerConnectionImpl({ iceTransportPolicy: 'relay', iceServers: [{
-    urls: ['turn:relay.invalid:3478?transport=udp', 'turn:relay.invalid:3479?transport=tcp', 'turns:[2001:db8::1]:5349?transport=tcp'],
+    urls: ['turn:relay.invalid:3478?transport=udp', 'turn:[2001:db8::1]:3479'],
     username: 'expiry:opaque/label', credential: 'opaque:+/=password',
   }] });
   assert.deepEqual(f.peers[1].config.iceServers, [
     { hostname: 'relay.invalid', port: 3478, username: 'expiry:opaque/label', password: 'opaque:+/=password', relayType: 'TurnUdp' },
-    { hostname: 'relay.invalid', port: 3479, username: 'expiry:opaque/label', password: 'opaque:+/=password', relayType: 'TurnTcp' },
-    { hostname: '2001:db8::1', port: 5349, username: 'expiry:opaque/label', password: 'opaque:+/=password', relayType: 'TurnTls' },
+    { hostname: '2001:db8::1', port: 3479, username: 'expiry:opaque/label', password: 'opaque:+/=password', relayType: 'TurnUdp' },
   ]);
   assert.equal(f.peers[1].config.iceTransportPolicy, 'relay');
+});
+
+test('unsupported native TURN TCP/TLS is refused for both relay-only and all policies without allocating a peer', async t => {
+  const f = fixture(), b = await backend(f); t.after(() => b.closeOwnedPeers());
+  for (const policy of ['all', 'relay']) for (const uri of [
+    'turn:relay.invalid:3478?transport=tcp', 'turns:relay.invalid:5349', 'turns:relay.invalid:5349?transport=tcp',
+  ]) {
+    assert.throws(() => new b.RTCPeerConnectionImpl({ iceTransportPolicy: policy,
+      iceServers: [{ urls: uri, username: 'fixture', credential: 'fixture' }] }));
+  }
+  assert.equal(f.peers.length, 0);
 });
 
 test('configuration and version failures allocate no peers and never relax relay or DTLS policy', async () => {

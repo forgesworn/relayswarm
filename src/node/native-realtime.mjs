@@ -34,12 +34,16 @@ function configuration(value) {
         || match[1] === 'turns' && match[3] === 'udp') throw failure();
       if (match[1] === 'stun') iceServers.push({ hostname, port });
       else {
+        // This pinned libdatachannel build uses libjuice, which supports
+        // TURN/UDP only and otherwise silently ignores TCP/TLS servers.
+        // Refuse that configuration before any peer can fall back to direct.
+        if (match[1] !== 'turn' || match[3] === 'tcp') throw failure();
         if (!text(server.username, 2048) || !server.username.length || !text(server.credential, 2048) || !server.credential.length
           || server.credentialType !== undefined && server.credentialType !== 'password') throw failure();
         // Structured ICE preserves opaque REST usernames/passwords, including
         // colons, slashes and plus signs. They never become URI user-info.
         iceServers.push({ hostname, port, username: server.username, password: server.credential,
-          relayType: match[1] === 'turns' ? 'TurnTls' : match[3] === 'tcp' ? 'TurnTcp' : 'TurnUdp' });
+          relayType: 'TurnUdp' });
       }
       if (iceServers.length > 16) throw failure();
     }

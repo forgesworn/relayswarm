@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "date": "2026-10-24",
+  "platform": "darwin-arm64",
+  "nodeMajor": 24,
+  "packageVersion": "0.33.4",
+  "libraryVersion": "0.24.5",
+  "libjuiceRevision": "3c40a3545b6b1b62c7adee7f8f2bd58aa290afd6",
+  "fixture": "authenticated-loopback-fake-turn",
+  "syntheticCredentialsOnly": true,
+  "liveSpryContacted": false,
+  "observations": [
+    {
+      "mode": "raw",
+      "nativeProcessExitCode": 0,
+      "authenticatedAllocates": 1,
+      "relayCandidateObserved": true,
+      "closeAndGlobalCleanupReturned": true,
+      "clientUdpSocketReleasedBeforeProcessExit": true,
+      "refreshZeroRequests": 0,
+      "allocationReleaseGatePassed": false
+    },
+    {
+      "mode": "facade",
+      "nativeProcessExitCode": 0,
+      "authenticatedAllocates": 1,
+      "relayCandidateObserved": true,
+      "closeAndGlobalCleanupReturned": true,
+      "clientUdpSocketReleasedBeforeProcessExit": true,
+      "refreshZeroRequests": 0,
+      "allocationReleaseGatePassed": false
+    }
+  ],
+  "conclusion": "Socket shutdown and successful native cleanup did not send TURN Refresh(lifetime=0). The fake server observed no release request. This is a failed release gate, not a repaired backend."
+}
