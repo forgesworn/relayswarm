@@ -46,6 +46,11 @@ opt-in numeric reports. Upload budgets persist across reloads/tabs without conse
 Optional Nostr or host website accounts share a private durable allowance across
 devices; account changes leave uploading off until fresh consent. The dated
 pilot evidence records Nostr sign-in; integrating websites supply their own account resolver.
+The unreleased loader fix makes uploads that overlap a changed-ticket admission check join its bounded online
+decision before spending allowance or sending media. Native Chrome/WASM loopback
+checks retain the same connection through three admission-ticket rotations;
+refusal, timeout and shutdown prevent delivery. Distributed R70 retention, TURN
+renewal and physical-device/public-NAT acceptance remain open.
 Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The example origin adds bounded blocking reload for compatible complete live
 playlists across all renditions, with 24 waiters inside 32 media requests.

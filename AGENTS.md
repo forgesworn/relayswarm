@@ -37,6 +37,7 @@ bounded peer-first mode using author-signed segment commitments.
 | `npm run test:native` | Native path tests, local relay + local DHT bootstrap |
 | `npm run test:swarm` | `src/browser/hls-swarm.mjs` unit tests |
 | `npm run test:swarm:core` | Loader hardening suite with peer-first fixtures on the Rust core |
+| `npm run test:ticket-renewal:browser` | Native Chrome/WASM ticket renewal, concurrent admission and revocation |
 | `npm run test:browser` | hls.js browser test (`--mode shadow` or `--mode peer-first`) |
 | `npm run test:publisher` | Publisher context/range and demo HTTP/relay tests |
 | `npm run test:operator` | Chrome upload allowance, remote policy and opt-in reports |

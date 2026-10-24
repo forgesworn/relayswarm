@@ -1,0 +1,112 @@
+{
+  "v": 1,
+  "kind": "core-ticket-renewal-local-check",
+  "writtenUTC": "2026-10-24T13:25:22.061463+00:00",
+  "baseCommit": "f53aa0967c48b897eafff2e75fc47ccb79b5d049",
+  "scope": "Local synthetic-byte protocol regression; no distributed R70, TURN, physical-device or public-NAT qualification.",
+  "failure": {
+    "trigger": "A media request arrives while the same peer has a changed-ticket online admission check pending.",
+    "before": "The upload rechecks the old ticket, sees a different pending credential and closes the accepted link as an admission refusal.",
+    "baselineRegression": "The focused renewal test fails on the base commit with closed != open. The baseline was loaded through a temporary Node module hook without modifying the checkout.",
+    "after": "The upload joins the pending bounded check. Only acceptance allows media and quota. A retired connection cannot spend quota after admission accepts."
+  },
+  "sourceSHA256": {
+    "src/browser/hls-swarm.mjs": "83bd6e61a2964c92a6e851116313f2f372096e3bf9144af7c4e31128b8c56e92",
+    "test/browser-hardening.test.mjs": "82237b6588dadb96ba7120a133909cbe47f06f7097c9639eeb93d32d8e9abebe",
+    "test/ticket-renewal-native-browser.mjs": "647724add98f0fd8f3ade3dca8c2e28667c2bdb85096882ff62f3914825ce401",
+    "src/browser/relayswarm-core.wasm": "eda9d5f970920d353a1ae76b4fa92f0a0eb0976683a3d5b58a596006b780e8c5"
+  },
+  "native": {
+    "command": "npm run test:ticket-renewal:browser -- --receipt artifacts/ticket-renewal-native-20261024.json",
+    "receipt": "artifacts/ticket-renewal-native-20261024.json",
+    "browserVersion": "155.0.8059.85",
+    "ticketRotationsPerSide": 3,
+    "verifiedPeerBytes": 1048576,
+    "revokedPeerBytes": 0,
+    "heldAdmission": "No media or quota before the real held HTTP response accepts.",
+    "retained": [
+      "accepted native RTCPeerConnection object",
+      "remote pubkey binding",
+      "own ephemeral identity",
+      "loader class",
+      "holder cache",
+      "host upload opt-in",
+      "spent upload allowance"
+    ],
+    "shutdown": [
+      {
+        "states": [
+          "closed"
+        ],
+        "accepted": 0
+      },
+      {
+        "states": [
+          "closed"
+        ],
+        "accepted": 0
+      }
+    ],
+    "receiptSHA256": "6410c8ab6ed61c928135b1978880e3be8bcb7f007295eea16ceb9c4cf0eaa520",
+    "sourceSHA256": {
+      "src/browser/hls-swarm.mjs": "83bd6e61a2964c92a6e851116313f2f372096e3bf9144af7c4e31128b8c56e92",
+      "src/browser/core-peer-link.mjs": "28a9563f27c5f8ac3a0050017e3e6745cf6fe7e5b3862ecc8994a0b1989b06dd",
+      "src/browser/core-wasm.mjs": "93dad920a0b559396023c8fac92391ae78eb05ff736bcb6c50392249befda8ec",
+      "src/browser/segment-commitment.mjs": "9356165e151f3be7abbe97a388651b15eb7266af5cab407e35e65bf869537b71",
+      "test/ticket-renewal-native-browser.mjs": "647724add98f0fd8f3ade3dca8c2e28667c2bdb85096882ff62f3914825ce401"
+    },
+    "wasmSHA256": "eda9d5f970920d353a1ae76b4fa92f0a0eb0976683a3d5b58a596006b780e8c5",
+    "ok": true
+  },
+  "historicalR70": {
+    "source": "20693eae4ad99475caadc84f1315ea3a426544d0",
+    "verdict": "RED, 15 of 16 gates; not rerun",
+    "retainedDiagnosis": "Far-end discovery replacement closed receiver-2's only link during the sampled renewal window. This admission-overlap fix does not establish distributed retention.",
+    "diagnosisSHA256": "1db259dea94a05e2bbd18be6428c1ad821cfc823089fd754d6bf2237eca99b16"
+  },
+  "validation": {
+    "state": "Final local checks passed.",
+    "checks": [
+      {
+        "command": "npm run test:swarm",
+        "tests": 350,
+        "pass": 350,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "command": "npm run test:swarm:core",
+        "tests": 282,
+        "pass": 281,
+        "fail": 0,
+        "skipped": 1
+      },
+      {
+        "command": "node --test test/policy-renewal.test.mjs test/admission.test.mjs test/bounded-operation.test.mjs",
+        "tests": 14,
+        "pass": 14,
+        "fail": 0,
+        "skipped": 0
+      }
+    ],
+    "baselineExpectedFailure": {
+      "command": "node --import ./artifacts/ticket-renewal-baseline-hook-20261024.mjs --test --test-name-pattern=\"own ticket renewal preserves\" test/browser-hardening-core.mjs",
+      "exitCode": 1,
+      "assertion": "pending renewal does not close a live link when media is requested; closed != open",
+      "hook": "Temporary module hook loaded the base commit loader with the current regression; removed after recording."
+    },
+    "initialConcurrentSuiteRun": "One pre-existing short-deadline signalling test failed while the full suites ran concurrently. The unchanged test passed in the final full JavaScript rerun.",
+    "documentation": "docs:generate and check:docs passed; 28 authored files and 436 repository links.",
+    "hostedCI": "Not run on this branch at the local evidence checkpoint.",
+    "syntax": "npm run check passed: 192 modules."
+  },
+  "cleanup": {
+    "browserConnections": "All fixture RTCPeerConnections closed; no accepted links remain.",
+    "listeners": "Task-owned local HTTP and WebSocket listeners closed in finally.",
+    "leftRunning": [],
+    "retainedEvidence": [
+      "artifacts/ticket-renewal-native-20261024.json"
+    ],
+    "scratch": "Task-specific debug logs and the baseline hook removed after results were recorded."
+  }
+}

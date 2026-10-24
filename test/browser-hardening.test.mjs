@@ -699,12 +699,13 @@ test("own ticket renewal preserves a live relay peer, verified media, held bytes
     peer.onPresence(({ from, payload }) => { if (from === fixture.swarm.metrics().pubkey) announcements.push(payload.ticket); });
     await fixture.load(); await until(() => fixture.swarm.metrics().bytes.held === 32);
     const loader = fixture.hls.config.fLoader, pubkey = fixture.swarm.metrics().pubkey;
-    const upload = async (id) => {
-      channel.receive(JSON.stringify({ t: "want", id, k: playback.key }));
+    const connection = fixture.swarm.peerConnectionDetails()[0];
+    const uploaded = async (id) => {
       await until(() => channel.sent.some((frame) => frame.t === "eof" && frame.id === id));
       const payload = channel.sent.filter((frame) => frame instanceof Uint8Array).at(-1);
       assert.equal(createHash("sha256").update(payload).digest("hex"), createHash("sha256").update(playback.bytes).digest("hex"));
     };
+    const upload = async (id) => { channel.receive(JSON.stringify({ t: "want", id, k: playback.key })); await uploaded(id); };
     await upload(1001);
     channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
     assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
@@ -724,13 +725,23 @@ test("own ticket renewal preserves a live relay peer, verified media, held bytes
     assert.equal(pending.peers.linksClosed, before.peers.linksClosed); assert.equal(channel.readyState, "open");
     assert.equal(pending.bytes.held, before.bytes.held); assert.equal(pending.bytes.uploaded, before.bytes.uploaded);
     assert.equal(pending.bytes.uploadRemaining, before.bytes.uploadRemaining); assert.deepEqual(reservations, [32]);
+    // A media request can arrive while the changed-ticket HTTP check is still
+    // pending. Renewal must not turn that overlap into an admission refusal.
+    channel.receive(JSON.stringify({ t: "want", id: 1002, k: playback.key }));
+    await sleep(30);
+    assert.equal(channel.readyState, "open", "pending renewal does not close a live link when media is requested");
+    assert.deepEqual(reservations, [32], "a pending refresh cannot authorise another upload reservation");
+    assert.equal(fixture.swarm.metrics().bytes.uploaded, before.bytes.uploaded);
     releaseRemoteRefresh();
     await until(() => fixture.swarm.metrics().peers.openPeersKnown === 1, refreshRemaining());
-    await upload(1002);
+    await uploaded(1002);
     assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
     const after = fixture.swarm.metrics();
     assert.equal(fixture.hls.config.fLoader, loader); assert.equal(after.pubkey, pubkey);
     assert.equal(after.peers.connected, 1); assert.equal(after.peers.linksOpened, 1); assert.equal(after.peers.linksClosed, 0);
+    const details = fixture.swarm.peerConnectionDetails();
+    assert.equal(details.length, 1); assert.equal(details[0].connection, connection.connection);
+    assert.equal(details[0].pubkey, connection.pubkey, "renewal retains the accepted peer identity");
     assert.equal(channel.readyState, "open"); assert.equal(after.bytes.held, 32);
     assert.equal(after.bytes.uploaded, 64); assert.equal(after.bytes.uploadRemaining, 32);
     assert.equal(after.segments.peerFirstLoaded, 2); assert.deepEqual(reservations, [32, 32]);
@@ -740,6 +751,49 @@ test("own ticket renewal preserves a live relay peer, verified media, held bytes
     assert.equal(fixture.swarm.metrics().bytes.uploaded, 64);
     fixture.swarm.stop(); assert.equal(fixture.swarm.updateTicket("late"), false);
   } finally { releaseRemoteRefresh(); await fixture.close(); http.closeAllConnections(); await new Promise((resolve) => http.close(resolve)); }
+});
+
+test("uploads waiting for a ticket refresh refuse rejection, timeout and late acceptance after closure", async t => {
+  for (const ending of ["rejected", "timeout", "stop", "channel-close"]) await t.test(ending, async child => {
+    let entered = false, finish, admissionSignal;
+    const reservations = [], checks = [];
+    const refresh = new Promise(resolve => { finish = resolve; });
+    const f = await linkedFixture({ WebSocketImpl: memoryRelaySocket(), serve: true, ticket: "own", maxUploadBytesPerSession: 96,
+      reserveUploadBytes: size => { reservations.push(size); return true; },
+      admit: (_pubkey, ticket, { signal }) => {
+        checks.push(ticket);
+        if (ticket !== "pending-renewal") return true;
+        entered = true; admissionSignal = signal; return refresh;
+      } });
+    let clock;
+    try {
+      const channel = await f.addPeer(); await f.load();
+      await until(() => f.swarm.metrics().bytes.held === 32);
+      const key = channel.sent.find(frame => frame.t === "have" && frame.add?.length).add[0];
+      clock = virtualClock(child);
+      const peer = f.peers[0];
+      peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }], ticket: "pending-renewal" });
+      await clock.advanceUntil(() => entered, 500);
+      channel.receive(JSON.stringify({ t: "want", id: 501, k: key }));
+      await clock.advance(20);
+      assert.equal(channel.readyState, "open");
+      assert.equal(f.swarm.metrics().bytes.uploaded, 0); assert.deepEqual(reservations, []);
+      if (ending === "stop") { f.swarm.stop(); finish(true); }
+      else if (ending === "channel-close") { channel.close(); finish(true); }
+      else if (ending === "rejected") finish(false);
+      else await clock.advance(3_000);
+      await clock.advanceUntil(() => channel.readyState === "closed", 500);
+      if (ending === "timeout" || ending === "stop") assert.equal(admissionSignal.aborted, true);
+      // Even a host callback that ignores cancellation and accepts late cannot
+      // publish bytes or consume a reservation after timeout or link closure.
+      finish(true); await clock.advance(20);
+      assert.equal(f.swarm.metrics().bytes.uploaded, 0);
+      assert.equal(f.swarm.metrics().bytes.uploadRemaining, 96); assert.deepEqual(reservations, []);
+      assert.equal(checks.filter(ticket => ticket === "pending-renewal").length, 1, "media joins one bounded check");
+      assert.equal(channel.sent.some(frame => frame instanceof Uint8Array || frame.t === "meta" || frame.t === "eof"), false);
+      assert.deepEqual(f.swarm.peerConnectionDetails(), []);
+    } finally { finish(false); clock?.restore(); await f.close(); }
+  });
 });
 
 test("ticket updates reject unusable swarms and bounded invalid credentials", () => {

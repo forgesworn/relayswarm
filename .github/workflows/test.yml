@@ -59,6 +59,7 @@ jobs:
       - run: CHROME_PATH=/opt/google/chrome/chrome npm run test:live-recovery
       - run: CHROME_PATH=/opt/google/chrome/chrome npm run test:core-link:browser -- --receipt playback-receipts/core-link-native.json
       - run: CHROME_PATH=/opt/google/chrome/chrome npm run test:cached-peer-race:browser -- --receipt playback-receipts/cached-peer-race-native.json
+      - run: CHROME_PATH=/opt/google/chrome/chrome npm run test:ticket-renewal:browser -- --receipt playback-receipts/ticket-renewal-native.json
       - run: npm run test:broadcast
       - run: npm run test:broadcast:browser -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
