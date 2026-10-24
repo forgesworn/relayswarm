@@ -364,7 +364,7 @@ fn advisory_player_hint_crosses_the_facade() {
     assert_eq!(
         command,
         ffi::PlayerCommand::PlayerHint {
-            hint: ffi::PlayerHint {
+            hint: ffi::PlayerSupplyHint {
                 rendition: "main:0".into(),
                 eligible_holders: 2,
                 projected_ms: Some(64.0),

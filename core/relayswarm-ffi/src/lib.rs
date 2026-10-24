@@ -1291,7 +1291,7 @@ pub struct PlayerSupply {
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct PlayerHint {
+pub struct PlayerSupplyHint {
     pub rendition: String,
     pub eligible_holders: u32,
     pub projected_ms: Option<f64>,
@@ -1300,7 +1300,7 @@ pub struct PlayerHint {
 /// Advisory command; may only break ties between origin-sustainable levels.
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum PlayerCommand {
-    PlayerHint { hint: PlayerHint },
+    PlayerHint { hint: PlayerSupplyHint },
 }
 
 #[uniffi::export]
@@ -1331,7 +1331,7 @@ pub fn player_hint(supply: PlayerSupply) -> PlayerCommand {
             max_holders: supply.max_holders as usize,
         });
     PlayerCommand::PlayerHint {
-        hint: PlayerHint {
+        hint: PlayerSupplyHint {
             rendition: hint.rendition,
             eligible_holders: hint.eligible_holders,
             projected_ms: hint.projected_ms,
