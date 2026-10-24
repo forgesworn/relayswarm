@@ -431,6 +431,10 @@ try {
     const faulted = honest.find((report) => report.viewer === "v1");
     if (!faulted?.swarm.segments.commitmentRejected || !faulted?.swarm.segments.commitmentUnavailable) failures.push("invalid and stalled commitments were not exercised");
   }
+  if (reports.some(report => report.peerDelivery.unknownConnections || report.peerDelivery.invalidEvents || report.peerDelivery.counterMismatches)) failures.push("peer delivery observation lost native connection identity, payload size or counter ordering");
+  if (MODE === "peer-first" && !MULTI && honest.some(report => report.peerDelivery.bytes !== report.swarm.bytes.peerFirst
+    || report.peerDelivery.fragments !== report.swarm.segments.peerFirstLoaded)) failures.push("peer delivery observations did not match verified single-holder player deliveries");
+  if (reports.some(report => (MODE === "shadow" || report.corrupt || !report.useSwarm) && report.peerDelivery.fragments > 0)) failures.push("a shadow or origin-only player received a peer-first delivery observation");
   if (stopChecks.some((check) => check.metrics.peers.connected || check.metrics.peers.dialling || check.metrics.relays.connected || check.metrics.bytes.held)) failures.push("stop() left swarm resources alive");
   if (stopChecks.some((c) => !c.loaderRestored)) failures.push("stop() did not restore the fragment loader");
   if (pageErrors.length) failures.push(`${pageErrors.length} uncaught page error(s)`);

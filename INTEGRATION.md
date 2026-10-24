@@ -108,6 +108,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `reannounceDebounceMs` / `minReannounceGapMs` | `4000` / `12000` | Bound capacity-change presence announcements. |
 | `presenceIntervalMs` | `20000` | Presence heartbeat, jittered 30%. |
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
+| `onPeerDelivery` | none | Optional `({ connection, bytes }) => void` observation for each accepted, verified single-holder peer-first delivery. `connection` is the actual `RTCPeerConnection`; `bytes` is the complete media payload byte count. Aggregate peer-first counters are updated first, then this callback runs immediately before the player's success callback. Host exceptions and rejected promises are ignored without changing playback. It does not fire for protocol traffic, shadow measurement, origin fallback, corrupt/rejected media or loads aborted, stopped or too late for the peer-first handoff. Multi-holder transfers do not fire it because their payload may combine several peers and origin; use aggregate metrics for those transfers. |
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
 | `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The relay session starts once the module has loaded or failed, after at most 2 seconds; fragments loaded meanwhile go to origin. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
@@ -147,6 +148,19 @@ consent. Receive-only still discovers peers and exposes its address to them;
 `mode: "off"` or `stop()` provides origin-only playback.
 
 ## Metrics
+
+`onPeerDelivery` is a main-branch addition after v0.3.0. The immutable v0.3.0
+release assets do not include it; consume a commit that contains the option.
+
+Use `onPeerDelivery` to attribute verified single-holder video to a connection
+your page already observes. Keep connection references in local maps rather
+than serialising them into receipts. The callback provides no URL, peer key,
+SDP or payload buffer, and does not add a network request or change a deadline.
+It observes bytes accepted for the player, not the segment currently playing
+from its buffer. Browser RTC byte statistics include connection and protocol
+messages and must not be presented as verified video delivery. Likewise, the
+`payload` outcome in `peerRequestDiagnostics` precedes hash verification and
+is not an alternative to this callback.
 
 `onMetrics(metrics)` and `metrics()` return a version-2 snapshot: `v`, `swarmId`,
 `mode`, `disabledReason`, `stopped`, `pubkey` (the ephemeral swarm key,

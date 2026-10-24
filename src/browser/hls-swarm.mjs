@@ -112,6 +112,9 @@ const DEFAULTS = Object.freeze({
   // Experimental, read-only supply observations; never sets a player level.
   peerSupplyHint: false,
   onPlayerHint: null,
+  // Observe only accepted, verified single-holder peer-first deliveries. The
+  // host gets its actual connection reference and a payload byte count.
+  onPeerDelivery: null,
 });
 const TRACE_LIMIT = 32_768;
 const SAMPLE_LIMIT = 500;
@@ -1027,6 +1030,14 @@ class HlsSwarm {
           pushSample(swarm.peerLatencySamples, end - t0);
           swarm.#hold(result.key, result.bytes.slice());
           if (context.frag) swarm.peerFragments.add(context.frag);
+          if (!result.multi && typeof swarm.options.onPeerDelivery === "function") {
+            // Observation runs after counters, just before the player callback.
+            // Host observer failures cannot change delivery or trigger fallback.
+            try {
+              const observed = swarm.options.onPeerDelivery({ connection: result.connection, bytes: size });
+              if (observed && typeof observed.then === "function") Promise.resolve(observed).catch(() => {});
+            } catch {}
+          }
           callbacks.onSuccess({ url: context.url, data: result.bytes.buffer, code: 200 }, this.peerStats, context, null);
         }).catch((error) => {
           if (this.active === token) {
@@ -1496,7 +1507,7 @@ class HlsSwarm {
       if (commitment.expiresAt <= Math.floor(Date.now() / 1000)) return null;
       this.#recordSelection(link, now() - requestedAt, bytes.byteLength);
       if (coordinated) this.counters.coordinatedPeerLoads += 1;
-      return { key, bytes, discoveryContext };
+      return { key, bytes, discoveryContext, connection: link.pc };
     }
     return null;
   }

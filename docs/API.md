@@ -75,6 +75,18 @@ The peer loader updates hls.js's retained statistics object and sends one
 `onAbort` callback for an aborted pending peer load. `destroy` cancels without
 reporting a completed load.
 
+The optional `onPeerDelivery({ connection, bytes })` callback attributes each
+verified single-holder peer-first delivery to its actual `RTCPeerConnection`.
+`bytes` is a positive media payload byte count. It runs after the aggregate
+peer-first counters change and immediately before the player's success
+callback. Observer exceptions and rejected promises cannot cause fallback or
+prevent playback. Protocol traffic, shadow measurements, origin fallback,
+failed verification and aborted or late deliveries do not fire it. Experimental
+multi-holder transfers do not fire it because a single delivered segment may
+combine peers and origin. Use aggregate metrics for those transfers. Connection
+references stay local to the host; the callback supplies no URL, peer identity,
+SDP or media buffer. See the [callback contract](../INTEGRATION.md#metrics).
+
 The rotation/refusal helpers are exported for the loader's policy and tests;
 most hosts only need `createHlsSwarm` and `HLS_SWARM_METRICS_VERSION`.
 

@@ -737,6 +737,93 @@ class ServingChannel extends RecordedChannel {
   }
 }
 
+test("peer delivery observation identifies the successful connection once after verification and counter updates", async () => {
+  const playback = peerPlaybackOptions(500), requested = [], observations = [];
+  const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(),
+    onPeerDelivery: value => observations.push({ value, peerBytes: fixture.swarm.metrics().bytes.peerFirst }) });
+  try {
+    const refusing = await fixture.addPeer(new ServingChannel(null, 0, requested, "refusing"));
+    const serving = await fixture.addPeer(new ServingChannel(playback.bytes, 1, requested, "serving"));
+    for (const channel of [refusing, serving]) channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+    assert.deepEqual(observations, [], "presence, HAVE and signalling are not media delivery");
+    for (let i = 0; i < 2; i++) {
+      const response = await fixture.load();
+      assert.deepEqual(new Uint8Array(response.data), playback.bytes);
+      assert.equal(observations.length, i + 1, "one observation precedes each player success");
+      assert.deepEqual(Object.keys(observations[i].value).sort(), ["bytes", "connection"]);
+      assert.equal(observations[i].value.connection, fixture.connections[1], "the refusing connection is never credited");
+      assert.equal(observations[i].value.bytes, playback.bytes.byteLength);
+      assert.equal(observations[i].peerBytes, (i + 1) * playback.bytes.byteLength, "public aggregate is updated before observation");
+      fixture.swarm.metrics(); fixture.swarm.metrics();
+      assert.equal(observations.length, i + 1, "taking a snapshot cannot repeat a delivery callback");
+    }
+    assert.deepEqual(requested, ["refusing", "serving", "serving"]);
+  } finally { await fixture.close(); }
+});
+
+test("throwing and asynchronously rejecting peer delivery observers cannot alter playback", async t => {
+  for (const kind of ["throw", "reject"]) await t.test(kind, async () => {
+    const playback = peerPlaybackOptions(500), observations = [];
+    const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(),
+      onPeerDelivery: value => { observations.push(value); if (kind === "throw") throw new Error("host observer failed"); return Promise.reject(new Error("host observer rejected")); } });
+    try {
+      const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 1, [], "holder"));
+      channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+      assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(observations.length, 1);
+      assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 1);
+      assert.equal(fixture.swarm.metrics().segments.originFallbacks, 0);
+      assert.equal(fixture.swarm.metrics().errors.total, 0);
+    } finally { await fixture.close(); }
+  });
+});
+
+test("origin fallback, rejected commitments and corrupt peer media never become peer delivery observations", async t => {
+  for (const kind of ["origin", "commitment", "corrupt", "shadow"]) await t.test(kind, async () => {
+    const playback = peerPlaybackOptions(100), observed = [];
+    const options = { ...playback.options, WebSocketImpl: memoryRelaySocket(), onPeerDelivery: value => observed.push(value),
+      ...(kind === "commitment" ? { getCommitment: () => null } : {}), ...(kind === "shadow" ? { mode: "shadow", shadowSampleRate: 1 } : {}) };
+    const fixture = await linkedFixture(options);
+    try {
+      const bytes = playback.bytes.slice(); if (kind === "corrupt") bytes[0] ^= 0xff;
+      const channel = await fixture.addPeer(new ServingChannel(bytes, 1, [], "holder"));
+      if (kind !== "origin") channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+      assert.deepEqual(new Uint8Array((await fixture.load()).data), playback.bytes);
+      if (kind === "shadow") await until(() => fixture.swarm.metrics().segments.peerInTime === 1);
+      assert.deepEqual(observed, []);
+      assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 0);
+      if (kind === "corrupt") assert.equal(fixture.swarm.metrics().segments.peerCorrupt, 1);
+      if (kind === "commitment") assert.equal(fixture.swarm.metrics().segments.commitmentRejected, 1);
+    } finally { await fixture.close(); }
+  });
+});
+
+test("late, aborted and destroyed peer loads never emit a delivery observation", async t => {
+  for (const kind of ["late", "abort", "destroy", "stop"]) await t.test(kind, async subtest => {
+    const playback = peerPlaybackOptions(50), observed = [], requested = [];
+    const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(), onPeerDelivery: value => observed.push(value) });
+    let time;
+    try {
+      const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 100, requested, "holder"));
+      channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
+      time = virtualClock(subtest);
+      let successes = 0, aborts = 0;
+      const loader = new fixture.hls.config.fLoader({});
+      loader.load(context, {}, { onSuccess: () => { successes++; }, onAbort: () => { aborts++; } });
+      await time.advanceUntil(() => requested.length === 1, 100);
+      if (kind === "abort") loader.abort();
+      else if (kind === "destroy") loader.destroy();
+      else if (kind === "stop") fixture.swarm.stop();
+      await time.advance(200);
+      assert.deepEqual(observed, []);
+      assert.equal(fixture.swarm.metrics().segments.peerFirstLoaded, 0);
+      assert.equal(successes, kind === "late" || kind === "stop" ? 1 : 0, "only normal origin fallback reaches the player");
+      assert.equal(aborts, kind === "abort" ? 1 : 0);
+    } finally { time?.restore(); await fixture.close(); }
+  });
+});
+
 // Virtual time for loader timing tests: host timer lateness (Windows
 // granularity, a loaded machine) cannot eat a budget. Each step yields to real
 // I/O, then moves the loader and link clocks and mocked timers on by 1ms.
@@ -3573,7 +3660,7 @@ function sameBytes(actual, expected, message) {
     message ?? `got ${actual.length} bytes, expected ${expected.length}`);
 }
 
-async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, originFallbackMs = 3_000, originDelayMs = 0, ignoreRanges = false, traceRequests = 0, peerSupplyHint = false, onPlayerHint = null, beforeCommitment = null }) {
+async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, originFallbackMs = 3_000, originDelayMs = 0, ignoreRanges = false, traceRequests = 0, peerSupplyHint = false, onPlayerHint = null, beforeCommitment = null, onPeerDelivery = null }) {
   const bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
   // The player's loader. It answers a range from the same object; its whole
   // segment is different bytes, so a whole-segment fallback shows.
@@ -3593,7 +3680,7 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
   const signed = signedFixture({ v: 3, key, rendition: "/media/index.m3u8", playlist: "/media/index.m3u8", mediaType: "main", encryption: null,
     sha256: createHash("sha256").update(bytes).digest("hex"), size, pieceSize, pieces });
   const f = await linkedFixture({ mode: "peer-first", streamEvent: signed.options.streamEvent, getCommitment: beforeCommitment ? async () => { await beforeCommitment(); return signed.event; } : () => signed.event, originFallbackMs,
-    segmentKey: (url) => new URL(url).pathname, coreWasm: multiCore, multiHolder, traceRequests, peerSupplyHint, onPlayerHint, WebSocketImpl: memoryRelaySocket() }, RangeLoader);
+    segmentKey: (url) => new URL(url).pathname, coreWasm: multiCore, multiHolder, traceRequests, peerSupplyHint, onPlayerHint, onPeerDelivery, WebSocketImpl: memoryRelaySocket() }, RangeLoader);
   await until(() => f.swarm.metrics().core.state === "ready");
   const channels = [];
   for (const options of holders) {
@@ -3612,7 +3699,8 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
 }
 
 test("multi-holder: two framing 2 holders each send pieces of one schema 3 segment", async (t) => {
-  const f = await multiFixture(t, { holders: [{}, {}] });
+  const observed = [];
+  const f = await multiFixture(t, { holders: [{}, {}], onPeerDelivery: value => observed.push(value) });
   try {
     assert.equal(f.swarm.metrics().core.multiHolder.enabled, true);
     sameBytes(await f.load(), f.bytes);
@@ -3623,6 +3711,7 @@ test("multi-holder: two framing 2 holders each send pieces of one schema 3 segme
     assert.ok(multiHolder.peerBytes > 0);
     assert.equal(multiHolder.peerBytes + multiHolder.originBytes, f.bytes.length);
     assert.equal(f.swarm.metrics().bytes.fromPeers, multiHolder.peerBytes);
+    assert.deepEqual(observed, [], "the single-holder observation must not invent attribution for a mixed-source payload");
   } finally { await f.close(); }
 });
 
