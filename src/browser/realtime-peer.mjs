@@ -9,6 +9,12 @@ const utf8 = new TextEncoder();
 const increment = (value) => Math.min(Number.MAX_SAFE_INTEGER, value + 1);
 const clock = () => performance.now();
 const reasons = new Set(["host", "abort", "timeout", "protocol", "signal", "native", "channel", "send", "handler"]);
+const states = {
+  connectionState: new Set(["new", "connecting", "connected", "disconnected", "failed", "closed"]),
+  iceConnectionState: new Set(["new", "checking", "connected", "completed", "failed", "disconnected", "closed"]),
+  iceGatheringState: new Set(["new", "gathering", "complete"]),
+  signalingState: new Set(["stable", "have-local-offer", "have-remote-offer", "have-local-pranswer", "have-remote-pranswer", "closed"]),
+};
 function bounded(value, min, max) { return Number.isSafeInteger(value) && value >= min && value <= max; }
 function bytes(value) {
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
@@ -253,10 +259,30 @@ export class RealtimePeer {
   }
 
   send(value, options) { return this.link?.send(value, options) ?? false; }
-  snapshot() { return { closed: this.closed, ready: Boolean(this.link), ...(this.link?.snapshot() ?? {}) }; }
+  #nativeState() {
+    const value = {};
+    for (const [name, allowed] of Object.entries(states)) {
+      try { value[name] = allowed.has(this.pc[name]) ? this.pc[name] : 'unknown'; }
+      catch { value[name] = 'unknown'; }
+    }
+    const channelState = this.channel?.readyState;
+    value.channelState = ['connecting', 'open', 'closing', 'closed'].includes(channelState) ? channelState : 'unknown';
+    value.localDescriptionSet = Boolean(this.pc.localDescription);
+    value.remoteDescriptionSet = Boolean(this.pc.remoteDescription);
+    return value;
+  }
+  snapshot() { return { closed: this.closed, ready: Boolean(this.link), ...(this.link?.snapshot() ?? {}),
+    delivery: this.maxPacketLifeTimeMs === undefined ? 'zero-retransmit' : 'finite-lifetime',
+    maxPacketLifeTimeMs: this.maxPacketLifeTimeMs ?? null,
+    closeReason: this.closeReason ?? null, native: this.#nativeState(), nativeBeforeClose: this.nativeBeforeClose ?? null,
+    localCandidates: this.sentCandidates, remoteCandidates: this.candidates,
+    pendingLocalCandidates: this.localCandidates.length, pendingRemoteCandidates: this.pendingCandidates.length + this.earlyCandidates.length,
+    descriptionSent: this.descriptionSent }; }
 
   close(reason = "host") {
     if (this.closed) return;
+    this.closeReason = reasons.has(reason) ? reason : 'host';
+    this.nativeBeforeClose = this.#nativeState();
     this.closed = true; clearTimeout(this.timer); this.unlisten?.();
     this.signal?.removeEventListener("abort", this.abort);
     this.pc.removeEventListener("icecandidate", this.ice);
