@@ -112,6 +112,8 @@ See the [P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
 
 ## Optional
 
+- [Native core packaging](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-PACKAGING.md): Tag-gated release attachments and dispatch-only native build artefacts, checksums and source verification; no release or URL dependency decision.
+
 - [Full documentation context](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms-full.txt): Generated maintained guides with absolute links; larger than the index.
 - [Landscape](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/LANDSCAPE.md): Primary-source comparison with other rendezvous/media projects.
 - [Historical spike results](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/RESULTS.md): Dated fixtures and measured topology; early PoCs have different trust assumptions.
