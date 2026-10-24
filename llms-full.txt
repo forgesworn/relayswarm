@@ -1,6 +1,6 @@
 # RelaySwarm full documentation context
 
-> Generated from maintained Markdown. Source package 0.4.2; release and deployment evidence is recorded in docs/STATUS.md.
+> Generated from maintained Markdown. Source package 0.4.3; release and deployment evidence is recorded in docs/STATUS.md.
 
 Canonical repository: https://github.com/forgesworn/relayswarm. Main-branch documentation can correct released documentation. Historical spike evidence is indexed separately in llms.txt.
 
@@ -16,7 +16,10 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.4.2 is the experimental GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.2).
+**Status:** [v0.4.3 is the prepared experimental prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3).
+Its opt-in sustainable peer waits preserve origin-recovery time within a
+segment's duration; its matching WASM core takes only requested upload ranges
+across the byte-copy boundary. Physical-phone continuity remains unverified.
 It integrates holder recovery with the Rust/WASM core, accepted connection and
 verified-media observations, bounded cancellation/draining and relay recovery.
 JavaScript/WASM and native core downloads have separate checksums. Native
@@ -40,7 +43,7 @@ and [current source evidence](https://raw.githubusercontent.com/forgesworn/relay
 Install ffmpeg with libx264 for synthetic media, then:
 
 ```sh
-git clone --branch v0.4.2 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.4.3 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -351,6 +354,7 @@ decision is not cached as permission for later upload requests.
 | `originFallbackMs` | `1500` | The in-time budget a peer delivery is measured against, and peer-first's ordinary wait. |
 | `maxPeerWaitMs` | `5000` | Peer-first may wait past `originFallbackMs`, up to this, only while recent peer timing projects the segment needs it and the playback buffer covers the wait with `originReserveMs` to spare. |
 | `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
+| `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-origin time with a 25% and 100 ms recovery margin. Before measurement, use `originReserveMs`; unknown duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. The independent `zeroBudgetPeerRace` window stays unchanged. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
 | `maxPeers` | `6` | Connections in and out. The demo selects four explicitly. |
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
@@ -604,6 +608,10 @@ without additional media or context getter reads. Finite signed values are
 retained; unavailable or nonfinite values are null. The fixed `source` is
 `buffer`, `no-media`, `no-buffer`, `error` or `unobserved`; `positionSource` is
 `part`, `fragment` or null. Non-buffer sources leave the numeric fields null.
+With `sustainablePeerWait` enabled, the geometry additionally includes
+`durationMs`, `originRecoveryMs` and `sustainableMs`. These explain the
+separate per-segment cap; `uncappedMs` continues to describe only the buffer
+calculation. Unknown duration is null and permits no serial peer wait.
 Wait outcomes retain their original geometry, rather than sampling the later
 buffer. Each row and returned snapshot owns a copy. These values explain the
 initial budget calculation, not donor availability or remaining request time.
@@ -945,6 +953,21 @@ limit; one that overruns by more, or whose holder wait leaves no time for a
 first byte, goes to origin at once (`peerProjectedLate`). `peerWaitExtended`
 counts extensions. Without evidence the ordinary wait applies.
 
+An individual wait can fit the current buffer while repeated misses still
+drain it: for example, a 2.5 s peer wait followed by a 1.3 s HTTP recovery
+takes longer than a two-second segment adds. The opt-in
+`sustainablePeerWait: true` also limits both the initial wait and every
+extension, including multi-holder transfers, to
+`max(0, duration * 1000 - (p90OriginMs * 1.25 + 100))`.
+For a two-second segment and 1,300 ms measured HTTP, that cap is 275 ms.
+The existing buffer-safe reserve and configured caps still apply. Until an
+ordinary whole-origin load has been measured, `originReserveMs` supplies the
+recovery estimate; missing or invalid duration permits no serial wait.
+Parts use their own duration. This admission rule cannot guarantee smooth
+playback when later origin, peer or decoder performance changes. A zero
+result can still use `zeroBudgetPeerRace`, whose independent peer timer
+runs alongside immediate normal HTTP and retains its configured window.
+
 The loader also goes to origin without asking a peer when the time left to the
 limit is less than the fastest of its last 16 completed transfers at least as
 large as the segment would need, or less than a recent first byte
@@ -1099,9 +1122,9 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
     the recomputed event hash, public key and signature. The unchanged stream
     event, delegation and revocations are no longer re-proved per segment;
     every other check still runs on every call.
-  - Copy peer objects once across the WebAssembly boundary, reserve a
-    commitment-expected receive size once, and keep only the requested piece
-    range inside the core when serving. The link frame format is unchanged.
+  - Copy a received peer object once across the WebAssembly boundary and
+    reserve a commitment-expected receive size once. The link frame format
+    is unchanged.
   - Compile the core's SHA-256 at `opt-level = 3`, halving multi-holder piece
     and object hashing time for about 0.7 KB more gzip module.
   - Derive each peer's NIP-44 conversation key once per session.
@@ -1121,6 +1144,25 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
   - Serve the demo page assets compressed with ETag revalidation; other
     routes keep `no-store`. Serialise demo relay fan-out frames once.
   - Add `npm run bench:hot-paths` for local before/after comparisons.
+
+## v0.4.3 (24 October 2026)
+
+Prepared experimental library prerelease following
+[v0.4.2](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.2).
+Physical iPhone/iPad and Android/Vanadium continuity, public NAT, sustained
+distributed playback and net benefit remain unverified. No service is deployed.
+
+- Add opt-in `sustainablePeerWait`: bound serial peer waits and all extensions
+  by each fragment/part's duration minus measured whole-origin recovery with
+  a 25% and 100 ms margin. Existing buffer reserves remain in force; the
+  independent cached-peer race still runs alongside immediate HTTP.
+- Pass only requested range bytes into the WASM upload path when the matching
+  core supports it. Previously each small range copied the entire held object
+  into WASM before slicing. The peer wire protocol and upload charging remain
+  unchanged; older committed cores retain the existing whole-object ABI.
+- Retain the historical v0.4.2 failed cached-race CI attempts. Local loader
+  regressions establish the new wait bound, not physical-phone playback.
+
 - Make the native cached-peer race fixture wait for framing-2 presence from
   the accepted peer as well as its cached-object advertisement. A controlled
   delayed heartbeat proves that a connected channel with HAVE is insufficient.
@@ -1626,15 +1668,17 @@ Source: [docs/GETTING-STARTED.md](https://raw.githubusercontent.com/forgesworn/r
 
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [API](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) · [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md)
 
-The supported release is an experimental
-[v0.4.2 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.2).
+These installation instructions target the prepared experimental
+[v0.4.3 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3).
+Confirm that tag and its checksum-listed assets have been published before
+using these pinned commands; a prepared version is not a verified download.
 Node 22.13+ is required; CI runs Node 24. `npm install relayswarm` is not the
 documented distribution path: the npm registry is unpublished.
 
 ## Install for a host application
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.2/relayswarm-0.4.2.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.3/relayswarm-0.4.3.tgz
 npm install hls.js
 ```
 
@@ -1653,17 +1697,17 @@ this hls.js loader.
 A Git dependency can also be pinned to the versioned release tag:
 
 ```sh
-npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.4.2'
+npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.4.3'
 ```
 
 ## Use the standalone browser bundle
 
 Download
-[`relayswarm-hls-swarm-0.4.2.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.2/relayswarm-hls-swarm-0.4.2.mjs)
+[`relayswarm-hls-swarm-0.4.3.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.3/relayswarm-hls-swarm-0.4.3.mjs)
 and serve it from your own application:
 
 ```js
-import { createHlsSwarm } from './relayswarm-hls-swarm-0.4.2.mjs';
+import { createHlsSwarm } from './relayswarm-hls-swarm-0.4.3.mjs';
 ```
 
 The bundle contains the loader's runtime dependencies; hls.js remains the
@@ -1671,7 +1715,7 @@ host's dependency. Prefer vendoring the verified file to relying on GitHub
 release-download URLs as a JavaScript CDN. The separate publisher helper uses
 Node filesystem/crypto APIs and does not belong in a browser bundle.
 
-The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.2/SHA256SUMS)
+The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.3/SHA256SUMS)
 covers the tarball, browser bundle, WASM module and JavaScript build metadata.
 Download those four files and the manifest into one directory and verify:
 
@@ -1681,7 +1725,7 @@ shasum -a 256 -c SHA256SUMS
 
 ## Use the optional shared core
 
-Download [`relayswarm-core-0.4.2.wasm`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.2/relayswarm-core-0.4.2.wasm)
+Download [`relayswarm-core-0.4.3.wasm`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.3/relayswarm-core-0.4.3.wasm)
 and serve it beside the browser bundle with `Content-Type: application/wasm`.
 Pass its URL through `coreWasm`; enable experimental `multiHolder` and
 `peerSupplyHint` only when the host intends to use them. A Content Security
@@ -1692,7 +1736,7 @@ The tarball also contains the committed module under `src/browser/`.
 
 ## Use the native core assets
 
-The [v0.4.2 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.2)
+The [v0.4.3 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3)
 includes `relayswarm-core.xcframework.zip`, its `.checksum`,
 `relayswarm-core-swift-bindings.zip` and `relayswarm-core.aar`. Download the
 platform's `SHA256SUMS-apple` or `SHA256SUMS-android` and every file listed in
@@ -1709,7 +1753,7 @@ WebRTC adapter or client application. RelaySwarmKit v0.6.0 separately consumes t
 ## Run the source demo
 
 ```sh
-git clone --branch v0.4.2 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.4.3 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -1760,7 +1804,7 @@ Current evidence and remaining device/network gates are in [STATUS.md](https://r
 
 ## Development source
 
-The published commands above install v0.4.2. Later development lands on
+The published commands above install v0.4.3. Later development lands on
 `main`, a mutable reference; its
 [production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md) and
 [delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) have separate evidence.
@@ -1773,7 +1817,7 @@ npm ci
 npm run demo
 ```
 
-Both v0.4.2 and current development source include the installed native
+Both v0.4.3 and current development source include the installed native
 executable, verified HTTP fallback and wider-media tests:
 
 ```sh
@@ -1876,6 +1920,13 @@ origin fetch. Only a complete verified peer winner counts as peer media.
 Normal HTTP never waits for metadata; stopping the swarm cancels its peer
 arm while that pending HTTP request continues. Progressive hls.js loads skip
 the race. See the [options and lifecycle contract](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md#options).
+
+The opt-in `sustainablePeerWait: true` additionally bounds serial peer waits
+and multi-holder extensions by each fragment/part's duration minus measured
+whole-origin recovery time with a 25% and 100 ms margin. The ordinary
+buffer reserve remains in force. Unknown duration or no spare duration starts
+HTTP immediately; an enabled cached-peer race retains its independent
+window. This is an admission bound, not a smooth-playback guarantee.
 
 `trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
 `traceRequests` (none by default): each peer-first load, eligibility
@@ -2399,12 +2450,42 @@ Source: [docs/STATUS.md](https://raw.githubusercontent.com/forgesworn/relayswarm
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Field-test guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md) ·
 [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md)
 
-Checkpoint: 24 October 2026. The experimental shared-core release is
-[v0.4.2](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.2).
-The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md#v042-24-october-2026) records its source changes;
+Checkpoint: 24 October 2026. The prepared experimental shared-core prerelease is
+[v0.4.3](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3).
+The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md#v043-24-october-2026) records its source changes;
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Sustainable peer waits and range-sized WASM uploads (24 October 2026)
+
+The opt-in `sustainablePeerWait` bounds serial peer waits and multi-holder
+extensions by the requested fragment/part duration minus measured p90
+whole-origin recovery with a 25% and 100 ms margin. A two-second segment
+with a 1,300 ms measured origin load leaves 275 ms for serial peer work.
+The independent cached-peer race retains its window alongside immediate
+HTTP. Existing buffer reserves, integrity checks and defaults remain intact.
+
+The matching WASM upload ABI accepts only the requested range. Previously a
+512 KiB ranged upload could first copy a roughly 6 MiB held object into the
+module and clone it before slicing. This removes that repeated whole-object
+input work without changing peer messages, range validation or upload charges.
+It is not a measured throughput, CPU-time or smooth-playback claim.
+
+The focused Node loader sweep passed 32 tests covering the new measured
+deadline, complete verified cached-peer contribution, cancellation and the
+existing origin-recovery reserve. It uses real committed WASM and simulated
+browser connections. The combined `npm run test:swarm:core` sweep against the
+rebuilt module passed 291 tests, with one expected skip and zero failures
+(292 total). That skip patches JavaScript selection's prototype, which the
+WASM selection path does not use. The protocol/ABI suite passed 42 tests;
+13 Rust range tests also passed. The actual WASM allocation regression sends
+the same 6 MiB object in 16 ranges: boundary input falls from 96 MiB
+with the legacy ABI to 6 MiB with the new ABI. This is a byte-copy measurement
+using synthetic links, not a device or streaming throughput comparison.
+These checks do not establish actual iPhone/iPad,
+Pixel/Vanadium, varied-NAT or sustained distributed continuity. The v0.4.2
+failed hosted-browser attempts below remain historical RED.
 
 ## Admission-renewal overlap release (24 October 2026)
 
@@ -9065,8 +9146,11 @@ Source: [docs/PERFORMANCE.md](https://raw.githubusercontent.com/forgesworn/relay
 
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md) · [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md)
 
-Measured 24 October 2026, comparing source `ed845ceccca192320f5b40b004ad54b7ffb2417c`
-with the changes listed below. The host was a 4-vCPU x86-64 Linux VM with
+Measured 24 October 2026, comparing the v0.4.3 source
+`6f63fb2f8ae20a51953c80853816311f25980bf0` with the changes listed below. The
+loader and publisher rows were measured against the earlier
+`ed845ceccca192320f5b40b004ad54b7ffb2417c`; v0.4.3 changes neither the
+loader's copy and hash paths nor the publisher. The host was a 4-vCPU x86-64 Linux VM with
 Node 22.22.0 and Rust 1.94.1. Every figure is an in-memory micro-benchmark:
 no browser, network, relay, device or player is involved, and timer resolution
 and shared-host noise move single runs by 10–30%. Ranges are medians from
@@ -9082,14 +9166,15 @@ native-receive rows. It does not measure playback, field networks or battery.
 
 | Path | Before | After |
 |---|---:|---:|
-| Core-backed link moving one 4 MiB object, both ends on one thread | 6.9–10.0 ms | 5.3–6.8 ms |
-| Core module memory after two 4 MiB receives | 29.6 MiB | 17.3 MiB |
-| Serving one 4 MiB schema-3 object as 16 piece ranges | 15.2 ms, 14.1 MiB module memory | 10.7 ms, 5.9 MiB |
-| Multi-holder piece hashing in the core | 8.0–9.0 ms/MiB | 3.6–4.0 ms/MiB |
-| Final whole-object check of a 4 MiB multi-holder transfer | 34–44 ms | 17–18 ms |
+| Core-backed link moving one 4 MiB object, both ends on one thread | 6.6–9.7 ms | 4.7–5.4 ms |
+| Core module memory after two (or four) 4 MiB receives | 29.6 MiB | 17.3 MiB |
+| Serving one 4 MiB schema-3 object as 16 piece ranges | 6.6–7.2 ms, 2.5 MiB module memory | 5.2–5.9 ms, 2.2 MiB |
+| Multi-holder piece hashing in the core | 8.4–8.7 ms/MiB | 3.7 ms/MiB |
+| Final whole-object check of a 4 MiB multi-holder transfer | 35–38 ms | 15–16 ms |
 
-The JavaScript reference link moved the same object in 2.3–3.3 ms before and
-after; it was not changed.
+The JavaScript reference link moved the same object in 2.0–2.7 ms before and
+after; it was not changed. v0.4.3 already passes only a requested range into
+the module when serving; the range row shows the remaining frame copies.
 
 - A link frame is moved, not copied, into the module's result buffer, and a
   resolved object is written into it once. The browser shell reads each event
@@ -9099,11 +9184,8 @@ after; it was not changed.
 - A receive whose size the caller expected from a signed commitment reserves
   that size once, on the first byte. A size only the remote declared still
   grows as bytes arrive, so `meta` alone holds no memory.
-- The module borrows the held object when serving: a piece range copies only
-  its own bytes. `Link::serve_response_slice` is added beside the unchanged
-  `serve_response` used by the native bindings.
 - The `sha2` crate is compiled at `opt-level = 3` while the rest of the module
-  stays at `"z"`. The module grew from 411,298 to 415,898 bytes (151.9 to
+  stays at `"z"`. The module grew from 411,690 to 415,896 bytes (152.0 to
   153.4 KB gzip), including the verdict memory below.
 - The multi-holder transfer output is copied once, from module memory into its
   own buffer.
@@ -9112,10 +9194,10 @@ after; it was not changed.
 
 | Fresh commitment per segment, same stream event | Before | After |
 |---|---:|---:|
-| JavaScript verifier, author-signed | 3.5–3.8 ms | 1.7–2.0 ms |
-| WebAssembly verifier, author-signed | 0.70–0.83 ms | 0.44–0.52 ms |
-| JavaScript verifier, delegate-signed with four revocations | 16.6 ms | 2.0 ms |
-| WebAssembly verifier, delegate-signed with four revocations | 2.7 ms | 0.67 ms |
+| JavaScript verifier, author-signed | 3.6–6.1 ms | 1.8–2.0 ms |
+| WebAssembly verifier, author-signed | 0.80 ms | 0.51 ms |
+| JavaScript verifier, delegate-signed with four revocations | 14.3–15.0 ms | 2.0–2.3 ms |
+| WebAssembly verifier, delegate-signed with four revocations | 2.7–2.9 ms | 0.63–0.67 ms |
 
 Both verifiers recheck the unchanged stream event, delegation and every
 supplied revocation for every segment. Each now remembers up to 512 Schnorr
@@ -9141,8 +9223,8 @@ cold and again with every accepted signature remembered.
   for both before dialling.
 - The native receiver fills one buffer of the trusted size and hashes as bytes
   arrive, instead of keeping every chunk and joining them. A 16 MiB object in
-  1,452-byte reads took 91–106 ms before and 23–28 ms after; in whole frames
-  the time was unchanged (20–29 ms) and peak memory is one object, not two.
+  1,452-byte reads took 88–94 ms before and 23–24 ms after; in whole frames
+  it took 22–24 ms before and 19 ms after, and peak memory is one object, not two.
   The size, chunk budget and digest checks are unchanged.
 
 ### Browser loader
@@ -9211,25 +9293,19 @@ These were measured or reviewed and left alone, with the reason.
   ticks about 13 µs.
 - Incoming relay events are deduplicated before signature verification, and
   every bounded map in the session and relay pool stays bounded.
-- The serving side of a core-backed link still copies the whole held object
-  into module memory for each request; only the range is copied after that.
-  Passing just the range needs a new operation that older modules would
-  refuse, so it is left as a follow-up.
 
 ## Follow-ups
 
 Ranked by expected effect. None is implemented here.
 
-1. Pass only the requested range of a held object into the core when serving
-   framing-2 requests, with an additive operation and a shell fallback.
-2. Republish broadcast playlists on a file-system watch instead of the 250 ms
+1. Republish broadcast playlists on a file-system watch instead of the 250 ms
    poll, so blocking playlist reloads release sooner after a segment is written.
-3. Group account-allowance writes so concurrent reservations share one durable
+2. Group account-allowance writes so concurrent reservations share one durable
    write; each operation must stay atomic and a failed one must not persist.
    Most of the remaining reservation cost is the state clone and full rewrite.
-4. Count only signatures, not joined or cached requests, against the demo's
+3. Count only signatures, not joined or cached requests, against the demo's
    commitment budget, which otherwise caps a server near 48 viewers.
-5. Keep a per-relay retry count so a relay that accepts and then drops each
+4. Keep a per-relay retry count so a relay that accepts and then drops each
    connection backs off instead of being redialled every 1–2 s.
 
 ---

@@ -4660,7 +4660,7 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
   // Plain fetch is not the origin path when the player's loader is known.
   t.mock.method(globalThis, "fetch", async () => { throw new Error("ranged origin load bypassed the player's loader"); });
   const hlsConfig = { xhrSetup: () => {} }, loaderConfig = { loadPolicy: { maxTimeToFirstByteMs: 10_000, maxLoadTimeMs: 10_000 } };
-  const load = async () => new Uint8Array((await new Promise((resolve) => new f.hls.config.fLoader(hlsConfig).load(multiContext, loaderConfig, { onSuccess: resolve }))).data);
+  const load = async (context = multiContext) => new Uint8Array((await new Promise((resolve) => new f.hls.config.fLoader(hlsConfig).load(context, loaderConfig, { onSuccess: resolve }))).data);
   return { ...f, bytes, channels, load, pieceSize, ranges, rangeLoaders, wholeLoads, hlsConfig, loaderConfig, get commitmentCalls() { return commitmentCalls; } };
 }
 
@@ -4676,6 +4676,106 @@ function beginCountedMultiLoad(f) {
   });
   return { loader, response, calls };
 }
+
+test("sustainable peer waits bound multi-holder extensions by measured recovery and segment duration", async t => {
+  const clock = virtualClock(t);
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { holders: [{ silent: true }], size: 12 * 65_536,
+      originFallbackMs: 1_200, originDelayMs: 1_300, wholeOriginDelayMs: 1_300, traceRequests: 256,
+      swarmOptions: { sustainablePeerWait: true, maxPeerWaitMs: 2_500 } }));
+    const context = { ...multiContext, frag: { ...multiContext.frag, duration: 2 } };
+    f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 30 } };
+    sameBytes(await clock.settle(f.load(context)), f.bytes);
+    assert.equal(f.channels[0].wants.length, 0, "a cold two-second segment reserves two seconds for origin");
+    const cold = f.swarm.trace().rows.find(row => row.k === "eligibility");
+    assert.equal(cold.budgetGeometry.sustainableMs, 0);
+    assert.equal(cold.budgetGeometry.originRecoveryMs, 2_000);
+
+    const started = clock.now();
+    sameBytes(await clock.settle(f.load(context)), f.bytes);
+    const elapsed = clock.now() - started;
+    const trace = f.swarm.trace().rows, load = trace.filter(row => row.k === "load").at(-1);
+    const geometry = load.budgetGeometry;
+    assert.equal(geometry.durationMs, 2_000);
+    assert.equal(geometry.originRecoveryMs, 1_725, "1.3s observed HTTP plus the existing quarter and 100ms margin");
+    assert.equal(geometry.sustainableMs, 275);
+    assert.equal(geometry.uncappedMs, 18_000, "the independent buffer reserve stays intact");
+    assert.equal(load.budgetMs, 275);
+    const transfer = trace.find(row => row.k === "xfer" && row.op === "start" && row.load === load.load);
+    assert.ok(transfer, "the real WASM multi-holder path was entered");
+    assert.equal(transfer.deadline - load.at, 275, "multi-holder cannot extend the wait to its usual 2.5s ceiling");
+    assert.ok(f.channels[0].wants.length > 0, "positive admission still tries the known holder");
+    assert.ok(elapsed < 2_000, `the failed peer plus actual origin recovery fits this segment (${elapsed}ms)`);
+    assert.equal(f.swarm.metrics().segments.originFallbacks, 1, "origin ranges preserve the transfer instead of reloading the whole object");
+    assert.equal(f.swarm.metrics().core.multiHolder.delivered, 1);
+    assert.equal(f.swarm.metrics().config.sustainablePeerWait, true);
+  } finally {
+    if (f) await clock.settle(f.close());
+    clock.restore();
+  }
+});
+
+test("sustainable peer waits preserve the independent cached-race window and verified contribution", async t => {
+  const clock = virtualClock(t);
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { holders: [{ delayMs: 80 }], size: 12 * 65_536,
+      wholeOriginDelayMs: 2_000, traceRequests: 256,
+      swarmOptions: { sustainablePeerWait: true, zeroBudgetPeerRace: true, maxPeerWaitMs: 500 } }));
+    f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 30 } };
+    const context = { ...multiContext, frag: { ...multiContext.frag, duration: 2 } };
+    const pending = f.load(context);
+    assert.equal(f.wholeLoads.length, 1, "zero sustainable wait starts ordinary HTTP synchronously despite a full buffer");
+    sameBytes(await clock.settle(pending), f.bytes);
+    const load = f.swarm.trace().rows.find(row => row.k === "load");
+    assert.equal(load.budgetMs, 0); assert.equal(load.budgetGeometry.sustainableMs, 0);
+    assert.equal(load.limitMs, 500, "cached peer work retains its own window while HTTP runs");
+    assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaceWins, 1);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length);
+    assert.equal(f.wholeLoads[0].loader.aborted, true);
+    assert.deepEqual(f.ranges, [], "cached races add no second origin download");
+  } finally {
+    if (f) await clock.settle(f.close());
+    clock.restore();
+  }
+});
+
+test("sustainable peer waits use part duration, reject unknown duration and preserve the default policy", async t => {
+  for (const variant of ["part", "part-unknown", "unknown", "invalid", "overflow", "default"]) await t.test(variant, async () => {
+    const playback = peerPlaybackOptions(1_200);
+    const fixture = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(),
+      ...(variant === "default" ? {} : { sustainablePeerWait: true }), swarmParts: true, traceRequests: 32,
+      getCommitment: () => assert.fail("no holder has been advertised") });
+    try {
+      fixture.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 30 } };
+      const ctx = { ...context, frag: { ...context.frag, duration: variant === "invalid" ? NaN : 10 } };
+      if (variant === "part") ctx.part = { index: 0, start: 12, duration: 0.5 };
+      if (variant === "part-unknown") ctx.part = { index: 0, start: 12 };
+      if (variant === "unknown") delete ctx.frag.duration;
+      if (variant === "overflow") ctx.frag.duration = Number.MAX_VALUE;
+      if (variant === "default") Object.defineProperty(ctx.frag, "duration", { get() { assert.fail("the default budget does not read duration"); } });
+      await new Promise(resolve => new fixture.hls.config.fLoader({}).load(ctx, {}, { onSuccess: resolve }));
+      const row = fixture.swarm.metrics().peerEligibilityDiagnostics.records.at(-1);
+      assert.equal(row.budgetMs, variant === "default" ? 1_200 : 0);
+      if (variant === "part") assert.equal(row.budgetGeometry.durationMs, 500, "a short part cannot borrow its parent duration");
+      if (["part-unknown", "unknown", "invalid", "overflow"].includes(variant)) assert.equal(row.budgetGeometry.durationMs, null);
+      if (variant === "default") {
+        assert.equal(fixture.swarm.metrics().config.sustainablePeerWait, false);
+        assert.equal("sustainableMs" in row.budgetGeometry, false);
+      }
+    } finally { await fixture.close(); }
+  });
+});
+
+test("sustainable peer waits require an explicit boolean option", () => {
+  for (const sustainablePeerWait of [1, "true", null]) {
+    const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], sustainablePeerWait });
+    assert.equal(swarm.metrics().mode, "off");
+    assert.equal(swarm.metrics().disabledReason, "invalid-sustainable-wait-option");
+    swarm.stop();
+  }
+});
 
 test("zero-budget cached race starts HTTP first and accepts only a complete verified peer winner", async t => {
   const clock = virtualClock(t), observed = [];

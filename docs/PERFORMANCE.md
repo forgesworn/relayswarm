@@ -2,8 +2,11 @@
 
 [Documentation](README.md) · [Status](STATUS.md) · [Changelog](../CHANGELOG.md)
 
-Measured 24 October 2026, comparing source `ed845ceccca192320f5b40b004ad54b7ffb2417c`
-with the changes listed below. The host was a 4-vCPU x86-64 Linux VM with
+Measured 24 October 2026, comparing the v0.4.3 source
+`6f63fb2f8ae20a51953c80853816311f25980bf0` with the changes listed below. The
+loader and publisher rows were measured against the earlier
+`ed845ceccca192320f5b40b004ad54b7ffb2417c`; v0.4.3 changes neither the
+loader's copy and hash paths nor the publisher. The host was a 4-vCPU x86-64 Linux VM with
 Node 22.22.0 and Rust 1.94.1. Every figure is an in-memory micro-benchmark:
 no browser, network, relay, device or player is involved, and timer resolution
 and shared-host noise move single runs by 10–30%. Ranges are medians from
@@ -19,14 +22,15 @@ native-receive rows. It does not measure playback, field networks or battery.
 
 | Path | Before | After |
 |---|---:|---:|
-| Core-backed link moving one 4 MiB object, both ends on one thread | 6.9–10.0 ms | 5.3–6.8 ms |
-| Core module memory after two 4 MiB receives | 29.6 MiB | 17.3 MiB |
-| Serving one 4 MiB schema-3 object as 16 piece ranges | 15.2 ms, 14.1 MiB module memory | 10.7 ms, 5.9 MiB |
-| Multi-holder piece hashing in the core | 8.0–9.0 ms/MiB | 3.6–4.0 ms/MiB |
-| Final whole-object check of a 4 MiB multi-holder transfer | 34–44 ms | 17–18 ms |
+| Core-backed link moving one 4 MiB object, both ends on one thread | 6.6–9.7 ms | 4.7–5.4 ms |
+| Core module memory after two (or four) 4 MiB receives | 29.6 MiB | 17.3 MiB |
+| Serving one 4 MiB schema-3 object as 16 piece ranges | 6.6–7.2 ms, 2.5 MiB module memory | 5.2–5.9 ms, 2.2 MiB |
+| Multi-holder piece hashing in the core | 8.4–8.7 ms/MiB | 3.7 ms/MiB |
+| Final whole-object check of a 4 MiB multi-holder transfer | 35–38 ms | 15–16 ms |
 
-The JavaScript reference link moved the same object in 2.3–3.3 ms before and
-after; it was not changed.
+The JavaScript reference link moved the same object in 2.0–2.7 ms before and
+after; it was not changed. v0.4.3 already passes only a requested range into
+the module when serving; the range row shows the remaining frame copies.
 
 - A link frame is moved, not copied, into the module's result buffer, and a
   resolved object is written into it once. The browser shell reads each event
@@ -36,11 +40,8 @@ after; it was not changed.
 - A receive whose size the caller expected from a signed commitment reserves
   that size once, on the first byte. A size only the remote declared still
   grows as bytes arrive, so `meta` alone holds no memory.
-- The module borrows the held object when serving: a piece range copies only
-  its own bytes. `Link::serve_response_slice` is added beside the unchanged
-  `serve_response` used by the native bindings.
 - The `sha2` crate is compiled at `opt-level = 3` while the rest of the module
-  stays at `"z"`. The module grew from 411,298 to 415,898 bytes (151.9 to
+  stays at `"z"`. The module grew from 411,690 to 415,896 bytes (152.0 to
   153.4 KB gzip), including the verdict memory below.
 - The multi-holder transfer output is copied once, from module memory into its
   own buffer.
@@ -49,10 +50,10 @@ after; it was not changed.
 
 | Fresh commitment per segment, same stream event | Before | After |
 |---|---:|---:|
-| JavaScript verifier, author-signed | 3.5–3.8 ms | 1.7–2.0 ms |
-| WebAssembly verifier, author-signed | 0.70–0.83 ms | 0.44–0.52 ms |
-| JavaScript verifier, delegate-signed with four revocations | 16.6 ms | 2.0 ms |
-| WebAssembly verifier, delegate-signed with four revocations | 2.7 ms | 0.67 ms |
+| JavaScript verifier, author-signed | 3.6–6.1 ms | 1.8–2.0 ms |
+| WebAssembly verifier, author-signed | 0.80 ms | 0.51 ms |
+| JavaScript verifier, delegate-signed with four revocations | 14.3–15.0 ms | 2.0–2.3 ms |
+| WebAssembly verifier, delegate-signed with four revocations | 2.7–2.9 ms | 0.63–0.67 ms |
 
 Both verifiers recheck the unchanged stream event, delegation and every
 supplied revocation for every segment. Each now remembers up to 512 Schnorr
@@ -78,8 +79,8 @@ cold and again with every accepted signature remembered.
   for both before dialling.
 - The native receiver fills one buffer of the trusted size and hashes as bytes
   arrive, instead of keeping every chunk and joining them. A 16 MiB object in
-  1,452-byte reads took 91–106 ms before and 23–28 ms after; in whole frames
-  the time was unchanged (20–29 ms) and peak memory is one object, not two.
+  1,452-byte reads took 88–94 ms before and 23–24 ms after; in whole frames
+  it took 22–24 ms before and 19 ms after, and peak memory is one object, not two.
   The size, chunk budget and digest checks are unchanged.
 
 ### Browser loader
@@ -148,23 +149,17 @@ These were measured or reviewed and left alone, with the reason.
   ticks about 13 µs.
 - Incoming relay events are deduplicated before signature verification, and
   every bounded map in the session and relay pool stays bounded.
-- The serving side of a core-backed link still copies the whole held object
-  into module memory for each request; only the range is copied after that.
-  Passing just the range needs a new operation that older modules would
-  refuse, so it is left as a follow-up.
 
 ## Follow-ups
 
 Ranked by expected effect. None is implemented here.
 
-1. Pass only the requested range of a held object into the core when serving
-   framing-2 requests, with an additive operation and a shell fallback.
-2. Republish broadcast playlists on a file-system watch instead of the 250 ms
+1. Republish broadcast playlists on a file-system watch instead of the 250 ms
    poll, so blocking playlist reloads release sooner after a segment is written.
-3. Group account-allowance writes so concurrent reservations share one durable
+2. Group account-allowance writes so concurrent reservations share one durable
    write; each operation must stay atomic and a failed one must not persist.
    Most of the remaining reservation cost is the state clone and full rewrite.
-4. Count only signatures, not joined or cached requests, against the demo's
+3. Count only signatures, not joined or cached requests, against the demo's
    commitment budget, which otherwise caps a server near 48 viewers.
-5. Keep a per-relay retry count so a relay that accepts and then drops each
+4. Keep a per-relay retry count so a relay that accepts and then drops each
    connection backs off instead of being redialled every 1–2 s.

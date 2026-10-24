@@ -14,7 +14,6 @@
 //! [`Link::serve_response`], and reports the channel draining with
 //! [`Link::buffered_amount_low`].
 
-use std::borrow::Cow;
 use std::collections::VecDeque;
 
 use indexmap::{IndexMap, IndexSet};
@@ -910,47 +909,49 @@ impl Link {
     /// `None` when they are not held or serving is declined. Upload already
     /// charged for a cancelled response is not refunded.
     pub fn serve_response(&mut self, now: u64, bytes: Option<Vec<u8>>) {
-        self.serve(now, bytes.map(Cow::Owned));
+        self.serve_response_inner(now, bytes, None);
     }
 
-    /// As [`Link::serve_response`], borrowing the held object: only the bytes
-    /// the response sends are copied, so a piece range copies just the range.
-    pub fn serve_response_slice(&mut self, now: u64, bytes: Option<&[u8]>) {
-        self.serve(now, bytes.map(Cow::Borrowed));
+    /// Answer an active range with only its bytes, rather than copying a whole
+    /// held object across the host boundary. The original object size fixes the
+    /// canonical piece size; a mismatched length, missing range or oversized
+    /// object is declined. Wire framing and receiver verification are unchanged.
+    pub fn serve_range_response(&mut self, now: u64, object_size: u64, bytes: Vec<u8>) {
+        self.serve_response_inner(now, Some(bytes), Some(object_size));
     }
 
-    fn serve(&mut self, now: u64, bytes: Option<Cow<'_, [u8]>>) {
+    fn serve_response_inner(&mut self, now: u64, bytes: Option<Vec<u8>>, range_object_size: Option<u64>) {
         self.clock = now;
         let Some(Active {
             upload,
             stage: Stage::AwaitingBytes,
-        }) = self.active.take()
+        }) = self.active.take_if(|active| matches!(active.stage, Stage::AwaitingBytes))
         else {
             return;
         };
         let none = [("t", &Value::from("none")), ("id", &Value::from(upload.id))];
-        let Some(held) = bytes else {
+        let Some(mut bytes) = bytes else {
             self.send_text(&none);
             return self.finish_upload();
         };
-        // A range the held object does not have is answered with `none`.
-        let bytes = match upload.range {
-            Some(range) => {
-                let Some((from, to)) = range_bytes(held.len() as u64, range) else {
-                    self.send_text(&none);
-                    return self.finish_upload();
-                };
-                match held {
-                    Cow::Owned(mut bytes) => {
-                        bytes.truncate(to as usize);
-                        bytes.drain(..from as usize);
-                        bytes
-                    }
-                    Cow::Borrowed(bytes) => bytes[from as usize..to as usize].to_vec(),
-                }
+        if let Some(object_size) = range_object_size {
+            let expected = upload
+                .range
+                .filter(|_| object_size <= self.config.max_segment_bytes)
+                .and_then(|range| range_bytes(object_size, range));
+            if expected.is_none_or(|(from, to)| to - from != bytes.len() as u64) {
+                self.send_text(&none);
+                return self.finish_upload();
             }
-            None => held.into_owned(),
-        };
+        } else if let Some(range) = upload.range {
+            // A range the held object does not have is answered with `none`.
+            let Some((from, to)) = range_bytes(bytes.len() as u64, range) else {
+                self.send_text(&none);
+                return self.finish_upload();
+            };
+            bytes.truncate(to as usize);
+            bytes.drain(..from as usize);
+        }
         if upload.cancelled {
             self.events.push(LinkEvent::UploadCancelled(bytes.len() as u64));
             self.send_text(&none);

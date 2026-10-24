@@ -48,6 +48,9 @@ const DEFAULTS = Object.freeze({
   // covers that projection while keeping originReserveMs for origin.
   maxPeerWaitMs: 5_000,
   originReserveMs: 2_000,
+  // Opt-in: also leave room to recover from origin within the duration this
+  // fragment adds, so repeated peer misses need not steadily drain playback.
+  sustainablePeerWait: false,
   lateWindowMs: 6_000,
   maxPeers: 6,
   maxUploadPeers: 4,
@@ -526,6 +529,7 @@ class HlsSwarm {
     if (typeof this.options.peerSupplyHint !== "boolean" || (this.options.onPlayerHint !== null && typeof this.options.onPlayerHint !== "function")) return "invalid-player-hint-option";
     if (typeof this.options.abrIgnorePeers !== "boolean") return "invalid-abr-option";
     if (typeof this.options.zeroBudgetPeerRace !== "boolean") return "invalid-cached-race-option";
+    if (typeof this.options.sustainablePeerWait !== "boolean") return "invalid-sustainable-wait-option";
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (this.options.reserveUploadBytes !== undefined && typeof this.options.reserveUploadBytes !== "function") return "invalid-upload-reservation";
     if (typeof this.options.serve !== "boolean" || typeof this.options.serveOnCellular !== "boolean") return "invalid-serve-option";
@@ -870,6 +874,7 @@ class HlsSwarm {
         originFallbackMs: this.options.originFallbackMs,
         maxPeerWaitMs: this.options.maxPeerWaitMs,
         originReserveMs: this.options.originReserveMs,
+        sustainablePeerWait: this.options.sustainablePeerWait,
         zeroBudgetPeerRace: this.options.zeroBudgetPeerRace,
         lateWindowMs: this.options.lateWindowMs,
         maxPeers: this.options.maxPeers,
@@ -1056,7 +1061,8 @@ class HlsSwarm {
         // The wait may grow from budgetMs up to the buffer-safe limit, never
         // past the buffered playback less the origin reserve.
         const ceiling = Math.max(swarm.options.originFallbackMs, swarm.options.maxPeerWaitMs);
-        const limitMs = Math.max(budgetMs, Math.min(ceiling, budgetGeometry.uncappedMs ?? budgetMs));
+        const limitMs = Math.max(budgetMs, Math.min(ceiling, budgetGeometry.uncappedMs ?? budgetMs,
+          budgetGeometry.sustainableMs ?? Infinity));
         swarm.#traceBegin(context, budgetMs, limitMs, budgetGeometry);
         // Ranged origin pieces go through the player's loader, as the whole would.
         const origin = { Loader: BaseLoader, config: this.hlsConfig, loaderConfig: config };
@@ -1334,7 +1340,21 @@ class HlsSwarm {
 
   #peerBudget(context, geometry) {
     const media = this.hls?.media;
-    if (!media) { geometry.source = "no-media"; return this.options.originFallbackMs; }
+    let sustainableMs = Infinity;
+    if (this.options.sustainablePeerWait) {
+      let durationMs = null;
+      try {
+        const part = context?.part, duration = part ? part.duration : context?.frag?.duration;
+        if (Number.isFinite(duration) && duration > 0 && Number.isFinite(duration * 1_000)) durationMs = duration * 1_000;
+      } catch {}
+      const originP90 = percentile(this.originLatencySamples, 0.9);
+      const originRecoveryMs = originP90 === null ? this.options.originReserveMs : originP90 * 1.25 + 100;
+      // Missing geometry or no spare duration means immediate HTTP. The
+      // separate cached-peer race may still run alongside that HTTP load.
+      sustainableMs = durationMs === null ? 0 : Math.max(0, durationMs - originRecoveryMs);
+      Object.assign(geometry, { durationMs, originRecoveryMs, sustainableMs });
+    }
+    if (!media) { geometry.source = "no-media"; return Math.min(this.options.originFallbackMs, sustainableMs); }
     try {
       for (let i = 0; i < media.buffered.length; i++) {
         if (media.buffered.start(i) <= media.currentTime && media.buffered.end(i) > media.currentTime) {
@@ -1349,7 +1369,7 @@ class HlsSwarm {
           const fragStart = (partStart = context?.part?.start) ?? context?.frag?.start;
           const playableEnd = Number.isFinite(fragStart) && fragStart > media.currentTime ? Math.min(bufferedEnd = media.buffered.end(i), fragStart) : (bufferedEnd = media.buffered.end(i));
           const uncappedMs = Math.max(0, (playableEnd - (currentTime = media.currentTime)) * 1000 - originReserve);
-          const budgetMs = Math.min(this.options.originFallbackMs, uncappedMs);
+          const budgetMs = Math.min(this.options.originFallbackMs, uncappedMs, sustainableMs);
           // Capture the values already consumed by the formula, without
           // rereading mutable media/fragment getters or changing their order.
           try {

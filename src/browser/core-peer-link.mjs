@@ -4,9 +4,10 @@
 // peer-link.mjs, which remains the reference implementation.
 
 import { PeerLink } from "./peer-link.mjs";
+import { commitmentPieceSize } from "./segment-commitment.mjs";
 
 const OP = { text: 0, binary: 1, request: 2, abort: 3, close: 4, tick: 5, serve: 6, bufferedLow: 7,
-  sendHave: 8, sendHaveChange: 9, sendContribution: 10, sendFetching: 11, state: 12, sets: 13, requestRange: 14 };
+  sendHave: 8, sendHaveChange: 9, sendContribution: 10, sendFetching: 11, state: 12, sets: 13, requestRange: 14, serveRange: 15 };
 const EVENT = { sendText: 1, sendBinary: 2, closed: 3, report: 4, resolved: 5, haveChanged: 6,
   scheduleChanged: 7, serveRequest: 8, uploadCancelled: 9, progress: 10, serveRange: 11 };
 const HIGH_WATER_BYTES = 128 * 1024;
@@ -333,7 +334,7 @@ export class CorePeerLink {
         else key = decoder.decode(payload);
         Promise.resolve()
           .then(() => this.closed ? null : range ? this.onRequest?.(this, key, range) : this.onRequest?.(this, key))
-          .then((bytes) => this.#serve(bytes), () => { this.close("serve-error"); this.#serve(null); });
+          .then((bytes) => this.#serve(bytes, range), () => { this.close("serve-error"); this.#serve(null); });
         return;
       }
       case EVENT.uploadCancelled: {
@@ -360,12 +361,23 @@ export class CorePeerLink {
     try { return Math.max(0, Number(this.channel.bufferedAmount) || 0); } catch { return 0; }
   }
 
-  #serve(bytes) {
+  #serve(bytes, range) {
     if (this.#handle === null) return;
     const buffered = this.#buffered();
     const view = !bytes ? null : bytes instanceof Uint8Array ? bytes : ArrayBuffer.isView(bytes)
       ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) : bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : null;
     if (bytes && !view) { this.close("serve-error"); return this.#call(OP.serve, { a: 0, b: buffered }); }
+    if (view && range && this.#host.rangeUploads) {
+      const size = view.byteLength, pieceSize = commitmentPieceSize(size);
+      if (size < 1 || size > this.maxSegmentBytes || !Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end)
+        || range.start < 0 || range.start >= range.end || range.end > Math.ceil(size / pieceSize)) {
+        return this.#call(OP.serve, { a: 0, b: buffered });
+      }
+      // The callback still returns the whole held object. Only this bounded
+      // view crosses into WASM; Rust independently checks its requested range.
+      return this.#call(OP.serveRange, { a: size, b: buffered,
+        bytes: view.subarray(range.start * pieceSize, Math.min(size, range.end * pieceSize)) });
+    }
     this.#call(OP.serve, { a: view ? 1 : 0, b: buffered, bytes: view ?? EMPTY });
   }
 

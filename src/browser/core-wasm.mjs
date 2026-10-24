@@ -48,6 +48,7 @@ async function instantiate(source) {
 const SELECTION_EXPORTS = ["rs_sel_observe", "rs_sel_record", "rs_sel_mark", "rs_sel_forget", "rs_sel_select", "rs_sel_state",
   "rs_sel_project", "rs_sel_minimum", "rs_sel_estimate", "rs_sel_summary", "rs_link_new", "rs_link_free", "rs_link_call", "rs_disc_call"];
 const LINK_SETS = 13;
+const LINK_SERVE_RANGE = 15;
 const LINK_HEADER = 13;
 const LINK_HEADER_BYTES = LINK_HEADER * 8;
 const LINK_RESOLVED = 5;
@@ -232,6 +233,8 @@ export async function loadCore(source, { onFailure } = {}) {
   // any callback runs, since a callback may call in again.
   const host = {
     links: new Set(),
+    // Optional so new JavaScript can still use a previously pinned core.
+    rangeUploads: typeof exports.rs_link_serve_range === "function",
     newLink(maxSegmentBytes, maxQueuedRequests, drainTimeoutMs, reliable, now) {
       if (retired) throw new Error("The core has been retired.");
       return exports.rs_link_new(maxSegmentBytes, maxQueuedRequests, drainTimeoutMs, reliable ? 1 : 0, now);
@@ -243,7 +246,9 @@ export async function loadCore(source, { onFailure } = {}) {
     call(handle, op, now, channel, a, b, bytes) {
       if (retired) return null;
       try {
-        const size = withBytes(exports, bytes, (pointer, length) => exports.rs_link_call(handle, op, now, channel, a, b, pointer, length));
+        const size = withBytes(exports, bytes, (pointer, length) => op === LINK_SERVE_RANGE && host.rangeUploads
+          ? exports.rs_link_serve_range(handle, now, channel, a, b, pointer, length)
+          : exports.rs_link_call(handle, op, now, channel, a, b, pointer, length));
         if (size < 0 || size < LINK_HEADER_BYTES) throw new Error(`Core link ${handle} refused operation ${op}.`);
         return readLinkFrame(exports, size);
       } catch (error) {
