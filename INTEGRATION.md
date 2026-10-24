@@ -72,6 +72,11 @@ expiry checks around asynchronous admission and upload reservations. It does not
 validate an opaque credential, extend policy authority or restore upload consent.
 Publisher, policy or peer-configuration changes still require reconfiguration.
 
+If an upload arrives during that peer's changed-ticket admission check, it joins
+the pending bounded check. Only an accepted decision permits media or an upload
+reservation. Rejection, timeout or shutdown prevents delivery. A successful
+decision is not cached as permission for later upload requests.
+
 ## Options
 
 | Option | Default | What it does |

@@ -1,5 +1,23 @@
 # RelaySwarm changelog
 
+## v0.4.2 (24 October 2026)
+
+Experimental library prerelease following [v0.4.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.1).
+No service is deployed; R70 distributed retention, TURN renewal, physical-device,
+public-NAT and sustained acceptance remain open. See [Status](docs/STATUS.md).
+
+- Let uploads arriving during a changed-ticket admission check join its bounded
+  online decision before spending allowance or sending media. Previously the
+  remembered old ticket could cause the live link to close. Rejection, timeout,
+  stop and channel closure still prevent delivery; later uploads check online again.
+- Expose accepted peer identities and connection references through
+  `peerConnectionDetails()` so observers can distinguish retention from replacement.
+- Retain a native Chrome/WASM ticket-renewal receipt in CI. Three rotations on
+  both sides retain the exact connection while delivering four verified 256 KiB
+  objects; later revocation sends zero peer bytes. This is synthetic loopback
+  protocol evidence, not distributed field acceptance.
+- Exclude local native real-time build output from the JavaScript tarball.
+
 ## v0.4.1 (24 October 2026)
 
 Experimental library prerelease following [v0.4.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.0).

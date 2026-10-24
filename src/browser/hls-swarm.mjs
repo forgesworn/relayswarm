@@ -2310,11 +2310,17 @@ class HlsSwarm {
   // `range` (framing 2) asks for pieces of the held object: the link sends
   // only those, so only their bytes are charged.
   async #serveRequest(link, key, range = null) {
-    if (this.options.admit && !(await this.#admits(link.pubkey, this.admitted.get(link.pubkey)?.ticket, "upload"))) {
+    // A changed-ticket presence can already own this peer's bounded online
+    // check. Join that decision instead of refusing the previously admitted
+    // ticket merely because a different credential is being checked. No bytes
+    // or allowance are spent unless that check accepts the credential.
+    const ticket = this.admissionChecks.get(link.pubkey)?.ticket ?? this.admitted.get(link.pubkey)?.ticket;
+    if (this.options.admit && !(await this.#admits(link.pubkey, ticket, "upload"))) {
       this.#refuseUpload("admission");
       link.close("admission");
       return null;
     }
+    if (link.closed) return null;
     const bytes = this.held.get(key);
     if (!bytes) { this.#refuseUpload("not-held"); return null; }
     let charge = bytes.byteLength;

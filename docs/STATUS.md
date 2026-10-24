@@ -4,11 +4,39 @@
 [Changelog](../CHANGELOG.md)
 
 Checkpoint: 24 October 2026. The experimental shared-core release is
-[v0.4.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.1).
-The [changelog](../CHANGELOG.md#v041-24-october-2026) records its source changes;
+[v0.4.2](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.2).
+The [changelog](../CHANGELOG.md#v042-24-october-2026) records its source changes;
 the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Admission-renewal overlap release (24 October 2026)
+
+v0.4.2 also exposes accepted peer connection identities with
+`peerConnectionDetails()` for distinguishing retained links from replacements.
+No service or pilot deployment is part of this library prerelease.
+
+A media request arriving during a peer's changed-ticket admission check could
+close the live link: the upload checked the old ticket while the new ticket
+already owned the per-peer check. Uploads now join that bounded online decision
+before reserving allowance or sending media. Rejection, timeout and shutdown
+still prevent delivery; subsequent requests check authority online again.
+
+`npm run test:ticket-renewal:browser` exercises two independent Chrome contexts,
+local Nostr signalling, real HTTP admission, native SCTP and the committed WASM
+core. Three ticket rotations on each side retain the exact accepted connection,
+peer identity, loader, held bytes, host upload opt-in and spent allowance. One
+real admission response is held while media is requested: no bytes or quota are spent before
+acceptance. Four verified 256 KiB loads use the retained connection; later online
+revocation sends zero peer bytes and the loader falls back to HTTP. The JavaScript
+and WASM hardening regressions also cover refusal, timeout and late acceptance
+after stop or channel closure. See the
+[source and local evidence](../spikes/results/core-ticket-renewal-20261024.json).
+
+This is a synthetic-byte loopback protocol check. R70 remains RED: its retained
+diagnosis attributed the lost link to far-end neighbour replacement during the
+renewal observation window. Distributed retention, TURN renewal, physical devices,
+public NAT and sustained playback remain open.
 
 ## Cached-peer race release (24 October 2026)
 

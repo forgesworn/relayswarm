@@ -37,6 +37,7 @@ bounded peer-first mode using author-signed segment commitments.
 | `npm run test:native` | Native path tests, local relay + local DHT bootstrap |
 | `npm run test:swarm` | `src/browser/hls-swarm.mjs` unit tests |
 | `npm run test:swarm:core` | Loader hardening suite with peer-first fixtures on the Rust core |
+| `npm run test:ticket-renewal:browser` | Native Chrome/WASM ticket renewal, concurrent admission and revocation |
 | `npm run test:browser` | hls.js browser test (`--mode shadow` or `--mode peer-first`) |
 | `npm run test:publisher` | Publisher context/range and demo HTTP/relay tests |
 | `npm run test:operator` | Chrome upload allowance, remote policy and opt-in reports |
@@ -116,7 +117,7 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 
 - `npm test` hits live public relays; a red run can mean relay weather, not
   a code fault. Re-run before concluding anything.
-- v0.4.1 is the experimental GitHub prerelease (v0.4.0 before it).
+- v0.4.2 is the experimental GitHub prerelease (v0.4.1 before it).
   Confirm a release exists before referring to its assets.
   The npm registry is unpublished; use the exact asset or pinned commit from
   `docs/GETTING-STARTED.md`. Do not move any release tag or replace its artifacts
@@ -138,7 +139,7 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
   It must match the JavaScript verifier on every vector; change the JavaScript,
   regenerate the vectors, then make Rust agree. Its toolchain is pinned in
   `core/rust-toolchain.toml`; reuse `core/target/`.
-- Package version 0.4.1, session wire version 3, commitment schemas 1/2/3 (3 experimental) and metrics
+- Package version 0.4.2, session wire version 3, commitment schemas 1/2/3 (3 experimental) and metrics
   version 2 are distinct. Published RelaySwarmKit v0.6.0 pins the v0.3.0 core
   and supports wire version 3 and signed media; current SDK/browser interoperability is measured on macOS
   arm64 loopback. Physical Apple devices and public-NAT interop remain unproved.
