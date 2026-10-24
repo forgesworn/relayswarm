@@ -3,9 +3,14 @@ name: e2e
 on:
   push:
     branches: [main]
+    tags: ['**']
   pull_request:
   workflow_dispatch:
     inputs:
+      core_packages:
+        description: Build native core artefacts only, without attaching a release
+        type: boolean
+        default: false
       soak:
         description: Run a longer, twelve-viewer peer-first test
         type: boolean
@@ -21,6 +26,7 @@ permissions:
 
 jobs:
   docs:
+    if: ${{ !inputs.core_packages }}
     name: documentation and AI context
     runs-on: ubuntu-latest
     timeout-minutes: 3
@@ -32,6 +38,7 @@ jobs:
       - run: node scripts/check-docs.mjs
 
   hls-playback:
+    if: ${{ !inputs.core_packages }}
     name: hls.js playback and field-test demo
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -68,6 +75,7 @@ jobs:
             artifacts/live-restart-browser/**/*.json
 
   swift-interop:
+    if: ${{ !inputs.core_packages }}
     name: current Swift SDK and browser interoperability
     runs-on: macos-15
     timeout-minutes: 15
@@ -96,7 +104,7 @@ jobs:
 
   hls-soak:
     name: hls.js optional twelve-viewer soak
-    if: github.event_name == 'workflow_dispatch' && inputs.soak
+    if: github.event_name == 'workflow_dispatch' && inputs.soak && !inputs.core_packages
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -116,6 +124,7 @@ jobs:
           path: soak-receipts/*.json
 
   hls-browser:
+    if: ${{ !inputs.core_packages }}
     name: hls.js (${{ matrix.mode }})
     strategy:
       fail-fast: false
@@ -140,6 +149,7 @@ jobs:
           path: browser-receipts/hls-swarm-${{ matrix.mode }}-rotation-*.json
 
   native:
+    if: ${{ !inputs.core_packages }}
     name: native (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -161,6 +171,7 @@ jobs:
       - run: npm run test:publisher
 
   rust-core:
+    if: ${{ !inputs.core_packages }}
     name: Rust core and shared vectors
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -208,6 +219,7 @@ jobs:
           npm run test:ffi:kotlin
 
   apple-package:
+    if: ${{ !inputs.core_packages }}
     name: Apple package of the Rust core
     runs-on: macos-15
     timeout-minutes: 30
@@ -231,6 +243,7 @@ jobs:
           npm run test:ffi:apple
 
   android-package:
+    if: ${{ !inputs.core_packages }}
     name: Android library of the Rust core
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -257,6 +270,7 @@ jobs:
           npm run test:ffi:android
 
   live-relays:
+    if: ${{ !inputs.core_packages }}
     name: browser transport against live relays
     needs: native
     runs-on: ubuntu-latest
@@ -272,3 +286,12 @@ jobs:
       # Hits live Nostr relays; a red run here can mean relay weather, not a
       # code fault - re-run before concluding anything.
       - run: npm test
+
+  core-release-packages:
+    name: native core release packaging
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && inputs.core_packages)
+    permissions:
+      contents: write
+    uses: ./.github/workflows/core-packages.yml
+    with:
+      publish: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
