@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { createSocket } from "node:dgram";
 import { realtimeWeriftPlugin, weriftRealtimeRevision } from "../src/node/realtime-werift-build.mjs";
 
 const packageRoot = process.env.WERIFT_REALTIME_PACKAGE_ROOT;
@@ -31,7 +32,7 @@ test('reviewed backend builds self-contained with MIT notice and refuses browser
   directory = await mkdtemp(join(tmpdir(), 'relayswarm-backend-reviewed-'));
   const file = join(directory, 'backend.mjs');
   const original = await readFile(join(packageRoot, 'lib/index.mjs'));
-  await build({ stdin: { contents: 'export {RTCPeerConnection} from "werift";' }, outfile: file,
+  await build({ stdin: { contents: 'export {RTCPeerConnection,TurnProtocol,StunOverTurnProtocol,Message,methods,classes,parseMessage,makeIntegrityKey,createTurnClient} from "werift";' }, outfile: file,
     platform: 'node', format: 'esm', bundle: true, banner: { js: shim }, plugins: [await realtimeWeriftPlugin({ packageRoot })] });
   const output = await readFile(file, 'utf8');
   assert.ok(output.includes('Copyright (c) 2020 shinyoshiaki')); assert.ok(output.includes('THE SOFTWARE IS PROVIDED "AS IS"'));
@@ -170,4 +171,140 @@ test('actual data-channel lifetime is captured before waiting in its application
     const queuedExpiry = transport.dataChannelQueue[0][3];
     assert.ok(queuedExpiry > performance.now() / 1000 && queuedExpiry <= performance.now() / 1000 + .051);
   } finally { await pc.close(); }
+});
+
+async function turnFixture(t, options = {}) {
+  const socket = createSocket('udp4'), clients = [], allocations = new Map(), requests = [], errors = [];
+  const username = 'synthetic-fixture-account', password = 'synthetic-fixture-password', realm = 'fixture-realm';
+  const key = backend.makeIntegrityKey(username, realm, password);
+  let nonce = Buffer.from('fixture-nonce-one'), challengedClose = false, droppedClose = false, quotaRefusals = 0;
+  await new Promise(resolve => socket.bind(0, '127.0.0.1', resolve));
+  const reply = (request, info, kind, attributes, authenticated = true) => {
+    const response = new backend.Message(request.messageMethod, kind, request.transactionId);
+    for (const [name, value] of Object.entries(attributes)) response.setAttribute(name, value);
+    if (authenticated) response.addMessageIntegrity(key);
+    response.addFingerprint();
+    socket.send(response.bytes, info.port, info.address);
+  };
+  socket.on('message', (bytes, info) => {
+    try {
+      const request = backend.parseMessage(bytes);
+      if (!request) return;
+      const lifetime = request.getAttributeValue('LIFETIME'), method = request.messageMethod;
+      const authenticated = Boolean(request.getAttributeValue('MESSAGE-INTEGRITY')) && Boolean(backend.parseMessage(bytes, key));
+      requests.push({ method, lifetime, authenticated, transaction: request.transactionIdHex, nonce: request.getAttributeValue('NONCE')?.toString('hex') });
+      if (!authenticated || request.getAttributeValue('USERNAME') !== username || request.getAttributeValue('REALM') !== realm) {
+        reply(request, info, backend.classes.ERROR, { 'ERROR-CODE': [401, 'Fixture challenge'], REALM: realm, NONCE: nonce }, false); return;
+      }
+      if (options.staleClose && method === backend.methods.REFRESH && lifetime === 0 && !challengedClose) {
+        challengedClose = true; nonce = Buffer.from('fixture-nonce-two');
+        reply(request, info, backend.classes.ERROR, { 'ERROR-CODE': [438, 'Fixture stale nonce'], NONCE: nonce }); return;
+      }
+      if (!request.getAttributeValue('NONCE')?.equals(nonce)) {
+        reply(request, info, backend.classes.ERROR, { 'ERROR-CODE': [438, 'Fixture stale nonce'], NONCE: nonce }); return;
+      }
+      if (method === backend.methods.ALLOCATE) {
+        if (options.refuseAllocation || allocations.size >= 8) {
+          quotaRefusals++;
+          reply(request, info, backend.classes.ERROR, { 'ERROR-CODE': [486, 'Fixture quota'] }); return;
+        }
+        allocations.set(info.port, true);
+        reply(request, info, backend.classes.RESPONSE, { LIFETIME: options.lifetime ?? 600,
+          'XOR-RELAYED-ADDRESS': ['127.0.0.1', 40000 + allocations.size], 'XOR-MAPPED-ADDRESS': [info.address, info.port] }); return;
+      }
+      if (method === backend.methods.REFRESH && lifetime === 0) {
+        if (options.dropAllClose || options.dropFirstClose && !droppedClose) { droppedClose = true; return; }
+        allocations.delete(info.port);
+        reply(request, info, backend.classes.RESPONSE, { LIFETIME: 0 }); return;
+      }
+      if (method === backend.methods.REFRESH) {
+        if (!options.holdPositiveRefresh) reply(request, info, backend.classes.RESPONSE, { LIFETIME: options.lifetime ?? 600 });
+      }
+    } catch (error) { errors.push(error.message); }
+  });
+  const create = async () => {
+    const client = await backend.createTurnClient({ address: ['127.0.0.1', socket.address().port], username, password }, { transport: 'udp' });
+    clients.push(client); return client;
+  };
+  t.after(async () => {
+    await Promise.all(clients.map(client => client.close()));
+    await new Promise(resolve => socket.close(resolve));
+    assert.deepEqual(errors, []);
+  });
+  return { create, allocations, requests, quotaRefusals: () => quotaRefusals };
+}
+
+test('actual UDP TURN teardown authenticates Refresh zero, handles stale nonce and is idempotent', async t => {
+  const fixture = await turnFixture(t, { staleClose: true }), client = await fixture.create();
+  assert.equal(fixture.allocations.size, 1);
+  const a = client.close(), b = client.close(); assert.equal(a, b);
+  await a;
+  const refreshes = fixture.requests.filter(row => row.method === backend.methods.REFRESH);
+  assert.equal(refreshes.length, 2); assert.ok(refreshes.every(row => row.lifetime === 0 && row.authenticated));
+  assert.notEqual(refreshes[0].transaction, refreshes[1].transaction); assert.notEqual(refreshes[0].nonce, refreshes[1].nonce);
+  assert.equal(fixture.allocations.size, 0); assert.equal(client.transport.closed, true);
+  assert.equal(client.realtimeRefreshAbort.signal.aborted, true); assert.equal(Object.keys(client.transactions).length, 0);
+});
+
+test('actual UDP TURN loss retries deallocation without losing the lifetime-zero request', async t => {
+  const fixture = await turnFixture(t, { dropFirstClose: true }), client = await fixture.create();
+  await client.close();
+  assert.equal(fixture.allocations.size, 0);
+  const refreshes = fixture.requests.filter(row => row.method === backend.methods.REFRESH);
+  assert.equal(refreshes.length, 2); assert.ok(refreshes.every(row => row.authenticated && row.lifetime === 0));
+});
+
+test('unresponsive TURN deallocation is bounded and always closes its socket/transactions', async t => {
+  const fixture = await turnFixture(t, { dropAllClose: true }), client = await fixture.create();
+  const begin = performance.now(); await client.close();
+  assert.ok(performance.now() - begin < 1500);
+  assert.equal(client.transport.closed, true); assert.equal(Object.keys(client.transactions).length, 0);
+  assert.ok(fixture.requests.filter(row => row.method === backend.methods.REFRESH).length <= 3);
+  // An unreachable server cannot acknowledge release; expiry remains its job.
+  assert.equal(fixture.allocations.size, 1);
+});
+
+test('two batches of eight actual TURN sockets reuse one credential without retaining quota', async t => {
+  const fixture = await turnFixture(t);
+  for (let batch = 0; batch < 2; batch++) {
+    const clients = await Promise.all(Array.from({ length: 8 }, () => fixture.create()));
+    assert.equal(fixture.allocations.size, 8);
+    await Promise.all(clients.map(client => client.close()));
+    assert.equal(fixture.allocations.size, 0);
+  }
+  assert.equal(fixture.quotaRefusals(), 0);
+});
+
+test('closing aborts the scheduled refresher and an in-flight positive refresh before release', async t => {
+  const fixture = await turnFixture(t, { lifetime: 1, holdPositiveRefresh: true }), client = await fixture.create();
+  await until(() => fixture.requests.some(row => row.method === backend.methods.REFRESH && row.lifetime === 1));
+  await client.close(); const count = fixture.requests.length;
+  await sleep(900);
+  assert.equal(fixture.requests.length, count); assert.equal(fixture.allocations.size, 0);
+  assert.equal(client.transport.closed, true); assert.equal(Object.keys(client.transactions).length, 0);
+  await assert.rejects(client.getChannel(['127.0.0.1', 40000]), /TURN transport closed/);
+  assert.equal(fixture.requests.length, count);
+});
+
+test('failed actual TURN allocation also closes its newly created transport', async t => {
+  const fixture = await turnFixture(t, { refuseAllocation: true }), closed = [];
+  const original = backend.TurnProtocol.prototype.close;
+  t.mock.method(backend.TurnProtocol.prototype, 'close', function () { closed.push(this); return original.call(this); });
+  await assert.rejects(fixture.create(), /TURN allocation failed/);
+  assert.equal(closed.length, 1); assert.equal(closed[0].transport.closed, true);
+  assert.equal(Object.keys(closed[0].transactions).length, 0); assert.equal(fixture.allocations.size, 0);
+});
+
+test('server and peer requests cannot register a late transaction after close wins address resolution', async t => {
+  const fixture = await turnFixture(t), client = await fixture.create();
+  const serverRequest = new backend.Message(backend.methods.REFRESH, backend.classes.REQUEST).setAttribute('LIFETIME', 600);
+  const peerRequest = new backend.Message(backend.methods.BINDING, backend.classes.REQUEST);
+  const peer = new backend.StunOverTurnProtocol(client);
+  // Both async address resolutions yield before transaction registration.
+  const serverRejected = assert.rejects(client.request(serverRequest, client.server), /TURN transport closed/);
+  const peerRejected = assert.rejects(peer.request(peerRequest, ['127.0.0.1', 40000], Buffer.alloc(16, 9)), /TURN transport closed/);
+  await client.close(); await Promise.all([serverRejected, peerRejected]);
+  assert.equal(Object.keys(client.transactions).length, 0);
+  assert.equal(fixture.requests.some(row => row.method === backend.methods.REFRESH && row.lifetime === 600), false);
+  assert.equal(fixture.allocations.size, 0); await peer.close();
 });

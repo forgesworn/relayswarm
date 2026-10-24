@@ -8969,7 +8969,7 @@ const sent = peer.send(alreadyEncryptedFragment, {
   deadlineMs: performance.now() + 100,
 });
 if (!sent) requestApplicationRecovery();
-// Numeric counters only, with no SDP, addresses, credentials or payloads.
+// Bounded counters and generic states; no SDP, addresses, credentials or payloads.
 const counters = peer.snapshot();
 peer.close();
 ```
@@ -9000,6 +9000,12 @@ different-lifetime and different-mode channels are refused; there is no
 automatic switch or HLS fallback. The same constraints apply to channels
 received by `RealtimePeer`. Snapshots name the selected delivery mode and
 lifetime without exposing credentials or payloads.
+
+Peer snapshots also retain a generic close reason, current/pre-close native
+connection/ICE/gathering/signalling/channel states, candidate counts and
+description-presence booleans. The pre-close state remains available after
+the underlying connection has been closed. These are in-memory observations
+on explicit request; no logger or history writer is added.
 
 For a media forwarding service, explicitly selecting 50 ms lifetime bounds
 unsent and retransmission eligibility in a correctly implemented backend.
@@ -9104,6 +9110,17 @@ licence file; the notice comes from the
 The guard does not independently pin all transitive dependencies: retain the
 consuming application's lockfile and build provenance as separate inputs.
 
+Correction revision 2 also releases a successfully allocated TURN lease on
+shutdown. It aborts the scheduled positive refresher, settles outstanding
+transactions, sends authenticated Refresh with lifetime zero to the already
+resolved server, handles stale nonce with fresh transaction IDs, then closes
+the socket in all outcomes. Up to three attempts share a 900 ms release
+budget; a server which cannot acknowledge release still owns allocation
+expiry. Closing is idempotent. Peer/server requests cannot resume after close
+and register another transaction after asynchronous address resolution.
+Failed allocation also closes its newly created transport. These corrections
+do not increase server quotas or replace them with fresh-credential churn.
+
 Run the conformance tests with the reviewed installation supplied explicitly:
 
 ```sh
@@ -9120,6 +9137,13 @@ rollback, lost control-skip recovery and expiry timer cleanup. The packet fixtur
 the retransmission trigger; production retry timers, ICE consent and native
 resource limits remain unchanged. This is SCTP wire proof, not WAN or physical
 device qualification.
+
+The same suite additionally runs the actual corrected TURN client against
+an authenticated loopback UDP fixture. It verifies nonce/authenticated release,
+lost requests, an unresponsive server, refresher/request cancellation, failed
+allocation and two successive batches of eight sockets reusing one credential
+under an eight-allocation limit. These control-plane tests do not replace
+the consuming application's public-server allocation/readback gate.
 
 The Chromium-to-native qualifier can consume the generated module explicitly:
 

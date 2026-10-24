@@ -6,7 +6,7 @@ import { dirname, resolve } from "node:path";
 import { builtinModules } from "node:module";
 
 export const weriftRealtimeRevision = Object.freeze({
-  upstream: "werift", version: "0.24.4", patch: "relayswarm-realtime-1",
+  upstream: "werift", version: "0.24.4", patch: "relayswarm-realtime-2",
   files: Object.freeze({
     "package.json": "a196305ac3e2a89431eba1cf53e56248ff01633252bbb932b5141b600f69f65f",
     "lib/index.mjs": "fa8f4b515bb99d5a3d20f96c9e14643fa8aa8fe4ccc9c2fef48eade5425f1421",
@@ -17,7 +17,7 @@ export const weriftRealtimeRevision = Object.freeze({
 // explicitly in every corrected bundle, alongside retained dependency notices.
 // https://github.com/shinyoshiaki/werift-webrtc/blob/develop/LICENSE
 const NOTICE = `/*!
-werift 0.24.4; RelaySwarm build-time realtime corrections, revision 1.
+werift 0.24.4; RelaySwarm build-time realtime corrections, revision 2.
 MIT License
 
 Copyright (c) 2020 shinyoshiaki
@@ -138,6 +138,114 @@ function corrected(source) {
   output = replaceOnce(output, "    if (this.sentQueue.length === 0) {\n      this.timer3Cancel();\n    } else if (done > 0)", "    if (this.sentQueue.length === 0) {\n      if (this.realtimeForwardTsn && uint32Gt(this.realtimeForwardTsn.cumulativeTsn, this.lastSackedTsn)) {\n        if (!this.timer3Handle) this.timer3Start();\n      } else this.timer3Cancel();\n    } else if (done > 0)");
   output = replaceOnce(output, "  updateAdvancedPeerAckPoint() {\n    if (uint32Gt", "  updateAdvancedPeerAckPoint() {\n    if (this.realtimeForwardTsn && uint32Gte(this.lastSackedTsn, this.realtimeForwardTsn.cumulativeTsn)) this.realtimeForwardTsn = void 0;\n    if (uint32Gt");
   output = replaceOnce(output, "this.isClosed = true;\n      this.timer1Cancel();", "this.isClosed = true;\n      clearTimeout(this.realtimeExpiryTimer);\n      this.realtimeExpiryTimer = void 0;\n      this.timer1Cancel();");
+  output = replaceOnce(output, `  refresh = (exp) => {
+    this.refreshHandle = cancelable(async (_, __, onCancel) => {
+      let run = true;
+      onCancel.once(() => {
+        run = false;
+      });
+      while (run) {
+        const delay = 5 / 6 * exp * 1e3;
+        log21("refresh delay", delay, { exp });
+        await setTimeout4(delay);
+        const request = new Message(4 /* REFRESH */, 0 /* REQUEST */);
+        request.setAttribute("LIFETIME", exp);
+        try {
+          const [message] = await this.requestWithRetry(request, this.server);
+          exp = message.getAttributeValue("LIFETIME");
+          log21("refresh", { exp });
+        } catch (error) {
+          log21("refresh error", error);
+        }
+      }
+    });
+  };`, `  refresh = (exp) => {
+    this.realtimeRefreshAbort?.abort();
+    if (this.realtimeClosing) return;
+    const controller = new AbortController();
+    this.realtimeRefreshAbort = controller;
+    this.refreshHandle = cancelable(async (resolve, _, onCancel) => {
+      onCancel.once(() => controller.abort());
+      try {
+        while (!this.realtimeClosing && !controller.signal.aborted && Number.isFinite(exp) && exp > 0) {
+          await setTimeout4(Math.max(100, 5 / 6 * Math.min(3600, exp) * 1e3), void 0, { signal: controller.signal });
+          if (this.realtimeClosing || controller.signal.aborted) break;
+          const request = new Message(4 /* REFRESH */, 0 /* REQUEST */);
+          request.setAttribute("LIFETIME", exp);
+          try {
+            const [message] = await this.requestWithRetry(request, this.server);
+            if (this.realtimeClosing || controller.signal.aborted) break;
+            exp = message.getAttributeValue("LIFETIME");
+          } catch { if (this.realtimeClosing || controller.signal.aborted) break; }
+        }
+      } catch {} finally { resolve(); }
+    });
+  };`);
+  output = replaceOnce(output, "  async request(request, addr, integrityKey, retransmissionsOrOptions, onRequestSent) {\n    if (this.turn.transactions", "  async request(request, addr, integrityKey, retransmissionsOrOptions, onRequestSent) {\n    if (this.turn.realtimeClosing) throw new Error('TURN transport closed.');\n    if (this.turn.transactions");
+  output = replaceOnce(output, "  async request(request, addr, _integrityKey, retransmissionsOrOptions, onRequestSent) {", "  async request(request, addr, _integrityKey, retransmissionsOrOptions, onRequestSent) {\n    if (this.realtimeClosing && !(request.messageMethod === 4 && request.getAttributeValue('LIFETIME') === 0)) throw new Error('TURN transport closed.');");
+  output = replaceOnce(output, "    const transaction = new Transaction(request, resolvedAddr, this, options);\n    this.turn.transactions", "    if (this.turn.realtimeClosing || this.turn.transport.closed || options.signal?.aborted) throw new Error('TURN transport closed.');\n    const transaction = new Transaction(request, resolvedAddr, this, options);\n    this.turn.transactions");
+  output = replaceOnce(output, "    const resolvedAddr = await resolveRequestAddress(addr);\n    const options = buildTransactionOptions(\n      this.integrityKey,", "    const resolvedAddr = await resolveRequestAddress(addr);\n    if (this.transport.closed || this.realtimeClosing && !(request.messageMethod === 4 && request.getAttributeValue('LIFETIME') === 0) || retransmissionsOrOptions?.signal?.aborted) throw new Error('TURN transport closed.');\n    const options = buildTransactionOptions(\n      this.integrityKey,");
+  output = replaceOnce(output, "  async sendData(data, addr) {\n    let channel;", "  async sendData(data, addr) {\n    if (this.realtimeClosing) return;\n    let channel;");
+  output = replaceOnce(output, "channel = await this.getChannel(addr);", "channel = await this.getChannel(addr);\n      if (this.realtimeClosing) return;");
+  output = replaceOnce(output, "      await this.getPermission(addr);\n      const indicate", "      await this.getPermission(addr);\n      if (this.realtimeClosing) return;\n      const indicate");
+  output = replaceOnce(output, `  async close() {
+    this.refreshHandle?.resolve?.();
+    await this.transport.close();
+  }
+};
+async function createTurnClient`, `  close() {
+    if (this.realtimeClosePromise) return this.realtimeClosePromise;
+    this.realtimeClosing = true;
+    this.realtimeRefreshAbort?.abort();
+    this.refreshHandle?.resolve?.();
+    for (const transaction of Object.values(this.transactions)) { try { transaction.failWithTimeout(); transaction.cancel(); } catch {} }
+    this.realtimeClosePromise = (async () => {
+      const controller = new AbortController();
+      const deadline = performance.now() + 900;
+      const timer = setTimeout(() => controller.abort(), 900);
+      const stopped = new Promise(resolve => controller.signal.addEventListener('abort', () => resolve(null), { once: true }));
+      try {
+        if (this.relayedAddress && this.integrityKey && !this.transport.closed && isIP2(this.server[0])) {
+          for (let attempt = 0; attempt < 3 && !controller.signal.aborted; attempt++) {
+            const remaining = deadline - performance.now();
+            if (remaining <= 0) break;
+            const request = new Message(4 /* REFRESH */, 0 /* REQUEST */);
+            request.setAttribute('LIFETIME', 0);
+            try {
+              const result = await Promise.race([this.request(request, this.server, void 0, {
+                retransmissions: 0, responseTimeout: Math.min(350, remaining), signal: controller.signal
+              }), stopped]);
+              if (result === null) break;
+              if (result[0].messageMethod === 4 && result[0].getAttributeValue('LIFETIME') === 0) break;
+            } catch (error) {
+              if (controller.signal.aborted) break;
+              if (error instanceof TransactionFailed) {
+                const code = error.response.getAttributeValue('ERROR-CODE')?.[0];
+                const nonce = error.response.getAttributeValue('NONCE');
+                const realm = error.response.getAttributeValue('REALM');
+                if (!nonce || !((code === 401 && realm) || (code === 438 && this.realm))) break;
+                this.server = error.addr;
+                this.nonce = nonce;
+                if (code === 401) this.realm = realm;
+                this.integrityKey = makeIntegrityKey(this.username, this.realm, this.password);
+              } else if (!(error instanceof TransactionTimeout)) break;
+            }
+          }
+        }
+      } catch {} finally {
+        clearTimeout(timer); controller.abort();
+        for (const transaction of Object.values(this.transactions)) { try { transaction.failWithTimeout(); transaction.cancel(); } catch {} }
+        this.channelBindingByAddr.clear(); this.creatingPermissionByAddr.clear();
+        this.channelByAddr = {}; this.addrByChannel = {}; this.permissionByAddr = {};
+        this.tcpBuffer = Buffer.alloc(0);
+        try { await this.transport.close(); } catch {}
+      }
+    })();
+    return this.realtimeClosePromise;
+  }
+};
+async function createTurnClient`);
+  output = replaceOnce(output, "  await turn.connectionMade();\n  return turn;", "  try { await turn.connectionMade(); return turn; }\n  catch { await turn.close(); throw new Error('TURN allocation failed.'); }");
   return output;
 }
 

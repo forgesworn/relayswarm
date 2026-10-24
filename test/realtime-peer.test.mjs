@@ -136,6 +136,21 @@ test("timeout and pre-abort retire native resources and session subscription", a
   const aborted = new RealtimePeer({ session: s, peerPubkey: "2".repeat(64), initiator: false, RTCPeerConnectionImpl: PC, signal: controller.signal, onDatagram() {} });
   await assert.rejects(aborted.start(), /Real-time peer closed/); assert.equal(s.handlers.size, 0);
 });
+test("failed-peer snapshots retain only generic pre-close ICE state and mode without SDP or credentials", async () => {
+  const s = session(), p = new RealtimePeer({ session: s, peerPubkey: '2'.repeat(64), initiator: false,
+    RTCPeerConnectionImpl: PC, maxPacketLifeTimeMs: 50, onDatagram() {} });
+  p.pc.connectionState = 'connecting'; p.pc.iceConnectionState = 'checking'; p.pc.iceGatheringState = 'complete';
+  p.pc.signalingState = 'stable'; p.pc.localDescription = { sdp: 'private-address-and-credential' };
+  p.pc.remoteDescription = { sdp: 'private-remote-address' };
+  p.close('timeout'); await assert.rejects(p.ready, /Real-time peer closed/);
+  const snapshot = p.snapshot();
+  assert.equal(snapshot.closeReason, 'timeout'); assert.equal(snapshot.delivery, 'finite-lifetime'); assert.equal(snapshot.maxPacketLifeTimeMs, 50);
+  assert.deepEqual(snapshot.nativeBeforeClose, { connectionState: 'connecting', iceConnectionState: 'checking', iceGatheringState: 'complete',
+    signalingState: 'stable', channelState: 'unknown', localDescriptionSet: true, remoteDescriptionSet: true });
+  assert.equal(snapshot.native.connectionState, 'closed');
+  assert.equal(JSON.stringify(snapshot).includes('private'), false);
+  assert.equal(JSON.stringify(snapshot).includes('2'.repeat(64)), false);
+});
 function memoryRelaySocket(events) {
   const sockets = new Set();
   return class extends EventTarget {
