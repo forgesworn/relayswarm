@@ -1,0 +1,111 @@
+name: native core release artefacts
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        description: Attach artefacts only for a tag-push caller
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  apple:
+    name: package Apple core
+    runs-on: macos-15
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Rust targets
+        working-directory: core
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin
+      - name: Build, compile the wrapper, zip and compute the SwiftPM checksum
+        run: node scripts/package-core-release.mjs apple
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: relayswarm-core-apple
+          path: artifacts/core-release/apple/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  android:
+    name: package Android core
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Rust targets and cargo-ndk
+        working-directory: core
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          cargo install --locked cargo-ndk --version 4.1.2
+      - name: Build and validate native ABI, page alignment, dependencies and AAR contents
+        run: node scripts/package-core-release.mjs android
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: relayswarm-core-android
+          path: artifacts/core-release/android/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  verify:
+    name: verify native core artefacts
+    needs: [apple, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: relayswarm-core-*
+          merge-multiple: true
+          path: artifacts/core-release
+      - run: node scripts/package-core-release.mjs verify
+
+  attach:
+    name: attach native core artefacts to the existing release
+    needs: [verify]
+    if: inputs.publish && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: relayswarm-core-*
+          merge-multiple: true
+          path: artifacts/core-release
+      - run: node scripts/package-core-release.mjs verify
+      - name: Require an existing release and attach without replacing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" artifacts/core-release/*

@@ -1282,7 +1282,9 @@ its measured scope and acceptance gaps in [Status](https://raw.githubusercontent
 | Review integrity, privacy and resource boundaries | [Threat model](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/THREAT-MODEL.md) |
 | Separate tested, released and outstanding capabilities | [Evidence and remaining work](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md) |
 | Answer common questions and compare other projects | [FAQ](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FAQ.md), [Landscape](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/LANDSCAPE.md) |
+| Compare core and imported signature verification costs | [Signature budget](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-SIGNATURE-BUDGET.md) |
 | Inspect dated measurements and reproduction commands | [Spike results](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/RESULTS.md) |
+| Prepare native binary assets without releasing | [Core packaging](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-PACKAGING.md) |
 | Follow release and documentation changes | [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md) |
 | Maintain AI entry points and check links | [Maintaining the docs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/MAINTAINING-DOCS.md) |
 
@@ -2006,6 +2008,25 @@ type; target-rendition preparation is not implemented. Unknown sizes or timing
 remain explicit. Shared Rust/WASM replay and loader on/off tests exercise the
 contract; physical devices, public NAT and field acceptance remain open.
 See [integration details](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md#experimental-peer-supply-hint).
+
+## Silent-holder deadline classification, 24 October 2026
+
+The silent-holder regression now pins two timer orders using virtual time.
+The loader registers its floor timer before issuing link requests. At an
+integer clock time it cancels the silent request at the floor (`abort`).
+With a fractional start, the link truncates its remaining duration separately
+from the transfer's floored absolute deadline; the link can time out one
+millisecond earlier (`timeout`). Both paths preserve verified delivery, origin
+fallback, source accounting and zero early-abandonment charges.
+
+Origin take-back adds verified deliveries and re-arms the transfer timer as
+work moves. Those extra callbacks can change timer registration phases under
+host load; the relative frequency of either ending is not a scheduler
+invariant. The two deadline contracts are unchanged.
+The regression asserts the request outcome and trace ordering/timestamps for
+each phase, advancing `Date.now()` with `performance.now()` and timers so
+the core link and loader share the controlled clock. This is an in-process
+clock/ordering check, not a field timing or physical-device result.
 
 ## Current delivery checkpoint
 
@@ -7701,6 +7722,176 @@ relative timings.
 Snapshots before and after browser close are separate observations. The recorder
 adds no requests or body reads and changes no playback deadline or assertion.
 It is diagnostic evidence, not ordinary network or physical-device qualification.
+
+---
+
+Source: [docs/CORE-PACKAGING.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-PACKAGING.md)
+
+# Native core release packaging
+
+This workflow prepares native core assets. It creates no tag or GitHub release,
+publishes nothing to npm, and leaves `core/apple/Package.swift` using `path:`.
+A binary URL dependency remains a separate release decision.
+
+## Triggers and permissions
+
+The existing [test workflow](https://raw.githubusercontent.com/forgesworn/relayswarm/main/.github/workflows/test.yml) calls
+[native packaging](https://raw.githubusercontent.com/forgesworn/relayswarm/main/.github/workflows/core-packages.yml) on a tag push, or
+when explicitly dispatched with `core_packages: true`. Ordinary branch pushes
+and pull requests do not run the release-packaging jobs. Their existing
+validation jobs retain their normal behaviour.
+
+The packaging-only dispatch skips the ordinary test matrix, builds Apple and
+Android artefacts, uploads them to Actions and verifies their checksums and
+source commit. Build/download jobs have read-only repository permission.
+The attachment job requires **both** a tag-push event and the caller's publish
+flag; a dispatch cannot attach assets, including when dispatched at a tag.
+
+On a tag push, attachment requires an already existing GitHub release for that
+tag. It fails if the release does not exist, and never creates one. Uploads
+omit `--clobber`, so existing release assets are not replaced. Both platforms
+must build and pass the combined verification before attachment. The caller
+grants write permission only to the reusable workflow; only its attachment
+job uses that permission.
+
+## Dry run
+
+From the candidate checkout:
+
+```sh
+gh workflow run test.yml --ref <candidate-branch> -f core_packages=true
+gh run view <run-id>
+gh run download <run-id> --pattern 'relayswarm-core-*' --dir artifacts/core-release-download
+node scripts/package-core-release.mjs verify artifacts/core-release-download
+```
+
+The entry point already exists on the default branch, so the dispatch can test
+a new reusable-workflow file on an unmerged candidate branch. Use a fresh
+empty download directory and check out the exact dispatched commit before
+verification. The verifier rejects mismatched source commits, missing or
+unexpected assets and invalid checksums. Actions artefacts are retained for
+30 days; a successful dispatch is not a release or publication.
+
+## Assets
+
+| File | Content |
+|---|---|
+| `relayswarm-core.xcframework.zip` | The binary XCFramework at the archive root, arm64 for iPhone, iOS simulator and macOS |
+| `relayswarm-core.xcframework.zip.checksum` | Actual `swift package compute-checksum` result for that archive |
+| `relayswarm-core-swift-bindings.zip` | Generated Swift wrapper and unchanged local-path `Package.swift` |
+| `relayswarm-core.aar` | Kotlin bindings and native libraries for arm64-v8a, armeabi-v7a and x86_64 |
+| `SHA256SUMS-apple`, `SHA256SUMS-android` | Digests of each platform's assets and metadata |
+| `BUILD-METADATA-apple.json`, `BUILD-METADATA-android.json` | Source commit, package version, Node and Rust versions |
+
+Extract both Apple archives into one directory to obtain the existing local
+Swift package. Its minimums are macOS 14 and iOS 16. The build compiles the
+Swift wrapper against the actual XCFramework before archiving it.
+The SwiftPM checksum describes the binary archive, not the bindings archive.
+
+The Android minimum is API 26. Consumers also add
+`net.java.dev.jna:jna:5.14.0@aar` and Kotlin 2.2 or later; the AAR does not
+embed those dependencies. The existing builder checks each ABI's machine,
+16 KiB load alignment for 64-bit libraries and system-library dependencies.
+Packaging checks the manifest, classes, consumer rules and all three libraries.
+
+## Local build and scope
+
+```sh
+npm ci
+node scripts/package-core-release.mjs apple
+node scripts/package-core-release.mjs android
+node scripts/package-core-release.mjs verify
+```
+
+Apple needs macOS/Xcode and the three Rust Apple targets. Android needs the
+SDK/NDK, SDK platform 36, cargo-ndk 4.1.2, Kotlin and the three Rust Android
+targets, as the existing builders require. Each build uses the worktree's own
+`core/target`; it sets no separate target directory or incremental policy.
+Source paths are remapped for native builds and checked before archiving.
+Source commits and hashes bind each platform's outputs to the same checkout.
+
+These checks cover build/packaging and local or CI consumption. They do not
+prove physical-device, mobile battery, public-NAT or field acceptance, and add
+no native WebRTC adapter, client application or transport dependency.
+
+---
+
+Source: [docs/CORE-SIGNATURE-BUDGET.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-SIGNATURE-BUDGET.md)
+
+# Core signature verification budget
+
+Measured 24 October 2026 at source `cd92d3690b9e32b7f5932ea0b703f42a41a13eb9`.
+This is an isolated experiment; the shipping Rust, JavaScript and committed
+WASM module are unchanged. The [raw measurements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/spikes/results/core-signature-budget-20261024.json)
+include asset hashes, per-round timings and tool versions.
+
+## Recommendation
+
+Keep signature verification in the core for now, with the WASM module served
+as a separate compressed asset. Delegating checks to the already-bundled
+`nostr-tools` saved about 3% of the combined compressed client/module bytes,
+but the measured imported-verifier path took longer per commitment. It also
+adds a host import to the currently import-free module. This result supports
+retaining one verifier across browser and native targets; it does not establish
+which isolated Schnorr implementation is intrinsically faster.
+
+## Asset sizes
+
+Both variants use the demo's minified browser ESM build, the same pinned Rust
+release configuration (`opt-level=z`, LTO, no `wasm-opt`) and a separately fetched
+module. Compression is gzip level 9 and Brotli quality 11. Totals sum the two
+separately compressed assets; they exclude HTTP headers and cache effects.
+The rebuilt baseline module is byte-identical to the committed module.
+
+| Asset | Core checks: raw / gzip / Brotli bytes | Imported nostr-tools checks: raw / gzip / Brotli bytes |
+|---|---:|---:|
+| Demo client | 823,969 / 261,901 / 216,987 | 824,082 / 261,922 / 216,961 |
+| WASM module | 406,612 / 150,394 / 122,190 | 369,884 / 137,844 / 112,356 |
+| Combined | 1,230,581 / 412,295 / 339,177 | 1,193,966 / 399,766 / 329,317 |
+
+The prototype saves 36,615 raw bytes, 12,529 gzip bytes or 9,860 Brotli bytes
+across the pair. The client already includes `nostr-tools` for relay/session
+verification; moving commitment checks does not remove it from the baseline.
+
+## Verification time
+
+Apple M1, macOS arm64, headless Chrome 155.0.8059.85, Node 24.21.0 for building and Rust
+1.94.1, nostr-tools 2.24.1 and esbuild 0.28.2. Each variant passed all 140 shared commitment/delegation/revocation
+vectors through Node/WASM and through actual Chrome before timing.
+
+| Direct-author commitment | Core mean / median / p95 ms | Imported nostr-tools mean / median / p95 ms |
+|---|---:|---:|
+| Schema 2, 970-byte event | 0.521 / 0.500 / 0.600 | 0.850 / 0.800 / 1.000 |
+| Schema 3, 64 piece hashes, 5,422-byte event | 0.649 / 0.600 / 0.700 | 1.038 / 1.000 / 1.200 |
+
+These measure the complete `verifySegmentCommitment` browser call, including
+JSON marshalling, validation, signature checks and returned-content decoding.
+The schema-3 event commits to a 4 MiB segment; the segment payload is not hashed
+or transferred in this timing. Each profile/variant has 50 warm-up calls and
+600 timed calls in six alternating-order rounds of 100. The vector timestamp
+is fixed for replay. Timings exclude network transfer, module compilation and
+player startup; Chrome's timer resolution limits individual-call precision.
+
+## Experiment boundary
+
+The baseline keeps BIP-340 checks inside `event::verify_event`. In the isolated
+prototype, the WASM implementation of that function serialises the event to a
+host import. The host parses it and calls `nostr-tools/pure.verifyEvent`,
+returning the verdict; native Rust keeps its existing implementation. The
+prototype browser adapter supplies that import. Both demo clients are built
+with identical esbuild settings. Temporary source edits are restored after
+the experiment, and neither experimental module nor adapter is shipped.
+
+Every callback parses a fresh event object, so `nostr-tools` cannot reuse an
+object's cached verification symbol. The timing includes this JSON callback
+cost and all checks the current core invokes. A different import format,
+authorisation cache or direct JavaScript verifier could change the result;
+those alternatives were not measured. Timing covers two direct-author
+profiles, while the conformance check covers all 140 shared vectors.
+
+This is one desktop loopback measurement. It does not measure mobile battery,
+physical iPhone/Android devices, public NAT, player-level latency or field load.
+It changes no release, tag, package dependency or production verification path.
 
 ---
 

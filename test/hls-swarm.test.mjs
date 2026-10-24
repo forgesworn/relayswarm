@@ -350,44 +350,55 @@ test("cold eligible links get fair exploration without displacing measured peers
 
 test("a gated viewer dials only peers whose ticket the host page admits", async () => {
   const relay = await startLocalRelay();
-  const swarms = [];
-  const admitted = [];
-  const join = (options) => {
-    const swarm = createHlsSwarm({
-      swarmId: "swarm-abcdefgh",
-      relays: [relay.url],
-      serve: true,
-      shadowSampleRate: 1,
-      RTCPeerConnectionImpl: FakePeerConnection,
-      presenceIntervalMs: 200,
-      ...options,
-    });
-    swarm.attach({ config: { loader: FakeLoader } });
-    swarms.push(swarm);
-    return swarm;
+  const pool = new RelayPool([relay.url]);
+  const peers = [], admitted = [];
+  let admitGood;
+  const goodDecision = new Promise((resolve) => { admitGood = resolve; });
+  const gated = createHlsSwarm({
+    swarmId: "swarm-abcdefgh", relays: [relay.url], serve: true, shadowSampleRate: 1,
+    RTCPeerConnectionImpl: FakePeerConnection, ticket: "good",
+    admit: async (pubkey, ticket) => { admitted.push(ticket); return ticket === "good" ? goodDecision : false; },
+  });
+  // A fixed sleep after join raced relay connection, subscription replay,
+  // signature checks and asynchronous admission under load. Observe each
+  // completed decision instead. Candidates announce once, so one candidate's
+  // repeated presence cannot stand in for another candidate being processed.
+  const waitFor = async (predicate, phase) => {
+    const deadline = performance.now() + 10_000;
+    while (!predicate() && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(predicate(), `${phase}: ${JSON.stringify(gated.metrics().peers)}`);
   };
-  const settle = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const announce = (ticket) => {
+    const peer = new RelaySwarmSession({ pool, swarmId: "swarm-abcdefgh" });
+    peer.start(); peers.push(peer);
+    peer.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: peer.pubkey }],
+      ...(ticket === undefined ? {} : { ticket }) });
+  };
   try {
-    const gated = join({
-      ticket: "good",
-      admit: async (pubkey, ticket) => {
-        admitted.push(ticket);
-        return ticket === "good";
-      },
-    });
-    join({ ticket: "forged" });
-    join({});
-    await settle(2_500);
+    gated.attach({ config: { loader: FakeLoader } });
+    await pool.connect();
+    await waitFor(() => Boolean(gated.metrics().pubkey), "viewer started");
+    announce("forged");
+    await waitFor(() => gated.metrics().peers.admitRefused === 1, "forged ticket refused");
+    assert.deepEqual(admitted, ["forged"]);
+    announce(undefined);
+    await waitFor(() => gated.metrics().peers.admitRefused === 2, "missing ticket refused");
     assert.equal(gated.metrics().peers.dialsStarted, 0, "no dial to a peer with a bad or missing ticket");
     assert.ok(gated.metrics().peers.admitRefused >= 2, "both were refused");
     assert.equal(gated.metrics().config.admit, true);
     assert.ok(!admitted.includes(undefined), "a missing ticket never reaches the host page's check");
 
-    join({ ticket: "good" });
-    await settle(2_500);
+    announce("good");
+    await waitFor(() => admitted.includes("good"), "host checking good ticket");
+    assert.equal(gated.metrics().peers.dialsStarted, 0, "pending host admission cannot start a dial");
+    admitGood(true);
+    await waitFor(() => gated.metrics().peers.dialsStarted >= 1, "admitted ticket holder dialled");
     assert.ok(gated.metrics().peers.dialsStarted >= 1, "a ticket holder is dialled");
   } finally {
-    for (const swarm of swarms) swarm.stop();
+    admitGood(false);
+    gated.stop();
+    for (const peer of peers) peer.close();
+    pool.close();
     await relay.close();
   }
 });
