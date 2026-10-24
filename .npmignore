@@ -13,3 +13,10 @@ state/
 **/publisher.json
 **/account-budget.json*
 **/youtube-url
+
+# Native build output ships as separate release assets.
+/core/target/
+/core/apple/.build/
+/core/apple/.swiftpm/
+/core/apple/relayswarm_ffiFFI.xcframework/
+/.interop-sdk/

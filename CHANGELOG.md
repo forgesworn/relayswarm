@@ -1,6 +1,22 @@
 # RelaySwarm changelog
 
-## Unreleased
+## v0.3.0 (24 October 2026)
+
+Experimental shared-core release. JavaScript/WASM, Apple and Android downloads
+have source metadata and checksum manifests. The native package retains its
+local-path Swift dependency; RelaySwarmKit adoption and field acceptance remain
+open. Session wire version 3 and metrics version 2 are unchanged.
+
+- Add opt-in advisory peer supply hints through Rust, WASM, the browser loader
+  and UniFFI; report known HAVE supply without forcing player quality.
+- Report receipt rendition-switch costs and holder observations in the trace
+  reporter, and pin deadline and gated-viewer test ordering.
+- Measure signature verification size and Chrome call cost; keep core
+  verification, with no production verifier switch.
+- Add tag-gated native release packaging, actual SwiftPM checksums and exact
+  source/hash verification, plus a reproducible JavaScript/WASM asset builder.
+- Exclude native build directories from JavaScript package tarballs.
+
 
 - Add `core/relayswarm-proto`, a Rust port of signed segment commitment,
   scoped delegation and revocation verification (schemas 1 and 2; schema 3

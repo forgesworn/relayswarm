@@ -4,28 +4,19 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.2.1 is the published experimental GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1).
-It follows v0.2.0, which added the broadcaster and production feature work to
-v0.1.0, and adds holder-discovery changes; its
-[delivery requirements](docs/PRODUCTION-READINESS.md) remain open. MIT licensed,
-Node 22.13+; CI uses Node 24. The npm registry is unpublished.
+**Status:** [v0.3.0 is the experimental GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.3.0).
+It adds the opt-in Rust/WASM core, experimental piece commitments and
+multi-holder transfer, Swift/Kotlin bindings, advisory peer supply hints and
+switch-cost reporting. JavaScript/WASM and native core downloads have separate
+checksums. MIT licensed, Node 22.13+; CI uses Node 24. The npm registry is
+unpublished.
 
-The [current experimental pilot](docs/STATUS.md#current-delivery-checkpoint)
-runs exact `5f2ece0`. Its nine required CI jobs, fresh 284-member package
-consumption and guarded HTTPS deployment passed. Bounded rendition-neighbour
-discovery and cold-peer deadline allocation are deployed. Nostr and an authenticated host-supplied account API are
-implemented; integrating websites supply their authentication.
-
-The agreed feature surfaces are implemented, but production acceptance is
-incomplete. The latest fourteen-role qualifier completed its 300-second
-measurement and passed 14 of 16 gates. It is RED because only one of four
-receivers obtained high-quality peer media and one contributor uploaded nothing
-during measurement; its cleanup passed. The pilot uses the explicit
-900-request address budget; the default remains 600. Matching capacity, two-hour/churn,
-natural expiry, physical/browser breadth, difficult networks, measured wire/cost
-benefit and downloaded-release acceptance remain open. v0.2.1 is published as
-an experimental prerelease. See the
-[P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
+Production acceptance remains incomplete. The dated
+[pilot evidence](docs/STATUS.md#current-delivery-checkpoint) records earlier
+controlled trials and their open sustained-operation, physical-device,
+difficult-network and measured-benefit gates. This release does not deploy or
+qualify that pilot. See the [delivery requirements](docs/PRODUCTION-READINESS.md)
+and [current source evidence](docs/STATUS.md).
 
 [Documentation](docs/README.md) · [Installation](docs/GETTING-STARTED.md) ·
 [hls.js integration](INTEGRATION.md) · [API reference](docs/API.md) ·
@@ -37,7 +28,7 @@ an experimental prerelease. See the
 Install ffmpeg with libx264 for synthetic media, then:
 
 ```sh
-git clone --branch v0.2.1 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.3.0 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -71,11 +62,12 @@ native fallback. See [broadcasting](docs/BROADCASTING.md),
 
 ## Install the library
 
-The release supplies an installable tarball, a standalone browser ESM bundle
-and SHA-256 checksums:
+The release supplies an installable tarball, a standalone browser ESM bundle,
+the optional WASM module and SHA-256 checksums. Apple and Android core assets
+are described in the [packaging guide](docs/CORE-PACKAGING.md):
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.1/relayswarm-0.2.1.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.3.0/relayswarm-0.3.0.tgz
 ```
 
 ```js
@@ -239,7 +231,7 @@ The canonical public repository is
 [`llms.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms.txt)
 is a short index with direct Markdown links;
 [`llms-full.txt`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms-full.txt)
-is generated from the maintained guides. Published code is pinned at `v0.2.1`;
+is generated from the maintained guides. Published code is pinned at `v0.3.0`;
 documentation on `main` can include later corrections. [Maintaining the docs](docs/MAINTAINING-DOCS.md)
 explains regeneration and publication checks. Release assets are never
 replaced after publication. [Changelog](CHANGELOG.md) records
