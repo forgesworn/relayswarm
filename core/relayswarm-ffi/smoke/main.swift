@@ -266,7 +266,7 @@ final class DiscoveryRun {
             [snapshot.candidates, snapshot.contexts, snapshot.requestedKeys, snapshot.replacementSpent, snapshot.opportunityActive,
              snapshot.remainingMs, snapshot.vacancyReserved,
              [counters.checks, counters.replacements, counters.expired, counters.opened, counters.verified,
-              counters.staleHolder, counters.staleBlocked]] as [Any],
+              counters.staleHolder, counters.staleBlocked, counters.heldMiss, counters.rearmed, counters.victimUnhelpful, counters.victimServing, counters.victimConsumer, counters.unmetNoHint, counters.unmetIneligible]] as [Any],
         ] as [Any])
     }
 }

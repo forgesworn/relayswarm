@@ -4,12 +4,12 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.3.0 is the experimental GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.3.0).
-It adds the opt-in Rust/WASM core, experimental piece commitments and
-multi-holder transfer, Swift/Kotlin bindings, advisory peer supply hints and
-switch-cost reporting. JavaScript/WASM and native core downloads have separate
-checksums. MIT licensed, Node 22.13+; CI uses Node 24. The npm registry is
-unpublished.
+**Status:** [v0.4.0 is the experimental GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.0).
+It integrates holder recovery with the Rust/WASM core, accepted connection and
+verified-media observations, bounded cancellation/draining and relay recovery.
+JavaScript/WASM and native core downloads have separate checksums. Native
+real-time transport remains experimental. MIT licensed, Node 22.13+; CI uses
+Node 24. The npm registry is unpublished.
 
 Production acceptance remains incomplete. The dated
 [pilot evidence](docs/STATUS.md#current-delivery-checkpoint) records earlier
@@ -28,7 +28,7 @@ and [current source evidence](docs/STATUS.md).
 Install ffmpeg with libx264 for synthetic media, then:
 
 ```sh
-git clone --branch v0.3.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.4.0 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -132,11 +132,17 @@ flowchart TB
 
 Other approaches and the narrow comparison are in [Landscape](docs/LANDSCAPE.md).
 [RelaySwarmKit](https://github.com/forgesworn/relayswarm-kit) is a separate Swift
-signalling/transport project. Published Kit v0.5.0 supports session version 3
-and signed media. Its public SDK received verified author/delegate HLS bytes
-from the production browser loader and rejected corruption and revocation.
+signalling/transport project. Kit v0.6.0 adopts the released Rust core and
+supports session version 3, signed schemas 1/2/3 and explicit piece transfers.
+Its public SDK received verified author/delegate HLS bytes from two production
+browser peers and rejected corruption, signature tampering and revocation.
 That measured macOS arm64/Chrome loopback journey and its boundaries are in the
 [protocol draft](docs/NIP-DRAFT.md); physical-device and NAT acceptance remain open.
+
+These are libraries; running a ForgeSworn-hosted service is not required.
+Applications choose their HLS origin, signalling relays and network policy.
+The interoperability fixtures use temporary loopback servers and close them
+after each run. Historical pilot deployments are separate, dated evidence.
 
 ## Evidence
 

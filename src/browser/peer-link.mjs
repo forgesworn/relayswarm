@@ -49,6 +49,9 @@ export class PeerLink {
     this.contribution = { serving: false, rendition: null, at: 0 };
     this.fetching = new Map();
     this.renditions = new Map();
+    // Rendition to the last time the remote announced it in a contribution message, serving or not.
+    // Unlike `renditions` a non-serving announcement keeps it. At most 8 entries. Local advice only.
+    this.announced = new Map();
     this.onClose = onClose;
     this.onUploadCancelled = onUploadCancelled;
     this.maxQueuedRequests = maxQueuedRequests;
@@ -205,6 +208,7 @@ export class PeerLink {
     this.closeReason = CLOSE_REASONS.has(reason) ? reason : "host";
     this.fetching.clear();
     this.renditions.clear();
+    this.announced.clear();
     this.pending?.finish(null, this.closeReason === "send-error" ? "send-error" : "closed");
     try { this.channel.close(); } catch {}
     try { this.pc.close(); } catch {}
@@ -248,6 +252,11 @@ export class PeerLink {
       case "contribution": {
         if (typeof message.serving !== "boolean" || (message.rendition !== null && (typeof message.rendition !== "string" || message.rendition.length > 2048))) return;
         this.contribution = { serving: message.serving, rendition: message.rendition, at: Date.now() };
+        if (message.rendition !== null) {
+          this.announced.delete(message.rendition);
+          if (this.announced.size >= 8) this.announced.delete(this.announced.keys().next().value);
+          this.announced.set(message.rendition, Date.now());
+        }
         if (!message.serving) { this.fetching.clear(); this.renditions.clear(); }
         else if (message.rendition !== null) {
           for (const [rendition, seen] of this.renditions) if (seen < Date.now() - 30_000) this.renditions.delete(rendition);

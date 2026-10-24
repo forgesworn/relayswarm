@@ -3,7 +3,7 @@
 > Experimental peer-assisted HLS video delivery with WebRTC data channels,
 > Nostr relay rendezvous, author-signed segment commitments and an hls.js
 > loader. A separate native Node path uses HyperDHT and Noise. MIT licensed;
-> v0.3.0 is the experimental prerelease; production acceptance remains open.
+> v0.4.0 is the experimental prerelease; production acceptance remains open.
 
 The canonical repository is https://github.com/forgesworn/relayswarm. Node 22.13+
 is required; CI uses Node 24. Public distribution includes an installable
@@ -14,9 +14,10 @@ source demo runs with `npm run demo`; synthetic media needs ffmpeg/libx264.
 The original WebRTC CLI signs plaintext SDP and uses a digest supplied by its
 seeder. The browser loader and shared session wire version 3 use pairwise
 NIP-44-encrypted signals; the native path encrypts dial authorisation and uses
-Noise for transfer. Package version 0.3.0, session version 3, commitment schemas
-1/2/3 (3 experimental) and metrics version 2 are distinct. Published Swift RelaySwarmKit v0.5.0
-supports wire version 3 and signed media, with actual SDK/Chrome loopback proof;
+Noise for transfer. Package version 0.4.0, session version 3, commitment schemas
+1/2/3 (3 experimental) and metrics version 2 are distinct. Swift RelaySwarmKit v0.6.0
+adopts the released core and supports wire version 3 and signed schemas 1/2/3,
+with actual SDK/two-holder Chrome loopback proof;
 physical Apple-device and public-NAT compatibility remain unverified.
 
 Browser modes are off (origin-only), shadow (origin playback plus extra sampled
@@ -66,16 +67,27 @@ Peer-first media loads/bytes avoided are not net connection-data savings, and
 upload counters measure committed media payload rather than acknowledged delivery.
 Pending durable reservations can consume quota without entering those counters.
 Documentation on main can include corrections after the immutable releases.
-v0.3.0 adds the opt-in Rust/WASM core, experimental schema 3 piece commitments
+v0.3.0 added the opt-in Rust/WASM core, experimental schema 3 piece commitments
 and multi-holder transfers, UniFFI Swift/Kotlin bindings, advisory peer supply
 hints and receipt switch-cost reporting. Core bindings do not include a native
-WebRTC adapter or client. RelaySwarmKit has not adopted this core. The scheduler
+WebRTC adapter or client. RelaySwarmKit v0.6.0 separately adopts this core. The scheduler
 retains the 32 KiB/s cold floor and at most three holders.
+
+v0.4.0 integrates holder recovery across JavaScript and the core, accepted
+connection/verified-media observations, partial-progress retention, reliable
+channel cancellation draining and first-healthy-relay recovery. The old R70
+qualifier passed 15 of 16 gates; the integrated source is not field-qualified.
+Later main-branch source preserves the measured HTTP recovery reserve and adds
+opt-in cached peer races beside immediate HTTP when no safe peer wait remains.
+Only accepted verified media counts; partial competing HTTP can still transfer.
 
 Production acceptance remains open. Dated pilot records retain their exact
 sources and RED/open sustained-operation, physical-device, difficult-network
 and net-benefit gates. This release does not deploy or qualify the pilot.
 See the P01-P12 checklist and dated status evidence.
+RelaySwarm and Kit are libraries; no ForgeSworn-hosted service is required.
+Applications choose their origin, relays and policy. Automated interoperability
+fixtures use temporary loopback servers, not a public pilot deployment.
 
 ## Documentation
 
@@ -104,7 +116,7 @@ See the P01-P12 checklist and dated status evidence.
 ## Evidence and maintenance
 
 - [Evidence and remaining work](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md): Dated release, CI/soak measurements, distribution proof, deterministic silent-holder deadline classifications and unverified gates.
-- [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): Shared-core v0.3.0 changes and published release history.
+- [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): Integrated v0.4.0 changes and published release history.
 - [Maintaining the docs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/MAINTAINING-DOCS.md): AI-context generation, link/freshness checks and public metadata.
 
 ## Optional

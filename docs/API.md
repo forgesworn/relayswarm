@@ -3,8 +3,8 @@
 [Documentation](README.md) · [Installation](GETTING-STARTED.md) ·
 [hls.js integration](../INTEGRATION.md)
 
-This describes current source, including additions after the published v0.3.0
-experimental prerelease. Package version `0.3.0`, session wire version `3`,
+This describes current source, including additions after the experimental
+v0.4.0 source snapshot. Package version `0.4.0`, session wire version `3`,
 segment-commitment schemas `1`/`2`/`3` (3 experimental) and metrics snapshot
 version `2` are different version numbers. Source exports and protocol fields
 are not a stable interoperability promise; immutable release assets retain
@@ -252,7 +252,7 @@ const publisher = await createHlsPublisher({
 | `maxConcurrent` | `8` | Simultaneous signing work, configurable from 1 to 64 |
 | `maxCacheEntries` | `512` | Entries in each bounded hash/commitment cache, configurable from 1 to 4,096 |
 | `allowEncryptedMedia` | `false` | Explicit AES-128 ciphertext publication; local keys remain HTTP-only |
-| `pieceCommitments` | `false` | Experimental: sign exact-playlist contexts as schema 3 (one SHA-256 per piece) instead of schema 2. v0.2.1 and RelaySwarmKit v0.5.0 receivers reject schema 3 and load those segments from origin |
+| `pieceCommitments` | `false` | Experimental: sign exact-playlist contexts as schema 3 (one SHA-256 per piece) instead of schema 2. v0.2.1 and RelaySwarmKit v0.5.0 receivers reject schema 3; Kit v0.6.0 has an explicit schema-3 piece API |
 | `commitmentSecretKey` / `delegation` | author key / none | Author-scoped delegated commitment signing; an externally authored event permits operation without the author secret |
 | `revokedDelegationIds` / `delegationRevocations` | empty arrays | Host-trusted current revocation view; no automatic global lookup |
 

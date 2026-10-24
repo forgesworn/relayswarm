@@ -19,10 +19,11 @@ import { startLocalRelay } from "./support/local-relay.mjs";
 const execute = promisify(execFile), digest = (value) => createHash("sha256").update(value).digest("hex");
 const sdk = resolve(process.env.RELAYSWARM_KIT_DIR ?? "../relayswarm-kit");
 const chrome = process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const pieceMode = process.argv.includes("--pieces");
 const evidenceFlag = process.argv.indexOf("--evidence"), evidencePath = resolve(evidenceFlag < 0 ? "artifacts/current-sdk-browser-interop.json" : process.argv[evidenceFlag + 1]);
 if (process.platform !== "darwin" || process.arch !== "arm64") throw new Error("The current SDK transport binary requires macOS arm64.");
 await mkdir(dirname(evidencePath), { recursive: true });
-const sourceFiles = ["src/relay-session.mjs", "src/browser/hls-swarm.mjs", "src/browser/peer-link.mjs", "src/browser/segment-commitment.mjs", "src/hls-publisher.mjs", "src/hls-media-catalogue.mjs", "src/publisher-state.mjs"];
+const sourceFiles = ["src/relay-session.mjs", "src/browser/hls-swarm.mjs", "src/browser/peer-link.mjs", "src/browser/segment-commitment.mjs", "src/browser/core-wasm.mjs", "src/browser/core-peer-link.mjs", "src/browser/relayswarm-core.wasm", "src/hls-publisher.mjs", "src/hls-media-catalogue.mjs", "src/publisher-state.mjs"];
 const javascriptHead = (await execute("git", ["rev-parse", "HEAD"])).stdout.trim();
 const sourceHashes = Object.fromEntries(await Promise.all(sourceFiles.map(async (path) => [path, digest(await readFile(path))])));
 const viewerSource = `import Hls from "hls.js";
@@ -30,7 +31,8 @@ import {createHlsSwarm} from "${resolve("src/browser/hls-swarm.mjs")}";
 const config=await fetch('/configuration.json').then(r=>r.json()), scenario=new URLSearchParams(location.search).get('scenario');
 const microphone=await navigator.mediaDevices.getUserMedia({audio:true});microphone.getTracks().forEach(t=>t.stop());
 let checks=0;
-const swarm=createHlsSwarm({mode:'shadow',swarmId:config.swarmId,relays:[config.relayUrl],streamEvent:config.streamEvent,serve:true,
+const swarm=createHlsSwarm({mode:config.pieceMode?'peer-first':'shadow',
+ ...(config.pieceMode?{coreWasm:'/relayswarm-core.wasm',multiHolder:true,getCommitment:async()=>null}:{}),swarmId:config.swarmId,relays:[config.relayUrl],streamEvent:config.streamEvent,serve:true,
  maxPeers:2,maxUploadPeers:2,maxUploadBytesPerSession:4*1024*1024,maxUploadBytesPerSecond:2*1024*1024,iceServers:[],shadowSampleRate:1,
  presenceIntervalMs:1000,ticket:'browser-admission',admit:async(_pub,ticket)=>{if(ticket!=='fixture-admission')return false;checks++;
  if(scenario==='revoke-during'&&checks===3){await fetch('/revoke-during',{method:'POST'});await new Promise(r=>setTimeout(r,500));}return true;},
@@ -57,11 +59,11 @@ try {
   work = await mkdtemp(join(tmpdir(), "current-sdk-interop-"));
   fixture = await createFmp4Fixture({ seconds: 8 });
   const authorKey = generateSecretKey(), delegateKey = generateSecretKey();
-  const publisher = await createHlsPublisher({ mediaDir: fixture.directory, secretKey: authorKey });
+  const publisher = await createHlsPublisher({ mediaDir: fixture.directory, secretKey: authorKey, pieceCommitments: pieceMode });
   const expected = { path: "/media/low/segment-00000.m4s", playlist: "/media/low/index.m3u8", level: 0, sequence: 0, discontinuity: 0, mediaType: "main" };
   const realBytes = await readFile(join(fixture.directory, "low/segment-00000.m4s"));
   const delegation = createCommitmentDelegation({ secretKey: authorKey, streamEvent: publisher.streamEvent, swarmId: publisher.swarmId, delegatePubkey: getPublicKey(delegateKey), renditions: [expected.playlist] });
-  const delegated = await createHlsPublisher({ mediaDir: fixture.directory, streamEvent: publisher.streamEvent, swarmId: publisher.swarmId, commitmentSecretKey: delegateKey, delegation });
+  const delegated = await createHlsPublisher({ mediaDir: fixture.directory, streamEvent: publisher.streamEvent, swarmId: publisher.swarmId, commitmentSecretKey: delegateKey, delegation, pieceCommitments: pieceMode });
   const revocation = createCommitmentRevocation({ secretKey: authorKey, streamEvent: publisher.streamEvent, swarmId: publisher.swarmId, delegation });
   relay = await startLocalRelay();
   const bundle = await build({ stdin: { contents: viewerSource, resolveDir: process.cwd(), sourcefile: "current-sdk-viewer.mjs" }, bundle: true, format: "esm", platform: "browser", write: false, logLevel: "silent" });
@@ -71,7 +73,8 @@ try {
     try {
       if (url.pathname === "/") return response.writeHead(200, { "content-type": "text/html" }).end('<!doctype html><video autoplay muted playsinline></video><script type="module" src="/viewer.js"></script>');
       if (url.pathname === "/viewer.js") return response.writeHead(200, { "content-type": "text/javascript" }).end(bundle.outputFiles[0].contents);
-      if (url.pathname === "/configuration.json") return response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ swarmId: publisher.swarmId, streamEvent: publisher.streamEvent, relayUrl: relay.url }));
+      if (url.pathname === "/relayswarm-core.wasm") return response.writeHead(200, { "content-type": "application/wasm" }).end(await readFile("src/browser/relayswarm-core.wasm"));
+      if (url.pathname === "/configuration.json") return response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ swarmId: publisher.swarmId, streamEvent: publisher.streamEvent, relayUrl: relay.url, pieceMode }));
       if (url.pathname === "/revoke-during") { revocations = [revocation]; return response.writeHead(200).end(); }
       if (url.pathname === "/policy.json") return response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ revocations }));
       if (url.pathname === "/commitment") {
@@ -93,16 +96,23 @@ try {
   const results = [];
   for (const scenario of ["author", "delegate", "corrupt", "tampered", "revoked", "revoke-during"]) {
     revocations = [];
-    const page = await browser.newPage();
-    await page.goto(`${base}/?scenario=${scenario}`);
-    await page.waitForFunction(() => window.interop?.fragments() >= 2 && window.interop.video.currentTime > 0 && window.interop.swarm.metrics().pubkey, { timeout: 15000 });
-    const peer = await page.evaluate(() => window.interop.swarm.metrics().pubkey);
-    const wantedKey = digest(`${publisher.swarmId}\n${expected.path}`), presenceDeadline = Date.now() + 5000;
-    while (!relay.events.some((event) => event.kind === 24170 && event.pubkey === peer && JSON.parse(event.content).have?.includes(wantedKey))) {
-      if (Date.now() > presenceDeadline) throw new Error("Browser did not advertise its held HLS media through the public session contract.");
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    const pages = [], peers = [];
+    for (let index = 0; index < (pieceMode ? 2 : 1); index++) {
+      const page = await browser.newPage(); pages.push(page);
+      await page.goto(`${base}/?scenario=${scenario}`);
+      await page.waitForFunction(() => window.interop?.fragments() >= 2 && window.interop.video.currentTime > 0 && window.interop.swarm.metrics().pubkey, null, { timeout: 15000 });
+      const peer = await page.evaluate(() => window.interop.swarm.metrics().pubkey); peers.push(peer);
+      const wantedKey = digest(`${publisher.swarmId}\n${expected.path}`), presenceDeadline = Date.now() + 5000;
+      while (!relay.events.some((event) => event.kind === 24170 && event.pubkey === peer && (() => {
+        const presence = JSON.parse(event.content);
+        return presence.have?.includes(wantedKey) && (!pieceMode || presence.transports?.some(transport => transport.obj === 2));
+      })())) {
+        if (Date.now() > presenceDeadline) throw new Error("Browser did not advertise its held media and requested framing through the public session contract.");
+        await new Promise(resolvePromise => setTimeout(resolvePromise, 50));
+      }
     }
-    const config = { scenario, relayUrl: relay.url, swarmId: publisher.swarmId, peerPubkey: peer, trustedAuthor: publisher.streamEvent.pubkey,
+    const page = pages[0], peer = peers[0];
+    const config = { scenario, pieceMode, peerPubkeys: peers, relayUrl: relay.url, swarmId: publisher.swarmId, peerPubkey: peer, trustedAuthor: publisher.streamEvent.pubkey,
       streamEvent: publisher.streamEvent, delegation: scenario.startsWith("delegate") || scenario.startsWith("revoke") ? delegation : null,
       revocations: scenario === "revoked" ? [revocation] : [], policyUrl: scenario === "revoke-during" ? `${base}/policy.json` : null,
       commitmentUrl: `${base}/commitment?scenario=${scenario}`, expected };
@@ -111,23 +121,41 @@ try {
     const timeout = setTimeout(() => sdkClient.process.kill("SIGTERM"), 30000);
     const messages = await sdkClient.done.finally(() => clearTimeout(timeout)), receipt = messages.find((message) => message.type === "sdk-receipt");
     const shouldPass = ["author", "delegate"].includes(scenario);
-    assert.equal(receipt?.ok, shouldPass, JSON.stringify({ scenario, messages }));
+    if (receipt?.ok !== shouldPass) {
+      const failure = { scenario, pieceMode, messages, browserMetrics: await Promise.all(pages.map(page => page.evaluate(() => window.interop.swarm.metrics()))) };
+      await writeFile(evidencePath.replace(/\.json$/u, '-failure.json'), JSON.stringify(failure, null, 2) + "\n");
+      assert.equal(receipt?.ok, shouldPass, JSON.stringify(failure));
+    }
     if (shouldPass) { assert.equal(receipt.sha256, digest(realBytes)); assert.equal(receipt.objectBytes, realBytes.length); }
-    if (scenario === "corrupt") assert.equal(receipt.error, "integrity");
+    if (scenario === "corrupt") assert.equal(receipt.error, pieceMode ? "unavailable" : "integrity");
     if (scenario.startsWith("revoke")) assert.equal(receipt.error, "revoked");
     if (scenario === "tampered") assert.equal(receipt.error, "invalidCommitment");
     assert.equal(receipt.wireAdapter, false);
-    const uploadedBytes = await page.evaluate(() => window.interop.swarm.metrics().bytes.uploaded);
-    if (["author", "delegate", "corrupt", "revoke-during"].includes(scenario)) assert.equal(uploadedBytes, realBytes.length, `Expected actual Chrome media transfer for ${scenario}`);
+    const uploaded = await Promise.all(pages.map(page => page.evaluate(() => window.interop.swarm.metrics().bytes.uploaded)));
+    const uploadedBytes = uploaded.reduce((total, value) => total + value, 0);
+    if (pieceMode && shouldPass) {
+      assert.equal(receipt.commitmentSchema, 3); assert.equal(receipt.framing, 2);
+      assert.equal(receipt.peerBytes, realBytes.length); assert.equal(receipt.originBytes, 0);
+      assert.equal(receipt.holdersUsed, Math.min(2, Math.ceil(realBytes.length / 65536)));
+      assert.equal(uploaded.filter(bytes => bytes > 0).length, receipt.holdersUsed);
+    }
+    if (pieceMode && scenario === "corrupt") {
+      // A valid piece may arrive before another holder is banned. The core
+      // can ask that remaining holder for the missing piece before discovering
+      // its corrupt response too. Accepted uploads therefore include retries.
+      assert.ok(uploadedBytes > 0 && uploadedBytes <= 2 * realBytes.length,
+        `Corrupt two-holder traffic must remain bounded: ${uploadedBytes}`);
+      assert.equal(receipt.objectBytes, 0, "corrupt pieces never produce delivered media");
+    } else if (["author", "delegate", "corrupt", "revoke-during"].includes(scenario)) assert.equal(uploadedBytes, realBytes.length, `Expected actual Chrome media transfer for ${scenario}`);
     else assert.equal(uploadedBytes, 0);
-    results.push({ ...receipt, browser: { currentTime: await page.evaluate(() => window.interop.video.currentTime), uploadedBytes, admissionChecks: await page.evaluate(() => window.interop.checks()) } });
-    await page.evaluate(() => { window.interop.swarm.stop(); window.interop.hls.destroy(); }); await page.close();
+    results.push({ ...receipt, browser: { holders: pages.length, perHolderUploadedBytes: uploaded, currentTime: await page.evaluate(() => window.interop.video.currentTime), uploadedBytes, admissionChecks: await page.evaluate(() => window.interop.checks()) } });
+    for (const holder of pages) { await holder.evaluate(() => { window.interop.swarm.stop(); window.interop.hls.destroy(); }); await holder.close(); }
   }
   assert.equal((await execute("git", ["-C", sdk, "rev-parse", "HEAD"])).stdout.trim(), sdkHead, "SDK commit changed during acceptance");
   for (const path of sdkFiles) assert.equal(digest(await readFile(join(sdk, path))), sdkSourceHashes[path], `SDK source changed during acceptance: ${path}`);
   for (const path of sourceFiles) assert.equal(digest(await readFile(path)), sourceHashes[path], `JavaScript module changed during current SDK acceptance: ${path}`);
   const evidence = { v: 1, measuredAt: new Date().toISOString(), toolkit: { baseCommit: sdkHead, sourceHashes: sdkSourceHashes }, javascript: { baseCommit: javascriptHead, sourceHashes },
-    currentSDKAPIs: true, wireAdapter: false, chromePlayback: true, generatedMedia: "fMP4 HLS H.264/AAC", actualMediaBytes: realBytes.length,
+    currentSDKAPIs: true, wireAdapter: false, commitmentSchema: pieceMode ? 3 : 2, objectFraming: pieceMode ? 2 : 1, fixtureTimingEstimates: pieceMode, chromePlayback: true, generatedMedia: "fMP4 HLS H.264/AAC", actualMediaBytes: realBytes.length,
     scope: "macOS arm64 Swift SDK and desktop Chrome, loopback only", results,
     plaintextNetworkSdpOnRelay: !relay.events.filter((event) => event.kind === 24171).every((event) => !event.content.includes("v=0") && !event.content.includes("candidate:")) };
   assert.equal(evidence.plaintextNetworkSdpOnRelay, false);

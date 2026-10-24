@@ -842,6 +842,11 @@ impl PeerSelection {
         self.lock().record(now, link, elapsed_ms, bytes);
     }
 
+    /// Mark a host-granted trial without recording delivery evidence.
+    pub fn mark_selected(&self, link: u64) {
+        self.lock().mark_selected(link);
+    }
+
     /// Drop a closed link's history.
     pub fn forget(&self, link: u64) {
         self.lock().forget(link);
@@ -1029,6 +1034,13 @@ pub struct DiscoveryCounters {
     pub verified: u64,
     pub stale_holder: u64,
     pub stale_blocked: u64,
+    pub held_miss: u64,
+    pub rearmed: u64,
+    pub victim_unhelpful: u64,
+    pub victim_serving: u64,
+    pub victim_consumer: u64,
+    pub unmet_no_hint: u64,
+    pub unmet_ineligible: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
@@ -1037,6 +1049,7 @@ pub struct DiscoverySnapshot {
     pub contexts: u32,
     pub requested_keys: u32,
     pub replacement_spent: u32,
+    pub replacement_rearm_ms: u64,
     pub opportunity_active: bool,
     pub remaining_ms: u64,
     pub vacancy_reserved: bool,
@@ -1117,6 +1130,11 @@ impl NeighbourDiscovery {
     /// The holder answered ahead of the deadline; clears its misses here.
     pub fn holder_ahead(&self, context: Option<u64>, pubkey: String) {
         self.lock().discovery.holder_ahead(context.map(ContextId::from_value), &pubkey);
+    }
+
+    /// Re-arm current demand after the bounded interval when the host has no fresh serving link.
+    pub fn rearm(&self, now: u64, context: u64, all_stale: bool) -> bool {
+        self.lock().discovery.rearm(now, ContextId::from_value(context), all_stale)
     }
 
     /// The holder has missed on enough distinct keys for long enough.
@@ -1254,6 +1272,7 @@ impl NeighbourDiscovery {
             contexts: snapshot.contexts as u32,
             requested_keys: snapshot.requested_keys as u32,
             replacement_spent: snapshot.replacement_spent as u32,
+            replacement_rearm_ms: discovery::REPLACEMENT_REARM_MS,
             opportunity_active: snapshot.opportunity_active,
             remaining_ms: snapshot.remaining_ms,
             vacancy_reserved: snapshot.vacancy_reserved,
@@ -1265,6 +1284,13 @@ impl NeighbourDiscovery {
                 verified: counters.verified,
                 stale_holder: counters.stale_holder,
                 stale_blocked: counters.stale_blocked,
+                held_miss: counters.held_miss,
+                rearmed: counters.rearmed,
+                victim_unhelpful: counters.victim_unhelpful,
+                victim_serving: counters.victim_serving,
+                victim_consumer: counters.victim_consumer,
+                unmet_no_hint: counters.unmet_no_hint,
+                unmet_ineligible: counters.unmet_ineligible,
             },
         }
     }

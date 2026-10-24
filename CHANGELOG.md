@@ -1,5 +1,83 @@
 # RelaySwarm changelog
 
+## Unreleased
+
+- Preserve the measured per-load HTTP recovery reserve when a multi-holder
+  deadline moves unfinished pieces to origin. Retain bounded, URL-free range
+  outcome counters so aborts, timeouts and incorrect response sizes are distinct.
+- Add opt-in `zeroBudgetPeerRace`: start the normal HTTP request immediately
+  and race only an already advertised cached schema-3 object. Only a complete
+  verified winner reaches the player; stopping the swarm leaves pending HTTP
+  running, while loader cancellation stops both arms. Defaults are unchanged.
+- Apply accepted-contributor holder recovery to both normal peer-first loads
+  and cached races; all-origin and unsuccessful peer work remain neutral.
+
+## v0.4.0 (24 October 2026)
+
+The old JavaScript field qualifier R70 passed 15 of 16 gates at `20693ea`;
+in-place link renewal failed. This integration with the current core is not
+field-qualified. High-quality delivery margin and sustained acceptance remain
+open. See [Status](docs/STATUS.md).
+
+- Count a linked holder that was asked for a segment and did not deliver it in
+  time as a miss. Previously a holder whose HAVE held the key was treated as
+  ahead and cleared, so one that was ahead but too slow was never stale and kept
+  neighbour discovery off. Each single-holder load is decided once, when it ends. A verified delivery clears only the link it came from. A load that goes
+  to origin charges only the links that were judged: those that were asked and
+  did not deliver in time, and at `peerNoFit` those whose own estimate did not
+  fit. Declines made on swarm-wide estimates or the buffer charge no holder, and
+  every serving link takes a miss only when no link held the key. A stale link's
+  HAVE no longer keeps a context met or the link protected as a victim. Loader
+  aborts, `stop()`, commitment failures and integrity failures record nothing
+  against the link concerned. The thresholds (four misses on distinct segments
+  over at least ten seconds) are unchanged.
+- Let a spent replacement re-arm once, at most every twenty seconds per context,
+  when no verified peer delivery has happened since it was spent and every link
+  serving that rendition is stale or none serves it. The 15-second discovery
+  window, one attempt at a time, the eviction cooldown, `maxPeers` and ticket
+  gating are unchanged. The interval is an internal constant, not an option.
+- Add local diagnostics: `neighbourDiscovery.counters.heldMiss` and `rearmed`,
+  `neighbourDiscovery.replacementRearmMs`, and `heldMissHolders` on the
+  eligibility rows that carry holder labels. They sit in the local snapshot and
+  are not part of the numeric operator report.
+- Give a linked holder that holds the demanded key but has never been asked one
+  request when the viewer's shared projection is late. One slow holder's partial
+  transfers set the projected rate for every link, so a later holder could be
+  declined unasked. Only when some link held the key at entry, the room exceeds
+  the median first byte and the holder is open, free, unbanned and not stale. At
+  most one trial per load and per link; the pre-request checks, abandonment and
+  held-miss charging apply as before. There is no completion-rate condition,
+  because a receiver whose only evidence is partial transfers has no completed
+  transfer to measure. This is one chance, not a promise that the segment fits.
+- Order rotation victims by tier before idle time: a non-serving remote that is
+  not a consumer, then a serving remote, then a non-serving remote that announced
+  a rendition this serving viewer plays. This is an ordering of links rotation
+  could already drop, not an exemption, so a consumer link is still dropped when
+  it is the only eligible one. Rotation cadence, `minLinkLifeMs`, `idleEvictMs`,
+  `evictionCooldownMs` and the wire messages are unchanged.
+- Add local diagnostics: `segments.peerUntestedTrial` and
+  `peerUntestedTrialLoaded`, `peers.evictedUnhelpful`, `evictedServing` and
+  `evictedConsumer`, `neighbourDiscovery.counters.victimUnhelpful`,
+  `victimServing`, `victimConsumer`, `unmetNoHint` and `unmetIneligible`, and
+  `trial: true` on the eligibility row of a granted trial. They sit in the local
+  snapshot and are not part of the numeric operator report.
+- The late-arrival projection, deadlines, abandonment, bounded peer work,
+  admission and HTTP fallback are unchanged.
+
+- Expose accepted native connections with `peerConnections()` and attribute
+  first-verified accepted media through `onPeerDelivery`, including multi-holder
+  contributions. Wire/control traffic and unsuccessful media receive no credit.
+- Preserve partially verified scheduler progress when origin has reserved the
+  tail, and keep reliable channels alive while cancelled responses drain.
+- Start a reconnecting pool on its first healthy relay and replay only current
+  presence to later relays; pending sockets and retries retain bounded ownership.
+- Carry the holder re-arm state, trial selection and diagnostics through Rust,
+  WASM and generated native bindings. Keep the existing framing and signed-media
+  schemas; update the matching binary and bindings together.
+- Include the native real-time source integration added after v0.3.0, with
+  guarded backend preparation and bounded TURN teardown. Native core packages
+  do not provide that separate WebRTC transport.
+
 ## v0.3.0 (24 October 2026)
 
 Experimental shared-core release. JavaScript/WASM, Apple and Android downloads

@@ -4,11 +4,26 @@
 [Changelog](../CHANGELOG.md)
 
 Checkpoint: 24 October 2026. The experimental shared-core release is
-[v0.3.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.3.0).
-The [changelog](../CHANGELOG.md#v030-24-october-2026) records its source changes;
+[v0.4.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.0).
+The [changelog](../CHANGELOG.md#v040-24-october-2026) records its source changes;
 the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Integrated library release (24 October 2026)
+
+v0.4.0 integrates holder recovery with Rust/WASM/native discovery, accepted
+connection snapshots and verified-media observations, partial-progress retention,
+reliable-channel cancellation draining and first-healthy-relay recovery. Native
+real-time source support added after v0.3.0 is included. No public service or
+pilot deployment is part of this library release. Operators choose media,
+relays, upload consent and transport policy.
+
+The old JavaScript R70 qualifier at `20693ea` passed 15 of 16 gates: in-place
+renewal failed, with a thin high-quality delivery margin. Those historical
+results are retained. The integrated source has not rerun that distributed
+profile. Physical devices, public NAT, sustained quality and net benefit remain
+unproved; local/CI regressions do not close those gates.
 
 ## Shared-core release checkpoint (24 October 2026)
 
@@ -33,10 +48,36 @@ is not tagged-release or physical-device evidence.
 The core, multi-holder path and peer supply hint remain opt-in. The hint is
 advisory and reports known HAVE supply. Signature checks remain in the core
 following the [measured comparison](CORE-SIGNATURE-BUDGET.md). The scheduler
-keeps the 32 KiB/s floor and three-holder default. RelaySwarmKit adoption,
-a native WebRTC adapter/client and physical-device/public-NAT acceptance
-remain open. This release does not change the controlled pilot deployment
-or turn its historical RED results into current acceptance.
+keeps the 32 KiB/s floor and three-holder default. RelaySwarmKit v0.6.0 adopts
+the released core for verification, framing and explicit schema-3 scheduling.
+A separate native application and physical-device/public-NAT acceptance remain
+open. Publishing the libraries does not deploy or qualify a pilot.
+
+## Swift core adoption (24 October 2026)
+
+[Kit v0.6.0](https://github.com/forgesworn/relayswarm-kit/releases/tag/v0.6.0)
+consumes the v0.3.0 XCFramework by URL/checksum and retains its unedited UniFFI
+wrapper and exact 140 verifier vectors and 48 link traces. Swift retains the
+application's author/admission gates, exclusive channel ownership, timers,
+cancellation and host-supplied origin policy. Native buffered amount and
+low-water callbacks pace opt-in uploads; no synthetic empty queue is used.
+
+The 54-test Kit suite passes with one opt-in public-relay test skipped. It
+includes a real 3 MiB ranged upload over multiple native queue windows, corrupt
+holder bans, exact origin ranges, final trust checks and joined cancellation.
+The current-SDK Chrome fixture covers both schema-2 whole-object reception and
+schema-3 two-holder assembly. Author/delegate cases deliver verified generated
+H.264/AAC fMP4 bytes. Corruption, signature tampering and both pre-request and
+in-flight revocation return zero media. No Swift wire adapter is used.
+The piece fixture labels its controlled timing estimates; they are not measured
+network rates. CI pins the SDK source and retains receipts with source hashes.
+
+This is macOS arm64/Chrome loopback evidence. It does not prove physical Apple
+devices, public NAT, sustained field quality or net hosting benefit. Kit's
+transport binary remains macOS arm64 only despite the core's iOS slices.
+RelaySwarm and Kit are libraries and require no ForgeSworn-hosted backend.
+Applications supply their own media, relays and policy. Test fixtures are
+temporary loopback listeners; no public pilot is required or deployed here.
 
 ## Experimental core supply hint, 24 October 2026
 

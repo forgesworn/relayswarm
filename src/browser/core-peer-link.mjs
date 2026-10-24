@@ -61,6 +61,7 @@ export class CorePeerLink {
     this.fetching = new Map();
     this.renditions = new Map();
     this.have = new Set();
+    this.announced = new Map();
     this.closed = false;
     this.closeReason = undefined;
     this.openedAt = Date.now();
@@ -193,6 +194,7 @@ export class CorePeerLink {
     this.#clearTimer();
     this.fetching.clear();
     this.renditions.clear();
+    this.announced.clear();
     this.#busy = false;
     this.#transferring = false;
     for (const entry of this.#requests.values()) { entry.settle(null); entry.report("closed"); }
@@ -240,6 +242,7 @@ export class CorePeerLink {
       this.#requests.set(requestId, this.#starting);
     }
     if (version !== this.#version) this.#sync(version);
+    if (this.closed) this.announced.clear();
     const frame = ++this.#frames;
     for (let offset = HEADER * 8; offset < bytes.byteLength;) {
       const tag = bytes[offset], length = view.getUint32(offset + 1, true);
@@ -274,6 +277,11 @@ export class CorePeerLink {
     for (const [rendition, seen] of sets.renditions) this.renditions.set(rendition, seen);
     if (sets.serving !== this.contribution.serving || sets.rendition !== this.contribution.rendition || sets.at !== this.contribution.at) {
       this.contribution = { serving: sets.serving, rendition: sets.rendition, at: sets.at };
+      if (sets.rendition !== null) {
+        this.announced.delete(sets.rendition);
+        if (this.announced.size >= 8) this.announced.delete(this.announced.keys().next().value);
+        this.announced.set(sets.rendition, sets.at);
+      }
     }
     if (sets.closeReason !== null) this.closeReason = sets.closeReason;
   }
