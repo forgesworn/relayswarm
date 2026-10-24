@@ -63,6 +63,14 @@ glare negotiations and closed/disconnected links; `stop()` leaves it empty.
 Mutating the returned array cannot alter the swarm. Keep native references
 local to the host; serialisable metrics contain no connection objects.
 
+The opt-in `zeroBudgetPeerRace: true` races an already advertised cached
+schema 3 object against immediately started normal HTTP when no safe peer
+wait remains. It requires the WASM multi-holder engine and adds no ranged
+origin fetch. Only a complete verified peer winner counts as peer media.
+Normal HTTP never waits for metadata; stopping the swarm cancels its peer
+arm while that pending HTTP request continues. Progressive hls.js loads skip
+the race. See the [options and lifecycle contract](../INTEGRATION.md#options).
+
 `trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
 `traceRequests` (none by default): each peer-first load, eligibility
 decision, peer request and origin request (whole or ranged), joined by a load
