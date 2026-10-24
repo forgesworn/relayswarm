@@ -1296,14 +1296,20 @@ class HlsSwarm {
     if (!previous) for (const link of this.links.values()) link.sendContribution(this.#servingAllowed(), rendition);
   }
 
-  #shouldWaitForOrigin(key, rendition) {
+  #shouldWaitForOrigin(key, rendition, context) {
+    const at = Date.now();
     const candidates = [...this.links.values()].filter((peer) => !peer.closed && peer.contribution?.serving
-      && (peer.renditions.get(rendition) || 0) > Date.now() - 30_000);
+      && (peer.renditions.get(rendition) || 0) > at - 30_000);
     if (!candidates.length) return false;
-    if (candidates.some((peer) => (peer.fetching.get(key) || 0) > Date.now())) return true;
+    if (candidates.some((peer) => (peer.fetching.get(key) || 0) > at)) return true;
+    // A VOD contributor may be behind this viewer's prefetch frontier. Only
+    // the exact main rendition's explicit ENDLIST state establishes VOD;
+    // alternate audio indexes audioTracks, not levels. Live and unknown
+    // playlists retain bounded rendezvous coordination for synchronous release.
+    const frag = context?.frag;
+    if (frag?.type === "main" && Number.isInteger(frag.level) && frag.level >= 0
+      && this.hls?.levels?.[frag.level]?.details?.live === false) return false;
     if (!this.#servingAllowed()) return true;
-    // Per-object rendezvous ordering spreads origin seed work across serving
-    // viewers. Different neighbourhoods can still seed duplicates safely.
     const rank = (pubkey) => [...pubkey].map((digit, i) => (parseInt(digit, 16) ^ parseInt(key[i], 16)).toString(16)).join("");
     return candidates.some((peer) => rank(peer.pubkey) < rank(this.session.pubkey));
   }
@@ -1587,7 +1593,7 @@ class HlsSwarm {
     // What the diagnostic rows and the holder bookkeeping below refer to.
     const demand = { key, rendition, context: holderContext, recorded: false, asked: new Set(), row: null };
     const coordinated = ![...this.links.values()].some((peer) => peer.have.has(key));
-    if (coordinated && !this.#shouldWaitForOrigin(key, rendition)) {
+    if (coordinated && !this.#shouldWaitForOrigin(key, rendition, context)) {
       this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry, undefined, demand);
       return null;
     }
@@ -1596,7 +1602,15 @@ class HlsSwarm {
     const sizeHint = this.renditionSizes.get(rendition);
     const holderWait = coordinated ? this.#holderWaitMs(key, rendition) : 0;
     const entryTransfer = sizeHint ? this.peerSelection.projectMs(sizeHint) : null;
-    let entry = plan.cachedOnly ? "unknown" : this.#projection(entryTransfer, holderWait, plan);
+    // A mixed transfer need not obtain the whole object from a peer: the
+    // piece planner can assign only a small bounded fraction and fetch the
+    // rest from origin in parallel. Defer its admission until the signed
+    // schema is known; v1/v2 and unavailable range paths retain the whole-
+    // object projection below. No HAVE means no such exception.
+    const mixedCandidate = !coordinated && this.#rangesEnabled() && [...this.links.values()].some((link) =>
+      !link.closed && !link.busy && link.supportsRanges === true && link.have.has(key) && !this.banned.has(link.pubkey)
+      && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !(holderContext && this.discovery.stale(holderContext, link.pubkey)));
+    let entry = plan.cachedOnly || mixedCandidate ? "unknown" : this.#projection(entryTransfer, holderWait, plan);
     // One try for a holder that has never been asked (see #untestedHolder). The
     // detail is kept for the have-at-entry row, which is the row this load writes next.
     let trial = null;
@@ -1627,10 +1641,10 @@ class HlsSwarm {
       return this.options.getCommitment(context, { signal: operationSignal });
     }, signal, commitmentRemaining).then((event) => ({ ok: true, event }), () => ({ ok: false }));
     if (coordinated) {
-      // No playlist manipulation or origin prefetch. The elected contributor
-      // loads normally; all advisory leases expire before the HTTP deadline.
+      // No playlist manipulation or origin prefetch. The origin contributor
+      // loads normally; coordination never moves the HTTP deadline.
       while (!signal.aborted && !this.stopped && now() < plan.deadline && ![...this.links.values()].some((peer) => peer.have.has(key))) {
-        if (!this.#shouldWaitForOrigin(key, rendition)) {
+        if (!this.#shouldWaitForOrigin(key, rendition, context)) {
           this.#peerEligibility(context, budgetMs, "wait-no-longer-eligible", false, budgetGeometry, undefined, demand);
           return null;
         }

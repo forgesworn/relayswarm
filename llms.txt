@@ -3,7 +3,7 @@
 > Experimental peer-assisted HLS video delivery with WebRTC data channels,
 > Nostr relay rendezvous, author-signed segment commitments and an hls.js
 > loader. A separate native Node path uses HyperDHT and Noise. MIT licensed;
-> v0.4.3 is the prepared experimental prerelease; production acceptance remains open.
+> v0.4.4 is the prepared experimental prerelease; production acceptance remains open.
 
 The canonical repository is https://github.com/forgesworn/relayswarm. Node 22.13+
 is required; CI uses Node 24. Public distribution includes an installable
@@ -14,7 +14,7 @@ source demo runs with `npm run demo`; synthetic media needs ffmpeg/libx264.
 The original WebRTC CLI signs plaintext SDP and uses a digest supplied by its
 seeder. The browser loader and shared session wire version 3 use pairwise
 NIP-44-encrypted signals; the native path encrypts dial authorisation and uses
-Noise for transfer. Package version 0.4.3, session version 3, commitment schemas
+Noise for transfer. Package version 0.4.4, session version 3, commitment schemas
 1/2/3 (3 experimental) and metrics version 2 are distinct. Swift RelaySwarmKit v0.6.0
 adopts the released core and supports wire version 3 and signed schemas 1/2/3,
 with actual SDK/two-holder Chrome loopback proof;
@@ -60,6 +60,17 @@ margin. Independent cached-peer races retain their window beside immediate HTTP.
 Its matching WASM upload ABI copies only the requested range instead of the
 whole held object per request. These are bounded-policy and byte-copy changes;
 physical iPhone/iPad and Pixel/Vanadium continuity remains unverified.
+v0.4.4 lets already-HAVE framing-2 schema-3 objects enter bounded mixed piece
+planning despite a late whole-object peer forecast; valid schemas 1/2 retain
+that forecast. Known-VOD main-media waits require a live same-key FETCH lease,
+using the exact demand's explicit recorded-playlist state. Live, unknown and
+alternate-audio contexts retain bounded coordination for synchronous release.
+Estimator floor, sustainable deadlines, origin reserve, wire and WASM bytes
+are unchanged. Paired with website clock/first-frame fixes, a physical Pixel/M4
+original-4K candidate passed a bounded 45.5-second window: 6,553,600 verified
+peer bytes, zero reported post-first-frame stalls and zero dropped frames.
+Earlier longer-window interruptions remain recorded; sustained continuity
+and net benefit remain open. Browser-cache bytes are separate from wire traffic.
 Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The example origin adds bounded blocking reload for compatible complete live
 playlists across all renditions, with 24 waiters inside 32 media requests.
@@ -130,7 +141,7 @@ fixtures use temporary loopback servers, not a public pilot deployment.
 ## Evidence and maintenance
 
 - [Evidence and remaining work](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md): Dated release, CI/soak measurements, distribution proof, deterministic silent-holder deadline classifications and unverified gates.
-- [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): v0.4.3 playback-cost changes and historical release evidence.
+- [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): v0.4.4 mixed-admission changes and historical release evidence.
 - [Maintaining the docs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/MAINTAINING-DOCS.md): AI-context generation, link/freshness checks and public metadata.
 
 ## Optional

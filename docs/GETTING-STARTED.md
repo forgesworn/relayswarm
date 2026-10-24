@@ -3,7 +3,7 @@
 [Documentation](README.md) · [API](API.md) · [hls.js integration](../INTEGRATION.md)
 
 These installation instructions target the prepared experimental
-[v0.4.3 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3).
+[v0.4.4 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4).
 Confirm that tag and its checksum-listed assets have been published before
 using these pinned commands; a prepared version is not a verified download.
 Node 22.13+ is required; CI runs Node 24. `npm install relayswarm` is not the
@@ -12,7 +12,7 @@ documented distribution path: the npm registry is unpublished.
 ## Install for a host application
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.3/relayswarm-0.4.3.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/relayswarm-0.4.4.tgz
 npm install hls.js
 ```
 
@@ -31,17 +31,17 @@ this hls.js loader.
 A Git dependency can also be pinned to the versioned release tag:
 
 ```sh
-npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.4.3'
+npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.4.4'
 ```
 
 ## Use the standalone browser bundle
 
 Download
-[`relayswarm-hls-swarm-0.4.3.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.3/relayswarm-hls-swarm-0.4.3.mjs)
+[`relayswarm-hls-swarm-0.4.4.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/relayswarm-hls-swarm-0.4.4.mjs)
 and serve it from your own application:
 
 ```js
-import { createHlsSwarm } from './relayswarm-hls-swarm-0.4.3.mjs';
+import { createHlsSwarm } from './relayswarm-hls-swarm-0.4.4.mjs';
 ```
 
 The bundle contains the loader's runtime dependencies; hls.js remains the
@@ -49,7 +49,7 @@ host's dependency. Prefer vendoring the verified file to relying on GitHub
 release-download URLs as a JavaScript CDN. The separate publisher helper uses
 Node filesystem/crypto APIs and does not belong in a browser bundle.
 
-The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.3/SHA256SUMS)
+The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/SHA256SUMS)
 covers the tarball, browser bundle, WASM module and JavaScript build metadata.
 Download those four files and the manifest into one directory and verify:
 
@@ -59,7 +59,7 @@ shasum -a 256 -c SHA256SUMS
 
 ## Use the optional shared core
 
-Download [`relayswarm-core-0.4.3.wasm`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.3/relayswarm-core-0.4.3.wasm)
+Download [`relayswarm-core-0.4.4.wasm`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/relayswarm-core-0.4.4.wasm)
 and serve it beside the browser bundle with `Content-Type: application/wasm`.
 Pass its URL through `coreWasm`; enable experimental `multiHolder` and
 `peerSupplyHint` only when the host intends to use them. A Content Security
@@ -70,7 +70,7 @@ The tarball also contains the committed module under `src/browser/`.
 
 ## Use the native core assets
 
-The [v0.4.3 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3)
+The [v0.4.4 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4)
 includes `relayswarm-core.xcframework.zip`, its `.checksum`,
 `relayswarm-core-swift-bindings.zip` and `relayswarm-core.aar`. Download the
 platform's `SHA256SUMS-apple` or `SHA256SUMS-android` and every file listed in
@@ -87,7 +87,7 @@ WebRTC adapter or client application. RelaySwarmKit v0.6.0 separately consumes t
 ## Run the source demo
 
 ```sh
-git clone --branch v0.4.3 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.4.4 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -138,7 +138,7 @@ Current evidence and remaining device/network gates are in [STATUS.md](STATUS.md
 
 ## Development source
 
-The published commands above install v0.4.3. Later development lands on
+The published commands above install v0.4.4. Later development lands on
 `main`, a mutable reference; its
 [production features](PRODUCTION-FEATURES.md) and
 [delivery requirements](PRODUCTION-READINESS.md) have separate evidence.
@@ -151,7 +151,7 @@ npm ci
 npm run demo
 ```
 
-Both v0.4.3 and current development source include the installed native
+Both v0.4.4 and current development source include the installed native
 executable, verified HTTP fallback and wider-media tests:
 
 ```sh
