@@ -364,6 +364,151 @@ test("authoritative size is enforced before accepting any peer chunks", async ()
   assert.equal(link.closed, true);
 });
 
+function controlledRelaySockets(ephemeral = false) {
+  const sockets = [];
+  class Socket extends EventTarget {
+    sent = [];
+    constructor(url) { super(); this.url = url; sockets.push(this); }
+    send(data) {
+      const frame = JSON.parse(data); this.sent.push(frame);
+      if (ephemeral && frame[0] === "EVENT") for (const remote of sockets) {
+        if (!remote.opened || remote.closed || remote.url !== this.url) continue;
+        for (const request of remote.sent.filter(value => value[0] === "REQ")) queueMicrotask(() => {
+          if (!remote.closed) remote.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(["EVENT", request[1], frame[1]]) }));
+        });
+      }
+    }
+    close() { if (this.closed) return; this.closed = true; this.dispatchEvent(new Event("close")); }
+    open() { this.opened = true; this.dispatchEvent(new Event("open")); }
+  }
+  return { Socket, sockets };
+}
+const relayTurns = async () => { for (let turn = 0; turn < 8; turn++) await Promise.resolve(); };
+
+test("reconnecting relay pool becomes ready on its first usable socket while later attempts remain owned", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { Socket, sockets } = controlledRelaySockets();
+  const pool = new RelayPool(["wss://healthy.example", "wss://hung.example", "wss://late.example"], { WebSocketImpl: Socket, reconnect: true });
+  let ready = false, session;
+  const connecting = pool.connect().then(() => { ready = true; });
+  try {
+    sockets[0].open(); await relayTurns();
+    assert.equal(ready, true, "a healthy relay starts before either other attempt or the 8s timeout");
+    assert.equal(pool.pendingSockets.size, 2);
+    session = new RelaySwarmSession({ pool, swarmId: base.swarmId }); session.start();
+    const presence = () => session.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: session.pubkey }] });
+    presence();
+    assert.equal(sockets[0].sent.filter(frame => frame[0] === "EVENT").length, 1, "session presence can publish immediately");
+    const subscriptions = sockets[0].sent.filter(frame => frame[0] === "REQ");
+    sockets[2].open(); await relayTurns();
+    assert.deepEqual(sockets[2].sent.filter(frame => frame[0] === "REQ"), subscriptions, "a late socket receives every existing subscription");
+    assert.equal(sockets[2].sent.filter(frame => frame[0] === "EVENT").length, 1, "current presence replays only to the new relay");
+    assert.equal(sockets[0].sent.filter(frame => frame[0] === "EVENT").length, 1, "no replay is broadcast to an existing relay");
+    presence();
+    assert.equal(sockets[2].sent.filter(frame => frame[0] === "EVENT").length, 2, "late sockets carry subsequent signed presence");
+    t.mock.timers.tick(7_999); await relayTurns();
+    assert.equal(pool.pendingSockets.size, 1);
+    t.mock.timers.tick(1); await relayTurns();
+    assert.equal(sockets[1].closed, true);
+    assert.equal(pool.pendingSockets.size, 0);
+    assert.equal(pool.retryTimers.size, 1, "the late rejected attempt still gets its bounded retry");
+    assert.equal(pool.sockets.length, 2);
+    assert.equal(pool.readyWaiters.size, 0);
+  } finally {
+    session?.close(); pool.close(); await Promise.allSettled([connecting]);
+    t.mock.timers.tick(30_000); await relayTurns();
+    assert.equal(sockets.length, 3, "stop owns and clears the pending retry");
+    assert.equal(pool.pendingSockets.size + pool.retryTimers.size + pool.readyWaiters.size, 0);
+  }
+});
+
+test("disjoint first relays discover through a late common ephemeral relay without replaying SDP", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { Socket, sockets } = controlledRelaySockets(true);
+  const pools = [new RelayPool(["wss://a.example", "wss://common.example"], { WebSocketImpl: Socket, reconnect: true, reconnectMaxMs: 20 }),
+    new RelayPool(["wss://b.example", "wss://common.example"], { WebSocketImpl: Socket, reconnect: true, reconnectMaxMs: 20 })];
+  const ready = pools.map(pool => pool.connect());
+  sockets[0].open(); sockets[2].open(); await Promise.all(ready);
+  const sessions = pools.map(pool => new RelaySwarmSession({ pool, swarmId: base.swarmId }));
+  const discovered = [[], []], signals = [];
+  try {
+    sessions.forEach((session, i) => { session.start(); session.onPresence(value => discovered[i].push(value.from));
+      session.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: session.pubkey }] }); });
+    sessions[1].onSignal(value => signals.push(value.payload.requestId));
+    sessions[0].sendSignal(sessions[1].pubkey, { type: "offer", transport: "webrtc", requestId: "old-offer", payload: { sdp: "old" } });
+    await relayTurns(); assert.deepEqual(discovered, [[], []]);
+    const firstCounts = [sockets[0], sockets[2]].map(socket => socket.sent.length);
+    sockets[1].open(); sockets[3].open(); await relayTurns();
+    assert.deepEqual(discovered[0], [sessions[1].pubkey], "late shared relay discovers a peer without the periodic heartbeat");
+    assert.deepEqual([sockets[0], sockets[2]].map(socket => socket.sent.length), firstCounts, "replays target only the newly opened relay");
+    for (const socket of [sockets[1], sockets[3]]) assert.deepEqual(socket.sent.filter(frame => frame[0] === "EVENT").map(frame => frame[1].kind), [24170], "presence only, no old SDP");
+    sessions[0].sendSignal(sessions[1].pubkey, { type: "offer", transport: "webrtc", requestId: "fresh-offer", payload: { sdp: "fresh" } });
+    await relayTurns(); assert.deepEqual(signals, ["fresh-offer"], "fresh encrypted signalling works across the common relay");
+    const beforeReconnect = sockets[0].sent.length;
+    sockets[1].close(); t.mock.timers.tick(20); await relayTurns();
+    sockets[4].open(); await relayTurns();
+    assert.deepEqual(sockets[4].sent.filter(frame => frame[0] === "EVENT").map(frame => frame[1].kind), [24170], "a reconnected relay receives only current presence");
+    assert.equal(sockets[0].sent.length, beforeReconnect);
+    assert.deepEqual(discovered[1], [sessions[0].pubkey]);
+  } finally { sessions.forEach(session => session.close()); pools.forEach(pool => pool.close()); await Promise.allSettled(ready); }
+});
+
+test("late relay replay owns its presence copy and respects session expiry and stop", async t => {
+  for (const ending of ["expired", "stopped"]) await t.test(ending, async t => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+    const { Socket, sockets } = controlledRelaySockets();
+    const pool = new RelayPool(["wss://first.example", "wss://late.example", "wss://later.example"], { WebSocketImpl: Socket, reconnect: true });
+    const connecting = pool.connect(); sockets[0].open(); await connecting;
+    const session = new RelaySwarmSession({ pool, swarmId: base.swarmId, maxEventAgeSeconds: 2 });
+    try {
+      session.start();
+      const returned = session.announcePresence({ role: "viewer", transports: [{ type: "webrtc", publicKey: session.pubkey }] });
+      const expected = JSON.parse(JSON.stringify(returned)); returned.content = "caller-mutated"; returned.tags[0][1] = "caller-mutated";
+      sockets[1].open(); await relayTurns();
+      assert.deepEqual(sockets[1].sent.filter(frame => frame[0] === "EVENT").map(frame => frame[1]), [expected], "cached signed presence owns its envelope");
+      if (ending === "expired") t.mock.timers.tick(3_000); else session.close();
+      sockets[2].open(); await relayTurns();
+      assert.deepEqual(sockets[2].sent.filter(frame => frame[0] === "EVENT"), [], "expired or stopped sessions replay nothing");
+      if (ending === "stopped") assert.equal(pool.relayOpenHandlers.size, 0);
+    } finally { session.close(); pool.close(); await Promise.allSettled([connecting]); }
+  });
+});
+
+test("stopping reconnect readiness closes every initial attempt and cannot resurrect from late opens", async t => {
+  for (const firstOpened of [false, true]) await t.test(firstOpened ? "after first readiness" : "before readiness", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { Socket, sockets } = controlledRelaySockets();
+    const pool = new RelayPool(["wss://first.example", "wss://hung.example"], { WebSocketImpl: Socket, reconnect: true });
+    const connecting = pool.connect();
+    const outcome = firstOpened ? connecting : assert.rejects(connecting, /closed/);
+    if (firstOpened) { sockets[0].open(); await connecting; }
+    pool.close(); await outcome;
+    for (const socket of sockets) socket.open();
+    t.mock.timers.tick(30_000); await relayTurns();
+    assert.equal(pool.sockets.length + pool.pendingSockets.size + pool.retryTimers.size + pool.readyWaiters.size, 0);
+    assert.ok(sockets.every(socket => socket.closed));
+    assert.equal(sockets.length, 2, "no retry or replacement can start after stop");
+  });
+});
+
+test("non-reconnecting readiness still waits for all attempts and bounds an all-failed error", async t => {
+  for (const healthy of [true, false]) await t.test(healthy ? "one usable relay" : "all failed", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { Socket, sockets } = controlledRelaySockets();
+    const pool = new RelayPool(["wss://first.example", "wss://hung.example"], { WebSocketImpl: Socket });
+    let completed = false;
+    const connecting = pool.connect().then(() => { completed = true; });
+    const outcome = healthy ? connecting : assert.rejects(connecting, /No relay reachable.*timed out/);
+    if (healthy) sockets[0].open();
+    await relayTurns(); assert.equal(completed, false);
+    t.mock.timers.tick(7_999); await relayTurns(); assert.equal(completed, false);
+    t.mock.timers.tick(1); await outcome;
+    assert.equal(completed, healthy);
+    assert.equal(pool.retryTimers.size, 0);
+    pool.close();
+  });
+});
+
 test("relay reconnect cannot resurrect a socket after close", async () => {
   const sockets = [];
   class Socket extends EventTarget {

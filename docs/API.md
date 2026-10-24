@@ -3,11 +3,12 @@
 [Documentation](README.md) · [Installation](GETTING-STARTED.md) ·
 [hls.js integration](../INTEGRATION.md)
 
-This describes v0.2.1, the published experimental prerelease. The earlier v0.1.0
-assets do not include the newer production feature work. Package version `0.2.1`,
-session wire version `3`, segment-commitment schemas `1`/`2` and metrics snapshot
+This describes current source, including additions after the published v0.3.0
+experimental prerelease. Package version `0.3.0`, session wire version `3`,
+segment-commitment schemas `1`/`2`/`3` (3 experimental) and metrics snapshot
 version `2` are different version numbers. Source exports and protocol fields
-are not a stable interoperability promise.
+are not a stable interoperability promise; immutable release assets retain
+the API they were built with.
 
 ## Module entry points
 
@@ -31,6 +32,21 @@ The wildcard export also permits source subpaths such as
 `relayswarm/src/native-journey.mjs`. These are implementation paths, not additional
 stable named entry points. Do not import HyperDHT, Node filesystem or Buffer-based
 object-transfer modules into an ordinary browser page.
+
+## Relay sessions
+
+`RelayPool.connect()` with `reconnect: true` becomes ready on the first usable
+relay while the other initial attempts and bounded retries remain owned by
+the pool. Without reconnect it waits for all initial attempts and reports an
+all-failed connection error. `close()` cancels attempts, waiters and retries.
+`onRelayOpen(handler)` supplies a publish function scoped to that newly opened
+socket; it becomes inert after the socket or pool closes.
+
+An active `RelaySwarmSession` retains one copied signed presence and replays
+it only to a newly opened or reconnected relay while it remains inside the
+session's age window. Existing sockets receive no replay broadcast. Signals
+and SDP are never cached or replayed. Expiry or `close()` clears the retained
+presence; `close()` also unregisters the relay-open handler.
 
 ## Browser loader
 
