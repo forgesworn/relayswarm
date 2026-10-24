@@ -1,0 +1,39 @@
+{
+  "format": 1,
+  "date": "2026-10-24",
+  "qualification": "native-initiator-browser-answerer",
+  "packageVersion": "0.33.4",
+  "libraryVersion": "0.24.5",
+  "nodeMajor": 24,
+  "platform": "darwin-arm64",
+  "runs": [
+    {
+      "machineClass": "development-mac",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "machineClass": "m4",
+      "passed": true,
+      "exitCode": 0,
+      "isolatedTemporarySourceCopy": true,
+      "sharedDependencyInstallationsChanged": false
+    }
+  ],
+  "browserObservedDcep": {
+    "ordered": false,
+    "maxPacketLifeTime": 250,
+    "maxRetransmits": null,
+    "label": "relayswarm-live-v1"
+  },
+  "generatedDatagramsOnly": true,
+  "binaryBidirectional": true,
+  "unknownIncomingChannelRefused": true,
+  "cleanupOwnedPeers": 0,
+  "certificateBypass": false,
+  "ice": "loopback-direct",
+  "publicNat": false,
+  "physicalDevice": false,
+  "linuxRuntimeAcceptance": false,
+  "multiParticipantMediaAcceptance": false
+}
