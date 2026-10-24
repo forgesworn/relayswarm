@@ -163,6 +163,15 @@ membership. Use this snapshot to draw connected peers; observing native
 constructors also sees negotiations that never become peers. Connection
 references are deliberately separate from serialisable `metrics()` data.
 
+`peerConnectionDetails()` is a later main-branch addition. It returns fresh
+`{ connection, pubkey }` records for the same accepted links. `pubkey` is the
+remote peer's ephemeral signalling key, explicitly associated with that native
+connection. Neither array order nor a local connection counter identifies a
+remote peer. The records disappear on link closure or `stop()`, and changing a
+record cannot change membership. This read-only projection adds no wire traffic.
+Keep native references local; a room participant's claim to a signalling key
+remains a self-report unless the application establishes its own binding.
+
 Use `onPeerDelivery` to attribute verified video to its contributing connections.
 For a multi-holder delivery, each connection is observed once with the bytes
 its pieces contributed to the completed object. The first verified copy of

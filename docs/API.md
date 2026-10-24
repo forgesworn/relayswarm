@@ -51,7 +51,7 @@ presence; `close()` also unregisters the relay-open handler.
 ## Browser loader
 
 `createHlsSwarm(options)` returns
-`{ attach(hls), updateTicket(ticket), stop(), metrics(), peerConnections(), trace() }`.
+`{ attach(hls), updateTicket(ticket), stop(), metrics(), peerConnections(), peerConnectionDetails(), trace() }`.
 `attach` wraps `hls.config.fLoader`; call it before `loadSource`. `stop` is the
 origin-only kill switch and closes connections, cancels pending work, releases
 held bytes and restores the original loader. Create a new swarm to participate
@@ -62,6 +62,12 @@ references for accepted, active links. It excludes pending dials, offers,
 glare negotiations and closed/disconnected links; `stop()` leaves it empty.
 Mutating the returned array cannot alter the swarm. Keep native references
 local to the host; serialisable metrics contain no connection objects.
+
+The later main-branch `peerConnectionDetails()` returns fresh
+`{ connection, pubkey }` records for those same accepted links. Each native
+connection is bound to its remote ephemeral signalling key, without an array
+ordering assumption. Records cannot mutate membership and disappear when the
+link closes or the swarm stops. It creates no new network messages.
 
 The opt-in `zeroBudgetPeerRace: true` races an already advertised cached
 schema 3 object against immediately started normal HTTP when no safe peer

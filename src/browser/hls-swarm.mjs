@@ -329,6 +329,7 @@ export function createHlsSwarm(options = {}) {
     stop: () => swarm.stop(),
     metrics: () => swarm.metrics(),
     peerConnections: () => swarm.peerConnections(),
+    peerConnectionDetails: () => swarm.peerConnectionDetails(),
     trace: () => swarm.trace(),
   };
 }
@@ -692,11 +693,19 @@ class HlsSwarm {
   // Native references are deliberately separate from serialisable metrics.
   // A pending dial or a glare negotiation is not an accepted peer link.
   peerConnections() {
+    return this.peerConnectionDetails().map(detail => detail.connection);
+  }
+
+  // Explicitly bind each accepted native connection to its signalling identity.
+  // Callers must not infer this association from separate metrics array orders.
+  peerConnectionDetails() {
     const connections = [];
     for (const link of this.links.values()) {
       try {
         if (!link.closed && link.channel.readyState === "open"
-          && !["failed", "closed", "disconnected"].includes(link.pc.connectionState)) connections.push(link.pc);
+          && !["failed", "closed", "disconnected"].includes(link.pc.connectionState)) {
+          connections.push({ connection: link.pc, pubkey: link.pubkey });
+        }
       } catch { /* An unavailable native state is not an active link. */ }
     }
     return connections;
