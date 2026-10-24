@@ -23,6 +23,7 @@ are not a stable interoperability promise.
 | `relayswarm/native-client` | Installed Node application | `validateNativeDescriptor`, `fetchNativeObject`, `createNativeObjectSeeder` |
 | `relayswarm/publisher-advertisement` | Node or a browser bundler | `createPublisherAdvertisement`, `verifyPublisherAdvertisement` |
 | `relayswarm/account-upload-budget` | Node on supported local POSIX storage | `createAccountUploadBudget`, `AccountBudgetError`, `accountBudgetError` |
+| `relayswarm/realtime-peer` | Browser; injected connection in tests | `RealtimeDatagramLink`, `RealtimePeer`, `REALTIME_TRANSPORT`, `REALTIME_CHANNEL` |
 | `relayswarm/package.json` | Package metadata | Name, version and declared dependencies |
 
 The wildcard export also permits source subpaths such as

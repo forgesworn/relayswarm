@@ -17,6 +17,7 @@ its measured scope and acceptance gaps in [Status](STATUS.md).
 | Review current production implementation and acceptance | [Production features](PRODUCTION-FEATURES.md), [delivery checklist](PRODUCTION-READINESS.md) |
 | Continue the agreed production work as another agent | [Goals and agent handover](AGENT-GOALS.md) |
 | Implement compatible session and commitment messages | [Protocol draft](NIP-DRAFT.md) |
+| Carry opaque deadline-sensitive datagrams with supplied ICE | [Experimental real-time transport](REALTIME-TRANSPORT.md) |
 | Run a trial on separate devices and interpret receipts | [Publisher/player field test](FIELD-TEST.md) |
 | Ingest a live broadcast or add optional RTMPS forwarding | [Broadcasting](BROADCASTING.md) |
 | Operate private state, remote policy and opt-in reports | [Operations](OPERATIONS.md) |
