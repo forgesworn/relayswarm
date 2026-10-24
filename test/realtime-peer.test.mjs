@@ -21,7 +21,11 @@ class PC extends EventTarget {
   static instances = [];
   localDescription = null; remoteDescription = null; connectionState = "new"; candidates = [];
   constructor(configuration) { super(); this.configuration = configuration; this.id = PC.instances.push(this) - 1; }
-  createDataChannel(label, options) { this.channelOptions = { label, ...options }; return this.channel = new Channel(); }
+  createDataChannel(label, options) {
+    this.channelOptions = { label, ...options }; this.channel = new Channel();
+    if (options.maxPacketLifeTime !== undefined) { this.channel.maxPacketLifeTime = options.maxPacketLifeTime; this.channel.maxRetransmits = null; }
+    return this.channel;
+  }
   async createOffer() { return { type: "offer", sdp: `offer-pc-${this.id}` }; }
   async createAnswer() { return { type: "answer", sdp: `answer-pc-${this.id}` }; }
   async setLocalDescription(value) { this.localDescription = value; }
@@ -31,6 +35,7 @@ class PC extends EventTarget {
       const id = Number(value.sdp.split("-").at(-1));
       this.other = PC.instances[id]; this.other.other = this;
       this.channel = new Channel(); this.channel.readyState = "connecting";
+      this.channel.maxPacketLifeTime = this.other.channel.maxPacketLifeTime; this.channel.maxRetransmits = this.other.channel.maxRetransmits;
       this.channel.other = this.other.channel; this.other.channel.other = this.channel;
       this.other.channel.readyState = "connecting";
       const event = new Event("datachannel"); event.channel = this.channel; this.dispatchEvent(event);
@@ -66,6 +71,16 @@ test("live link rejects reliable, ordered, timed or wrong-labelled channel inste
     const channel = Object.assign(new Channel(), settings);
     assert.throws(() => new RealtimeDatagramLink({ channel, pc: new PC(), onDatagram() {} }), /Invalid/);
   }
+});
+test("explicit finite lifetime requires an exact unreliable mode match and never falls back", t => {
+  const channel = Object.assign(new Channel(), { maxRetransmits: null, maxPacketLifeTime: 50 });
+  const { link } = fixture(t, { channel, maxPacketLifeTimeMs: 50 });
+  assert.equal(link.snapshot().delivery, 'finite-lifetime'); assert.equal(link.snapshot().maxPacketLifeTimeMs, 50);
+  for (const settings of [{ maxRetransmits: 0, maxPacketLifeTime: null }, { maxRetransmits: null, maxPacketLifeTime: 51 },
+    { maxRetransmits: null, maxPacketLifeTime: null }, { ordered: true, maxRetransmits: null, maxPacketLifeTime: 50 }]) {
+    assert.throws(() => new RealtimeDatagramLink({ pc: new PC(), channel: Object.assign(new Channel(), settings), maxPacketLifeTimeMs: 50, onDatagram() {} }), /Invalid/);
+  }
+  for (const lifetime of [0, 1001, 1.5, NaN]) assert.throws(() => new RealtimeDatagramLink({ pc: new PC(), channel, maxPacketLifeTimeMs: lifetime, onDatagram() {} }), /Invalid/);
 });
 test("abort closes once, removes receive listeners and never leaks callback error details", t => {
   const signal = new AbortController(), { link, channel, closed, received, pc } = fixture(t, { signal: signal.signal });
@@ -140,7 +155,7 @@ function memoryRelaySocket(events) {
     close() { sockets.delete(this); this.dispatchEvent(new Event("close")); }
   };
 }
-test("real RelayPool and NIP-44 session negotiate live datagrams with injected ICE and encrypted SDP", async t => {
+for (const lifetime of [undefined, 50]) test(`real RelayPool and NIP-44 session negotiate ${lifetime ?? 'zero-retry'} live datagrams with injected ICE and encrypted SDP`, async t => {
   const events = [], Socket = memoryRelaySocket(events), pools = [], sessions = [], peers = [], received = [];
   t.after(() => { for (const p of peers) p.close(); for (const s of sessions) s.close(); for (const p of pools) p.close(); });
   for (let i = 0; i < 2; i++) {
@@ -150,9 +165,10 @@ test("real RelayPool and NIP-44 session negotiate live datagrams with injected I
   const iceServers = [{ urls: "turn:relay.example:3478?transport=udp", username: "ephemeral-test", credential: "not-a-root-secret" }];
   for (let i = 0; i < 2; i++) peers.push(new RealtimePeer({ session: sessions[i], peerPubkey: sessions[1 - i].pubkey,
     initiator: i === 0, iceServers, iceTransportPolicy: "relay", RTCPeerConnectionImpl: PC,
-    onDatagram: value => received.push({ i, value: [...value] }) }));
+    maxPacketLifeTimeMs: lifetime, onDatagram: value => received.push({ i, value: [...value] }) }));
   peers[1].start(); peers[0].start(); await Promise.all(peers.map(p => p.ready));
-  assert.deepEqual(peers[0].pc.channelOptions, { label: REALTIME_CHANNEL, ordered: false, maxRetransmits: 0 });
+  assert.deepEqual(peers[0].pc.channelOptions, { label: REALTIME_CHANNEL, ordered: false,
+    ...(lifetime === undefined ? { maxRetransmits: 0 } : { maxPacketLifeTime: lifetime }) });
   for (const p of peers) assert.deepEqual(p.pc.configuration, { iceServers, iceTransportPolicy: "relay" });
   assert.equal(peers[0].send(new Uint8Array([7, 8])), true); await settle();
   assert.deepEqual(received, [{ i: 1, value: [7, 8] }]);

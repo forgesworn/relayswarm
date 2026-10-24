@@ -15,17 +15,20 @@ function bytes(value) {
   if (value instanceof Uint8Array) return value;
   return null;
 }
-function realtime(channel) {
-  return channel.label === REALTIME_CHANNEL && channel.ordered === false && channel.maxRetransmits === 0 && channel.maxPacketLifeTime === null;
+function realtime(channel, lifetime) {
+  return channel.label === REALTIME_CHANNEL && channel.ordered === false && (lifetime === undefined
+    ? channel.maxRetransmits === 0 && channel.maxPacketLifeTime === null
+    : channel.maxRetransmits === null && channel.maxPacketLifeTime === lifetime);
 }
 
 export class RealtimeDatagramLink {
-  constructor({ pc, channel, maxDatagramBytes = 16_384, maxBufferedBytes = 262_144, maxReceivePending = 16,
+  constructor({ pc, channel, maxDatagramBytes = 16_384, maxBufferedBytes = 262_144, maxReceivePending = 16, maxPacketLifeTimeMs,
     onDatagram, onClose, signal, now = clock } = {}) {
-    if (!pc || !channel || !realtime(channel) || !bounded(maxDatagramBytes, 1, 65_536)
+    if (!pc || !channel || maxPacketLifeTimeMs !== undefined && !bounded(maxPacketLifeTimeMs, 1, 1000)
+      || !realtime(channel, maxPacketLifeTimeMs) || !bounded(maxDatagramBytes, 1, 65_536)
       || !bounded(maxBufferedBytes, maxDatagramBytes, 4_194_304) || typeof now !== "function"
       || !bounded(maxReceivePending, 1, 256) || typeof onDatagram !== "function") throw new Error("Invalid real-time datagram link.");
-    Object.assign(this, { pc, channel, maxDatagramBytes, maxBufferedBytes, maxReceivePending, onDatagram, onClose, signal, now });
+    Object.assign(this, { pc, channel, maxDatagramBytes, maxBufferedBytes, maxReceivePending, maxPacketLifeTimeMs, onDatagram, onClose, signal, now });
     this.closed = false;
     this.receivePending = 0;
     this.counters = { sent: 0, received: 0, sentBytes: 0, receivedBytes: 0, backpressureDrops: 0, receiveDrops: 0, deadlineDrops: 0, closedDrops: 0 };
@@ -81,7 +84,8 @@ export class RealtimeDatagramLink {
   }
 
   snapshot() { return { ...this.counters, closed: this.closed, maxDatagramBytes: this.maxDatagramBytes,
-    maxBufferedBytes: this.maxBufferedBytes, maxReceivePending: this.maxReceivePending, receivePending: this.receivePending }; }
+    maxBufferedBytes: this.maxBufferedBytes, maxReceivePending: this.maxReceivePending, receivePending: this.receivePending,
+    delivery: this.maxPacketLifeTimeMs === undefined ? 'zero-retransmit' : 'finite-lifetime', maxPacketLifeTimeMs: this.maxPacketLifeTimeMs ?? null }; }
 
   close(reason = "host") {
     if (this.closed) return;
@@ -106,15 +110,16 @@ export class RealtimeDatagramLink {
 export class RealtimePeer {
   constructor({ session, peerPubkey, initiator, iceServers = [], iceTransportPolicy = "relay",
     RTCPeerConnectionImpl = globalThis.RTCPeerConnection, requestId,
-    timeoutMs = 15_000, maxDatagramBytes, maxBufferedBytes, onDatagram, onClose, signal, now = clock } = {}) {
+    timeoutMs = 15_000, maxDatagramBytes, maxBufferedBytes, maxPacketLifeTimeMs, onDatagram, onClose, signal, now = clock } = {}) {
     if (!session || !HEX64.test(peerPubkey) || peerPubkey === session.pubkey || typeof initiator !== "boolean"
       || !["all", "relay"].includes(iceTransportPolicy) || !Array.isArray(iceServers) || iceServers.length > 8
       || typeof RTCPeerConnectionImpl !== "function" || typeof onDatagram !== "function" || typeof now !== "function"
       || !bounded(timeoutMs, 1, 60_000) || requestId !== undefined && !ID.test(requestId)
       || !bounded(maxDatagramBytes ?? 16_384, 1, 65_536)
-      || !bounded(maxBufferedBytes ?? 262_144, maxDatagramBytes ?? 16_384, 4_194_304)) throw new Error("Invalid real-time peer.");
+      || !bounded(maxBufferedBytes ?? 262_144, maxDatagramBytes ?? 16_384, 4_194_304)
+      || maxPacketLifeTimeMs !== undefined && !bounded(maxPacketLifeTimeMs, 1, 1000)) throw new Error("Invalid real-time peer.");
     Object.assign(this, { session, peerPubkey, initiator, onDatagram, onClose, signal, now,
-      maxDatagramBytes, maxBufferedBytes, timeoutMs });
+      maxDatagramBytes, maxBufferedBytes, maxPacketLifeTimeMs, timeoutMs });
     this.requestId = initiator ? requestId ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, "0")).join("") : requestId ?? null;
     this.pc = new RTCPeerConnectionImpl({ iceServers, iceTransportPolicy });
     this.closed = false; this.started = false; this.link = null; this.channel = null;
@@ -151,7 +156,8 @@ export class RealtimePeer {
     this.pc.addEventListener("datachannel", this.datachannel);
     this.pc.addEventListener("connectionstatechange", this.connection);
     if (this.initiator) {
-      try { this.#channel(this.pc.createDataChannel(REALTIME_CHANNEL, { ordered: false, maxRetransmits: 0 })); }
+      try { this.#channel(this.pc.createDataChannel(REALTIME_CHANNEL, this.maxPacketLifeTimeMs === undefined
+        ? { ordered: false, maxRetransmits: 0 } : { ordered: false, maxPacketLifeTime: this.maxPacketLifeTimeMs })); }
       catch { this.close("channel"); return this.ready; }
       this.#serial(async () => {
         const offer = await this.pc.createOffer(); if (this.closed) return;
@@ -225,7 +231,7 @@ export class RealtimePeer {
   }
 
   #channel(channel) {
-    if (this.closed || this.channel || !realtime(channel)) {
+    if (this.closed || this.channel || !realtime(channel, this.maxPacketLifeTimeMs)) {
       try { channel.close(); } catch {}
       return this.close("protocol");
     }
@@ -241,7 +247,7 @@ export class RealtimePeer {
   #opened() {
     if (this.closed || this.link || this.channel?.readyState !== "open" || !this.pc.remoteDescription) return;
     this.link = new RealtimeDatagramLink({ pc: this.pc, channel: this.channel,
-      maxDatagramBytes: this.maxDatagramBytes, maxBufferedBytes: this.maxBufferedBytes, now: this.now,
+      maxDatagramBytes: this.maxDatagramBytes, maxBufferedBytes: this.maxBufferedBytes, maxPacketLifeTimeMs: this.maxPacketLifeTimeMs, now: this.now,
       onDatagram: this.onDatagram, onClose: (reason) => this.close(reason) });
     clearTimeout(this.timer); this.resolve(this.link);
   }

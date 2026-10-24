@@ -41,7 +41,8 @@
     "test:media-recovery": "node test/media-recovery-browser.mjs && node test/sparse-aac-recovery-browser.mjs",
     "test:live-recovery": "node test/live-restart-browser.mjs --baseline --resultsDir artifacts/live-restart-browser/baseline && node test/live-restart-browser.mjs --outage-ms 35000 --resultsDir artifacts/live-restart-browser/treatment",
     "test:realtime": "node --test test/realtime-peer.test.mjs",
-    "test:realtime:native": "node test/realtime-native-browser.mjs"
+    "test:realtime:native": "node test/realtime-native-browser.mjs",
+    "test:realtime:backend": "node --test test/realtime-werift-build.test.mjs"
   },
   "keywords": [
     "nostr",
@@ -95,7 +96,8 @@
     "./native-client": "./src/native-client.mjs",
     "./publisher-advertisement": "./src/publisher-advertisement.mjs",
     "./account-upload-budget": "./src/account-upload-budget.mjs",
-    "./realtime-peer": "./src/browser/realtime-peer.mjs"
+    "./realtime-peer": "./src/browser/realtime-peer.mjs",
+    "./realtime-werift-build": "./src/node/realtime-werift-build.mjs"
   },
   "bugs": {
     "url": "https://github.com/forgesworn/relayswarm/issues"

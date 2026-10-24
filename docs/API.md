@@ -24,6 +24,7 @@ are not a stable interoperability promise.
 | `relayswarm/publisher-advertisement` | Node or a browser bundler | `createPublisherAdvertisement`, `verifyPublisherAdvertisement` |
 | `relayswarm/account-upload-budget` | Node on supported local POSIX storage | `createAccountUploadBudget`, `AccountBudgetError`, `accountBudgetError` |
 | `relayswarm/realtime-peer` | Browser; injected connection in tests | `RealtimeDatagramLink`, `RealtimePeer`, `REALTIME_TRANSPORT`, `REALTIME_CHANNEL` |
+| `relayswarm/realtime-werift-build` | Node build tool | `realtimeWeriftPlugin`, `weriftRealtimeRevision` |
 | `relayswarm/package.json` | Package metadata | Name, version and declared dependencies |
 
 The wildcard export also permits source subpaths such as

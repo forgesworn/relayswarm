@@ -59,10 +59,20 @@ expiry. Once SCTP accepts bytes, the application cannot recall them. A
 receiver must still reject an expired complete frame.
 
 `RealtimeDatagramLink` can wrap an application-negotiated `pc`/`channel`
-directly. It requires the label `relayswarm-live-v1`, `ordered: false`,
-`maxRetransmits: 0` and `maxPacketLifeTime: null`. Ordered, reliable or timed
-channels are refused; there is no reliable or HLS fallback. The same
-constraints apply to channels received by `RealtimePeer`.
+directly. It requires the label `relayswarm-live-v1` and `ordered: false`.
+The default mode requires `maxRetransmits: 0` and `maxPacketLifeTime: null`.
+An explicit `maxPacketLifeTimeMs` option (integer 1 to 1000) instead requires
+`maxRetransmits: null` and exactly the selected `maxPacketLifeTime` value.
+Both endpoints must select the same mode and lifetime. Ordered, reliable,
+different-lifetime and different-mode channels are refused; there is no
+automatic switch or HLS fallback. The same constraints apply to channels
+received by `RealtimePeer`. Snapshots name the selected delivery mode and
+lifetime without exposing credentials or payloads.
+
+For a media forwarding service, explicitly selecting 50 ms lifetime bounds
+unsent and retransmission eligibility in a correctly implemented backend.
+Zero retries alone does not impose an unsent queue deadline. Negotiated flags
+do not prove backend conformance; use the guarded Node correction below.
 
 ## Bounds and lifetime
 
@@ -106,7 +116,7 @@ The qualifier requires the matching Playwright Chromium installation (or
 `E2E_CHROMIUM_EXECUTABLE`). It passed on the development Mac. It does not
 exercise TURN, remote networks, audiovisual decoding or phone devices.
 
-The tested Node role is **answerer only**. Werift 0.24.3's outgoing DCEP
+The original uncorrected Node qualifier role is **answerer only**. Werift 0.24.3's outgoing DCEP
 encoding overwrites the unordered channel bit when maxRetransmits is set;
 an initiating werift peer therefore fails the strict receiver check. Do not
 weaken that check to make a Node initiator pass. The browser initiates each
@@ -121,3 +131,70 @@ that inspection is not a live TURN qualification. Operator wrappers must
 also disable/reject inherited dependency debugging (`DEBUG`) before opening
 connections: dependency diagnostics can include ICE credentials. The
 transport module itself adds no logger.
+
+## Guarded Node backend build
+
+The opt-in `relayswarm/realtime-werift-build` module corrects one exact
+werift 0.24.4 ESM source revision during an esbuild Node build. It neither
+edits installed packages nor changes another application's dependency.
+The exported `weriftRealtimeRevision` records the reviewed upstream file
+SHA-256 values. Unknown metadata/source, browser builds, external-package
+builds and unsupported werift subpath imports are refused. There is no
+uncorrected fallback.
+
+```js
+import { build } from 'esbuild';
+import { realtimeWeriftPlugin } from 'relayswarm/realtime-werift-build';
+
+await build({
+  entryPoints: ['operator-entry.mjs'], // imports RTCPeerConnection from werift
+  outfile: 'operator.mjs',
+  platform: 'node', format: 'esm', bundle: true,
+  // Supply the normal createRequire shim if bundled dependencies require it.
+  plugins: [await realtimeWeriftPlugin({ packageRoot: reviewedWeriftDirectory })],
+});
+```
+
+The changes preserve unordered DCEP mode bits, recognise zero retransmits,
+capture lifetime in monotonic seconds when the data-channel send is enqueued, discard
+expired application-queue data, and refuse expired SCTP data before first
+send or retransmission. A single timer per association expires queued media
+even without a window-opening event. Abandonment identifies the exact DATA
+chunk and its message fragments rather than another message with the same
+chunk type. Flight-byte accounting follows abandonment and retransmission.
+The latest FORWARD TSN control skip is retained until cumulative acknowledgement
+and retried using the unchanged control timer if lost; expired media is not
+retransmitted. Association closure cancels its added expiry timer.
+The upstream MIT notice is retained explicitly in the generated bundle,
+alongside dependency legal comments. The published npm package omitted its
+licence file; the notice comes from the
+[upstream repository licence](https://github.com/shinyoshiaki/werift-webrtc/blob/develop/LICENSE).
+The guard does not independently pin all transitive dependencies: retain the
+consuming application's lockfile and build provenance as separate inputs.
+
+Run the conformance tests with the reviewed installation supplied explicitly:
+
+```sh
+WERIFT_REALTIME_PACKAGE_ROOT=/path/to/reviewed/node_modules/werift npm run test:realtime:backend
+```
+
+Without that variable the conformance command fails; it cannot turn green
+by skipping the backend cases. With the reviewed source, the tests build the
+corrected module and exercise actual serialised SCTP packets through a finite
+in-memory lossy transport. They prove zero-retry loss recovery, expiry behind
+a zero receive window, correct message selection, fragmented-message loss
+and lifetime-unit/application-queue handling. They also cover wall-clock
+rollback, lost control-skip recovery and expiry timer cleanup. The packet fixture accelerates
+the retransmission trigger; production retry timers, ICE consent and native
+resource limits remain unchanged. This is SCTP wire proof, not WAN or physical
+device qualification.
+
+The Chromium-to-native qualifier can consume the generated module explicitly:
+
+```sh
+E2E_REALTIME_BACKEND_MODULE=/path/to/corrected-backend.mjs E2E_REALTIME_LIFETIME_MS=50 npm run test:realtime:native
+```
+
+That path is a mandatory explicit selection when qualifying finite-lifetime
+native forwarding. An omitted backend path retains the historical direct
+upstream diagnostic; it does not establish corrected loss/expiry behaviour.
