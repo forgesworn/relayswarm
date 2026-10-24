@@ -97,3 +97,40 @@ test("PlayerHint trace replays shared supply changes and catches a changed comma
   rows[1].out.eligibleHolders++;
   assert.equal((await report(sets, { core })).replayMismatches.length, 1);
 });
+
+test("fixture receipt reports every switch, source counts, peer delay and only prior same-session holders", async () => {
+  const input = JSON.parse(await readFile(new URL("fixtures/switch-cost-receipt.json", import.meta.url)));
+  const out = await report(traceSets(input), { core, receipts: [{ input, name: "fixture" }] });
+  const [cost] = out.switchCosts;
+  assert.equal(cost.basis, "player-level-event");
+  assert.equal(cost.switches.length, 3);
+  assert.deepEqual(cost.switches.map(({ fromLevel, toLevel, segments, firstPeerMs }) => ({ fromLevel, toLevel, segments, firstPeerMs })), [
+    { fromLevel: 0, toLevel: 1, segments: { peer: 1, origin: 1, unknown: 1 }, firstPeerMs: 40 },
+    { fromLevel: 1, toLevel: 0, segments: { peer: 0, origin: 2, unknown: 0 }, firstPeerMs: null },
+    { fromLevel: 0, toLevel: 1, segments: { peer: 1, origin: 0, unknown: 0 }, firstPeerMs: 10 },
+  ]);
+  assert.equal(cost.switches[0].bandwidthEstimate, 8000000);
+  assert.deepEqual(cost.switches[0].holdersAtSwitch, { session: 0, source: "trace-eligibility", atMs: 150, ageMs: 50,
+    holders: [2, 4], haveHolders: [4], staleHolders: [2] });
+  assert.deepEqual(cost.switches[1].holdersAtSwitch.holders, [], "known zero differs from unknown");
+  assert.equal(cost.switches[2].holdersAtSwitch, null, "neither an old session nor a future row is evidence at this switch");
+  assert.match(cost.scope, /not a complete live inventory/);
+  assert.deepEqual(out.replayMismatches, []);
+  input.snapshots = [{ atMs: 750, metrics: { peerEligibilityDiagnostics: { records: [
+    { atMs: 40, level: 1, holders: [7], haveHolders: [7], staleHolders: [] },
+  ] } } }];
+  const repeated = await report(traceSets(input), { core, receipts: [{ input, name: "fixture" }] });
+  assert.deepEqual(repeated.switchCosts[0].switches[2].holdersAtSwitch, { session: 1, source: "snapshot-eligibility",
+    atMs: 740, ageMs: 60, holders: [7], haveHolders: [7], staleHolders: [] });
+});
+
+test("switch reporting works without a trace and labels fragment-derived transitions", async () => {
+  const input = { durationMs: 100, player: { fragments: [
+    { atMs: 10, level: 0, source: "origin" }, { atMs: 20, level: 1, source: "peer" }, { atMs: 30, level: 1, source: "origin" },
+  ] } };
+  const out = await report([], { core, receipts: [{ input: [input], name: "older" }] });
+  assert.equal(out.switchCosts[0].basis, "fragment-level-transition");
+  assert.deepEqual(out.switchCosts[0].switches[0].segments, { peer: 1, origin: 1, unknown: 0 });
+  assert.equal(out.switchCosts[0].switches[0].firstPeerMs, 0);
+  assert.equal(out.switchCosts[0].switches[0].holdersAtSwitch, null);
+});

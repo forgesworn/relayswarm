@@ -1,0 +1,31 @@
+{
+  "v": 1,
+  "kind": "relayswarm-field-receipt",
+  "durationMs": 900,
+  "player": {
+    "levelChanges": [{"atMs": 110, "level": 0}, {"atMs": 200, "level": 1}, {"atMs": 500, "level": 0}, {"atMs": 800, "level": 1}],
+    "fragments": [
+      {"atMs": 120, "level": 0, "sequence": 1, "source": "origin", "bandwidthEstimate": 9000000},
+      {"atMs": 180, "level": 1, "sequence": 2, "source": "origin"},
+      {"atMs": 210, "level": 1, "sequence": 3, "source": "origin", "bandwidthEstimate": 8000000},
+      {"atMs": 240, "level": 1, "sequence": 4, "source": "peer"},
+      {"atMs": 245, "level": 5, "sequence": 4, "mediaType": "audio", "source": "peer"},
+      {"atMs": 260, "level": 1, "sequence": 5, "part": 0, "source": "peer"},
+      {"atMs": 270, "level": 1, "sequence": 6, "source": "unknown"},
+      {"atMs": 510, "level": 0, "sequence": 7, "source": "origin"},
+      {"atMs": 600, "level": 0, "sequence": 8, "source": "origin"},
+      {"atMs": 810, "level": 1, "sequence": 9, "source": "peer"}
+    ]
+  },
+  "sessions": [{
+    "startedAtMs": 100, "endedAtMs": 700,
+    "trace": {"v": 1, "dropped": 0, "rows": [
+      {"k": "eligibility", "at": 50, "level": 1, "holders": [2, 4], "haveHolders": [4], "staleHolders": [2]},
+      {"k": "eligibility", "at": 150, "level": 1, "holders": [9], "haveHolders": [9], "staleHolders": []},
+      {"k": "eligibility", "at": 350, "level": 0, "holders": [], "haveHolders": [], "staleHolders": []}
+    ]}
+  }],
+  "current": {"startedAtMs": 700, "metrics": {"peerEligibilityDiagnostics": {"records": [
+    {"atMs": 150, "level": 1, "holders": [1], "haveHolders": [1], "staleHolders": []}
+  ]}}}
+}
