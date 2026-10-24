@@ -1,6 +1,10 @@
 # RelaySwarm changelog
 
-## Unreleased
+## v0.4.1 (24 October 2026)
+
+Experimental library prerelease following [v0.4.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.0).
+No service is deployed; physical-device, public-NAT and distributed field
+acceptance remain open. See [Status](docs/STATUS.md).
 
 - Preserve the measured per-load HTTP recovery reserve when a multi-holder
   deadline moves unfinished pieces to origin. Retain bounded, URL-free range
@@ -9,6 +13,8 @@
   and race only an already advertised cached schema-3 object. Only a complete
   verified winner reaches the player; stopping the swarm leaves pending HTTP
   running, while loader cancellation stops both arms. Defaults are unchanged.
+- Retain a native Chrome cached-race receipt in CI, proving both winners and
+  reuse of the same connection with synthetic protocol data on loopback.
 - Apply accepted-contributor holder recovery to both normal peer-first loads
   and cached races; all-origin and unsuccessful peer work remain neutral.
 

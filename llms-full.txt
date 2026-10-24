@@ -1,6 +1,6 @@
 # RelaySwarm full documentation context
 
-> Generated from maintained Markdown. Source package 0.4.0; release and deployment evidence is recorded in docs/STATUS.md.
+> Generated from maintained Markdown. Source package 0.4.1; release and deployment evidence is recorded in docs/STATUS.md.
 
 Canonical repository: https://github.com/forgesworn/relayswarm. Main-branch documentation can correct released documentation. Historical spike evidence is indexed separately in llms.txt.
 
@@ -16,7 +16,7 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.4.0 is the experimental GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.0).
+**Status:** [v0.4.1 is the experimental GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.1).
 It integrates holder recovery with the Rust/WASM core, accepted connection and
 verified-media observations, bounded cancellation/draining and relay recovery.
 JavaScript/WASM and native core downloads have separate checksums. Native
@@ -40,7 +40,7 @@ and [current source evidence](https://raw.githubusercontent.com/forgesworn/relay
 Install ffmpeg with libx264 for synthetic media, then:
 
 ```sh
-git clone --branch v0.4.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.4.1 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -1078,7 +1078,11 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 # RelaySwarm changelog
 
-## Unreleased
+## v0.4.1 (24 October 2026)
+
+Experimental library prerelease following [v0.4.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.0).
+No service is deployed; physical-device, public-NAT and distributed field
+acceptance remain open. See [Status](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md).
 
 - Preserve the measured per-load HTTP recovery reserve when a multi-holder
   deadline moves unfinished pieces to origin. Retain bounded, URL-free range
@@ -1087,6 +1091,8 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
   and race only an already advertised cached schema-3 object. Only a complete
   verified winner reaches the player; stopping the swarm leaves pending HTTP
   running, while loader cancellation stops both arms. Defaults are unchanged.
+- Retain a native Chrome cached-race receipt in CI, proving both winners and
+  reuse of the same connection with synthetic protocol data on loopback.
 - Apply accepted-contributor holder recovery to both normal peer-first loads
   and cached races; all-origin and unsuccessful peer work remain neutral.
 
@@ -1554,14 +1560,14 @@ Source: [docs/GETTING-STARTED.md](https://raw.githubusercontent.com/forgesworn/r
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [API](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) · [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md)
 
 The supported release is an experimental
-[v0.4.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.0).
+[v0.4.1 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.1).
 Node 22.13+ is required; CI runs Node 24. `npm install relayswarm` is not the
 documented distribution path: the npm registry is unpublished.
 
 ## Install for a host application
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.0/relayswarm-0.4.0.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.1/relayswarm-0.4.1.tgz
 npm install hls.js
 ```
 
@@ -1580,17 +1586,17 @@ this hls.js loader.
 A Git dependency can also be pinned to the versioned release tag:
 
 ```sh
-npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.4.0'
+npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.4.1'
 ```
 
 ## Use the standalone browser bundle
 
 Download
-[`relayswarm-hls-swarm-0.4.0.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.0/relayswarm-hls-swarm-0.4.0.mjs)
+[`relayswarm-hls-swarm-0.4.1.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.1/relayswarm-hls-swarm-0.4.1.mjs)
 and serve it from your own application:
 
 ```js
-import { createHlsSwarm } from './relayswarm-hls-swarm-0.4.0.mjs';
+import { createHlsSwarm } from './relayswarm-hls-swarm-0.4.1.mjs';
 ```
 
 The bundle contains the loader's runtime dependencies; hls.js remains the
@@ -1598,7 +1604,7 @@ host's dependency. Prefer vendoring the verified file to relying on GitHub
 release-download URLs as a JavaScript CDN. The separate publisher helper uses
 Node filesystem/crypto APIs and does not belong in a browser bundle.
 
-The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.0/SHA256SUMS)
+The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.1/SHA256SUMS)
 covers the tarball, browser bundle, WASM module and JavaScript build metadata.
 Download those four files and the manifest into one directory and verify:
 
@@ -1608,7 +1614,7 @@ shasum -a 256 -c SHA256SUMS
 
 ## Use the optional shared core
 
-Download [`relayswarm-core-0.4.0.wasm`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.0/relayswarm-core-0.4.0.wasm)
+Download [`relayswarm-core-0.4.1.wasm`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.1/relayswarm-core-0.4.1.wasm)
 and serve it beside the browser bundle with `Content-Type: application/wasm`.
 Pass its URL through `coreWasm`; enable experimental `multiHolder` and
 `peerSupplyHint` only when the host intends to use them. A Content Security
@@ -1619,7 +1625,7 @@ The tarball also contains the committed module under `src/browser/`.
 
 ## Use the native core assets
 
-The [v0.4.0 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.0)
+The [v0.4.1 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.1)
 includes `relayswarm-core.xcframework.zip`, its `.checksum`,
 `relayswarm-core-swift-bindings.zip` and `relayswarm-core.aar`. Download the
 platform's `SHA256SUMS-apple` or `SHA256SUMS-android` and every file listed in
@@ -1636,7 +1642,7 @@ WebRTC adapter or client application. RelaySwarmKit v0.6.0 separately consumes t
 ## Run the source demo
 
 ```sh
-git clone --branch v0.4.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.4.1 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -1687,7 +1693,7 @@ Current evidence and remaining device/network gates are in [STATUS.md](https://r
 
 ## Development source
 
-The published commands above install v0.4.0. Later development lands on
+The published commands above install v0.4.1. Later development lands on
 `main`, a mutable reference; its
 [production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md) and
 [delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) have separate evidence.
@@ -1700,7 +1706,7 @@ npm ci
 npm run demo
 ```
 
-Both v0.4.0 and current development source include the installed native
+Both v0.4.1 and current development source include the installed native
 executable, verified HTTP fallback and wider-media tests:
 
 ```sh
@@ -2315,11 +2321,28 @@ Source: [docs/STATUS.md](https://raw.githubusercontent.com/forgesworn/relayswarm
 [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md)
 
 Checkpoint: 24 October 2026. The experimental shared-core release is
-[v0.4.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.0).
-The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md#v040-24-october-2026) records its source changes;
+[v0.4.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.1).
+The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md#v041-24-october-2026) records its source changes;
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Cached-peer race release (24 October 2026)
+
+v0.4.1 includes the opt-in `zeroBudgetPeerRace` loader option. It starts the
+normal HTTP request immediately and races only an object already advertised
+by an eligible cached schema-3 peer. A complete verified winner owns delivery;
+progressive loads skip the race. Stopping the swarm leaves pending HTTP
+running, while loader cancellation stops both arms. The default remains off.
+The multi-holder origin tail also retains the measured per-load recovery
+reserve, with bounded range-outcome diagnostics.
+
+The native Chrome fixture checks both winners, exact verified bytes, one
+whole HTTP request per load and reuse of the same connection. It uses two
+contexts on one machine with synthetic protocol data. Accepted peer bytes do
+not prove net savings: an aborted HTTP arm may already have transferred bytes.
+No public service or pilot is deployed. The field and device gates below
+remain open; publishing these libraries does not close them.
 
 ## Integrated library release (24 October 2026)
 
