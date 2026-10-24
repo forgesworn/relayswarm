@@ -7775,6 +7775,12 @@ signs instead of interpolating them into URI user-info. DTLS fingerprint
 verification remains enabled. Native logging is initialised at `None`; there
 is no per-call log writer in this module. Host/provider logging is separate.
 
+The pinned native libjuice backend supports **TURN over UDP only**. This
+facade refuses TURN/TCP and TURN/TLS configuration before allocating a peer,
+including under `all` policy, so unsupported servers cannot be silently
+ignored in favour of a direct connection. This limit belongs to the native
+backend; it is not a claim that the browser or Spry lacks those transports.
+
 Native `send(false)` means the message was accepted into a buffer, not refused.
 The shared datagram link checks native `bufferedAmount` before sending. This
 facade preserves the standard void-send behaviour and treats native
@@ -7804,6 +7810,25 @@ an isolated temporary source copy and existing dependencies without changing
 shared installations. [Retained observations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/evidence/native-realtime-loopback-20261024.json)
 record the exact gate. This is not Linux runtime acceptance,
 public-NAT performance, multi-participant media acceptance or a release.
+
+### Stock TURN allocation-release finding
+
+The stock 0.33.4/0.24.5 native backend failed a separate allocation-release
+gate against an authenticated synthetic loopback TURN server. Both the raw
+binding and this facade obtained a relay candidate, returned from close and
+process-global cleanup, and released their local UDP socket while the process
+was still alive. Neither sent `Refresh(lifetime=0)`. Socket ownership cleanup
+therefore does not establish prompt release of a server allocation.
+[Retained observations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/evidence/native-turn-close-stock-20261024.json) keep
+that failure distinct from the passing browser/datagram gate.
+
+`test/native-turn-release.py` reproduces the check with fixture credentials;
+it contacts no live relay and exits unsuccessfully when release is missing.
+It requires an explicit exact `E2E_NATIVE_PACKAGE_ROOT`; `PROBE_MODE=facade`
+selects the owned wrapper and `E2E_NATIVE_BINDING` can explicitly select a
+separately built sidecar. A native-source correction needs independent
+identity, source/patch/binary receipts and release qualification. Reissuing
+credentials, increasing quota or restarting a relay does not repair teardown.
 
 ## Dependency and licence boundary
 
