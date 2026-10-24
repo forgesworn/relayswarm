@@ -159,10 +159,17 @@ export async function requestObject(stream, expected, { maxObjectBytes = DEFAULT
 
 function receiveObject(stream, expected, maxObjectBytes) {
   return new Promise((resolve, reject) => {
-    let pending = Buffer.alloc(0);
+    // Unparsed bytes are held as parts and joined only once a whole header or
+    // frame is available, so small reads cost no repeated copies.
+    let parts = [], partBytes = 0, needed = HEADER_BYTES;
     let metadataSeen = false;
     let receivedBytes = 0;
-    const chunks = [];
+    let chunkCount = 0;
+    // The trusted size is known before any byte: one buffer, filled in place
+    // and hashed as it arrives, instead of the chunks plus a joined copy.
+    let object = null;
+    const hash = createHash("sha256");
+    const maxChunks = Math.max(1, Math.ceil(expected.size / MAX_FRAME_BYTES) * 4);
 
     const cleanup = () => {
       stream.off("data", onData);
@@ -180,14 +187,23 @@ function receiveObject(stream, expected, maxObjectBytes) {
     const onClose = () => fail(new Error("Native peer connection closed before completing the transfer."));
     const onData = (chunk) => {
       try {
-        pending = pending.length === 0 ? Buffer.from(chunk) : Buffer.concat([pending, chunk]);
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        parts.push(bytes);
+        partBytes += bytes.length;
+        if (partBytes < needed) return;
+        let pending = parts.length === 1 ? parts[0] : Buffer.concat(parts, partBytes);
+        parts = []; partBytes = 0; needed = HEADER_BYTES;
         while (pending.length >= HEADER_BYTES) {
           if (pending[0] !== MAGIC[0] || pending[1] !== MAGIC[1] || pending[2] !== VERSION) throw new Error("Invalid transfer frame header.");
           const type = pending[3];
           if (type < FRAME.REQUEST || type > FRAME.ERROR) throw new Error("Invalid transfer frame type.");
           const length = pending.readUInt32BE(4);
           if (length > MAX_FRAME_BYTES) throw new Error("Transfer frame is too large.");
-          if (pending.length < HEADER_BYTES + length) return;
+          if (pending.length < HEADER_BYTES + length) {
+            // Keep the incomplete frame: a stream may reuse the chunk's memory.
+            parts = [Buffer.from(pending)]; partBytes = pending.length; needed = HEADER_BYTES + length;
+            return;
+          }
           const payload = pending.subarray(HEADER_BYTES, HEADER_BYTES + length);
           pending = pending.subarray(HEADER_BYTES + length);
 
@@ -199,28 +215,31 @@ function receiveObject(stream, expected, maxObjectBytes) {
               throw new Error("Native peer returned unexpected object metadata.");
             }
             metadataSeen = true;
+            object = Buffer.allocUnsafe(expected.size);
             continue;
           }
           if (type === FRAME.CHUNK) {
             if (!metadataSeen) throw new Error("Object bytes arrived before metadata.");
-            if (!payload.length || chunks.length >= Math.max(1, Math.ceil(expected.size / MAX_FRAME_BYTES) * 4)) throw new Error("Native peer exceeded the object chunk budget.");
+            if (!payload.length || chunkCount >= maxChunks) throw new Error("Native peer exceeded the object chunk budget.");
+            chunkCount += 1;
+            if (receivedBytes + payload.length > expected.size || receivedBytes + payload.length > maxObjectBytes) throw new Error("Native peer exceeded the expected object size.");
+            payload.copy(object, receivedBytes);
+            hash.update(payload);
             receivedBytes += payload.length;
-            if (receivedBytes > expected.size || receivedBytes > maxObjectBytes) throw new Error("Native peer exceeded the expected object size.");
-            chunks.push(Buffer.from(payload));
             continue;
           }
           if (type === FRAME.EOF) {
             if (payload.length !== 0 || !metadataSeen || receivedBytes !== expected.size) throw new Error("Native peer ended an incomplete transfer.");
             if (pending.length !== 0) throw new Error("Native peer sent data after the end of the transfer.");
-            const bytes = Buffer.concat(chunks, receivedBytes);
-            if (sha256Hex(bytes) !== expected.sha256) throw new Error("Native peer returned bytes with the wrong SHA-256 digest.");
+            if (hash.digest("hex") !== expected.sha256) throw new Error("Native peer returned bytes with the wrong SHA-256 digest.");
             cleanup();
             stream.end();
-            resolve(bytes);
+            resolve(object);
             return;
           }
           throw new Error("Unexpected transfer frame.");
         }
+        if (pending.length) { parts = [Buffer.from(pending)]; partBytes = pending.length; }
       } catch (error) {
         fail(error);
       }

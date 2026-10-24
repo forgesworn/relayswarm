@@ -18,6 +18,11 @@ const MAX_SIGNAL_PLAINTEXT_BYTES = 8 * 1024;
 const MAX_TICKET_BYTES = 2 * 1024;
 const FUTURE_TOLERANCE_SECONDS = 30;
 const CLOCK_SAMPLE_CAPACITY = 64;
+// NIP-44 conversation keys by peer pubkey. Deriving one is an ECDH, several
+// times the cost of encrypting or decrypting a signal with it, and both
+// directions of a pairwise exchange share the key. Bounded because anyone
+// can sign a signal to us.
+const CONVERSATION_KEY_CAPACITY = 256;
 
 const utf8 = new TextEncoder();
 
@@ -73,7 +78,7 @@ function validateRelayUrl(value) {
 }
 
 export class RelayPool {
-  constructor(urls, { label = "relay", WebSocketImpl = globalThis.WebSocket, connectTimeoutMs = 8_000, reconnect = false, reconnectMaxMs = 30_000 } = {}) {
+  constructor(urls, { label = "relay", WebSocketImpl = globalThis.WebSocket, connectTimeoutMs = 8_000, reconnect = false, reconnectMaxMs = 30_000, readyOnFirstRelay = false } = {}) {
     if (!Array.isArray(urls) || urls.length < 1 || urls.length > 8) throw new Error("RelayPool requires between one and eight relay URLs.");
     if (typeof WebSocketImpl !== "function") throw new Error("RelayPool requires a WebSocket implementation.");
     this.urls = [...new Set(urls.map(validateRelayUrl))];
@@ -93,6 +98,10 @@ export class RelayPool {
     // socket is re-dialled with jittered backoff and every live subscription is
     // re-sent. Short tests and the PoC keep the old one-shot behaviour.
     this.reconnect = reconnect;
+    // A one-shot pool normally waits for every initial attempt. With this,
+    // it is ready on the first usable relay instead, still fails only when
+    // every attempt has, and later relays join as they open.
+    this.readyOnFirstRelay = readyOnFirstRelay === true;
     this.reconnectMaxMs = reconnectMaxMs;
     this.subscriptions = new Map();
     this.retryTimers = new Set();
@@ -119,8 +128,12 @@ export class RelayPool {
     // initial attempt lets an unreachable relay hold a healthy one hostage
     // until its connection timeout. Register before opening any socket.
     let waiter;
-    const ready = this.reconnect ? new Promise((resolve, reject) => this.readyWaiters.add(waiter = { resolve, reject })) : null;
+    const ready = this.reconnect || this.readyOnFirstRelay ? new Promise((resolve, reject) => this.readyWaiters.add(waiter = { resolve, reject })) : null;
     const settled = Promise.allSettled(this.urls.map((url) => this.#connectOne(url)));
+    const unreachable = (results) => {
+      const reasons = results.map((result) => result.status === "rejected" ? result.reason?.message : "").filter(Boolean);
+      return new Error(`No relay reachable${reasons.length ? `: ${reasons.join("; ")}` : "."}`);
+    };
     if (this.reconnect) {
       // All attempts remain owned by pendingSockets. Even after readiness,
       // observe their failures and retain the existing bounded retry policy.
@@ -136,12 +149,18 @@ export class RelayPool {
       } finally { this.readyWaiters.delete(waiter); }
       return;
     }
+    if (ready) {
+      // Ready on the first open socket; a slower relay joins when it opens.
+      void settled.then((results) => { if (this.sockets.length === 0) waiter.reject(unreachable(results)); });
+      try {
+        await ready;
+        if (this.closed) throw new Error("RelayPool is closed.");
+      } finally { this.readyWaiters.delete(waiter); }
+      return;
+    }
     const results = await settled;
     if (this.closed) throw new Error("RelayPool is closed.");
-    if (this.sockets.length === 0) {
-      const reasons = results.map((result) => result.status === "rejected" ? result.reason?.message : "").filter(Boolean);
-      throw new Error(`No relay reachable${reasons.length ? `: ${reasons.join("; ")}` : "."}`);
-    }
+    if (this.sockets.length === 0) throw unreachable(results);
     this.connected = true;
   }
 
@@ -307,6 +326,8 @@ export class RelayPool {
 export class RelaySwarmSession {
   #lastPresence = null;
   #unsubscribeRelayOpen = null;
+  #conversationKeys = new Map();
+  #conversationKeyOwner = null;
   constructor({ pool, swarmId, secretKey = generateSecretKey(), maxEventAgeSeconds = 120 } = {}) {
     if (!pool) throw new Error("RelaySwarmSession requires a relay pool.");
     if (typeof swarmId !== "string" || swarmId.length < 8 || swarmId.length > 128) throw new Error("Invalid swarm identifier.");
@@ -434,8 +455,7 @@ export class RelaySwarmSession {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Invalid signal payload.");
     const plaintext = JSON.stringify({ v: RELAYSWARM_VERSION, type, transport, requestId, payload });
     if (byteLength(plaintext) > MAX_SIGNAL_PLAINTEXT_BYTES) throw new Error("Signal payload is too large.");
-    const conversationKey = nip44.utils.getConversationKey(this.secretKey, toPubkey);
-    const content = nip44.encrypt(plaintext, conversationKey);
+    const content = nip44.encrypt(plaintext, this.#conversationKey(toPubkey));
     const event = finalizeEvent({
       kind: KIND_SIGNAL,
       created_at: Math.floor(Date.now() / 1000),
@@ -520,8 +540,7 @@ export class RelaySwarmSession {
 
   #receiveSignal(event) {
     if (byteLength(event.content) > MAX_SIGNAL_CIPHERTEXT_BYTES || uniqueTag(event, "p") !== this.pubkey) return;
-    const conversationKey = nip44.utils.getConversationKey(this.secretKey, event.pubkey);
-    const plaintext = nip44.decrypt(event.content, conversationKey);
+    const plaintext = nip44.decrypt(event.content, this.#conversationKey(event.pubkey));
     if (byteLength(plaintext) > MAX_SIGNAL_PLAINTEXT_BYTES) return;
     const payload = parseObject(plaintext);
     if (payload.v !== RELAYSWARM_VERSION || !validToken(payload.type) || !validToken(payload.transport) || !validRequestId(payload.requestId)) return;
@@ -531,6 +550,23 @@ export class RelaySwarmSession {
     if (this.clock.signalAges.length >= CLOCK_SAMPLE_CAPACITY) this.clock.signalAges.shift();
     this.clock.signalAges.push(Math.floor(Date.now() / 1000) - event.created_at);
     this.#dispatch(this.signalHandlers, { from: event.pubkey, event, payload });
+  }
+
+  // The pairwise key for `pubkey`, derived once per session secret key and
+  // kept in a small least-recently-used map. A failed derivation is not kept.
+  #conversationKey(pubkey) {
+    if (this.#conversationKeyOwner !== this.secretKey) {
+      this.#conversationKeys.clear();
+      this.#conversationKeyOwner = this.secretKey;
+    }
+    let key = this.#conversationKeys.get(pubkey);
+    if (key) this.#conversationKeys.delete(pubkey);
+    else {
+      key = nip44.utils.getConversationKey(this.secretKey, pubkey);
+      if (this.#conversationKeys.size >= CONVERSATION_KEY_CAPACITY) this.#conversationKeys.delete(this.#conversationKeys.keys().next().value);
+    }
+    this.#conversationKeys.set(pubkey, key);
+    return key;
   }
 
   #dispatch(handlers, value) {
@@ -544,6 +580,7 @@ export class RelaySwarmSession {
   close() {
     this.unsubscribe?.();
     this.#unsubscribeRelayOpen?.(); this.#unsubscribeRelayOpen = null; this.#lastPresence = null;
+    this.#conversationKeys.clear(); this.#conversationKeyOwner = null;
     for (const id of this.subscriptionIds) this.pool.unsubscribe?.(id);
     this.subscriptionIds = [];
     this.unsubscribe = null;
