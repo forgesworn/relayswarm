@@ -88,7 +88,10 @@ For eligible already-HAVE framing-2 holders, a verified schema-3 commitment
 can enter mixed piece planning without passing a whole-object peer forecast.
 The planner may use only a bounded peer fraction alongside origin pieces;
 valid schemas 1/2 retain their whole-object projection. Waiting for unavailable
-media requires a live same-key FETCH lease from a fresh serving contributor.
+known-VOD main media requires a live same-key FETCH lease from a fresh serving
+contributor. VOD is read from the exact demanded main level's `details.live ===
+false`; live, unknown and alternate-audio contexts retain their bounded
+coordination. The current player level does not override the demand's level.
 These changes preserve the estimator floor, integrity checks and existing
 deadline/reserve bounds; the committed core module is unchanged.
 

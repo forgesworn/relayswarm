@@ -62,7 +62,9 @@ whole held object per request. These are bounded-policy and byte-copy changes;
 physical iPhone/iPad and Pixel/Vanadium continuity remains unverified.
 v0.4.4 lets already-HAVE framing-2 schema-3 objects enter bounded mixed piece
 planning despite a late whole-object peer forecast; valid schemas 1/2 retain
-that forecast. Unavailable-media waits require a live same-key FETCH lease.
+that forecast. Known-VOD main-media waits require a live same-key FETCH lease,
+using the exact demand's explicit recorded-playlist state. Live, unknown and
+alternate-audio contexts retain bounded coordination for synchronous release.
 Estimator floor, sustainable deadlines, origin reserve, wire and WASM bytes
 are unchanged. Paired with website clock/first-frame fixes, a physical Pixel/M4
 original-4K candidate passed a bounded 45.5-second window: 6,553,600 verified

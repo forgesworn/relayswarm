@@ -13,8 +13,10 @@ Sustained physical-device continuity and net network benefit remain open.
   sustainable deadlines, origin reserve and the estimator's 300 ms flow floor
   remain unchanged; no Rust/WASM rebuild or wire change is required.
 - Require a live same-key FETCH lease from a fresh same-rendition serving
-  contributor before waiting for unavailable media. Bare serving presence
-  and key rank no longer make a prefetch leader wait for an idle follower.
+  contributor before waiting for unavailable recorded main-rendition media.
+  The exact demanded rendition must explicitly report VOD; live, unknown and
+  alternate-audio contexts retain bounded rendezvous coordination. Bare
+  serving presence and key rank no longer hold a known-VOD prefetch leader.
 - Retain real-WASM regressions and the previous-source failing control.
   Paired with separate website clock/first-frame fixes, a physical Pixel/M4
   candidate passed a bounded 45.5-second original-4K window: 6,553,600 verified

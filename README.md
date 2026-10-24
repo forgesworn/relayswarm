@@ -6,8 +6,9 @@ concept uses HyperDHT and Noise for installed Node applications.
 
 **Status:** [v0.4.4 is the prepared experimental prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4).
 Cached schema-3 media can combine a bounded peer fraction with origin pieces
-even when a whole-object peer estimate is late. Waiting for unavailable media
-requires a live same-key fetch lease from a contributor.
+even when a whole-object peer estimate is late. Waiting for unavailable
+known-VOD main media requires a live same-key fetch lease from a contributor;
+live and unknown playlists retain their bounded coordination.
 Its opt-in sustainable peer waits preserve origin-recovery time within a
 segment's duration; its matching WASM core takes only requested upload ranges
 across the byte-copy boundary. Longer physical-phone continuity remains open.

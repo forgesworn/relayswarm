@@ -754,11 +754,16 @@ on the attempt's own progress. This gives an untested holder one chance. It does
 not make a segment fit a room shorter than a relayed transfer needs, and a load
 with less room than that still goes to origin.
 
-When an eligible same-rendition contributor is fetching a new segment, the
-loader waits only if a live FETCH lease names that exact key. Bare serving
-presence or rendezvous rank is insufficient, since the contributor may be
-behind this viewer's prefetch frontier. The loader requests its signed
-commitment while waiting for availability. It
+For a recorded main-rendition segment, the loader waits only if an eligible
+same-rendition contributor has a live FETCH lease for that exact key. Known VOD
+means `context.frag.type === "main"` and the exact demanded integer level's
+`hls.levels[level].details.live === false`; `currentLevel` is not consulted.
+Bare serving presence or rendezvous rank is insufficient because the contributor
+may be behind this viewer's VOD prefetch frontier. Live and unknown playlists
+retain bounded receive-only/rendezvous coordination for synchronous segment
+release. Alternate audio remains unknown here because its level indexes a
+different track family. The loader requests its signed commitment while
+waiting for availability. It
 verifies the commitment after availability arrives, before requesting peer
 bytes. Both operations share the loader's deadline. An eligible wait may make
 one commitment request even if availability never arrives. A failed commitment

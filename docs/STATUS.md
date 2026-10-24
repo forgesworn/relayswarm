@@ -20,24 +20,34 @@ planner, sustainable deadline and origin reserve still bound peer work;
 valid schemas 1/2 retain their whole-object projection. The 300 ms estimator
 floor, integrity verifier, wire and committed WASM bytes are unchanged.
 
-An unavailable object is waited for only while a fresh same-rendition serving
-contributor advertises a live FETCH lease for that exact key. A contributor
-behind a prefetch leader no longer causes a wait merely by serving or ranking
-ahead. A lying or expired lease cannot move the loader's deadline.
+For known-VOD main media, an unavailable object is waited for only while a
+fresh same-rendition serving contributor advertises a live FETCH lease for
+that exact key. A contributor behind a recorded-media prefetch leader no longer
+causes a wait merely by serving or ranking ahead. VOD is the exact demanded
+main level's explicit `details.live === false`, rather than `currentLevel`;
+live, unknown, alternate-audio and invalid-level contexts retain the previous
+bounded coordination. A lying or expired lease cannot move the deadline.
 
-Ten focused real-WASM checks cover repeated mixed delivery after an actual
+Twenty focused real-WASM checks cover repeated mixed delivery after an actual
 slow partial flow, both valid legacy schemas, missing/wrong/expired leases,
-valid availability and a bounded lying lease. The same corrected fixture on
+valid availability, a bounded lying lease, live/unknown compatibility and
+exact-level/track-family classification. The same corrected fixture on
 the previous `6f63fb2` source fails the mixed-admission and missing-lease
 controls. Test channels model native reliable/ordered SCTP and allow losing
 EOF frames to drain before the next eligible demand.
-The complete WASM loader sweep passed 301 tests with one expected
+The initial candidate's complete WASM loader sweep passed 301 tests with one expected
 JavaScript-prototype-only skip (302 total). Syntax and authored/generated
 documentation checks passed. The first parallel JavaScript loader sweep had
 four timed holder-accounting failures; the same four passed on both previous
 and candidate source in quiet isolation without changing their assertions.
-The complete serial JavaScript loader rerun then passed all 370 tests with
+Its complete serial JavaScript loader rerun then passed all 370 tests with
 zero failures in 125.875 seconds.
+
+The initial hosted broadcast fixture exposed a synchronous live-release race:
+donor HAVE arrived 29–58 ms after the consumer's decision, while the first
+candidate admitted waits only after observing FETCH. The recorded-media scope
+above preserves the prior live coordination and the unchanged strict peer
+playback assertion; that failed initial attempt remains recorded.
 
 Physical candidate checks used original 2160p HLS on Pixel/Vanadium and an
 M4 browser, actual Nostr signalling and the owner's existing Archy Spry TLS

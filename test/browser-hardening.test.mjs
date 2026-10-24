@@ -4677,19 +4677,21 @@ test("mixed admission retains repeated verified peer fractions despite a fresh l
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
-test("origin coordination requires a live same-key FETCH lease and preserves its deadline", async t => {
+test("recorded VOD coordination requires a live same-key FETCH lease and preserves its deadline", async t => {
   for (const variant of ["no-lease", "other-key", "expired", "live", "live-unavailable"]) await t.test(variant, async t => {
     const playback = peerPlaybackOptions(120), requested = [];
     const f = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(), coreWasm: multiCore });
     let clock;
     try {
       await until(() => f.swarm.metrics().core.state === "ready");
+      f.hls.levels = [{ details: { live: false } }];
       const channel = await f.addPeer(new ServingChannel(playback.bytes, 1, requested, "fetching-holder"));
       channel.receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:0" }));
       clock = virtualClock(t);
       if (variant !== "no-lease") channel.receive(JSON.stringify({ t: "fetching", k: variant === "other-key" ? "f".repeat(64) : playback.key, ms: variant === "expired" ? 10 : 2000 }));
       if (variant === "expired") await clock.advance(11);
-      const began = clock.now(), pending = f.load();
+      const began = clock.now(), pending = new Promise(resolve => new f.hls.config.fLoader({}).load({ ...context,
+        frag: { ...context.frag, type: "main" } }, {}, { onSuccess: resolve }));
       if (variant === "live") setTimeout(() => channel.receive(JSON.stringify({ t: "have", keys: [playback.key] })), 20);
       await clock.settle(pending, 200);
       const metrics = f.swarm.metrics();
@@ -4702,6 +4704,53 @@ test("origin coordination requires a live same-key FETCH lease and preserves its
         assert.equal(metrics.segments.commitmentRequests, 0);
         assert.ok(clock.now() - began < 10, "a prefetch leader does not spend its peer wait on an idle follower");
       }
+    } finally { clock?.restore(); await f.close(); }
+  });
+});
+
+test("live and unknown playlists retain bounded receive-only and ranked coordination", async t => {
+  const variants = [
+    { name: "live", levels: [{ details: { live: true } }], arrives: true },
+    { name: "unknown", arrives: true },
+    { name: "exact-live-demand", levels: [{ details: { live: true } }, { details: { live: false } }], currentLevel: 1, arrives: true },
+    { name: "exact-vod-demand", levels: [{ details: { live: false } }, { details: { live: true } }], currentLevel: 1, vod: true },
+    { name: "alternate-audio", type: "audio", levels: [{ details: { live: false } }] },
+    { name: "invalid-negative-level", level: -1, levels: Object.assign([], { "-1": { details: { live: false } } }) },
+    { name: "invalid-outside-level", level: 3, levels: [{ details: { live: false } }] },
+    { name: "live-ranked-contributor", levels: [{ details: { live: true } }], serve: true },
+    { name: "unknown-ranked-contributor", serve: true },
+  ];
+  for (const variant of variants) await t.test(variant.name, async t => {
+    const playback = peerPlaybackOptions(120), requested = [];
+    const f = await linkedFixture({ ...playback.options, serve: variant.serve ?? false, WebSocketImpl: memoryRelaySocket(), coreWasm: multiCore });
+    let clock;
+    try {
+      await until(() => f.swarm.metrics().core.state === "ready");
+      f.hls.levels = variant.levels; f.hls.currentLevel = variant.currentLevel ?? 0;
+      const channel = await f.addPeer(new ServingChannel(playback.bytes, 1, requested, "live-holder"));
+      const frag = { ...context.frag, type: variant.type ?? "main", level: variant.level ?? 0 };
+      channel.receive(JSON.stringify({ t: "contribution", serving: true, rendition: `${frag.type}:${frag.level}` }));
+      let loadContext = { ...context, frag };
+      if (variant.serve) {
+        const rank = (pubkey, key) => [...pubkey].map((digit, i) => (parseInt(digit, 16) ^ parseInt(key[i], 16)).toString(16)).join("");
+        const own = f.swarm.metrics().pubkey, remote = f.peers[0].pubkey;
+        for (let n = 0; ; n++) {
+          const path = `/live-ranked-${n}.ts`, key = createHash("sha256").update(`${base.swarmId}\n${path}`).digest("hex");
+          if (rank(remote, key) < rank(own, key)) { loadContext = { ...loadContext, url: `https://origin.example${path}` }; break; }
+          assert.ok(n < 1024, "a bounded deterministic key establishes the contributor rank");
+        }
+      }
+      clock = virtualClock(t);
+      const began = clock.now(), pending = new Promise(resolve => new f.hls.config.fLoader({}).load(loadContext, {}, { onSuccess: resolve }));
+      if (variant.arrives) setTimeout(() => channel.receive(JSON.stringify({ t: "have", keys: [playback.key] })), 20);
+      await clock.settle(pending, 200);
+      const metrics = f.swarm.metrics();
+      assert.equal(metrics.segments.coordinatedWaits, variant.vod ? 0 : 1,
+        "only an explicit VOD main-demand rendition suppresses legacy coordination");
+      assert.equal(metrics.segments.coordinatedPeerLoads, variant.arrives ? 1 : 0);
+      assert.ok(clock.now() - began <= 125, "live, unknown and invalid-context waits keep the original deadline");
+      if (variant.vod) assert.ok(clock.now() - began < 10, "currentLevel cannot override the exact VOD demand");
+      else assert.equal(metrics.segments.commitmentRequests, 1);
     } finally { clock?.restore(); await f.close(); }
   });
 });
