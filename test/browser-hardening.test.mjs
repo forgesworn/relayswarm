@@ -123,6 +123,37 @@ function memoryRelaySocket() {
   };
 }
 
+test("peer connection snapshots include only accepted active links and cannot mutate swarm state", async t => {
+  for (const ending of ["channel-close", "disconnected", "closed", "stop"]) await t.test(ending, async () => {
+    const fixture = await linkedFixture({ ...peerPlaybackOptions(500).options, WebSocketImpl: memoryRelaySocket() });
+    try {
+      assert.deepEqual(fixture.swarm.peerConnections(), []);
+      const peer = new RelaySwarmSession({ pool: fixture.pool, swarmId: base.swarmId }); peer.start(); fixture.peers.push(peer);
+      peer.sendSignal(fixture.swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: "snapshot-pending-offer", payload: { sdp: "fixture-offer" } });
+      await until(() => fixture.connections.length === 1 && fixture.swarm.metrics().peers.offersAccepted === 1);
+      assert.equal(fixture.swarm.metrics().peers.dialling, 1);
+      assert.deepEqual(fixture.swarm.peerConnections(), [], "an admitted offer is still a pending negotiation");
+      const channel = new RecordedChannel(); channel.readyState = "connecting";
+      const event = new Event("datachannel"); event.channel = channel; fixture.connections[0].dispatchEvent(event);
+      assert.deepEqual(fixture.swarm.peerConnections(), [], "a not-yet-open channel cannot appear as a viewer");
+      channel.readyState = "open"; channel.dispatchEvent(new Event("open"));
+      await until(() => fixture.swarm.metrics().peers.connected === 1);
+      const snapshot = fixture.swarm.peerConnections();
+      assert.deepEqual(snapshot, [fixture.connections[0]], "the accepted link returns the exact native connection");
+      assert.notEqual(fixture.swarm.peerConnections(), snapshot, "each call returns a fresh array");
+      snapshot.pop(); snapshot.push({ arbitrary: "caller value" });
+      assert.deepEqual(fixture.swarm.peerConnections(), [fixture.connections[0]], "mutating the caller's array cannot alter membership");
+      assert.equal(fixture.swarm.peerConnections().length, fixture.swarm.metrics().peers.connected);
+      if (ending === "channel-close") channel.close();
+      else if (ending === "stop") fixture.swarm.stop();
+      else { fixture.connections[0].connectionState = ending; fixture.connections[0].dispatchEvent(new Event("connectionstatechange")); }
+      assert.deepEqual(fixture.swarm.peerConnections(), [], "closed, disconnected and stopped links disappear");
+      assert.equal(fixture.swarm.metrics().peers.connected, 0);
+      fixture.swarm.stop(); assert.deepEqual(fixture.swarm.peerConnections(), []);
+    } finally { await fixture.close(); }
+  });
+});
+
 test("presence carries a bounded object framing version and drops an invalid one", async () => {
   const pool = new RelayPool(["wss://memory.test"], { WebSocketImpl: memoryRelaySocket() });
   const swarmId = "framing-presence", sender = new RelaySwarmSession({ pool, swarmId }), receiver = new RelaySwarmSession({ pool, swarmId });
@@ -2212,9 +2243,11 @@ async function glareFixture(t, { polite = true, hold, gathering = false, rollbac
 
 test("polite glare reuses the pending PC and original slot with one winning channel and request ID", async t => {
   const f = await glareFixture(t), pc = await f.start();
+  assert.deepEqual(f.swarm.peerConnections(), [], "the outgoing glare candidate is not an accepted peer");
   const outgoing = f.received.find(value => value.type === "offer"); assert.ok(outgoing);
   const abandoned = pc.localChannel, staleOpen = abandoned.openCallbacks[0];
   f.offer(); await glareFlush();
+  assert.deepEqual(f.swarm.peerConnections(), [], "a winning offer still waits for its accepted data channel");
   assert.equal(f.connections.length, 1); assert.equal(pc.closes, 0); assert.equal(abandoned.readyState, "closed");
   assert.deepEqual(pc.trace.filter(value => !value.startsWith("admit:")), ["createOffer", "local:offer", "local:rollback", "remote:offer", "createAnswer", "local:answer"]);
   assert.deepEqual(f.received.filter(value => value.type === "answer").map(value => value.requestId), ["winning-offer"]);
@@ -2222,6 +2255,7 @@ test("polite glare reuses the pending PC and original slot with one winning chan
   assert.equal(pc.trace.filter(value => value === "remote:answer").length, 0); assert.equal(pc.closes, 0);
   const channel = pc.incoming(); channel.open(); await glareFlush();
   assert.equal(f.swarm.metrics().peers.connected, 1); assert.equal(f.swarm.metrics().peers.linksOpened, 1);
+  assert.deepEqual(f.swarm.peerConnections(), [pc], "glare exposes only the single accepted native connection");
   const acceptedCallback = channel.openCallbacks[0]; acceptedCallback(); staleOpen(); await glareFlush();
   assert.equal(channel.readyState, "open"); assert.equal(pc.closes, 0);
   const extra = pc.incoming(); await glareFlush();
@@ -3668,7 +3702,8 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
   class RangeLoader extends Loader {
     constructor(config) { super(); this.config = config; }
     load(context, config, callbacks) {
-      if (!context.rangeEnd || ignoreRanges) return super.load(context, config, callbacks);
+      if (!context.rangeEnd) return super.load(context, config, callbacks);
+      if (ignoreRanges) return setTimeout(() => super.load(context, config, callbacks), originDelayMs);
       rangeLoaders.push({ config: this.config, loaderConfig: config, context });
       ranges.push([context.rangeStart, context.rangeEnd - 1]);
       setTimeout(() => callbacks.onSuccess({ data: bytes.slice(context.rangeStart, context.rangeEnd).buffer }, this.stats, context, null), originDelayMs);
@@ -3699,8 +3734,11 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
 }
 
 test("multi-holder: two framing 2 holders each send pieces of one schema 3 segment", async (t) => {
-  const observed = [];
-  const f = await multiFixture(t, { holders: [{}, {}], onPeerDelivery: value => observed.push(value) });
+  const observed = [], aggregateAtObservation = [];
+  const f = await multiFixture(t, { holders: [{}, {}], onPeerDelivery: value => {
+    observed.push(value); aggregateAtObservation.push(f.swarm.metrics().bytes.peerFirst);
+    if (observed.length === 1) throw new Error("the first host observation failed");
+  } });
   try {
     assert.equal(f.swarm.metrics().core.multiHolder.enabled, true);
     sameBytes(await f.load(), f.bytes);
@@ -3711,16 +3749,26 @@ test("multi-holder: two framing 2 holders each send pieces of one schema 3 segme
     assert.ok(multiHolder.peerBytes > 0);
     assert.equal(multiHolder.peerBytes + multiHolder.originBytes, f.bytes.length);
     assert.equal(f.swarm.metrics().bytes.fromPeers, multiHolder.peerBytes);
-    assert.deepEqual(observed, [], "the single-holder observation must not invent attribution for a mixed-source payload");
+    assert.equal(observed.length, 2, "one observation per contributing holder, despite the first observer throwing");
+    assert.deepEqual(new Set(observed.map(value => value.connection)), new Set(f.connections), "exact accepted native connections");
+    assert.ok(observed.every(value => Number.isSafeInteger(value.bytes) && value.bytes > 0));
+    assert.ok(observed.every(value => Object.keys(value).sort().join(",") === "bytes,connection"));
+    assert.equal(observed.reduce((sum, value) => sum + value.bytes, 0), multiHolder.peerBytes);
+    assert.deepEqual(aggregateAtObservation, [multiHolder.peerBytes, multiHolder.peerBytes], "all accepted peer bytes are counted before either observation");
+    assert.equal(f.swarm.metrics().errors.total, 0);
   } finally { await f.close(); }
 });
 
 test("multi-holder: a holder that sends a bad piece is banned and the other completes the segment", async (t) => {
-  const f = await multiFixture(t, { holders: [{}, { corrupt: true }] });
+  const observed = [];
+  const f = await multiFixture(t, { holders: [{}, { corrupt: true }], onPeerDelivery: value => observed.push(value) });
   try {
     sameBytes(await f.load(), f.bytes);
     assert.equal(f.swarm.metrics().core.multiHolder.bans, 1);
     assert.equal(f.channels[1].readyState, "closed");
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].connection, f.connections[0], "corrupt pieces never receive connection credit");
+    assert.equal(observed[0].bytes, f.swarm.metrics().bytes.peerFirst);
   } finally { await f.close(); }
 });
 
@@ -3732,12 +3780,13 @@ test("multi-holder: a silent holder's pieces come from origin by range at the de
   for (const [fraction, outcome] of [[0, "abort"], [0.75, "timeout"]]) {
     await t.test(`${outcome} at clock fraction ${fraction}`, async (t) => {
       const clock = virtualClock(t, fraction);
+      const observed = [];
       let f;
       try {
         // One silent trial piece projects past the 400 ms floor. Origin
         // finishes after that floor; the transfer owns it, not a whole load.
         f = await clock.settle(multiFixture(t, { holders: [{}, { silent: true }], size: 12 * 65_536,
-          originFallbackMs: 400, originDelayMs: 150, traceRequests: 4096 }));
+          originFallbackMs: 400, originDelayMs: 150, traceRequests: 4096, onPeerDelivery: value => observed.push(value) }));
         sameBytes(await clock.settle(f.load()), f.bytes, "not the origin loader's whole-segment bytes");
         const [silent] = f.channels[1].wants;
         assert.equal(silent[1] - silent[0], 1, "the silent holder had one trial piece");
@@ -3746,6 +3795,12 @@ test("multi-holder: a silent holder's pieces come from origin by range at the de
         assert.ok(f.channels[1].wants.length > 0, "the silent holder was asked");
         assert.equal(multiHolder.originBytes + multiHolder.peerBytes, f.bytes.length);
         assert.equal(f.swarm.metrics().bytes.fromPeers, multiHolder.peerBytes);
+        assert.ok(multiHolder.originBytes > 0 && multiHolder.peerBytes > 0, "the delivered object combines verified peer and origin pieces");
+        assert.ok(multiHolder.unusedBytes > 0, "the origin's overlapping answer contains pieces the fast holder already verified");
+        assert.equal(observed.length, 1, "several successful range requests become one contribution observation");
+        assert.equal(observed[0].connection, f.connections[0], "the silent holder is not credited");
+        assert.equal(observed[0].bytes, multiHolder.peerBytes, "duplicate and origin-winning pieces add no peer credit");
+        assert.equal(observed[0].bytes + multiHolder.originBytes, f.bytes.length, "each piece is attributed only once");
         const diagnostics = f.swarm.metrics().peerRequestDiagnostics;
         const silentRequests = diagnostics.records.filter((row) => row.holder === 2);
         assert.equal(silentRequests.length, 1);
@@ -3767,6 +3822,24 @@ test("multi-holder: a silent holder's pieces come from origin by range at the de
         clock.restore();
       }
     });
+  }
+});
+
+test("multi-holder: a failed object never observes its already verified peer pieces", async t => {
+  const clock = virtualClock(t), observed = [];
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { holders: [{}, { silent: true }], size: 12 * 65_536,
+      originFallbackMs: 400, originDelayMs: 150, ignoreRanges: true, onPeerDelivery: value => observed.push(value) }));
+    sameBytes(await clock.settle(f.load()), new Uint8Array(32).fill(9), "the failed transfer falls back to the whole origin loader");
+    const { multiHolder } = f.swarm.metrics().core;
+    assert.ok(multiHolder.peerBytes > 0, "a peer piece was verified before another source failed");
+    assert.equal(multiHolder.delivered, 0);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.deepEqual(observed, [], "partial verified pieces were never handed to the player");
+  } finally {
+    if (f) await clock.settle(f.close());
+    clock.restore();
   }
 });
 
@@ -3819,7 +3892,8 @@ test("multi-holder: a holder too slow for the deadline is abandoned early and it
 });
 
 test("multi-holder: origin ranges go through the player's loader with its config", async (t) => {
-  const f = await multiFixture(t, { holders: [{ silent: true }], size: 12 * 65_536, originFallbackMs: 400 });
+  const observed = [];
+  const f = await multiFixture(t, { holders: [{ silent: true }], size: 12 * 65_536, originFallbackMs: 400, onPeerDelivery: value => observed.push(value) });
   try {
     sameBytes(await f.load(), f.bytes);
     assert.ok(f.rangeLoaders.length > 0);
@@ -3830,6 +3904,8 @@ test("multi-holder: origin ranges go through the player's loader with its config
       assert.equal(context.frag, multiContext.frag);
     }
     assert.equal(multiContext.rangeEnd, undefined, "the player's context is not changed");
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.deepEqual(observed, [], "an all-origin transfer has no peer contribution");
   } finally { await f.close(); }
 });
 

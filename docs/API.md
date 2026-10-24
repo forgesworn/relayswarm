@@ -35,11 +35,17 @@ object-transfer modules into an ordinary browser page.
 ## Browser loader
 
 `createHlsSwarm(options)` returns
-`{ attach(hls), updateTicket(ticket), stop(), metrics(), trace() }`.
+`{ attach(hls), updateTicket(ticket), stop(), metrics(), peerConnections(), trace() }`.
 `attach` wraps `hls.config.fLoader`; call it before `loadSource`. `stop` is the
 origin-only kill switch and closes connections, cancels pending work, releases
 held bytes and restores the original loader. Create a new swarm to participate
 again. Uploading defaults to off; `mode` defaults to `shadow`.
+
+`peerConnections()` returns a fresh array of the actual `RTCPeerConnection`
+references for accepted, active links. It excludes pending dials, offers,
+glare negotiations and closed/disconnected links; `stop()` leaves it empty.
+Mutating the returned array cannot alter the swarm. Keep native references
+local to the host; serialisable metrics contain no connection objects.
 
 `trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
 `traceRequests` (none by default): each peer-first load, eligibility
@@ -75,15 +81,19 @@ The peer loader updates hls.js's retained statistics object and sends one
 `onAbort` callback for an aborted pending peer load. `destroy` cancels without
 reporting a completed load.
 
-The optional `onPeerDelivery({ connection, bytes })` callback attributes each
-verified single-holder peer-first delivery to its actual `RTCPeerConnection`.
-`bytes` is a positive media payload byte count. It runs after the aggregate
-peer-first counters change and immediately before the player's success
-callback. Observer exceptions and rejected promises cannot cause fallback or
-prevent playback. Protocol traffic, shadow measurements, origin fallback,
-failed verification and aborted or late deliveries do not fire it. Experimental
-multi-holder transfers do not fire it because a single delivered segment may
-combine peers and origin. Use aggregate metrics for those transfers. Connection
+The optional `onPeerDelivery({ connection, bytes })` callback attributes
+verified peer-first media to its actual `RTCPeerConnection`. A single-holder
+delivery fires once with its whole payload. A multi-holder delivery fires once
+per contributing connection with only its first-verified-copy piece bytes;
+origin-winning and duplicate pieces are excluded. `bytes` is a positive media
+payload byte count, and all observations for an object sum to its increase in
+`bytes.peerFirst`. The complete object must be accepted for the player first;
+verified pieces of an incomplete or rejected object emit nothing. It runs
+after all aggregate counters change and immediately before the player's success
+callback. Observer exceptions and rejected promises cannot cause fallback,
+prevent playback or suppress other contributions. Protocol traffic, shadow
+measurements, origin fallback, failed verification and aborted or late
+deliveries do not fire it. Connection
 references stay local to the host; the callback supplies no URL, peer identity,
 SDP or media buffer. See the [callback contract](../INTEGRATION.md#metrics).
 

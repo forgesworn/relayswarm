@@ -112,7 +112,7 @@ const DEFAULTS = Object.freeze({
   // Experimental, read-only supply observations; never sets a player level.
   peerSupplyHint: false,
   onPlayerHint: null,
-  // Observe only accepted, verified single-holder peer-first deliveries. The
+  // Observe only accepted, verified peer-first media contributions. The
   // host gets its actual connection reference and a payload byte count.
   onPeerDelivery: null,
 });
@@ -313,6 +313,7 @@ export function createHlsSwarm(options = {}) {
     updateTicket: (ticket) => swarm.updateTicket(ticket),
     stop: () => swarm.stop(),
     metrics: () => swarm.metrics(),
+    peerConnections: () => swarm.peerConnections(),
     trace: () => swarm.trace(),
   };
 }
@@ -660,6 +661,19 @@ class HlsSwarm {
       this.#trace({ k: "load", load, at: this.#traceAt(), sn: integer(context.frag?.sn), level: integer(context.frag?.level), cc: integer(context.frag?.cc),
         budgetMs: Math.round(budgetMs), limitMs: Math.round(limitMs), budgetGeometry: { ...budgetGeometry } });
     } catch {}
+  }
+
+  // Native references are deliberately separate from serialisable metrics.
+  // A pending dial or a glare negotiation is not an accepted peer link.
+  peerConnections() {
+    const connections = [];
+    for (const link of this.links.values()) {
+      try {
+        if (!link.closed && link.channel.readyState === "open"
+          && !["failed", "closed", "disconnected"].includes(link.pc.connectionState)) connections.push(link.pc);
+      } catch { /* An unavailable native state is not an active link. */ }
+    }
+    return connections;
   }
 
   metrics() {
@@ -1030,13 +1044,17 @@ class HlsSwarm {
           pushSample(swarm.peerLatencySamples, end - t0);
           swarm.#hold(result.key, result.bytes.slice());
           if (context.frag) swarm.peerFragments.add(context.frag);
-          if (!result.multi && typeof swarm.options.onPeerDelivery === "function") {
+          if (typeof swarm.options.onPeerDelivery === "function") {
             // Observation runs after counters, just before the player callback.
             // Host observer failures cannot change delivery or trigger fallback.
-            try {
-              const observed = swarm.options.onPeerDelivery({ connection: result.connection, bytes: size });
-              if (observed && typeof observed.then === "function") Promise.resolve(observed).catch(() => {});
-            } catch {}
+            const contributions = result.multi ? result.contributions : [{ connection: result.connection, bytes: size }];
+            for (const { connection, bytes } of contributions) {
+              if (bytes <= 0) continue;
+              try {
+                const observed = swarm.options.onPeerDelivery({ connection, bytes });
+                if (observed && typeof observed.then === "function") Promise.resolve(observed).catch(() => {});
+              } catch {}
+            }
           }
           callbacks.onSuccess({ url: context.url, data: result.bytes.buffer, code: 200 }, this.peerStats, context, null);
         }).catch((error) => {
@@ -1558,7 +1576,7 @@ class HlsSwarm {
     const originMs = percentile(this.originLatencySamples, 0.5);
     const origin = [null, originMs ? commitment.size / originMs : null];
     return new Promise((resolve) => {
-      const requests = new Map(), originRequests = new Set(), abandoned = new WeakSet();
+      const requests = new Map(), originRequests = new Set(), abandoned = new WeakSet(), contributions = new Map();
       let finished = false, tickTimer = null, backstop = null, releaseOrigin = null, originShare = 0, verified = 0;
       // A source is credited only with the bytes its delivery newly
       // verified: a holder and origin can both send a piece, and the first
@@ -1614,7 +1632,9 @@ class HlsSwarm {
               this.#recordSelection(link, now() - startedAt, bytes.byteLength);
               const state = xfer("delivered", { source: command.peer, p: [command.range.start, command.range.end], bytes: bytes.byteLength },
                 (at) => transfer.delivered(at, command.peer, command.range, bytes));
-              this.multiHolder.peerBytes += credit(state, bytes.byteLength);
+              const fresh = credit(state, bytes.byteLength);
+              this.multiHolder.peerBytes += fresh;
+              if (fresh > 0) contributions.set(link.pc, (contributions.get(link.pc) ?? 0) + fresh);
               apply(state);
             } else {
               if (!controller.signal.aborted || abandoned.has(controller)) this.#recordSelection(link, now() - startedAt);
@@ -1663,7 +1683,10 @@ class HlsSwarm {
           this.multiHolder.delivered += 1;
           this.multiHolderTimings.push([now() - begunAt, slowestMs, requestCount]);
           if (this.multiHolderTimings.length > 128) this.multiHolderTimings.shift();
-          finish(commitment.expiresAt <= Math.floor(Date.now() / 1000) ? null : { key, bytes: state.bytes.slice(), discoveryContext, multi: true, peerBytes: Math.max(0, commitment.size - originShare) });
+          finish(commitment.expiresAt <= Math.floor(Date.now() / 1000) ? null : {
+            key, bytes: state.bytes.slice(), discoveryContext, multi: true, peerBytes: Math.max(0, commitment.size - originShare),
+            contributions: [...contributions].map(([connection, bytes]) => ({ connection, bytes })),
+          });
         } else if (command.t === "fail") {
           this.multiHolder.failed += 1;
           finish(null);

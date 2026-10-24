@@ -365,7 +365,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `reannounceDebounceMs` / `minReannounceGapMs` | `4000` / `12000` | Bound capacity-change presence announcements. |
 | `presenceIntervalMs` | `20000` | Presence heartbeat, jittered 30%. |
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
-| `onPeerDelivery` | none | Optional `({ connection, bytes }) => void` observation for each accepted, verified single-holder peer-first delivery. `connection` is the actual `RTCPeerConnection`; `bytes` is the complete media payload byte count. Aggregate peer-first counters are updated first, then this callback runs immediately before the player's success callback. Host exceptions and rejected promises are ignored without changing playback. It does not fire for protocol traffic, shadow measurement, origin fallback, corrupt/rejected media or loads aborted, stopped or too late for the peer-first handoff. Multi-holder transfers do not fire it because their payload may combine several peers and origin; use aggregate metrics for those transfers. |
+| `onPeerDelivery` | none | Optional `({ connection, bytes }) => void` observation for each accepted, verified peer-first media contribution. `connection` is the actual `RTCPeerConnection`; `bytes` is the positive media payload byte count. A single-holder delivery fires once with its whole payload; a multi-holder delivery fires once per contributing connection with only its first-verified-copy bytes, excluding origin and duplicate pieces. It fires only after the complete verified object is accepted for the player. Aggregate peer-first counters are updated first, then all contributions are observed immediately before the player's success callback. Host exceptions and rejected promises are ignored without changing playback or other observations. It does not fire for protocol traffic, shadow measurement, origin fallback, corrupt/rejected media, an incomplete multi-holder object or loads aborted, stopped or too late for the peer-first handoff. |
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
 | `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The relay session starts once the module has loaded or failed, after at most 2 seconds; fragments loaded meanwhile go to origin. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
@@ -406,11 +406,26 @@ consent. Receive-only still discovers peers and exposes its address to them;
 
 ## Metrics
 
-`onPeerDelivery` is a main-branch addition after v0.3.0. The immutable v0.3.0
-release assets do not include it; consume a commit that contains the option.
+`onPeerDelivery` and `peerConnections()` are main-branch additions after
+v0.3.0. The immutable v0.3.0 release assets do not include them; consume a
+commit that contains these APIs.
 
-Use `onPeerDelivery` to attribute verified single-holder video to a connection
-your page already observes. Keep connection references in local maps rather
+`peerConnections()` returns a fresh array of the actual `RTCPeerConnection`
+objects for accepted, active peer links. Pending offers, dials, glare
+negotiations and closed/disconnected links are excluded. It returns an empty
+array after `stop()`. Changing the returned array does not change the swarm's
+membership. Use this snapshot to draw connected peers; observing native
+constructors also sees negotiations that never become peers. Connection
+references are deliberately separate from serialisable `metrics()` data.
+
+Use `onPeerDelivery` to attribute verified video to its contributing connections.
+For a multi-holder delivery, each connection is observed once with the bytes
+its pieces contributed to the completed object. The first verified copy of
+each piece wins; duplicate or origin-winning pieces add no peer credit. All
+contributions sum to the increase in `bytes.peerFirst`. An incomplete or
+rejected object emits no observation even if some pieces verified. Aggregate
+counters include the whole delivery before its first observation runs.
+Keep connection references in local maps rather
 than serialising them into receipts. The callback provides no URL, peer key,
 SDP or payload buffer, and does not add a network request or change a deadline.
 It observes bytes accepted for the player, not the segment currently playing
@@ -1530,11 +1545,17 @@ object-transfer modules into an ordinary browser page.
 ## Browser loader
 
 `createHlsSwarm(options)` returns
-`{ attach(hls), updateTicket(ticket), stop(), metrics(), trace() }`.
+`{ attach(hls), updateTicket(ticket), stop(), metrics(), peerConnections(), trace() }`.
 `attach` wraps `hls.config.fLoader`; call it before `loadSource`. `stop` is the
 origin-only kill switch and closes connections, cancels pending work, releases
 held bytes and restores the original loader. Create a new swarm to participate
 again. Uploading defaults to off; `mode` defaults to `shadow`.
+
+`peerConnections()` returns a fresh array of the actual `RTCPeerConnection`
+references for accepted, active links. It excludes pending dials, offers,
+glare negotiations and closed/disconnected links; `stop()` leaves it empty.
+Mutating the returned array cannot alter the swarm. Keep native references
+local to the host; serialisable metrics contain no connection objects.
 
 `trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
 `traceRequests` (none by default): each peer-first load, eligibility
@@ -1570,15 +1591,19 @@ The peer loader updates hls.js's retained statistics object and sends one
 `onAbort` callback for an aborted pending peer load. `destroy` cancels without
 reporting a completed load.
 
-The optional `onPeerDelivery({ connection, bytes })` callback attributes each
-verified single-holder peer-first delivery to its actual `RTCPeerConnection`.
-`bytes` is a positive media payload byte count. It runs after the aggregate
-peer-first counters change and immediately before the player's success
-callback. Observer exceptions and rejected promises cannot cause fallback or
-prevent playback. Protocol traffic, shadow measurements, origin fallback,
-failed verification and aborted or late deliveries do not fire it. Experimental
-multi-holder transfers do not fire it because a single delivered segment may
-combine peers and origin. Use aggregate metrics for those transfers. Connection
+The optional `onPeerDelivery({ connection, bytes })` callback attributes
+verified peer-first media to its actual `RTCPeerConnection`. A single-holder
+delivery fires once with its whole payload. A multi-holder delivery fires once
+per contributing connection with only its first-verified-copy piece bytes;
+origin-winning and duplicate pieces are excluded. `bytes` is a positive media
+payload byte count, and all observations for an object sum to its increase in
+`bytes.peerFirst`. The complete object must be accepted for the player first;
+verified pieces of an incomplete or rejected object emit nothing. It runs
+after all aggregate counters change and immediately before the player's success
+callback. Observer exceptions and rejected promises cannot cause fallback,
+prevent playback or suppress other contributions. Protocol traffic, shadow
+measurements, origin fallback, failed verification and aborted or late
+deliveries do not fire it. Connection
 references stay local to the host; the callback supplies no URL, peer identity,
 SDP or media buffer. See the [callback contract](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md#metrics).
 
