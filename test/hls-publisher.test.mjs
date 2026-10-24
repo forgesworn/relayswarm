@@ -345,7 +345,7 @@ test("identical concurrent commitments share one slot, return private copies and
 });
 
 test("a caller that joins after the leader's last check is held to a catalogue and file read after it arrived", async (t) => {
-  const { writeFileSync, renameSync } = await import("node:fs");
+  const { writeFileSync, renameSync, rmSync } = await import("node:fs");
   const live = (sequence) => `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:${sequence}\n#EXTINF:2,\nseg${sequence}.ts\n#EXTINF:2,\nseg${sequence + 1}.ts\n`;
   for (const mode of ["playlist", "segment"]) await t.test(mode, async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "relayswarm-publisher-join-"));
@@ -361,7 +361,14 @@ test("a caller that joins after the leader's last check is held to a catalogue a
       if (call !== 3) return;
       hook = null;
       const [temporary, target, body] = mode === "playlist" ? ["next.m3u8", "index.m3u8", live(21)] : ["next.ts", "seg20.ts", "replaced-20"];
-      writeFileSync(join(directory, temporary), body); renameSync(join(directory, temporary), join(directory, target));
+      writeFileSync(join(directory, temporary), body);
+      try { renameSync(join(directory, temporary), join(directory, target)); }
+      catch (error) {
+        // Windows can refuse to replace the segment the leader holds open; a
+        // real in-place change exercises the same stat check.
+        if (process.platform !== "win32" || !["EPERM", "EACCES", "EBUSY"].includes(error.code)) throw error;
+        writeFileSync(join(directory, target), body); rmSync(join(directory, temporary));
+      }
       late = publisher.commitment(input);
       late.catch(() => {});
     };
