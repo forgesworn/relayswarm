@@ -371,6 +371,7 @@ class HlsSwarm {
     this.transferIds = new WeakMap();
     this.nextTransferId = 1;
     this.multiHolder = { transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0 };
+    this.originRangeOutcomes = Object.fromEntries(["payload", "invalid-request", "wrong-size", "error", "timeout", "abort", "exception"].map(outcome => [outcome, 0]));
     // Origins (scheme, host and port) that answered a range with something
     // else; multi-holder transfer skips their segments for the session.
     this.originsWithoutRanges = new Set();
@@ -820,7 +821,7 @@ class HlsSwarm {
       errors: { total: c.errors, byStage: { ...this.errorsByStage } },
       // Additive metrics-v2 field: which commitment verifier and peer selection run.
       core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", selection: this.peerSelection.kind ?? "js", discovery: this.discovery.kind ?? "js", links: { ...this.coreLinks }, fallbacks: this.coreFallbacks, decided: { ...this.coreDecided },
-        multiHolder: { enabled: this.#rangesEnabled(), ...this.multiHolder,
+        multiHolder: { enabled: this.#rangesEnabled(), ...this.multiHolder, originRangeOutcomes: { ...this.originRangeOutcomes },
           timings: { durationMs: percentiles(this.multiHolderTimings.map((row) => row[0])), slowestRequestMs: percentiles(this.multiHolderTimings.map((row) => row[1])),
             requests: percentiles(this.multiHolderTimings.map((row) => row[2])) } } },
       config: {
@@ -1010,7 +1011,9 @@ class HlsSwarm {
         swarm.#traceBegin(context, budgetMs, limitMs, budgetGeometry);
         // Ranged origin pieces go through the player's loader, as the whole would.
         const origin = { Loader: BaseLoader, config: this.hlsConfig, loaderConfig: config };
-        const plan = { deadline: t0 + budgetMs, limit: t0 + limitMs, expired: false, onDeadline: null, origin, extend: (to) => {
+        const plan = { deadline: t0 + budgetMs, limit: t0 + limitMs,
+          originReserveMs: budgetGeometry.originReserveMs ?? swarm.options.originReserveMs,
+          expired: false, onDeadline: null, origin, extend: (to) => {
           const target = Math.min(plan.limit, to);
           if (this.active !== token || target <= plan.deadline) return false;
           plan.deadline = target;
@@ -1644,6 +1647,11 @@ class HlsSwarm {
         } else if (command.t === "origin") {
           releaseOrigin ??= this.#claimOrigin(key);
           const controller = new AbortController(), [from, to] = bytesOf(command.range), originAt = now();
+          let rangeResult = null;
+          const onResult = result => {
+            rangeResult = result;
+            this.originRangeOutcomes[result.outcome] = increment(this.originRangeOutcomes[result.outcome]);
+          };
           originRequests.add(controller);
           this.multiHolder.originRanges += 1;
           const onIgnored = () => {
@@ -1651,11 +1659,12 @@ class HlsSwarm {
             this.originsWithoutRanges.add(originHost);
             this.multiHolder.originRangesIgnored += 1;
           };
-          (plan.origin?.Loader ? loadOriginRange(plan.origin, context, from, to, { signal: controller.signal, onIgnored })
-            : fetchOriginRange(context, from, to, { signal: controller.signal, onIgnored })).then((bytes) => {
+          (plan.origin?.Loader ? loadOriginRange(plan.origin, context, from, to, { signal: controller.signal, onIgnored, onResult })
+            : fetchOriginRange(context, from, to, { signal: controller.signal, onIgnored, onResult })).then((bytes) => {
             originRequests.delete(controller);
             if (this.options.traceRequests) this.#trace({ k: "origin", load, at: this.#traceAt(originAt), ms: Math.round(now() - originAt), ranged: true,
-              range: [command.range.start, command.range.end], outcome: bytes ? "payload" : finished ? "abort" : "none", bytes: bytes?.byteLength ?? null });
+              range: [command.range.start, command.range.end], outcome: rangeResult?.outcome ?? (bytes ? "payload" : finished ? "abort" : "none"),
+              httpStatus: rangeResult?.httpStatus ?? null, bytes: bytes?.byteLength ?? null });
             if (finished) return;
             const p = [command.range.start, command.range.end];
             if (!bytes) return apply(xfer("failed", { source: "origin" }, (at) => transfer.failed(at, "origin")));
@@ -1704,7 +1713,9 @@ class HlsSwarm {
       plan.onDeadline = () => {
         if (finished) return false;
         apply(xfer("tick", {}, (at) => transfer.tick(at)));
-        if (!finished && backstop === null) backstop = this.#after(this.options.originReserveMs, () => { backstop = null; finish(null); });
+        // Keep the measured reserve captured by this load, without moving its
+        // absolute recovery deadline if the peer-floor timer itself ran late.
+        if (!finished && backstop === null) backstop = this.#after(Math.max(0, plan.limit + plan.originReserveMs - now()), () => { backstop = null; finish(null); });
         return true;
       };
       const estimates = { peers, origin, sharedFirstByteMs: this.peerSelection.firstByteMs(), sharedRate: this.peerSelection.rate() };

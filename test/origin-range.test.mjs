@@ -124,3 +124,29 @@ test("an aborted ranged load aborts the player's loader and yields nothing", asy
   assert.equal(await loadOriginRange({ Loader }, { url: "https://origin.example/x" }, 0, 10, { signal: controller.signal }), null);
   assert.equal(seen.length, 1, "an already aborted signal loads nothing");
 });
+
+test("ranged loader outcomes distinguish HTTP, timeout, cancellation and wrong-size responses exactly once", async t => {
+  for (const outcome of ["payload", "error", "timeout", "abort", "wrong-size", "exception", "invalid-request"]) await t.test(outcome, async () => {
+    const observed = [], controller = new AbortController();
+    class Loader {
+      load(_context, _config, callbacks) {
+        this.callbacks = callbacks;
+        if (outcome === "exception") throw new Error("private failure text");
+        if (outcome === "error") callbacks.onError({ code: 416, text: "private failure text" });
+        else if (outcome === "timeout") callbacks.onTimeout();
+        else if (outcome === "abort") controller.abort();
+        else callbacks.onSuccess({ code: 206, data: new Uint8Array(outcome === "wrong-size" ? 2 : 4).buffer });
+      }
+      abort() { this.callbacks?.onAbort(); }
+      destroy() {}
+    }
+    const value = await loadOriginRange({ Loader }, { url: "https://origin.example/media/seg.ts" }, 0, outcome === "invalid-request" ? 0 : 4,
+      { signal: controller.signal, onResult: value => { observed.push(value); throw new Error("host observer failed"); } });
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].outcome, outcome);
+    assert.deepEqual(Object.keys(observed[0]).sort(), ["expectedBytes", "httpStatus", "outcome", "receivedBytes"]);
+    assert.equal(observed[0].httpStatus, outcome === "error" ? 416 : ["payload", "wrong-size"].includes(outcome) ? 206 : null);
+    assert.equal(observed[0].receivedBytes, outcome === "payload" ? 4 : outcome === "wrong-size" ? 2 : null);
+    assert.equal(value?.byteLength ?? null, outcome === "payload" ? 4 : null);
+  });
+});

@@ -82,7 +82,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `secretKey` | fresh per viewer | Ephemeral signing key for presence and signalling. Never the viewer's own identity. |
 | `originFallbackMs` | `1500` | The in-time budget a peer delivery is measured against, and peer-first's ordinary wait. |
 | `maxPeerWaitMs` | `5000` | Peer-first may wait past `originFallbackMs`, up to this, only while recent peer timing projects the segment needs it and the playback buffer covers the wait with `originReserveMs` to spare. |
-| `originReserveMs` | `2000` | Peer-first reserves this much buffered playback for the origin; an empty buffer goes directly to origin. |
+| `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
 | `maxPeers` | `6` | Connections in and out. The demo selects four explicitly. |
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
@@ -245,6 +245,11 @@ not an identity), `uptimeMs`, `serving`, plus:
   sent by both a holder and origin (`unusedBytes`), `originRanges`,
   and `originRangesIgnored`, the origins that answered a range with
   something else (each once).
+  `originRangeOutcomes` contains fixed counters for `payload`, `invalid-request`,
+  `wrong-size`, `error`, `timeout`, `abort` and `exception`, so an origin tail
+  cancelled by the library differs from an HTTP failure or ignored range.
+  Counters saturate and snapshots own their copies. Optional bounded origin
+  trace rows also include a numeric `httpStatus`; no error text or URL is added.
   `timings` gives p50 and p90 over the last 128 delivered transfers of their
   duration, their slowest single request and their request count.
   Peer byte totals elsewhere count only a transfer's peer share. An additive
