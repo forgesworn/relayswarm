@@ -128,11 +128,13 @@ test("peer connection snapshots include only accepted active links and cannot mu
     const fixture = await linkedFixture({ ...peerPlaybackOptions(500).options, WebSocketImpl: memoryRelaySocket() });
     try {
       assert.deepEqual(fixture.swarm.peerConnections(), []);
+      assert.deepEqual(fixture.swarm.peerConnectionDetails(), []);
       const peer = new RelaySwarmSession({ pool: fixture.pool, swarmId: base.swarmId }); peer.start(); fixture.peers.push(peer);
       peer.sendSignal(fixture.swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: "snapshot-pending-offer", payload: { sdp: "fixture-offer" } });
       await until(() => fixture.connections.length === 1 && fixture.swarm.metrics().peers.offersAccepted === 1);
       assert.equal(fixture.swarm.metrics().peers.dialling, 1);
       assert.deepEqual(fixture.swarm.peerConnections(), [], "an admitted offer is still a pending negotiation");
+      assert.deepEqual(fixture.swarm.peerConnectionDetails(), [], "pending offers have no accepted identity binding");
       const channel = new RecordedChannel(); channel.readyState = "connecting";
       const event = new Event("datachannel"); event.channel = channel; fixture.connections[0].dispatchEvent(event);
       assert.deepEqual(fixture.swarm.peerConnections(), [], "a not-yet-open channel cannot appear as a viewer");
@@ -140,6 +142,10 @@ test("peer connection snapshots include only accepted active links and cannot mu
       await until(() => fixture.swarm.metrics().peers.connected === 1);
       const snapshot = fixture.swarm.peerConnections();
       assert.deepEqual(snapshot, [fixture.connections[0]], "the accepted link returns the exact native connection");
+      const details = fixture.swarm.peerConnectionDetails();
+      assert.deepEqual(details, [{ connection: fixture.connections[0], pubkey: peer.pubkey }], "identity is the authenticated remote signalling key");
+      details[0].pubkey = "caller mutation"; details[0].connection = null; details.length = 0;
+      assert.deepEqual(fixture.swarm.peerConnectionDetails(), [{ connection: fixture.connections[0], pubkey: peer.pubkey }], "caller-owned records cannot alter the native identity binding");
       assert.notEqual(fixture.swarm.peerConnections(), snapshot, "each call returns a fresh array");
       snapshot.pop(); snapshot.push({ arbitrary: "caller value" });
       assert.deepEqual(fixture.swarm.peerConnections(), [fixture.connections[0]], "mutating the caller's array cannot alter membership");
@@ -148,6 +154,7 @@ test("peer connection snapshots include only accepted active links and cannot mu
       else if (ending === "stop") fixture.swarm.stop();
       else { fixture.connections[0].connectionState = ending; fixture.connections[0].dispatchEvent(new Event("connectionstatechange")); }
       assert.deepEqual(fixture.swarm.peerConnections(), [], "closed, disconnected and stopped links disappear");
+      assert.deepEqual(fixture.swarm.peerConnectionDetails(), [], "retired identity bindings disappear with the link");
       assert.equal(fixture.swarm.metrics().peers.connected, 0);
       fixture.swarm.stop(); assert.deepEqual(fixture.swarm.peerConnections(), []);
     } finally { await fixture.close(); }
