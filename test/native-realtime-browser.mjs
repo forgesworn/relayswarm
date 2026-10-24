@@ -2,7 +2,6 @@
 // this command has no successful skipped mode and captures no real media.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { build } from 'esbuild';
@@ -11,6 +10,7 @@ import { createNativeRealtimeBackend, NATIVE_REALTIME_PACKAGE_VERSION } from '..
 import { RelayPool, RelaySwarmSession } from '../src/relay-session.mjs';
 import { RealtimePeer } from '../src/browser/realtime-peer.mjs';
 import { startLocalRelay } from './support/local-relay.mjs';
+import { readPreparedNativeRealtime } from '../scripts/build-native-realtime.mjs';
 
 let backend, peer, browser, relay, http, pool, session;
 let phase = 'dependencies';
@@ -20,12 +20,13 @@ async function until(check, timeoutMs = 5000) {
   throw new Error('Native real-time qualification timed out.');
 }
 try {
-  assert(process.env.E2E_NATIVE_PACKAGE_ROOT, 'Supply an explicit pinned native package directory');
-  const packageRoot = resolve(process.env.E2E_NATIVE_PACKAGE_ROOT);
-  const metadata = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
-  assert.equal(metadata.name, 'node-datachannel'); assert.equal(metadata.version, NATIVE_REALTIME_PACKAGE_VERSION);
-  const require = createRequire(join(packageRoot, 'package.json'));
-  backend = await createNativeRealtimeBackend({ nodeDataChannel: require(packageRoot), packageVersion: metadata.version });
+  assert(process.env.E2E_NATIVE_ARTIFACT, 'Supply an explicit prepared native artifact directory');
+  const artifact = resolve(process.env.E2E_NATIVE_ARTIFACT);
+  const { receipt } = await readPreparedNativeRealtime(artifact);
+  assert.equal(receipt.bindingVersion, NATIVE_REALTIME_PACKAGE_VERSION);
+  const binding = join(artifact, 'native-addon.node');
+  const require = createRequire(binding);
+  backend = await createNativeRealtimeBackend({ nodeDataChannel: require(binding), packageVersion: receipt.bindingVersion });
   phase = 'local-relay';
   const bundle = await build({ stdin: { contents: `
     export {RelayPool,RelaySwarmSession} from './src/relay-session.mjs';
@@ -79,7 +80,7 @@ try {
   console.log(JSON.stringify({ passed: true, generatedDatagramsOnly: true, nativeInitiator: true,
     browserAnswerer: true, browserObservedDcep: actual, binaryBidirectional: true, unknownIncomingChannelRefused: true,
     certificateBypass: false, ice: 'loopback-direct', publicNat: false, physicalDevice: false,
-    packageVersion: metadata.version, native: readySnapshot, cleanupOwnedPeers: backend.snapshot().ownedPeers }));
+    packageVersion: receipt.bindingVersion, native: readySnapshot, cleanupOwnedPeers: backend.snapshot().ownedPeers }));
   await page.evaluate(() => { window.peer.close(); window.session.close(); window.pool.close(); });
 } catch {
   console.error(`Native real-time browser qualifier failed at ${phase}.`); process.exitCode = 1;

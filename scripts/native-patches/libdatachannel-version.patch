@@ -1,0 +1,10 @@
+--- a/include/rtc/version.h
++++ b/include/rtc/version.h
+@@ -4,6 +4,6 @@
+ #define RTC_VERSION_MAJOR 0
+ #define RTC_VERSION_MINOR 24
+ #define RTC_VERSION_PATCH 5
+-#define RTC_VERSION "0.24.5"
++#define RTC_VERSION "0.24.5-forgesworn-turn-close.1"
+ 
+ #endif

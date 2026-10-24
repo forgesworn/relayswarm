@@ -1,7 +1,7 @@
 import { REALTIME_CHANNEL } from '../browser/realtime-peer.mjs';
 
 export const NATIVE_REALTIME_PACKAGE_VERSION = '0.33.4';
-export const NATIVE_REALTIME_LIBRARY_VERSION = '0.24.5';
+export const NATIVE_REALTIME_LIBRARY_VERSION = '0.24.5-forgesworn-turn-close.1';
 const MAX_DATAGRAM_BYTES = 16_384;
 const encoder = new TextEncoder();
 const failure = () => new Error('Native real-time transport refused the operation.');

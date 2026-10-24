@@ -47,7 +47,7 @@ function fixture() {
     addRemoteCandidate(candidate, mid) { this.candidates.push({ candidate, mid }); }
     close() { this.closed++; this.stateValue = 'closed'; }
   }
-  const native = { PeerConnection: Peer, initLogger: level => logs.push(level), getLibraryVersion: () => '0.24.5', cleanup: () => { cleanups++; } };
+  const native = { PeerConnection: Peer, initLogger: level => logs.push(level), getLibraryVersion: () => '0.24.5-forgesworn-turn-close.1', cleanup: () => { cleanups++; } };
   return { peers, logs, native, Channel, cleanups: () => cleanups };
 }
 async function backend(f, options = {}) {
@@ -99,6 +99,9 @@ test('unsupported native TURN TCP/TLS is refused for both relay-only and all pol
 test('configuration and version failures allocate no peers and never relax relay or DTLS policy', async () => {
   const f = fixture();
   await assert.rejects(() => backend(f, { packageVersion: '0.33.3' }));
+  await assert.rejects(() => createNativeRealtimeBackend({
+    nodeDataChannel: { ...f.native, getLibraryVersion: () => '0.24.5' }, packageVersion: '0.33.4',
+  }));
   for (const value of [0, 1001, NaN]) await assert.rejects(() => backend(f, { maxPacketLifeTimeMs: value }));
   const b = await backend(f);
   for (const value of [{ iceServers: [] }, { iceServers: [], iceTransportPolicy: 'guess' },
