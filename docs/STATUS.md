@@ -4,11 +4,28 @@
 [Changelog](../CHANGELOG.md)
 
 Checkpoint: 24 October 2026. The experimental shared-core release is
-[v0.4.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.0).
-The [changelog](../CHANGELOG.md#v040-24-october-2026) records its source changes;
+[v0.4.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.1).
+The [changelog](../CHANGELOG.md#v041-24-october-2026) records its source changes;
 the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Cached-peer race release (24 October 2026)
+
+v0.4.1 includes the opt-in `zeroBudgetPeerRace` loader option. It starts the
+normal HTTP request immediately and races only an object already advertised
+by an eligible cached schema-3 peer. A complete verified winner owns delivery;
+progressive loads skip the race. Stopping the swarm leaves pending HTTP
+running, while loader cancellation stops both arms. The default remains off.
+The multi-holder origin tail also retains the measured per-load recovery
+reserve, with bounded range-outcome diagnostics.
+
+The native Chrome fixture checks both winners, exact verified bytes, one
+whole HTTP request per load and reuse of the same connection. It uses two
+contexts on one machine with synthetic protocol data. Accepted peer bytes do
+not prove net savings: an aborted HTTP arm may already have transferred bytes.
+No public service or pilot is deployed. The field and device gates below
+remain open; publishing these libraries does not close them.
 
 ## Integrated library release (24 October 2026)
 
