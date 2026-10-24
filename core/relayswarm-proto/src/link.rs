@@ -939,7 +939,7 @@ impl Link {
                 .range
                 .filter(|_| object_size <= self.config.max_segment_bytes)
                 .and_then(|range| range_bytes(object_size, range));
-            if !expected.is_some_and(|(from, to)| to - from == bytes.len() as u64) {
+            if expected.is_none_or(|(from, to)| to - from != bytes.len() as u64) {
                 self.send_text(&none);
                 return self.finish_upload();
             }
