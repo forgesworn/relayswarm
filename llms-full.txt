@@ -1279,6 +1279,7 @@ its measured scope and acceptance gaps in [Status](https://raw.githubusercontent
 | Review current production implementation and acceptance | [Production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md), [delivery checklist](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) |
 | Continue the agreed production work as another agent | [Goals and agent handover](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/AGENT-GOALS.md) |
 | Implement compatible session and commitment messages | [Protocol draft](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md) |
+| Carry opaque deadline-sensitive datagrams with supplied ICE | [Experimental real-time transport](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/REALTIME-TRANSPORT.md) |
 | Run a trial on separate devices and interpret receipts | [Publisher/player field test](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md) |
 | Force HLS peer traffic through Spry TURN and inspect the qualification gates | [Spry interoperability](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/interop/spry-turn.md) |
 | Ingest a live broadcast or add optional RTMPS forwarding | [Broadcasting](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/BROADCASTING.md) |
@@ -1503,6 +1504,8 @@ are not a stable interoperability promise.
 | `relayswarm/native-client` | Installed Node application | `validateNativeDescriptor`, `fetchNativeObject`, `createNativeObjectSeeder` |
 | `relayswarm/publisher-advertisement` | Node or a browser bundler | `createPublisherAdvertisement`, `verifyPublisherAdvertisement` |
 | `relayswarm/account-upload-budget` | Node on supported local POSIX storage | `createAccountUploadBudget`, `AccountBudgetError`, `accountBudgetError` |
+| `relayswarm/realtime-peer` | Browser; injected connection in tests | `RealtimeDatagramLink`, `RealtimePeer`, `REALTIME_TRANSPORT`, `REALTIME_CHANNEL` |
+| `relayswarm/realtime-werift-build` | Node build tool | `realtimeWeriftPlugin`, `weriftRealtimeRevision` |
 | `relayswarm/package.json` | Package metadata | Name, version and declared dependencies |
 
 The wildcard export also permits source subpaths such as
@@ -7964,6 +7967,206 @@ It changes no release, tag, package dependency or production verification path.
 
 ---
 
+Source: [docs/NATIVE-REALTIME.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NATIVE-REALTIME.md)
+
+# Native operator real-time backend
+
+Experimental, initiator-only transport for opaque datagrams. It does not
+capture, encode, decrypt, record or play media. The existing browser adapter,
+NIP-44 session, application admission and media queues remain separate.
+
+`src/node/native-realtime.mjs` loads no native dependency on import. A dedicated
+operator supplies a source-built **node-datachannel 0.33.4** addon whose
+native library identifies itself as **0.24.5-forgesworn-turn-close.1**. Both
+versions are checked. The stock npm binary is refused. Browser consumers
+load no native code; explicit preparation belongs to the operator build.
+
+## API and ownership
+
+```js
+import { createRequire } from 'node:module';
+import { readPreparedNativeRealtime } from './scripts/build-native-realtime.mjs';
+const directory = '/absolute/path/to/prepared-native';
+const { receipt } = await readPreparedNativeRealtime(directory);
+const binding = directory + '/native-addon.node';
+const nodeDataChannel = createRequire(binding)(binding);
+import { createNativeRealtimeBackend } from './src/node/native-realtime.mjs';
+
+const backend = await createNativeRealtimeBackend({
+  nodeDataChannel,
+  packageVersion: receipt.bindingVersion,
+  maxPacketLifeTimeMs: 250,
+  maxPeers: 16,
+});
+
+// Pass backend.RTCPeerConnectionImpl to RealtimePeer on the operator side,
+// with initiator:true and the same explicit finite lifetime. The browser
+// installs its answerer before the operator starts sending an offer.
+// ICE servers and all/relay policy remain explicit application inputs.
+
+backend.closeOwnedPeers();
+// Only at dedicated process exit, after every call has closed:
+backend.disposeForProcessExit();
+```
+
+The factory returns `RTCPeerConnectionImpl`, `closeOwnedPeers`, `snapshot` and
+`disposeForProcessExit`. `closeOwnedPeers` closes all peers it created and
+refuses new ones. It does not call the dependency's process-global cleanup.
+`disposeForProcessExit` also invokes that global cleanup exactly once; it is
+unsuitable as the cleanup operation for one call in a shared native process.
+
+The facade implements the subset used by `RealtimePeer`: offer creation,
+local offer application, remote answer application, trickled ICE, state and
+data-channel events, bounded binary sends, buffering observations and close.
+It is not a complete browser RTCPeerConnection polyfill. Native automatic
+channel negotiation has already applied an offer when `createOffer` resolves.
+
+## Initiator boundary
+
+The upstream 0.33.4 polyfill caches channel reliability attributes from
+constructor options. For an incoming channel it supplies no options, so
+those attributes describe defaults rather than the actual remote DCEP mode.
+The native binding exposes no reliability getter. This adapter therefore
+**refuses remote offers, answer creation and all incoming channels**.
+
+It creates one exact `relayswarm-live-v1` channel locally, requesting unordered
+delivery and the configured finite lifetime. Its exposed attributes describe
+that local native request. The actual browser answerer independently checks
+the remote channel's negotiated DCEP values and refuses mismatches. The
+operator must not select this backend as an answerer or relabel unknown
+remote channels to pass the shared policy gate.
+
+ICE starts with no default STUN server. The host must supply `iceServers`
+and `iceTransportPolicy`; relay policy is not downgraded. TURN credentials
+use the native structured ICE API, preserving opaque colons, slashes and plus
+signs instead of interpolating them into URI user-info. DTLS fingerprint
+verification remains enabled. Native logging is initialised at `None`; there
+is no per-call log writer in this module. Host/provider logging is separate.
+
+The pinned native libjuice backend supports **TURN over UDP only**. This
+facade refuses TURN/TCP and TURN/TLS configuration before allocating a peer,
+including under `all` policy, so unsupported servers cannot be silently
+ignored in favour of a direct connection. This limit belongs to the native
+backend; it is not a claim that the browser or Spry lacks those transports.
+
+Native `send(false)` means the message was accepted into a buffer, not refused.
+The shared datagram link checks native `bufferedAmount` before sending. This
+facade preserves the standard void-send behaviour and treats native
+exceptions as failure. Finite transport expiry and receiver observations
+remain relevant; accepted-send counters alone do not prove delivery.
+
+## Qualification
+
+```sh
+node --test test/native-realtime.test.mjs
+node scripts/build-native-realtime.mjs --output target/realtime-native
+E2E_NATIVE_ARTIFACT=/absolute/path/to/target/realtime-native \
+  node test/native-realtime-browser.mjs
+E2E_NATIVE_BINDING=/absolute/path/to/target/realtime-native/native-addon.node \
+  python3 test/native-turn-lifecycle.py
+```
+
+The browser command verifies the explicit prepared receipt and binary, then
+fails on missing, altered or mismatched inputs. There is no successful skipped mode. An optional
+`E2E_CHROMIUM_EXECUTABLE` selects a host-installed test browser. It exercises
+the real native initiator against a real Chromium answerer through encrypted
+RelaySwarm signalling and verifies actual browser DCEP reliability, binary
+datagrams containing NUL/255 in both directions and rejection of an unexpected
+incoming channel. Its finite process closes peers, relay, browser and native
+runtime. It captures no camera, microphone, screen or media recording.
+
+Initial macOS arm64 loopback qualification passed on the development Mac
+and M4 with Node 24, package 0.33.4 and native library 0.24.5. The M4 run used
+an isolated temporary source copy and existing dependencies without changing
+shared installations. [Retained observations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/evidence/native-realtime-loopback-20261024.json)
+record the exact gate. This is not Linux runtime acceptance,
+public-NAT performance, multi-participant media acceptance or a release.
+
+### Stock TURN allocation-release finding
+
+The stock 0.33.4/0.24.5 native backend failed a separate allocation-release
+gate against an authenticated synthetic loopback TURN server. Both the raw
+binding and this facade obtained a relay candidate, returned from close and
+process-global cleanup, and released their local UDP socket while the process
+was still alive. Neither sent `Refresh(lifetime=0)`. Socket ownership cleanup
+therefore does not establish prompt release of a server allocation.
+[Retained observations](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/evidence/native-turn-close-stock-20261024.json) keep
+that failure distinct from the passing browser/datagram gate.
+
+`test/native-turn-release.py` reproduces the check with fixture credentials;
+it contacts no live relay and exits unsuccessfully when release is missing.
+It requires an explicit exact `E2E_NATIVE_PACKAGE_ROOT`; `PROBE_MODE=facade`
+selects the owned wrapper and `E2E_NATIVE_BINDING` can explicitly select a
+separately built sidecar. A native-source correction needs independent
+identity, source/patch/binary receipts and release qualification. Reissuing
+credentials, increasing quota or restarting a relay does not repair teardown.
+
+## Dependency and licence boundary
+
+This adapter's original source follows RelaySwarm's MIT licence. The native
+dependency is separately **MPL-2.0**; the combined distribution must not be
+labelled MIT-only. Binary packaging must retain its licence/notices and make
+the covered source, including any modifications, available as required by
+that licence. The prepared artifact includes the reviewed dependency licence inventory,
+exact source revisions, complete patches and hashes of its emitted files.
+Modified MPL-covered files are libjuice `src/agent.c`, `src/agent.h` and
+libdatachannel `include/rtc/version.h`; SCTP source is unchanged.
+
+Primary pinned sources:
+
+- [node-datachannel 0.33.4 package](https://registry.npmjs.org/node-datachannel/0.33.4)
+- [Native binding source and licence](https://github.com/murat-dogan/node-datachannel/tree/v0.33.4)
+- [Pinned native build configuration](https://github.com/murat-dogan/node-datachannel/blob/v0.33.4/CMakeLists.txt)
+- [libdatachannel 0.24.5 source and licence](https://github.com/paullouisageneau/libdatachannel/tree/v0.24.5)
+- [Buffered-send contract](https://github.com/paullouisageneau/libdatachannel/blob/v0.24.5/include/rtc/channel.hpp)
+
+### Source-built allocation teardown
+
+Explicit preparation builds only pinned source inputs with at most two jobs.
+Each invocation owns fresh source and derived directories; it never trusts an
+existing OpenSSL/CMake cache or modifies an installed npm prebuild. The
+receipt and library version identify a modified binary. Preparation downloads
+sources; importing the verifier or starting an operator never does.
+
+The libjuice change sends explicit authenticated `Refresh(lifetime=0)` on the
+existing allocation socket before destroying it. Receive processing remains
+alive for stale-nonce challenges; a single closing loop owns retries and
+transaction IDs. Each agent has a 500ms deadline and at most six requests per
+allocation. A 438 updates the nonce and starts a fresh transaction. Validated
+success with explicit lifetime zero, or allocation-mismatch 437, completes
+release. Success validation uses upstream transaction IDs and MESSAGE-INTEGRITY;
+upstream error handling does not require error-response integrity. This patch
+does not introduce a general TURN response-source validation change.
+
+Release is best effort under packet loss or partition: an unreachable server
+can retain its allocation until expiry. Eight serial fully blackholed agents
+can consume approximately four seconds plus scheduling overhead. This bound
+is per agent, not per process. No credential rotation or quota increase is a
+substitute for cleanup.
+
+`test/native-turn-lifecycle.py` uses only authenticated synthetic loopback TURN
+with a cap of eight and one unchanged fixture credential. It checks normal
+and dropped-request `8 → 0 → 8 → 0` reuse, delayed 350ms stale-nonce challenges,
+invalid-HMAC and wrong-transaction success replies, lost/late acknowledgements,
+and bounded whole-process cleanup when all release packets are blackholed.
+[The retained macOS arm64 lifecycle run](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/evidence/native-turn-lifecycle-20261024.json)
+passed all eight scenarios. Normal, dropped-first-two and delayed-nonce cases
+each released and reused eight slots twice. All-eight blackhole cleanup
+returned in 4254ms while the fake server correctly retained eight allocations.
+[Patched native/browser qualification](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/evidence/native-realtime-patched-loopback-20261024.json)
+also passed actual unordered 250ms DCEP and binary exchange. These are
+synthetic loopback gates; Linux runtime and public Spry lifecycle acceptance
+remain separate.
+
+Every accepted release request must carry the correct HMAC, realm, username,
+nonce and original client UDP tuple. Blackhole allocation retention is an
+expected limitation, reported separately from successful release.
+
+Neither native implementation, operator independence nor absent call logs
+establishes an Online Safety Act exemption.
+
+---
+
 Source: [docs/NIP-DRAFT.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md)
 
 # RelaySwarm experimental protocol draft
@@ -9369,3 +9572,232 @@ acceptance gate. Connection counts do not establish accepted media payload.
 Temporary-policy diagnostics do not establish default-device behaviour.
 Update this table as evidence arrives; do not mark the overall work complete
 while a required entry remains open.
+
+---
+
+Source: [docs/REALTIME-TRANSPORT.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/REALTIME-TRANSPORT.md)
+
+# Experimental real-time transport
+
+The source-only `relayswarm/realtime-peer` export carries opaque datagrams
+over an explicitly selected WebRTC peer. It reuses `RelaySwarmSession` wire
+version 3's signed pairwise NIP-44 signalling with a separate `webrtc-live`
+transport token. HLS `PeerLink` and the loader keep their ordered reliable
+protocol unchanged. This module is not included in the immutable v0.2.1
+release or its browser bundle.
+
+This is a transport component for a new call adapter, not an SFU, codec,
+media-key service or room implementation. The application must authenticate
+and encrypt media before sending it, authorise recipients, reassemble bounded
+fragments, enforce frame deadlines and request video recovery after loss.
+DTLS protects each link but does not by itself hide media from a forwarder
+which terminates that link. No logging, recording, discovery announcement,
+credential issuer or automatic peer/service selection is added here.
+
+## API
+
+```js
+import { RealtimePeer } from 'relayswarm/realtime-peer';
+
+// pool and session are host-selected and connected/started already.
+// Resolve the selected peer's key through the application's trust policy.
+const peer = new RealtimePeer({
+  session,
+  peerPubkey: selectedPeerPubkey,
+  initiator: true,
+  iceServers: deviceSelectedIceServers,
+  iceTransportPolicy: 'relay',
+  onDatagram: bytes => admitToBoundedFrameReceiver(bytes),
+  onClose: reason => handleTransportClosure(reason),
+  signal: cancellation.signal,
+});
+await peer.start(); // also available as peer.ready
+const sent = peer.send(alreadyEncryptedFragment, {
+  deadlineMs: performance.now() + 100,
+});
+if (!sent) requestApplicationRecovery();
+// Bounded counters and generic states; no SDP, addresses, credentials or payloads.
+const counters = peer.snapshot();
+peer.close();
+```
+
+Construct the receiving side with `initiator: false` and its explicit sender
+key, then start it before the initiator. Both sides can be given the same
+`requestId` (8 to 64 URL-safe ASCII characters) when the host already has a
+fresh negotiation capability. Otherwise the initiator generates a random ID
+and the receiver binds to the first offer from its pinned peer. Replacement
+uses a new peer instance. Caller admission remains necessary: knowing a
+Nostr public key is not proof of room entitlement.
+
+`start()` returns the same `ready` promise, resolving with its
+`RealtimeDatagramLink`. The native connection is available as `peer.pc` for
+caller read-only statistics. `send(Uint8Array | ArrayBuffer, { deadlineMs })`
+returns a boolean. `deadlineMs` uses the same monotonic millisecond clock as
+the optional injected `now()` callback; omitted deadlines have no transport
+expiry. Once SCTP accepts bytes, the application cannot recall them. A
+receiver must still reject an expired complete frame.
+
+`RealtimeDatagramLink` can wrap an application-negotiated `pc`/`channel`
+directly. It requires the label `relayswarm-live-v1` and `ordered: false`.
+The default mode requires `maxRetransmits: 0` and `maxPacketLifeTime: null`.
+An explicit `maxPacketLifeTimeMs` option (integer 1 to 1000) instead requires
+`maxRetransmits: null` and exactly the selected `maxPacketLifeTime` value.
+Both endpoints must select the same mode and lifetime. Ordered, reliable,
+different-lifetime and different-mode channels are refused; there is no
+automatic switch or HLS fallback. The same constraints apply to channels
+received by `RealtimePeer`. Snapshots name the selected delivery mode and
+lifetime without exposing credentials or payloads.
+
+Peer snapshots also retain a generic close reason, current/pre-close native
+connection/ICE/gathering/signalling/channel states, candidate counts and
+description-presence booleans. The pre-close state remains available after
+the underlying connection has been closed. These are in-memory observations
+on explicit request; no logger or history writer is added.
+
+For a media forwarding service, explicitly selecting 50 ms lifetime bounds
+unsent and retransmission eligibility in a correctly implemented backend.
+Zero retries alone does not impose an unsent queue deadline. Negotiated flags
+do not prove backend conformance; use the guarded Node correction below.
+
+## Bounds and lifetime
+
+- Default datagrams are at most 16 KiB; the configurable hard maximum is
+  64 KiB. Larger media frames need application fragmentation.
+- Default SCTP buffered-data allowance is 256 KiB, configurable up to 4 MiB.
+  A send that would exceed the allowance is dropped, without an application
+  transport queue, retry or deferred send.
+- Async receive callbacks are capped at 16 in flight by default on the link.
+  Additional datagrams are dropped; callback rejection closes with a generic
+  reason. A synchronous admission callback can hand bytes to a separately
+  bounded receiver. Closing cannot cancel an already-running callback, so
+  callers must check their own cancellation before applying async results.
+- Each peer accepts at most 128 ICE candidates per direction, at most 4 KiB
+  per candidate and 6 KiB SDP. Candidate-before-description and replica
+  reordering are retained only inside those bounds. The default connection
+  deadline is 15 seconds (configurable up to 60 seconds).
+- Abort, timeout, native/channel failure or explicit close removes listeners,
+  clears candidate queues, closes channel/connection and rejects unfinished
+  readiness with a generic error. The caller owns the shared session/pool;
+  closing one peer does not close those shared resources.
+- `iceServers` and `iceTransportPolicy` are supplied by the host. The policy
+  defaults to `relay` with no ICE servers. No root TURN secret or default
+  service is supplied. An empty relay configuration cannot establish a path.
+
+## Verification scope
+
+Run `npm run test:realtime`. The tests exercise bounds, late data, protocol
+refusal, cancellation, timeout, pinned peers/IDs, candidate reordering and an
+actual `RelayPool`/NIP-44 session exchange through an in-memory relay. The
+native peer connection in these unit tests is a fixture, so they do not prove
+browser SCTP behaviour, WAN/NAT traversal, real media playback or a complete
+Spry/Sapflow/KithMoot call. Those require the consuming adapter's integration
+tests. This component establishes no legal exemption for the combined offering.
+
+`npm run test:realtime:native` additionally runs an actual Chromium initiator
+against a Node werift 0.24.3 answerer, with real WebRTC and encrypted session
+signalling over a loopback relay. Both directions carry generated datagrams
+and the native incoming channel must be unordered with zero retransmits.
+The qualifier requires the matching Playwright Chromium installation (or
+`E2E_CHROMIUM_EXECUTABLE`). It passed on the development Mac. It does not
+exercise TURN, remote networks, audiovisual decoding or phone devices.
+
+The original uncorrected Node qualifier role is **answerer only**. Werift 0.24.3's outgoing DCEP
+encoding overwrites the unordered channel bit when maxRetransmits is set;
+an initiating werift peer therefore fails the strict receiver check. Do not
+weaken that check to make a Node initiator pass. The browser initiates each
+connection to an independent Node forwarding operator. The receiver accepts
+the browser's correctly encoded unordered channel and sends on that channel.
+
+Always pass explicit ICE configuration to the Node implementation. Werift
+otherwise supplies a default STUN service; it selects the first supplied
+STUN and TURN URL rather than establishing browser-like multi-server
+fallback. Source inspection maps relay policy to its `forceTurn` option;
+that inspection is not a live TURN qualification. Operator wrappers must
+also disable/reject inherited dependency debugging (`DEBUG`) before opening
+connections: dependency diagnostics can include ICE credentials. The
+transport module itself adds no logger.
+
+## Guarded Node backend build
+
+The opt-in `relayswarm/realtime-werift-build` module corrects one exact
+werift 0.24.4 ESM source revision during an esbuild Node build. It neither
+edits installed packages nor changes another application's dependency.
+The exported `weriftRealtimeRevision` records the reviewed upstream file
+SHA-256 values. Unknown metadata/source, browser builds, external-package
+builds and unsupported werift subpath imports are refused. There is no
+uncorrected fallback.
+
+```js
+import { build } from 'esbuild';
+import { realtimeWeriftPlugin } from 'relayswarm/realtime-werift-build';
+
+await build({
+  entryPoints: ['operator-entry.mjs'], // imports RTCPeerConnection from werift
+  outfile: 'operator.mjs',
+  platform: 'node', format: 'esm', bundle: true,
+  // Supply the normal createRequire shim if bundled dependencies require it.
+  plugins: [await realtimeWeriftPlugin({ packageRoot: reviewedWeriftDirectory })],
+});
+```
+
+The changes preserve unordered DCEP mode bits, recognise zero retransmits,
+capture lifetime in monotonic seconds when the data-channel send is enqueued, discard
+expired application-queue data, and refuse expired SCTP data before first
+send or retransmission. A single timer per association expires queued media
+even without a window-opening event. Abandonment identifies the exact DATA
+chunk and its message fragments rather than another message with the same
+chunk type. Flight-byte accounting follows abandonment and retransmission.
+The latest FORWARD TSN control skip is retained until cumulative acknowledgement
+and retried using the unchanged control timer if lost; expired media is not
+retransmitted. Association closure cancels its added expiry timer.
+The upstream MIT notice is retained explicitly in the generated bundle,
+alongside dependency legal comments. The published npm package omitted its
+licence file; the notice comes from the
+[upstream repository licence](https://github.com/shinyoshiaki/werift-webrtc/blob/develop/LICENSE).
+The guard does not independently pin all transitive dependencies: retain the
+consuming application's lockfile and build provenance as separate inputs.
+
+Correction revision 2 also releases a successfully allocated TURN lease on
+shutdown. It aborts the scheduled positive refresher, settles outstanding
+transactions, sends authenticated Refresh with lifetime zero to the already
+resolved server, handles stale nonce with fresh transaction IDs, then closes
+the socket in all outcomes. Up to three attempts share a 900 ms release
+budget; a server which cannot acknowledge release still owns allocation
+expiry. Closing is idempotent. Peer/server requests cannot resume after close
+and register another transaction after asynchronous address resolution.
+Failed allocation also closes its newly created transport. These corrections
+do not increase server quotas or replace them with fresh-credential churn.
+
+Run the conformance tests with the reviewed installation supplied explicitly:
+
+```sh
+WERIFT_REALTIME_PACKAGE_ROOT=/path/to/reviewed/node_modules/werift npm run test:realtime:backend
+```
+
+Without that variable the conformance command fails; it cannot turn green
+by skipping the backend cases. With the reviewed source, the tests build the
+corrected module and exercise actual serialised SCTP packets through a finite
+in-memory lossy transport. They prove zero-retry loss recovery, expiry behind
+a zero receive window, correct message selection, fragmented-message loss
+and lifetime-unit/application-queue handling. They also cover wall-clock
+rollback, lost control-skip recovery and expiry timer cleanup. The packet fixture accelerates
+the retransmission trigger; production retry timers, ICE consent and native
+resource limits remain unchanged. This is SCTP wire proof, not WAN or physical
+device qualification.
+
+The same suite additionally runs the actual corrected TURN client against
+an authenticated loopback UDP fixture. It verifies nonce/authenticated release,
+lost requests, an unresponsive server, refresher/request cancellation, failed
+allocation and two successive batches of eight sockets reusing one credential
+under an eight-allocation limit. These control-plane tests do not replace
+the consuming application's public-server allocation/readback gate.
+
+The Chromium-to-native qualifier can consume the generated module explicitly:
+
+```sh
+E2E_REALTIME_BACKEND_MODULE=/path/to/corrected-backend.mjs E2E_REALTIME_LIFETIME_MS=50 npm run test:realtime:native
+```
+
+That path is a mandatory explicit selection when qualifying finite-lifetime
+native forwarding. An omitted backend path retains the historical direct
+upstream diagnostic; it does not establish corrected loss/expiry behaviour.

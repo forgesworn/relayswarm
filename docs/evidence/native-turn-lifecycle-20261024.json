@@ -1,0 +1,192 @@
+{
+  "passed": true,
+  "syntheticCredentialsOnly": true,
+  "liveServiceContacted": false,
+  "results": [
+    {
+      "scenario": "normal",
+      "passed": true,
+      "cycles": 2,
+      "allocationTransitions": [
+        8,
+        0,
+        8,
+        0
+      ],
+      "authenticatedAllocates": 16,
+      "refreshZeroRequests": 16,
+      "authenticatedSameTupleReleaseRequests": 16,
+      "invalidReleaseRequests": 0,
+      "maximumRequestsPerAllocation": 1,
+      "staleNonceChallenges": 0,
+      "remainingAllocations": 0,
+      "cleanupReturned": true,
+      "closeToProcessExitMs": 2412,
+      "partitionReleaseExpected": null,
+      "exitCode": 0,
+      "stderrPresent": false
+    },
+    {
+      "scenario": "drop-first-two",
+      "passed": true,
+      "cycles": 2,
+      "allocationTransitions": [
+        8,
+        0,
+        8,
+        0
+      ],
+      "authenticatedAllocates": 16,
+      "refreshZeroRequests": 48,
+      "authenticatedSameTupleReleaseRequests": 48,
+      "invalidReleaseRequests": 0,
+      "maximumRequestsPerAllocation": 3,
+      "staleNonceChallenges": 0,
+      "remainingAllocations": 0,
+      "cleanupReturned": true,
+      "closeToProcessExitMs": 3801,
+      "partitionReleaseExpected": null,
+      "exitCode": 0,
+      "stderrPresent": false
+    },
+    {
+      "scenario": "stale-delayed",
+      "passed": true,
+      "cycles": 2,
+      "allocationTransitions": [
+        8,
+        0,
+        8,
+        0
+      ],
+      "authenticatedAllocates": 16,
+      "refreshZeroRequests": 80,
+      "authenticatedSameTupleReleaseRequests": 80,
+      "invalidReleaseRequests": 0,
+      "maximumRequestsPerAllocation": 5,
+      "staleNonceChallenges": 16,
+      "remainingAllocations": 0,
+      "cleanupReturned": true,
+      "closeToProcessExitMs": 7128,
+      "partitionReleaseExpected": null,
+      "exitCode": 0,
+      "stderrPresent": false
+    },
+    {
+      "scenario": "forged-hmac",
+      "passed": true,
+      "cycles": 1,
+      "allocationTransitions": [
+        8,
+        0
+      ],
+      "authenticatedAllocates": 8,
+      "refreshZeroRequests": 24,
+      "authenticatedSameTupleReleaseRequests": 24,
+      "invalidReleaseRequests": 0,
+      "maximumRequestsPerAllocation": 3,
+      "staleNonceChallenges": 0,
+      "remainingAllocations": 0,
+      "cleanupReturned": true,
+      "closeToProcessExitMs": 2042,
+      "partitionReleaseExpected": null,
+      "exitCode": 0,
+      "stderrPresent": false
+    },
+    {
+      "scenario": "forged-txid",
+      "passed": true,
+      "cycles": 1,
+      "allocationTransitions": [
+        8,
+        0
+      ],
+      "authenticatedAllocates": 8,
+      "refreshZeroRequests": 24,
+      "authenticatedSameTupleReleaseRequests": 24,
+      "invalidReleaseRequests": 0,
+      "maximumRequestsPerAllocation": 3,
+      "staleNonceChallenges": 0,
+      "remainingAllocations": 0,
+      "cleanupReturned": true,
+      "closeToProcessExitMs": 2046,
+      "partitionReleaseExpected": null,
+      "exitCode": 0,
+      "stderrPresent": false
+    },
+    {
+      "scenario": "lost-ack",
+      "passed": true,
+      "cycles": 1,
+      "allocationTransitions": [
+        8,
+        0
+      ],
+      "authenticatedAllocates": 8,
+      "refreshZeroRequests": 40,
+      "authenticatedSameTupleReleaseRequests": 40,
+      "invalidReleaseRequests": 0,
+      "maximumRequestsPerAllocation": 5,
+      "staleNonceChallenges": 0,
+      "remainingAllocations": 0,
+      "cleanupReturned": true,
+      "closeToProcessExitMs": 4244,
+      "partitionReleaseExpected": null,
+      "exitCode": 0,
+      "stderrPresent": false
+    },
+    {
+      "scenario": "late-ack",
+      "passed": true,
+      "cycles": 1,
+      "allocationTransitions": [
+        8,
+        0
+      ],
+      "authenticatedAllocates": 8,
+      "refreshZeroRequests": 40,
+      "authenticatedSameTupleReleaseRequests": 40,
+      "invalidReleaseRequests": 0,
+      "maximumRequestsPerAllocation": 5,
+      "staleNonceChallenges": 0,
+      "remainingAllocations": 0,
+      "cleanupReturned": true,
+      "closeToProcessExitMs": 4267,
+      "partitionReleaseExpected": null,
+      "exitCode": 0,
+      "stderrPresent": false
+    },
+    {
+      "scenario": "blackhole",
+      "passed": true,
+      "cycles": 1,
+      "allocationTransitions": [
+        8,
+        8
+      ],
+      "authenticatedAllocates": 8,
+      "refreshZeroRequests": 40,
+      "authenticatedSameTupleReleaseRequests": 40,
+      "invalidReleaseRequests": 0,
+      "maximumRequestsPerAllocation": 5,
+      "staleNonceChallenges": 0,
+      "remainingAllocations": 8,
+      "cleanupReturned": true,
+      "closeToProcessExitMs": 4254,
+      "partitionReleaseExpected": false,
+      "exitCode": 0,
+      "stderrPresent": false
+    }
+  ],
+  "artifact": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "bindingVersion": "0.33.4",
+    "libraryVersion": "0.24.5-forgesworn-turn-close.1",
+    "binarySha256": "ede568c39136031393f87394f8be365cb108c2be9a8ed74c19f7835655dd8e26",
+    "libjuicePatchSha256": "fe802d2af81470a65f9f2dee2c393a8d8468129a228714f2041960e013020069"
+  },
+  "timingDefinition": "closeToProcessExitMs includes controlled fixture waits, later cycles and final native cleanup; it is not a network latency measurement.",
+  "liveSpryAcceptance": false,
+  "linuxRuntimeAcceptance": false
+}

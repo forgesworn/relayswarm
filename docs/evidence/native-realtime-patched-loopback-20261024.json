@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "generatedDatagramsOnly": true,
+  "nativeInitiator": true,
+  "browserAnswerer": true,
+  "browserObservedDcep": {
+    "ordered": false,
+    "maxPacketLifeTime": 250,
+    "maxRetransmits": null,
+    "label": "relayswarm-live-v1"
+  },
+  "binaryBidirectional": true,
+  "unknownIncomingChannelRefused": true,
+  "certificateBypass": false,
+  "ice": "loopback-direct",
+  "publicNat": false,
+  "physicalDevice": false,
+  "packageVersion": "0.33.4",
+  "native": {
+    "ownedPeers": 1,
+    "closed": false,
+    "disposed": false,
+    "packageVersion": "0.33.4",
+    "libraryVersion": "0.24.5-forgesworn-turn-close.1",
+    "role": "initiator-only",
+    "maxPacketLifeTimeMs": 250
+  },
+  "cleanupOwnedPeers": 0,
+  "binarySha256": "ede568c39136031393f87394f8be365cb108c2be9a8ed74c19f7835655dd8e26"
+}
