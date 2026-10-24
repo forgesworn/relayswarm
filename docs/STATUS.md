@@ -3,12 +3,42 @@
 [Documentation](README.md) · [Field-test guide](FIELD-TEST.md) ·
 [Changelog](../CHANGELOG.md)
 
-Checkpoint: 24 October 2026. The experimental shared-core release is
-[v0.4.2](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.2).
-The [changelog](../CHANGELOG.md#v042-24-october-2026) records its source changes;
+Checkpoint: 24 October 2026. The prepared experimental shared-core prerelease is
+[v0.4.3](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3).
+The [changelog](../CHANGELOG.md#v043-24-october-2026) records its source changes;
 the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Sustainable peer waits and range-sized WASM uploads (24 October 2026)
+
+The opt-in `sustainablePeerWait` bounds serial peer waits and multi-holder
+extensions by the requested fragment/part duration minus measured p90
+whole-origin recovery with a 25% and 100 ms margin. A two-second segment
+with a 1,300 ms measured origin load leaves 275 ms for serial peer work.
+The independent cached-peer race retains its window alongside immediate
+HTTP. Existing buffer reserves, integrity checks and defaults remain intact.
+
+The matching WASM upload ABI accepts only the requested range. Previously a
+512 KiB ranged upload could first copy a roughly 6 MiB held object into the
+module and clone it before slicing. This removes that repeated whole-object
+input work without changing peer messages, range validation or upload charges.
+It is not a measured throughput, CPU-time or smooth-playback claim.
+
+The focused Node loader sweep passed 32 tests covering the new measured
+deadline, complete verified cached-peer contribution, cancellation and the
+existing origin-recovery reserve. It uses real committed WASM and simulated
+browser connections. The combined `npm run test:swarm:core` sweep against the
+rebuilt module passed 291 tests, with one expected skip and zero failures
+(292 total). That skip patches JavaScript selection's prototype, which the
+WASM selection path does not use. The protocol/ABI suite passed 42 tests;
+13 Rust range tests also passed. The actual WASM allocation regression sends
+the same 6 MiB object in 16 ranges: boundary input falls from 96 MiB
+with the legacy ABI to 6 MiB with the new ABI. This is a byte-copy measurement
+using synthetic links, not a device or streaming throughput comparison.
+These checks do not establish actual iPhone/iPad,
+Pixel/Vanadium, varied-NAT or sustained distributed continuity. The v0.4.2
+failed hosted-browser attempts below remain historical RED.
 
 ## Admission-renewal overlap release (24 October 2026)
 

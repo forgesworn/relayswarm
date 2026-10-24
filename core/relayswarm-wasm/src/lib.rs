@@ -282,6 +282,8 @@ pub const LINK_STATE: u32 = 12;
 pub const LINK_SETS: u32 = 13;
 /// Framing 2: `a` timeout, `b` object size, input `[key, start, end]`.
 pub const LINK_REQUEST_RANGE: u32 = 14;
+/// Pre-sliced upload: `a` original object size, `b` buffered amount, input range bytes.
+pub const LINK_SERVE_RANGE: u32 = 15;
 
 const EVENT_SEND_TEXT: u8 = 1;
 const EVENT_SEND_BINARY: u8 = 2;
@@ -466,6 +468,10 @@ pub unsafe extern "C" fn rs_link_call(handle: u32, op: u32, now: f64, open: u32,
                 link.observe_buffered(ms(b));
                 link.serve_response(now, (a != 0.0).then(|| input.to_vec()));
             }
+            LINK_SERVE_RANGE => {
+                link.observe_buffered(ms(b));
+                link.serve_range_response(now, ms(a), input.to_vec());
+            }
             LINK_BUFFERED_LOW => link.buffered_amount_low(now, ms(a)),
             LINK_SEND_HAVE => link.send_have(&strings(json().as_ref())),
             LINK_SEND_HAVE_CHANGE => {
@@ -493,6 +499,24 @@ pub unsafe extern "C" fn rs_link_call(handle: u32, op: u32, now: f64, open: u32,
             None => -1,
         }
     })
+}
+
+/// Optional range-upload capability. The active link validates the original
+/// object size and exact canonical range length before using these bytes.
+///
+/// # Safety
+/// `bytes` must address `len` initialised bytes from `rs_alloc` (or `len` 0).
+#[no_mangle]
+pub unsafe extern "C" fn rs_link_serve_range(
+    handle: u32,
+    now: f64,
+    open: u32,
+    object_size: f64,
+    buffered: f64,
+    bytes: *const u8,
+    len: usize,
+) -> i32 {
+    rs_link_call(handle, LINK_SERVE_RANGE, now, open, object_size, buffered, bytes, len)
 }
 
 // --- neighbour discovery ----------------------------------------------------

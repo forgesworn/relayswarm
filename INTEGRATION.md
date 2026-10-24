@@ -88,6 +88,7 @@ decision is not cached as permission for later upload requests.
 | `originFallbackMs` | `1500` | The in-time budget a peer delivery is measured against, and peer-first's ordinary wait. |
 | `maxPeerWaitMs` | `5000` | Peer-first may wait past `originFallbackMs`, up to this, only while recent peer timing projects the segment needs it and the playback buffer covers the wait with `originReserveMs` to spare. |
 | `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
+| `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-origin time with a 25% and 100 ms recovery margin. Before measurement, use `originReserveMs`; unknown duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. The independent `zeroBudgetPeerRace` window stays unchanged. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
 | `maxPeers` | `6` | Connections in and out. The demo selects four explicitly. |
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
@@ -341,6 +342,10 @@ without additional media or context getter reads. Finite signed values are
 retained; unavailable or nonfinite values are null. The fixed `source` is
 `buffer`, `no-media`, `no-buffer`, `error` or `unobserved`; `positionSource` is
 `part`, `fragment` or null. Non-buffer sources leave the numeric fields null.
+With `sustainablePeerWait` enabled, the geometry additionally includes
+`durationMs`, `originRecoveryMs` and `sustainableMs`. These explain the
+separate per-segment cap; `uncappedMs` continues to describe only the buffer
+calculation. Unknown duration is null and permits no serial peer wait.
 Wait outcomes retain their original geometry, rather than sampling the later
 buffer. Each row and returned snapshot owns a copy. These values explain the
 initial budget calculation, not donor availability or remaining request time.
@@ -681,6 +686,21 @@ by no more than a quarter, or rests on evidence older than 15 s, waits to the
 limit; one that overruns by more, or whose holder wait leaves no time for a
 first byte, goes to origin at once (`peerProjectedLate`). `peerWaitExtended`
 counts extensions. Without evidence the ordinary wait applies.
+
+An individual wait can fit the current buffer while repeated misses still
+drain it: for example, a 2.5 s peer wait followed by a 1.3 s HTTP recovery
+takes longer than a two-second segment adds. The opt-in
+`sustainablePeerWait: true` also limits both the initial wait and every
+extension, including multi-holder transfers, to
+`max(0, duration * 1000 - (p90OriginMs * 1.25 + 100))`.
+For a two-second segment and 1,300 ms measured HTTP, that cap is 275 ms.
+The existing buffer-safe reserve and configured caps still apply. Until an
+ordinary whole-origin load has been measured, `originReserveMs` supplies the
+recovery estimate; missing or invalid duration permits no serial wait.
+Parts use their own duration. This admission rule cannot guarantee smooth
+playback when later origin, peer or decoder performance changes. A zero
+result can still use `zeroBudgetPeerRace`, whose independent peer timer
+runs alongside immediate normal HTTP and retains its configured window.
 
 The loader also goes to origin without asking a peer when the time left to the
 limit is less than the fastest of its last 16 completed transfers at least as
