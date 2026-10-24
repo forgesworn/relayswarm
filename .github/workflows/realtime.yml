@@ -1,0 +1,57 @@
+name: Realtime transport
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-realtime:
+    name: Native realtime (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Bounded peer, native facade and source verification regressions
+        run: node --test test/realtime-peer.test.mjs test/native-realtime.test.mjs test/native-realtime-build.test.mjs
+      - name: Check the optional historical backend against its reviewed version
+        shell: bash
+        run: |
+          npm install --prefix "$RUNNER_TEMP/realtime-werift" --ignore-scripts --no-audit --no-fund werift@0.24.4
+          WERIFT_REALTIME_PACKAGE_ROOT="$RUNNER_TEMP/realtime-werift/node_modules/werift" node --test test/realtime-werift-build.test.mjs
+      - name: Build the pinned native source and verify its receipt
+        run: node scripts/build-native-realtime.mjs
+      - name: Authenticated TURN release, nonce recovery and bounded partition cleanup
+        shell: bash
+        run: |
+          E2E_NATIVE_BINDING="$PWD/target/realtime-native/native-addon.node" python3 -B test/native-turn-lifecycle.py > target/native-turn-lifecycle.json
+      - run: npx playwright-core install --with-deps chromium
+      - name: Actual browser DCEP and binary interoperability
+        shell: bash
+        run: |
+          E2E_NATIVE_ARTIFACT="$PWD/target/realtime-native" node test/native-realtime-browser.mjs > target/native-browser.json
+      - name: Retain the exact qualified native artifact and receipts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: realtime-native-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            target/realtime-native/
+            target/native-turn-lifecycle.json
+            target/native-browser.json
+          if-no-files-found: error
+          retention-days: 14
