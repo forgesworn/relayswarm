@@ -13,6 +13,7 @@ use crate::js::is_hex64;
 const STALE_HOLDER_MISSES: u32 = 4;
 const STALE_HOLDER_MS: u64 = 10_000;
 const MAX_HOLDERS: usize = 8;
+pub const REPLACEMENT_REARM_MS: u64 = 20_000;
 const MAX_CANDIDATES: usize = 64;
 const MAX_CANDIDATE_KEYS: usize = 8;
 const CONTEXT_IDLE_MS: u64 = 30_000;
@@ -87,6 +88,7 @@ pub struct Context {
     pub last_demand_at: Option<u64>,
     pub activity_at: u64,
     pub spent: bool,
+    pub spent_at: Option<u64>,
     pub holders: IndexMap<String, Holder>,
 }
 
@@ -140,6 +142,13 @@ pub struct Counters {
     pub verified: u64,
     pub stale_holder: u64,
     pub stale_blocked: u64,
+    pub held_miss: u64,
+    pub rearmed: u64,
+    pub victim_unhelpful: u64,
+    pub victim_serving: u64,
+    pub victim_consumer: u64,
+    pub unmet_no_hint: u64,
+    pub unmet_ineligible: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -199,6 +208,7 @@ impl NeighbourDiscovery {
                 last_demand_at: None,
                 activity_at: now,
                 spent: false,
+                spent_at: None,
                 holders: IndexMap::new(),
             };
             self.contexts.insert(media_type, context);
@@ -282,20 +292,21 @@ impl NeighbourDiscovery {
         }
     }
 
-    /// This holder lacked `key` at the deadline; one miss per distinct key.
-    pub fn holder_miss(&mut self, now: u64, context: Option<ContextId>, pubkey: &str, key: &str) {
+    /// Record a failed judged holder once per distinct key; true for a new miss.
+    pub fn holder_miss(&mut self, now: u64, context: Option<ContextId>, pubkey: &str, key: &str) -> bool {
         if !is_hex64(pubkey) || !is_hex64(key) {
-            return;
+            return false;
         }
         let Some(context) = context.and_then(|id| self.live_context_mut(id)) else {
-            return;
+            return false;
         };
         if let Some(entry) = context.holders.get_mut(pubkey) {
             if entry.last_key != key {
                 entry.misses += 1;
                 entry.last_key = key.to_owned();
+                return true;
             }
-            return;
+            return false;
         }
         if context.holders.len() >= MAX_HOLDERS {
             context.holders.shift_remove_index(0);
@@ -308,6 +319,7 @@ impl NeighbourDiscovery {
                 last_key: key.to_owned(),
             },
         );
+        true
     }
 
     pub fn holder_ahead(&mut self, context: Option<ContextId>, pubkey: &str) {
@@ -345,7 +357,13 @@ impl NeighbourDiscovery {
     }
 
     /// A hinted candidate for an unmet current context, or `None`.
-    pub fn choose(&self, now: u64, eligible: impl Fn(&Candidate) -> bool, unmet: impl Fn(MediaType) -> bool, room: bool) -> Option<Found> {
+    pub fn choose(
+        &mut self,
+        now: u64,
+        eligible: impl Fn(&Candidate) -> bool,
+        unmet: impl Fn(MediaType) -> bool,
+        room: bool,
+    ) -> Option<Found> {
         if self.window.as_ref().is_some_and(|window| window.attempt.is_some()) {
             return None;
         }
@@ -354,6 +372,7 @@ impl NeighbourDiscovery {
             None => self.contexts.values().map(|context| (context.id, context.media_type)).collect(),
         };
         let vacant = self.window.as_ref().is_some_and(|window| window.vacant);
+        let (mut no_hint, mut ineligible) = (false, false);
         for (context, media_type) in contexts {
             if !self.current(now, context) || !unmet(media_type) || (!room && self.spent(context) && !vacant) {
                 continue;
@@ -361,12 +380,35 @@ impl NeighbourDiscovery {
             if let Some(found) = self.hinted(now, context, &eligible) {
                 return Some(found);
             }
+            if self.hinted(now, context, &|_| true).is_some() {
+                if !ineligible {
+                    ineligible = true;
+                    self.counters.unmet_ineligible += 1;
+                }
+            } else if !no_hint {
+                no_hint = true;
+                self.counters.unmet_no_hint += 1;
+            }
         }
         None
     }
 
-    fn spent(&self, context: ContextId) -> bool {
+    pub fn spent(&self, context: ContextId) -> bool {
         self.live_context(context).is_some_and(|context| context.spent)
+    }
+
+    /// Re-arm at most once per interval, only for current demand with no fresh serving link.
+    pub fn rearm(&mut self, now: u64, context: ContextId, all_stale: bool) -> bool {
+        let Some(value) = self.live_context(context) else { return false };
+        let Some(spent_at) = value.spent_at else { return false };
+        if now < spent_at || now - spent_at < REPLACEMENT_REARM_MS || !self.current(now, context) || !all_stale {
+            return false;
+        }
+        let value = self.live_context_mut(context).unwrap();
+        value.spent = false;
+        value.spent_at = None;
+        self.counters.rearmed += 1;
+        true
     }
 
     /// A fresh eligible candidate hinting a key this context demands.
@@ -459,7 +501,9 @@ impl NeighbourDiscovery {
         if self.spent(context) {
             return false;
         }
-        self.live_context_mut(context).unwrap().spent = true;
+        let context = self.live_context_mut(context).unwrap();
+        context.spent = true;
+        context.spent_at = Some(now);
         let window = self.window.as_mut().unwrap();
         window.vacant = true;
         window.victim = victim.map(str::to_owned);
@@ -506,6 +550,7 @@ impl NeighbourDiscovery {
             return false;
         };
         context.spent = false;
+        context.spent_at = None;
         self.counters.verified += 1;
         true
     }

@@ -263,7 +263,7 @@ function discoveryState(op, [result, valid, live, reserved, suppresses, stale, c
     result = { mediaType: media(mediaType), pubkey, key, ...(op.begin ? { begun } : {}) };
   }
   const [count, contextCount, requestedKeys, replacementSpent, opportunityActive, remainingMs, vacancyReserved,
-    [checks, replacements, expired, opened, verified, staleHolder, staleBlocked]] = snapshot;
+    [checks, replacements, expired, opened, verified, staleHolder, staleBlocked, heldMiss, rearmed, victimUnhelpful, victimServing, victimConsumer, unmetNoHint, unmetIneligible]] = snapshot;
   return {
     result, valid, live, reserved, suppresses, stale, current,
     window: window && (([mediaType, createdAt, expiresAt, vacant, victim, attempt]) => ({
@@ -274,9 +274,9 @@ function discoveryState(op, [result, valid, live, reserved, suppresses, stale, c
       ({ mediaType: media(mediaType), rendition, keys, lastDemandAt, activityAt, spent, holders })),
     candidates,
     snapshot: {
-      v: 1, candidateCapacity: 64, candidates: count, contexts: contextCount, requestedKeys, replacementSpent,
+      v: 1, candidateCapacity: 64, candidates: count, contexts: contextCount, requestedKeys, replacementSpent, replacementRearmMs: 20000,
       opportunityActive, remainingMs, vacancyReserved,
-      counters: { checks, replacements, expired, opened, verified, staleHolder, staleBlocked },
+      counters: { checks, replacements, expired, opened, verified, staleHolder, staleBlocked, heldMiss, rearmed, victimUnhelpful, victimServing, victimConsumer, unmetNoHint, unmetIneligible },
     },
   };
 }

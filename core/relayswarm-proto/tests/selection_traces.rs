@@ -156,12 +156,12 @@ fn discovery_step(
         "candidates": discovery.candidates().map(|candidate| json!([candidate.pubkey, candidate.have, candidate.ticket, candidate.at])).collect::<Vec<_>>(),
         "snapshot": {
             "v": 1, "candidateCapacity": 64, "candidates": snapshot.candidates, "contexts": snapshot.contexts,
-            "requestedKeys": snapshot.requested_keys, "replacementSpent": snapshot.replacement_spent,
+            "requestedKeys": snapshot.requested_keys, "replacementSpent": snapshot.replacement_spent, "replacementRearmMs": 20000,
             "opportunityActive": snapshot.opportunity_active, "remainingMs": snapshot.remaining_ms,
             "vacancyReserved": snapshot.vacancy_reserved,
             "counters": { "checks": counters.checks, "replacements": counters.replacements, "expired": counters.expired,
                 "opened": counters.opened, "verified": counters.verified, "staleHolder": counters.stale_holder,
-                "staleBlocked": counters.stale_blocked },
+                "staleBlocked": counters.stale_blocked, "heldMiss": counters.held_miss, "rearmed": counters.rearmed, "victimUnhelpful": counters.victim_unhelpful, "victimServing": counters.victim_serving, "victimConsumer": counters.victim_consumer, "unmetNoHint": counters.unmet_no_hint, "unmetIneligible": counters.unmet_ineligible },
         },
     })
 }

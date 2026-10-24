@@ -108,6 +108,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `reannounceDebounceMs` / `minReannounceGapMs` | `4000` / `12000` | Bound capacity-change presence announcements. |
 | `presenceIntervalMs` | `20000` | Presence heartbeat, jittered 30%. |
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
+| `onPeerDelivery` | none | Optional `({ connection, bytes }) => void` observation for each accepted, verified peer-first media contribution. `connection` is the actual `RTCPeerConnection`; `bytes` is the positive media payload byte count. A single-holder delivery fires once with its whole payload; a multi-holder delivery fires once per contributing connection with only its first-verified-copy bytes, excluding origin and duplicate pieces. It fires only after the complete verified object is accepted for the player. Aggregate peer-first counters are updated first, then all contributions are observed immediately before the player's success callback. Host exceptions and rejected promises are ignored without changing playback or other observations. It does not fire for protocol traffic, shadow measurement, origin fallback, corrupt/rejected media, an incomplete multi-holder object or loads aborted, stopped or too late for the peer-first handoff. |
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
 | `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The relay session starts once the module has loaded or failed, after at most 2 seconds; fragments loaded meanwhile go to origin. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
@@ -148,6 +149,34 @@ consent. Receive-only still discovers peers and exposes its address to them;
 
 ## Metrics
 
+`onPeerDelivery` and `peerConnections()` are main-branch additions after
+v0.3.0. The immutable v0.3.0 release assets do not include them; consume a
+commit that contains these APIs.
+
+`peerConnections()` returns a fresh array of the actual `RTCPeerConnection`
+objects for accepted, active peer links. Pending offers, dials, glare
+negotiations and closed/disconnected links are excluded. It returns an empty
+array after `stop()`. Changing the returned array does not change the swarm's
+membership. Use this snapshot to draw connected peers; observing native
+constructors also sees negotiations that never become peers. Connection
+references are deliberately separate from serialisable `metrics()` data.
+
+Use `onPeerDelivery` to attribute verified video to its contributing connections.
+For a multi-holder delivery, each connection is observed once with the bytes
+its pieces contributed to the completed object. The first verified copy of
+each piece wins; duplicate or origin-winning pieces add no peer credit. All
+contributions sum to the increase in `bytes.peerFirst`. An incomplete or
+rejected object emits no observation even if some pieces verified. Aggregate
+counters include the whole delivery before its first observation runs.
+Keep connection references in local maps rather
+than serialising them into receipts. The callback provides no URL, peer key,
+SDP or payload buffer, and does not add a network request or change a deadline.
+It observes bytes accepted for the player, not the segment currently playing
+from its buffer. Browser RTC byte statistics include connection and protocol
+messages and must not be presented as verified video delivery. Likewise, the
+`payload` outcome in `peerRequestDiagnostics` precedes hash verification and
+is not an alternative to this callback.
+
 `onMetrics(metrics)` and `metrics()` return a version-2 snapshot: `v`, `swarmId`,
 `mode`, `disabledReason`, `stopped`, `pubkey` (the ephemeral swarm key,
 not an identity), `uptimeMs`, `serving`, plus:
@@ -177,8 +206,8 @@ not an identity), `uptimeMs`, `serving`, plus:
   `peerUnverified`, `inTimeShare`, `sampledInTimeShare`, `observedInTimeShare`,
   `sampledInTimeByteShare`, `observedInTimeByteShare`, `peerFirstLoaded`,
   `originFallbacks`, `peerSkippedLate`, `peerProjectedLate`, `peerWaitExtended`,
-  `peerAbandoned`, `peerNoFit`, `commitmentRequests`, `commitmentRejected`,
-  `commitmentUnavailable`, `peerFirstShare`, `peerFirstByteShare`, `peerLatencyMedianMs`,
+  `peerAbandoned`, `peerNoFit`, `peerUntestedTrial`, `peerUntestedTrialLoaded`,
+  `commitmentRequests`, `commitmentRejected`, `commitmentUnavailable`, `peerFirstShare`, `peerFirstByteShare`, `peerLatencyMedianMs`,
   `peerLatencyP90Ms`, `originLatencyMedianMs`.
 - `bytes`: `fromOrigin`, `fromPeers`, `peerFirst`, `uploaded`, `uploadsServed`,
   `uploadsRefused`, `uploadsCancelled`, `uploadCancelledBytes`, `held`,
@@ -251,12 +280,18 @@ not distinct segments. Budget is the initial allowance, not remaining request
 time. Rows contain no segment keys, hashes, URLs, peer public keys or addresses.
 Rows for decisions made after the key computation and link inspection (every
 positive-budget reason except `aborted-before-eligibility`; never `no-budget`)
-also carry three sorted arrays of at most eight holder labels: `holders`
+also carry four sorted arrays of at most eight holder labels: `holders`
 (links serving this rendition now), `haveHolders` (links whose HAVE contains
-the demanded key now) and `staleHolders` (the serving links that neighbour
-discovery treats as stale for this rendition, see below). They are read after the decision and change no decision, timer
-or deadline; if reading them fails the row is still written with the arrays
-null. A holder label is a positive integer that this instance assigns to each
+the demanded key now), `staleHolders` (the serving links that neighbour
+discovery treats as stale for this rendition, see below) and `heldMissHolders`
+(the links recorded as a held miss on this decision, see below; empty until the
+load ends, then filled on the decision's last row). The first three are read
+after the decision and change no decision, timer or deadline; if reading them
+fails the row is still written with the arrays null. The `have-at-entry` row of
+a load that was granted an untested-holder trial (see
+[peer-first loading](#authenticated-peer-first-loading)) also carries
+`trial: true` and the `projection` detail of the later late stage (the commitment
+detail when both stages were late); no other row has a `trial` field. A holder label is a positive integer that this instance assigns to each
 remote peer when it first becomes a link, in first-link order, kept across
 connection replacement in a map of at most 64 peers (oldest evicted; `0` means
 unknown). It is a local counter, not a key or address: it is never derived from
@@ -389,11 +424,19 @@ A timed-out or cancelled request resolves promptly for origin fallback. On a
 known ordered, fully reliable channel, the link stays busy while discarding
 that response up to a matching validated EOF, or a refusal before metadata.
 Only then can another request use the channel. The receiver also sends
-`cancel`; a holder that honours it stops at its next chunk and sends EOF early,
-or refuses before metadata. Holders without `cancel` send the response in full.
+`cancel`; a holder that honours it stops adding binary data and queues EOF
+behind the bytes already sent, including when it is waiting for the channel's
+buffer-low event, or refuses before metadata. Holders without `cancel` send the response in full.
 A holder queues more of a response only while at most 128 KiB is waiting to
 be sent on the channel, so chunks queued before a cancel arrives still flow. The existing drain limit closes
 an incomplete response; host stop and admission withdrawal close immediately.
+Schema 3 multi-holder peer requests verify progress in batches of at most four
+canonical pieces and 512 KiB; a canonical piece larger than that is requested
+alone. The remaining pieces stay queued for that holder, so a later abandoned
+request preserves earlier verified pieces. Origin keeps its contiguous HTTP
+ranges. Run `npm run test:core-link:browser` for native Chrome loopback coverage
+of a cancelled six-MiB ranged response and a subsequent hash-checked range on
+the same reliable connection.
 Fresh-origin coordination is bounded by safe buffered playback and measured
 HTTP fallback time. hls.js owns quality selection. These mechanisms do not
 prove optimal internet scheduling or net savings.
@@ -408,12 +451,51 @@ Victim selection protects active receiving, draining and queued/active uploads,
 minimum link life, bidirectional idle time, the shared rotation cooldown and
 useful sibling audio/video neighbours. At least one established link remains.
 
+Among the links that rotation could already drop (not mid-transfer, not banned,
+at least `minLinkLifeMs` old and idle for `idleEvictMs`), both this victim choice
+and the idle rotation for an incoming offer now go in tier order before idle
+time. Tier 0 (unhelpful) is a non-serving remote that is not a consumer. Tier 1
+(serving) is a remote that is serving. Tier 2 (consumer) is a non-serving remote
+when this viewer is serving, if that remote announced, in a contribution message
+within two `presenceIntervalMs`, a rendition this viewer plays within 30 s: it
+plays what this viewer can give it, though it may not have asked yet. The lowest
+tier goes first, and idle longest within it. A discovery replacement still
+leaves out the links useful to an active context before it orders the rest.
+This is an ordering, not an exemption. If the link to a consumer is the only
+eligible link it is dropped exactly as before, so a receiver that never asks
+still cannot hold a slot indefinitely, and the ordering does not make discovery
+run when no candidate hints a demanded key. Rotation cadence, the number of
+rotations, `minLinkLifeMs`, `idleEvictMs` and `evictionCooldownMs` are
+unchanged. Each link keeps, for at most eight renditions, when the remote last
+announced each one, serving or not; this is local state and no message
+changes. `peers.evictedUnhelpful`, `evictedServing` and `evictedConsumer` count
+offer evictions by the victim's tier, `neighbourDiscovery.counters.victimUnhelpful`,
+`victimServing` and `victimConsumer` count discovery replacements, and
+`peers.evicted` still counts every eviction.
+
+Held-miss charging and the untested-holder trial below govern the single-holder
+whole-object path. Schema-3 multi-holder loads retain the core piece scheduler;
+their accepted, first-verified peer contributors clear holder history. An
+all-origin assembly does not renew a peer replacement or become a peer timing
+or ABR sample. Neither path changes the signed-media acceptance checks.
+
 A serving link normally counts as a neighbour for its rendition even before it
-holds any segment, which keeps discovery off. A link that serves the current
-rendition but lacks this viewer's demanded segment is given a miss when the wait
-reaches its deadline (a `wait-expired` outcome, or a `wait-aborted` outcome that
-the deadline timer itself caused, which keeps its row reason) and when an
-entry-stage `projected-late` decision finds that no link held the key. Four
+holds any segment, which keeps discovery off. Each load that reached the HAVE
+check is decided once, when it ends. If a verified segment came from a link, that
+link's history is dropped and no other link is changed. If the load went to
+origin, only the links that were judged are charged, with a miss called a held
+miss. These are the serving links that were asked and did not deliver a verified
+segment in time (the request was abandoned, timed out or failed, or the payload
+arrived after the deadline), and, when no link could fit the time left
+(`peerNoFit`), the serving links that held the key and whose own timing estimate
+did not fit. A decline made on swarm-wide estimates or on the buffer charges no
+holder: a `projected-late` decision while some link held the key, or a request
+skipped because no recent transfer could finish. A link that was never asked is
+left alone. When no link held the key, every serving link takes a miss, as before: at
+a `wait-expired` outcome (or a `wait-aborted` outcome that the deadline timer
+itself caused, which keeps its row reason) and at an entry-stage `projected-late`
+decision. Holding the key at entry or after the wait no longer clears a link
+by itself. Four
 misses on distinct segments, "distinct" meaning a different key from the last
 missed key (consecutive keys), at least ten seconds after the first, make the
 link stale for that context: it no longer meets the context and is no longer
@@ -421,22 +503,40 @@ protected as a useful neighbour, so discovery may seek a peer hinting the exact
 demanded key and may replace it. The count is kept per `main` or `audio`
 context, only from loads that reached the HAVE check (zero-budget,
 aborted-before-eligibility and no-longer-eligible loads neither count nor
-reset). A load that is aborted by the caller (an hls.js abort) or by `stop()`
-does not count. A link's history is dropped when one of this viewer's loads
-finds the demanded key in that link's HAVE at entry or before the wait deadline,
-when the link closes, when the rendition changes, or when the context sees no
-demand for 30 seconds. A stale link is still asked for any segment it does hold.
+reset). A load that is aborted by the caller (an hls.js abort) or by `stop()`, an
+unavailable, rejected or expired commitment do not count. A corrupt payload is
+never charged to the link that sent it: that link is banned and closed, and the
+size and digest check is made first even when the deadline has passed, though
+another holder asked by a later step of the same load can still be charged. A
+payload that would have verified but arrives after the deadline goes to origin
+and charges the link that was asked. A link's history is dropped only when a verified segment from that
+link reaches this viewer's loader in time, when the link closes, when the
+rendition changes, or when the context sees no demand for 30 seconds. A stale
+link is still asked for any segment it does hold.
 The thresholds are internal constants, not options, and the wait, deadlines,
-HTTP fallback, `maxPeers`, the single 15-second window, the one-replacement
-allowance, the rotation cooldown and every upload limit are unchanged. In a full
+HTTP fallback, `maxPeers`, the single 15-second window, the rotation cooldown
+and every upload limit are unchanged. In a full
 neighbourhood the allowance still bounds this to one replacement per context
-generation until a verified delivery renews it, so a replacement that is also
-never ahead leaves the viewer on origin for that rendition. The additive
+generation until a verified delivery or the twenty-second re-arm below renews
+it, so a replacement that is also never ahead or never delivers leaves the
+viewer on origin for that rendition between attempts. The additive
 `neighbourDiscovery.counters.staleHolder` counts attempts that began because
 every serving link was stale; `staleBlocked` counts loads where a fresh eligible
 candidate hinted a demanded key for such a context but a bound (spent allowance,
-no room or victim, no outgoing slot, an attempt in flight) began no attempt. Both
-are local counts and do not show that delivery improved.
+no room or victim, no outgoing slot, an attempt in flight) began no attempt;
+`heldMiss` counts one per link and demanded key for a held miss. `unmetNoHint`
+counts, at most once per candidate search, a current unmet context for which no
+fresh candidate hinted a demanded key, and `unmetIneligible` one for which fresh
+candidates did but every one was ineligible (cooldown, retries, already
+dialling); neither changes the search. They count only contexts that also pass
+discovery's existing room, reservation or victim condition, so an unmet context
+with no room and no victim is not counted, and they count per context, so one
+search can count a context and still return a candidate for another. All are local
+counts in the local snapshot, are not added to the numeric operator report, and
+do not show that delivery improved. A stale link's HAVE does not count: a link
+that still advertises a demanded key but is stale for that context neither keeps
+the context met nor is protected as a useful neighbour. A link that is not stale
+still counts through its HAVE, as before.
 
 Discovery retains at most two requested keys for each selected `main` and
 `audio` context, 64 candidate hints of at most eight hashes, and one opportunity
@@ -444,10 +544,17 @@ with an absolute maximum of 15 seconds. Quality changes invalidate only that
 media type, including zero-budget loads; those loads add no key hashing or HAVE
 lookup. A refused attempt may reuse its single vacancy before that same deadline.
 The reservation and scoped victim reconnect suppression then expire even if
-loads continue. Only an accepted commitment/hash-verified delivery for the exact
+loads continue. An accepted commitment/hash-verified delivery for the exact
 selected context generation renews its one-replacement allowance; PC-open,
-HAVE, sibling progress and inactivity do not. Per-piece origin fallback remains
-unchanged.
+HAVE, sibling progress and inactivity do not. Without a delivery, a spent
+allowance also renews once at least twenty seconds (an internal constant,
+`neighbourDiscovery.replacementRearmMs`) after it was spent, if the context is
+still current and every link serving its rendition is stale or none serves it;
+`neighbourDiscovery.counters.rearmed` counts these. That allows at most one
+replacement per twenty seconds per context. The single 15-second window, one
+attempt at a time, the rotation cooldown, `maxPeers` and ticket gating still
+apply, so two contexts that re-arm together do not rotate links in quick
+succession. Per-piece origin fallback remains unchanged.
 
 A still-current discovery offer can include the exact demanded `requestedKey`
 inside its existing pairwise NIP-44 payload, alongside the truthful peer count.
@@ -555,6 +662,36 @@ from two first-byte times in, when neither double its latest rate nor the best
 recent rate would finish in time. `peerAbandoned` counts these. The holder is
 asked to stop and returns the unsent bytes to its per-second rate.
 
+A holder that has never been asked gets one request. The projection rests on one
+pool of timing evidence for the whole viewer, so a single slow holder's partial
+transfers can make every decision late, including the decision about a holder
+that has not been tried. When the entry or the commitment projection would send
+a load to origin as `projected-late`, some link held the key at entry (the load
+is not coordinated), and the room to the buffer limit is longer than the median
+first byte, the loader looks for an untested holder: an open, free, unbanned
+link whose HAVE holds the key, that has no recorded attempt, and that is not
+stale for the load's context. If there is one, the load waits to the buffer
+limit as a nearly fitting projection does, and its first request goes to that
+link if it still qualifies at that moment (the first in link order, since an
+untested link has no observation to rank by), otherwise to the ordinary choice. `peerUntestedTrial` counts the request and `peerUntestedTrialLoaded`
+a request that returned a segment verified against its commitment. For that
+decision no `projected-late` row is written and `peerProjectedLate` is not
+counted. A load gets at most one trial and a link is untested only until its
+first recorded attempt, so it gets at most one in its life. A stale link, a busy
+or banned one, and a coordinated load get none. The rest of the attempt is
+unchanged: the pre-request checks above still send a load to origin
+(`peerSkippedLate`), the attempt is abandoned on its own progress, a link that
+was asked and did not deliver is charged as a held miss, and later requests in
+the same load use the ordinary choice. There is no completion-rate condition. The
+option considered was to allow a trial only when the median completed transfer
+time fits the room, but a receiver whose only evidence is partial transfers has
+no completed transfer to take a median of, so that condition would not apply in
+the case the trial is for. The safeguards are the existing ones: the buffer
+limit, the pre-request first-byte and fastest-completion checks, and abandonment
+on the attempt's own progress. This gives an untested holder one chance. It does
+not make a segment fit a room shorter than a relayed transfer needs, and a load
+with less room than that still goes to origin.
+
 When an eligible same-rendition contributor is fetching a new segment, the
 loader requests its signed commitment while waiting for availability. It
 verifies the commitment after availability arrives, before requesting peer
@@ -599,7 +736,9 @@ decide its own mode.
   of its own, at most one per `evictionCooldownMs`, and never a link that is
   mid-transfer or younger than `minLinkLifeMs`. Rotating for anyone who asked
   was measured to cost late joiners more than it won, because an evicted peer
-  re-dials at once and displaces a third. Other refusals carry a
+  re-dials at once and displaces a third. Among the links it may drop it takes
+  the lowest tier first, so a link to a receiver that plays what it can give goes
+  last, not never. Other refusals carry a
   `retryAfterMs` and up to two referrals instead. `peers.evicted`,
   `peers.evictionsUnavailable`, `peers.retriesScheduled`,
   `peers.referralsFollowed`, `offersRefused` and `segments.noPeers` show what

@@ -49,6 +49,9 @@ export class PeerLink {
     this.contribution = { serving: false, rendition: null, at: 0 };
     this.fetching = new Map();
     this.renditions = new Map();
+    // Rendition to the last time the remote announced it in a contribution message, serving or not.
+    // Unlike `renditions` a non-serving announcement keeps it. At most 8 entries. Local advice only.
+    this.announced = new Map();
     this.onClose = onClose;
     this.onUploadCancelled = onUploadCancelled;
     this.maxQueuedRequests = maxQueuedRequests;
@@ -205,6 +208,7 @@ export class PeerLink {
     this.closeReason = CLOSE_REASONS.has(reason) ? reason : "host";
     this.fetching.clear();
     this.renditions.clear();
+    this.announced.clear();
     this.pending?.finish(null, this.closeReason === "send-error" ? "send-error" : "closed");
     try { this.channel.close(); } catch {}
     try { this.pc.close(); } catch {}
@@ -248,6 +252,11 @@ export class PeerLink {
       case "contribution": {
         if (typeof message.serving !== "boolean" || (message.rendition !== null && (typeof message.rendition !== "string" || message.rendition.length > 2048))) return;
         this.contribution = { serving: message.serving, rendition: message.rendition, at: Date.now() };
+        if (message.rendition !== null) {
+          this.announced.delete(message.rendition);
+          if (this.announced.size >= 8) this.announced.delete(this.announced.keys().next().value);
+          this.announced.set(message.rendition, Date.now());
+        }
         if (!message.serving) { this.fetching.clear(); this.renditions.clear(); }
         else if (message.rendition !== null) {
           for (const [rendition, seen] of this.renditions) if (seen < Date.now() - 30_000) this.renditions.delete(rendition);
@@ -268,7 +277,12 @@ export class PeerLink {
       case "want": return this.#onWant(message);
       case "cancel": {
         if (!Number.isSafeInteger(message.id)) return;
-        for (const upload of this.uploads) if (upload.id === message.id) upload.cancelled = true;
+        for (const upload of this.uploads) if (upload.id === message.id) {
+          upload.cancelled = true;
+          // EOF queues behind the binary already sent on this ordered
+          // channel; cancellation need not wait for the buffer-low event.
+          upload.resume?.();
+        }
         return;
       }
       case "meta": {
@@ -357,7 +371,7 @@ export class PeerLink {
     let sent = 0;
     while (sent < bytes.byteLength) {
       if (this.closed) return;
-      if (this.channel.bufferedAmount > HIGH_WATER_BYTES) await this.#drained();
+      if (this.channel.bufferedAmount > HIGH_WATER_BYTES) await this.#drained(upload);
       if (this.closed) return;
       if (upload.cancelled) break;
       const end = Math.min(sent + CHUNK_BYTES, bytes.byteLength);
@@ -370,7 +384,7 @@ export class PeerLink {
     this.#sendText({ t: "eof", id });
   }
 
-  #drained() {
+  #drained(upload) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         cleanup();
@@ -381,6 +395,7 @@ export class PeerLink {
         clearTimeout(timer);
         this.channel.removeEventListener("bufferedamountlow", done);
         this.channel.removeEventListener("close", done);
+        if (upload.resume === done) delete upload.resume;
       };
       const done = () => {
         cleanup();
@@ -388,6 +403,7 @@ export class PeerLink {
       };
       this.channel.addEventListener("bufferedamountlow", done);
       this.channel.addEventListener("close", done);
+      upload.resume = done;
     });
   }
 }
