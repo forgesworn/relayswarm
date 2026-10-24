@@ -2039,7 +2039,9 @@ PRs [14](https://github.com/forgesworn/relayswarm/pull/14),
 [19](https://github.com/forgesworn/relayswarm/pull/19) merged after their
 required CI jobs passed. Integration also advances the peer link's wall clock
 with the loader's virtual clock in the deadline regression; both pinned
-outcomes pass without loosening byte accounting or deadline assertions.
+outcomes pass without loosening byte accounting or deadline assertions. The
+hint regression holds commitment delivery until its idle-HAVE snapshot has
+been observed, so key-resolution timing cannot make the holder busy first.
 
 Native packaging's [dispatch dry run](https://github.com/forgesworn/relayswarm/actions/runs/40051822407)
 built and verified both platforms on its packaging PR source; attachment was
