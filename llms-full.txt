@@ -2491,6 +2491,8 @@ JavaScript-prototype-only skip (302 total). Syntax and authored/generated
 documentation checks passed. The first parallel JavaScript loader sweep had
 four timed holder-accounting failures; the same four passed on both previous
 and candidate source in quiet isolation without changing their assertions.
+The complete serial JavaScript loader rerun then passed all 370 tests with
+zero failures in 125.875 seconds.
 
 Physical candidate checks used original 2160p HLS on Pixel/Vanadium and an
 M4 browser, actual Nostr signalling and the owner's existing Archy Spry TLS
