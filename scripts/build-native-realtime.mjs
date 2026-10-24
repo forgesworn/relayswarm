@@ -3,7 +3,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile, mkdir, lstat, readdir, copyFile, symlink, realpath, mkdtemp, rm } from 'node:fs/promises';
-import { resolve, join, dirname, parse } from 'node:path';
+import { resolve, join, dirname, parse, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -136,7 +136,7 @@ async function copyLicence(source, target) {
 export async function preflightNativeOutput(directory) {
   const absolute = resolve(directory), rootPath = parse(absolute).root;
   let current = rootPath;
-  for (const part of absolute.slice(rootPath.length).split('/').filter(Boolean)) {
+  for (const part of absolute.slice(rootPath.length).split(sep).filter(Boolean)) {
     current = join(current, part);
     if (!await exists(current)) await mkdir(current);
     const info = await lstat(current);

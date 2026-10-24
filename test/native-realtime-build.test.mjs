@@ -133,9 +133,9 @@ test('output preflight permits known regular upgrades and refuses unrelated file
   await rm(join(output, 'native-addon.node')); await symlink(external, join(output, 'native-addon.node'));
   await assert.rejects(preflightNativeOutput(output));
   assert.equal(await readFile(external, 'utf8'), 'untouched');
-  await symlink(output, join(root, 'linked-output'));
+  await symlink(output, join(root, 'linked-output'), 'dir');
   await assert.rejects(preflightNativeOutput(join(root, 'linked-output')));
-  await symlink(root, join(root, 'linked-parent'));
+  await symlink(root, join(root, 'linked-parent'), 'dir');
   await assert.rejects(preflightNativeOutput(join(root, 'linked-parent', 'new-output')));
   await assert.rejects(lstat(join(root, 'new-output')), { code: 'ENOENT' });
 });

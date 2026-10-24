@@ -1,2 +1,4 @@
 # Empty context lines in unified patches contain a required space.
 docs/interop/*.patch -whitespace
+# Reviewed native patch hashes require identical bytes on every checkout.
+scripts/native-patches/*.patch text eol=lf -whitespace
