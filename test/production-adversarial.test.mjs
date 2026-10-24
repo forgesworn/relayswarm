@@ -27,6 +27,7 @@ async function demoFixture(t, options = {}) {
   const mediaDir = await mediaDirectory(t);
   const demo = await startDemoServer({ mediaDir, manifest: "index.m3u8", iceServers: [], ...options });
   t.after(() => demo.close());
+  demo.mediaDir = mediaDir;
   return demo;
 }
 async function post(demo, path, input, extra = {}) {
@@ -124,13 +125,17 @@ test("cancelled slow admission bodies and commitment bursts do not retain slots 
     await new Promise((resolve) => connection.once("connect", resolve));
     connection.write(`POST /admission/challenge HTTP/1.1\r\nHost: ${endpoint.host}\r\nOrigin: ${demo.base}\r\nContent-Type: application/json\r\nContent-Length: 4096\r\n\r\n{`);
   }
-  const query = new URLSearchParams({ path: "/media/segment.ts", level: "0", sequence: "0", cc: "0" });
-  const results = await Promise.all(Array.from({ length: 32 }, () => fetch(`${demo.base}/commitment?${query}`, { signal: AbortSignal.timeout(5000) }).then(async (r) => ({ status: r.status, body: await r.json() }))));
+  // Sixteen distinct contexts: identical requests would join one slot.
+  await writeFile(join(demo.mediaDir, "index.m3u8"), `#EXTM3U\n#EXT-X-TARGETDURATION:2\n${Array.from({ length: 16 }, (_, i) => `#EXTINF:2,\n#EXT-X-BYTERANGE:16384@${i * 16384}\nsegment.ts\n`).join("")}#EXT-X-ENDLIST\n`);
+  const context = (i) => new URLSearchParams({ path: "/media/segment.ts", level: "0", sequence: String(i % 16), cc: "0", start: String((i % 16) * 16384), end: String((i % 16 + 1) * 16384) });
+  const results = await Promise.all(Array.from({ length: 32 }, (_, i) => fetch(`${demo.base}/commitment?${context(i)}`, { signal: AbortSignal.timeout(5000) }).then(async (r) => ({ i, status: r.status, body: await r.json() }))));
   assert.ok(results.some((r) => r.status === 200));
   assert.ok(results.every((r) => r.status === 200 || r.status === 503));
-  for (const result of results.filter((r) => r.status === 200)) { assert.ok(verifyEvent(result.body)); assert.equal(result.body.pubkey, demo.publisher.streamEvent.pubkey); assert.equal(JSON.parse(result.body.content).sequence, 0); }
-  assert.ok(demo.publisher.getMetrics().peakInFlight <= 8);
+  for (const result of results.filter((r) => r.status === 200)) { assert.ok(verifyEvent(result.body)); assert.equal(result.body.pubkey, demo.publisher.streamEvent.pubkey); assert.equal(JSON.parse(result.body.content).sequence, result.i % 16); }
+  assert.ok(results.some((r) => r.status === 503) && demo.publisher.getMetrics().busyRejected > 0, "the burst reaches the concurrency limit");
+  assert.equal(demo.publisher.getMetrics().peakInFlight, 8);
   assert.equal(demo.publisher.getMetrics().inFlight, 0);
+  const query = context(0);
   for (const connection of slow) connection.destroy();
   assert.equal(demo.admission.metrics().challenges, 0, "incomplete bodies never allocate a challenge");
   await credential(demo);

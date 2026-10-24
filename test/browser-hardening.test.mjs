@@ -1010,6 +1010,35 @@ test("origin media is copied only to compare or serve it, and hashed only to com
   assert.deepEqual([peerServing.copies, peerServing.hashed, peerServing.metrics.bytes.held], [1, 0, size]);
 });
 
+test("a progressive shadow load started on cellular is still held when it finishes on Wi-Fi", async () => {
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator"), connection = { type: "wifi" };
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { connection } });
+  const chunk = 10_000, chunks = 4;
+  class Origin extends Loader {
+    async load(context, _config, callbacks) {
+      for (let index = 0; index < chunks; index++) {
+        callbacks.onProgress?.(this.stats, context, new Uint8Array(chunk).fill(index + 1).buffer, null);
+        await sleep(5);
+        if (index === 1) connection.type = "wifi";
+      }
+      callbacks.onSuccess({ data: new ArrayBuffer(0) }, this.stats, context, null);
+    }
+  }
+  const swarm = createHlsSwarm({ ...base, relays: ["wss://memory-relay.example"], WebSocketImpl: memoryRelaySocket(), shadowSampleRate: 0, serve: true, lateWindowMs: 20 });
+  try {
+    const hls = { config: { loader: Origin } };
+    swarm.attach(hls);
+    // Serving is not allowed when the load starts, but is by the time it is held.
+    connection.type = "cellular";
+    new hls.config.fLoader({}).load(context, {}, { onSuccess() {}, onProgress() {}, onError() {}, onTimeout() {} });
+    await until(() => swarm.metrics().segments.originLoaded === 1 && swarm.metrics().bytes.held === chunk * chunks);
+  } finally {
+    swarm.stop();
+    if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+    else delete globalThis.navigator;
+  }
+});
+
 test("core discovery reads candidates again after a hint or clear", async () => {
   const core = await loadCore(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url)));
   const at = 1_792_000_000_000, wasm = core.neighbourDiscovery(() => at), js = new NeighbourDiscovery(() => at);

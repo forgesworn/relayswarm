@@ -252,7 +252,7 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
         await unchanged(handle, file, before);
         signingScope(now());
         metrics.cacheHits++; retain(commitments, key, cached);
-        return cached.event;
+        return { event: cached.event, record, contextId, file, version };
       }
       const hash = await hashRecord(record, file, handle, before);
       await unchanged(handle, file, before);
@@ -263,7 +263,7 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
       const signedAt = Math.floor(now() / 1000), ready = commitments.get(key);
       if (ready?.version === version && ready.expiresAt > signedAt + 5 && (!scope || ready.expiresAt <= scope.expiresAt) && ready.event.created_at <= signedAt + 30 && ready.event.created_at >= signedAt - 120) {
         signingScope(now());
-        metrics.cacheHits++; return ready.event;
+        metrics.cacheHits++; return { event: ready.event, record, contextId, file, version };
       }
       const range = record.rangeEnd === null ? "" : `#${record.rangeStart}-${record.rangeEnd}`;
       const currentScope = signingScope(now());
@@ -275,8 +275,18 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
       if (cached?.version === version) metrics.renewals++;
       metrics.commitmentsSigned++;
       retain(commitments, key, { version, expiresAt: fields.expiresAt, event });
-      return event;
+      return { event, record, contextId, file, version };
     } finally { await handle.close(); }
+  }
+  // A joined caller may arrive after the leader's last check, or while the
+  // coalesced refresh that check used was already running. Check it against a
+  // catalogue read after it arrived, as a separate request would be.
+  async function confirmJoined({ event, record, contextId, file, version }) {
+    if (pendingRefresh) await pendingRefresh.catch(() => {});
+    if (!(await refresh()).contexts.has(contextId)) throw new PublisherError("Context is absent from the published playlists.", 404);
+    if (await localFile(record.path) !== file || stamp(await fileStat(file, { bigint: true })) !== version) throw changed();
+    signingScope(now());
+    return event;
   }
 
   await refresh();
@@ -326,12 +336,12 @@ export async function createHlsPublisher({ mediaDir, manifest = "master.m3u8", s
       const id = requestKey(request), joined = id === null ? undefined : pendingCommitments.get(id);
       // An identical in-flight request is joined without a slot. Its failure
       // reaches every caller and is never retained.
-      if (joined) { metrics.commitmentJoins++; return structuredClone(await joined); }
+      if (joined) { metrics.commitmentJoins++; return structuredClone(await confirmJoined(await joined)); }
       if (metrics.inFlight >= maxConcurrent) { metrics.busyRejected++; throw new PublisherError("Publisher busy.", 503); }
       metrics.inFlight++; metrics.peakInFlight = Math.max(metrics.peakInFlight, metrics.inFlight);
       const task = signCommitment(request).finally(() => { metrics.inFlight--; if (id !== null) pendingCommitments.delete(id); });
       if (id !== null) pendingCommitments.set(id, task);
-      return structuredClone(await task);
+      return structuredClone((await task).event);
     },
   };
 }

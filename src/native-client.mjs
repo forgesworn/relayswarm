@@ -68,7 +68,10 @@ async function peerObject(descriptor, { bootstrap, signal, peerTimeoutMs, WebSoc
     // overlaps the presence round trip; the dial still waits for both.
     const transportReady = transport.ready();
     transportReady.catch(() => {});
-    await cancellable(pool.connect(), signal);
+    // A DHT failure still ends the relay wait at once, as the joint wait did.
+    const transportFailed = new Promise((_, reject) => { transportReady.catch(reject); });
+    transportFailed.catch(() => {});
+    await cancellable(Promise.race([pool.connect(), transportFailed]), signal);
     const presence = waitFor(session, "onPresence", ({ from, payload }) => descriptor.trustedSeeders.includes(from)
       && payload.role === "seeder" && payload.have.includes(descriptor.sha256)
       && payload.transports.some(({ type }) => type === NATIVE_TRANSPORT), signal);
@@ -80,7 +83,7 @@ async function peerObject(descriptor, { bootstrap, signal, peerTimeoutMs, WebSoc
     // after subscribing, without advertising an inbound service or held objects.
     session.announcePresence({ role: "leecher", transports: [{ type: NATIVE_TRANSPORT, publicKey: transport.publicKey }],
       have: [], open: false });
-    // Either failing ends the attempt at once, as the serial waits did.
+    // Either failing ends the attempt at once.
     const [seeder] = await Promise.all([presence, cancellable(transportReady, signal)]);
     const key = seeder.payload.transports.find(({ type }) => type === NATIVE_TRANSPORT).publicKey;
     const requestId = randomBytes(16).toString("hex");

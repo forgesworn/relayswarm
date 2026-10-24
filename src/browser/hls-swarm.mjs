@@ -1192,7 +1192,7 @@ class HlsSwarm {
     try {
       const data = response.data, size = data?.byteLength;
       if (!size) return { copy: null, size: 0 };
-      return { copy: this.#servingAllowed() ? data.slice(0) : null, size };
+      return { copy: this.#mayServe() ? data.slice(0) : null, size };
     } catch { return { copy: null, size: 0 }; }
   }
 
@@ -1304,20 +1304,8 @@ class HlsSwarm {
     if (!this.#servingAllowed()) return true;
     // Per-object rendezvous ordering spreads origin seed work across serving
     // viewers. Different neighbourhoods can still seed duplicates safely.
-    // A rank is each code point's hex digit XOR the key's, compared as a hex
-    // string: digit by digit, a proper prefix first. Own digits once.
-    const own = Array.from(this.session.pubkey, (digit, i) => parseInt(digit, 16) ^ parseInt(key[i], 16));
-    const ahead = (pubkey) => {
-      let i = 0;
-      for (const digit of pubkey) {
-        if (i === own.length) return false;
-        const value = parseInt(digit, 16) ^ parseInt(key[i], 16);
-        if (value !== own[i]) return value < own[i];
-        i++;
-      }
-      return i < own.length;
-    };
-    return candidates.some((peer) => ahead(peer.pubkey));
+    const rank = (pubkey) => [...pubkey].map((digit, i) => (parseInt(digit, 16) ^ parseInt(key[i], 16)).toString(16)).join("");
+    return candidates.some((peer) => rank(peer.pubkey) < rank(this.session.pubkey));
   }
 
   #claimOrigin(key) {
@@ -2102,7 +2090,7 @@ class HlsSwarm {
         let progressBytes = 0;
         // Bytes are kept only for a sampled comparison or for serving. Chunks
         // are kept or not for the whole load, so a join is never partial.
-        const keepChunks = race.sampled || swarm.#servingAllowed();
+        const keepChunks = race.sampled || swarm.#mayServe();
         const tapped = {
           ...callbacks,
           onProgress: callbacks.onProgress
@@ -2118,7 +2106,7 @@ class HlsSwarm {
             try {
               const data = response?.data;
               if (data?.byteLength) {
-                if (race.sampled || swarm.#servingAllowed()) copy = data.slice(0);
+                if (keepChunks) copy = data.slice(0);
                 size = data.byteLength;
               } else if (progressBytes) {
                 if (keepChunks) copy = RelaySwarmShadowLoader.join(progress);
@@ -2343,6 +2331,12 @@ class HlsSwarm {
     }
     if (!this.#servingAllowed()) return;
     for (const link of this.links.values()) link.sendHaveChange([key], evicted);
+  }
+
+  // Whether serving could be allowed by the time #hold runs. Allowance and
+  // network type can change during a load; consent, validity and stop cannot.
+  #mayServe() {
+    return !this.stopped && !this.disabledReason && this.options.serve === true;
   }
 
   #servingAllowed() {

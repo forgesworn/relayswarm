@@ -217,6 +217,26 @@ test("a relay that accepts but never answers does not spend the native peer dead
   }
 });
 
+test("an immediate DHT failure falls back without waiting for a relay that never answers", { timeout: 20000 }, async (t) => {
+  const context = await fixture((_request, response) => response.end("independently trusted native object"));
+  const held = new Set(), stalled = createNetServer((socket) => { held.add(socket); socket.on("close", () => held.delete(socket)); });
+  await new Promise((resolve) => stalled.listen(0, "127.0.0.1", resolve));
+  // As when the host refuses to bind UDP: bootstrap rejects at once.
+  t.mock.method(NativeDhtTransport.prototype, "ready", async () => { throw new Error("bind EACCES"); });
+  try {
+    const descriptor = { ...context.descriptor, relayUrls: [`ws://127.0.0.1:${stalled.address().port}`] };
+    const started = performance.now();
+    const result = await fetchNativeObject(descriptor, { ...context.options, peerTimeoutMs: 4000, timeoutMs: 8000 });
+    assert.equal(result.receipt.fallback, true);
+    assert.deepEqual(result.bytes, context.bytes);
+    assert.ok(performance.now() - started < 2000, "the DHT failure ends the peer attempt before the relay deadline");
+  } finally {
+    for (const socket of held) socket.destroy();
+    await new Promise((resolve) => stalled.close(resolve));
+    await context.close();
+  }
+});
+
 test("native peer absence falls back automatically to size and digest verified HTTP", { timeout: 10000 }, async () => {
   const context = await fixture((_request, response) => response.end("independently trusted native object"));
   try {

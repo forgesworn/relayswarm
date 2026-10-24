@@ -298,7 +298,8 @@ The returned object contains:
 - `getMetrics()`: request, cache, streamed hashing, signing, renewal, eviction,
   changed-read, bounded playlist-retry and concurrency counters.
   `commitmentJoins` counts requests that joined an identical one already in
-  flight; joined requests take no concurrency slot. A playlist
+  flight; joined requests take no concurrency slot and are each checked
+  against a catalogue and file read after they arrived. A playlist
   rejected by the byte/stat change guard gets one fresh full-catalogue retry;
   invalid data and changed segment bytes still reject. These counters do not
   measure network delivery.

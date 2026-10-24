@@ -83,10 +83,11 @@ async function verification(verify, { delegated = false } = {}) {
     tags: [["d", "bench"], ["relayswarm", "redistribute", "1"]] }, secretKey);
   const delegateKey = generateSecretKey(), trust = {};
   if (delegated) {
-    const delegate = (delegatePubkey) => createCommitmentDelegation({ secretKey, streamEvent, swarmId, delegatePubkey, renditions: ["0"] });
+    // One clock for the whole trust chain: a second boundary must not move it.
+    const delegate = (delegatePubkey) => createCommitmentDelegation({ secretKey, streamEvent, swarmId, delegatePubkey, renditions: ["0"], now: () => at });
     trust.delegation = delegate(getPublicKey(delegateKey));
     trust.delegationRevocations = Array.from({ length: 4 }, () =>
-      createCommitmentRevocation({ secretKey, streamEvent, swarmId, delegation: delegate(getPublicKey(generateSecretKey())) }));
+      createCommitmentRevocation({ secretKey, streamEvent, swarmId, delegation: delegate(getPublicKey(generateSecretKey())), now: () => at }));
   }
   const segments = Array.from({ length: 60 }, (_, sequence) => {
     const fields = { streamEventId: streamEvent.id, swarmId, key: sha256(`segment-${sequence}`), rendition: "0", sequence,

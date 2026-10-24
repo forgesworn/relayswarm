@@ -93,17 +93,14 @@ and after:
 | Shadow mode, unsampled, not serving, 2 MiB / 8 MiB | 1.92 / 3.90 ms | 0.12 / 0.14 ms |
 | Peer-first HTTP fallback, not serving, 2 MiB / 8 MiB | 0.68 / 1.90 ms | 0.23 / 0.19 ms |
 
-- Shadow mode copies origin bytes only for a sampled comparison or when this
-  viewer may serve, and hashes them only for a sampled comparison. With the
-  default 0.25 sample rate and serving off, three in four segments previously
-  paid a copy and a SHA-256 they never used.
-- Peer-first skips whole-segment copies that the held-segment store would
-  discard, because serving is off or the object is already held. Whether to
-  copy is now decided when the response arrives; if serving is switched on in
-  the microtask before the store runs, that one segment is not held.
-- The origin-seeding rank comparison is computed once per wait wake rather
-  than rebuilding hex strings per candidate: 50 µs to 6 µs with four
-  candidates, with the same order on 700,000 randomised comparisons.
+- Shadow mode copies origin bytes only for a sampled comparison or when
+  serving is enabled (`serve: true`), and hashes them only for a sampled
+  comparison. With the default 0.25 sample rate and serving off, three in four
+  segments previously paid a copy and a SHA-256 they never used.
+- Peer-first skips whole-segment copies when serving is not enabled or the
+  object is already held. With serving enabled, bytes are still copied and the
+  held-segment store decides when it runs, so a load that starts on cellular
+  or without allowance and finishes with serving allowed is still held.
 - The core-backed neighbour discovery keeps its decoded candidate list until
   a hint or clear changes it. With 64 candidates, `hinted` fell from 123–428 µs
   to 45–52 µs and `choose` from 150–399 µs to 70–78 µs.
@@ -127,9 +124,13 @@ and after:
   stat-checks every playlist; a playlist with `EXT-X-SKIP` is always parsed,
   because a delta depends on the previous catalogue.
 - Identical concurrent commitment requests join the one in flight without
-  taking a slot. Each caller receives its own copy, and a failure reaches
-  every joined caller and is not kept. The demo's 240-per-10-second request
-  budget is unchanged and still counts joined and cached requests.
+  taking a slot. Each joined caller is then checked against a catalogue read
+  and a file stat made after it arrived, as a separate request would be, so a
+  context that left the playlist or a replaced segment is refused rather than
+  answered from the earlier check. Each caller receives its own copy, and a
+  failure reaches every joined caller and is not kept. The demo's
+  240-per-10-second request budget is unchanged and still counts joined and
+  cached requests.
 - Account-allowance validation builds its account and grant indexes once,
   making it linear in the bounded state.
 - The demo serves its page, style sheet, client bundle and WebAssembly module

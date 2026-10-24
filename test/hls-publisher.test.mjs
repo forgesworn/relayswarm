@@ -324,6 +324,12 @@ test("identical concurrent commitments share one slot, return private copies and
   assert.equal(events[1].content, events[2].content);
   assert.notEqual(events[1].content, "caller mutation");
   assert.equal((await publisher.commitment(firstRange)).content, events[1].content);
+  // Joined callers get copies too, not the cached event or each other's.
+  const signed = events[2].content;
+  assert.notStrictEqual(events[1], events[2]);
+  events[1].content = "joined mutation";
+  assert.equal(events[2].content, signed);
+  assert.equal((await publisher.commitment(firstRange)).content, signed);
 
   // A shared failure reaches every joined caller once; the next request starts afresh.
   mutate = true;
@@ -336,6 +342,38 @@ test("identical concurrent commitments share one slot, return private copies and
   assert.equal(publisher.getMetrics().busyRejected, 0);
   assert.equal(publisher.getMetrics().inFlight, 0);
   assert.equal(JSON.parse((await publisher.commitment(second)).content).sha256, digest("5678"));
+});
+
+test("a caller that joins after the leader's last check is held to a catalogue and file read after it arrived", async (t) => {
+  const { writeFileSync, renameSync } = await import("node:fs");
+  const live = (sequence) => `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:${sequence}\n#EXTINF:2,\nseg${sequence}.ts\n#EXTINF:2,\nseg${sequence + 1}.ts\n`;
+  for (const mode of ["playlist", "segment"]) await t.test(mode, async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayswarm-publisher-join-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    for (const sequence of [20, 21, 22]) await writeFile(join(directory, `seg${sequence}.ts`), `bytes-${sequence}`);
+    await writeFile(join(directory, "index.m3u8"), live(20));
+    let hook = null, calls = 0, late = null;
+    const publisher = await createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8", now: () => { hook?.(++calls); return Date.now(); } });
+    const input = { path: "/media/seg20.ts", level: 0, sequence: 20, discontinuity: 0 };
+    // The leader's third clock read is its signing time, after its final
+    // catalogue and stat checks. The change and the joiner both follow it.
+    hook = (call) => {
+      if (call !== 3) return;
+      hook = null;
+      const [temporary, target, body] = mode === "playlist" ? ["next.m3u8", "index.m3u8", live(21)] : ["next.ts", "seg20.ts", "replaced-20"];
+      writeFileSync(join(directory, temporary), body); renameSync(join(directory, temporary), join(directory, target));
+      late = publisher.commitment(input);
+      late.catch(() => {});
+    };
+    const leader = await publisher.commitment(input);
+    assert.equal(JSON.parse(leader.content).sha256, digest("bytes-20"));
+    assert.equal(publisher.getMetrics().commitmentJoins, 1);
+    if (mode === "playlist") await assert.rejects(late, { status: 404 });
+    else {
+      await assert.rejects(late, { status: 503 });
+      assert.equal(JSON.parse((await publisher.commitment(input)).content).sha256, digest("replaced-20"));
+    }
+  });
 });
 
 test("unchanged playlists reuse their parsed catalogue but every request rereads and compares exact bytes", async (t) => {

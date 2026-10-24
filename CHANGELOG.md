@@ -22,9 +22,11 @@
     comparison or serving needs them, and cache the core discovery's
     candidate list until a hint or clear changes it.
   - Join identical in-flight commitment requests instead of refusing them at
-    the concurrency limit, read media playlists concurrently, and reuse the
-    previous parse when every playlist is byte-identical (never for
-    `EXT-X-SKIP` deltas). Add the `commitmentJoins` publisher counter.
+    the concurrency limit; each joined request is still checked against a
+    catalogue and file read after it arrived. Read media playlists
+    concurrently, and reuse the previous parse when every playlist is
+    byte-identical (never for `EXT-X-SKIP` deltas). Add the
+    `commitmentJoins` publisher counter.
   - Make account-allowance validation linear in its bounded state.
   - Serve the demo page assets compressed with ETag revalidation; other
     routes keep `no-store`. Serialise demo relay fan-out frames once.
