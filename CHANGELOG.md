@@ -1,5 +1,12 @@
 # RelaySwarm changelog
 
+## Unreleased
+
+- Make the native cached-peer race fixture wait for framing-2 presence from
+  the accepted peer as well as its cached-object advertisement. A controlled
+  delayed heartbeat proves that a connected channel with HAVE is insufficient.
+  Retain failing-load traces and eligibility diagnostics in CI receipts.
+
 ## v0.4.2 (24 October 2026)
 
 Experimental library prerelease following [v0.4.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.1).

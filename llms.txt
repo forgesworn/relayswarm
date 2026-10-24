@@ -51,6 +51,9 @@ decision before spending allowance or sending media. Native Chrome/WASM loopback
 checks retain the same connection through three admission-ticket rotations;
 refusal, timeout and shutdown prevent delivery. Distributed R70 retention, TURN
 renewal and physical-device/public-NAT acceptance remain open.
+Current main's cached-peer native fixture waits for the accepted peer's framing-2
+presence as well as HAVE. A delayed signed-presence control reproduces the old
+readiness error; the v0.4.2 tag's two failed browser attempts remain historical RED.
 Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The example origin adds bounded blocking reload for compatible complete live
 playlists across all renditions, with 24 waiters inside 32 media requests.
