@@ -1,5 +1,39 @@
 # RelaySwarmKit interoperability
 
+## Current core-backed SDK
+
+[Kit v0.6.0](https://github.com/forgesworn/relayswarm-kit/releases/tag/v0.6.0)
+adopts RelaySwarm's v0.3.0 Rust core through a checksum-pinned XCFramework and
+the release's unedited UniFFI wrapper. Its 54-test suite (one opt-in skip)
+replays all 140 verifier vectors and 48 link traces, and exercises actual
+libdatachannel upload pacing, cancellation and schema-3 source accounting.
+Its transport remains macOS arm64 only. Core iOS slices do not add iOS WebRTC.
+
+`test/interop-current-sdk-browser.mjs` uses public SDK APIs without a wire
+adapter. The default run covers schema-2 whole-object reception through
+`SwarmGuest`, `MediaDataChannel` and `SignedMediaTransfer`. `--pieces` connects
+two Chrome HAVE holders through framing-2 admission and uses `CoreMediaPeer`
+and `SignedPieceTransfer`. Production browser code supplies generated real
+H.264/AAC fMP4 media. Author/delegate cases verify the complete object; corrupt
+media, signature tampering and pre-request/in-flight revocation deliver zero
+media. Positive piece cases credit both holders and zero origin bytes. The
+piece fixture uses explicitly labelled timing estimates, not measured rates.
+
+```sh
+npm run test:interop:kit -- --evidence artifacts/current-sdk-browser.json
+npm run test:interop:kit -- --pieces --evidence artifacts/current-sdk-pieces-browser.json
+```
+
+Use the pinned SDK checkout in `../relayswarm-kit`, or set
+`RELAYSWARM_KIT_DIR`. CI pins its full commit and retains both receipts with
+source hashes. Temporary local relay and HTTP listeners bind to loopback and
+are closed after the test. Publishing or consuming either library does not
+require a ForgeSworn-hosted service. Applications choose media, relays,
+admission, trust, consent and origin-range handling. Physical Apple devices,
+public NAT, long-running field quality and net hosting benefit remain unproved.
+
+## Historical v0.5.0 SDK checkpoint
+
 Published [Kit v0.5.0](https://github.com/forgesworn/relayswarm-kit/releases/tag/v0.5.0)
 points to `2f0b26ace4096a5dca87baf715274f91c331ac3a`. Its PR and merged-head CI
 pass, including 39 tests with one opt-in public-relay test skipped. The SDK
@@ -18,10 +52,8 @@ zero bytes. There is no Swift wire adapter. This is macOS arm64 and desktop
 Chrome on loopback; it does not establish physical Apple-device, public-NAT
 or native HLS decoding acceptance.
 
-Run `npm run test:interop:kit` with the pinned SDK checkout in
-`../relayswarm-kit`, or set `RELAYSWARM_KIT_DIR`. The hosted interop job pins the
-released SDK commit. The consuming application still owns publisher trust,
-revocation freshness, origin fallback, playback and upload consent.
+The consuming application owns publisher trust, revocation freshness, origin
+fallback, playback and upload consent.
 
 ## Historical v2 review proposal
 

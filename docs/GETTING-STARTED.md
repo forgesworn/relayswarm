@@ -80,7 +80,8 @@ package; its minimums are iOS 16 and macOS 14, arm64 only. The AAR requires
 Android API 26+, Kotlin 2.2+ and `net.java.dev.jna:jna:5.14.0@aar`.
 See [Native core packaging](CORE-PACKAGING.md) for the complete dependency,
 build and verification contract. These are core bindings, with no native
-WebRTC adapter or client application, and RelaySwarmKit has not adopted them.
+WebRTC adapter or client application. RelaySwarmKit v0.6.0 separately adopts
+the released core; its existing WebRTC transport remains macOS arm64 only.
 
 ## Run the source demo
 
@@ -158,10 +159,11 @@ npm run test:media-browser
 npm run test:media-recovery          # actual corrupt-media repair/cancel/deadline journeys
 npm run test:interop
 npm run test:interop:kit             # published SDK API, not the historical adapter
+npm run test:interop:kit -- --pieces # schema-3, two browser holders, released core
 ```
 
 The historical adapter fixture requires macOS arm64 and read-only authenticated
 `gh` access to its pinned public sources. The current SDK fixture uses published
-Kit v0.5.0 in `../relayswarm-kit` (or `RELAYSWARM_KIT_DIR`) and requires Swift 6,
+Kit v0.6.0 in `../relayswarm-kit` (or `RELAYSWARM_KIT_DIR`) and requires Swift 6,
 macOS arm64, Chrome and ffmpeg. Its verified transfer and acceptance boundaries
 are in the [interop guide](interop/README.md).
