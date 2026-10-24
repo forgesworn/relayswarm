@@ -82,6 +82,7 @@ export class RelayPool {
     this.connectTimeoutMs = connectTimeoutMs;
     this.sockets = [];
     this.handlers = new Set();
+    this.relayOpenHandlers = new Set();
     this.seen = new Set();
     this.connected = false;
     this.closed = false;
@@ -114,15 +115,29 @@ export class RelayPool {
 
   async #connect() {
     this.connected = true;
-    const results = await Promise.allSettled(this.urls.map((url) => this.#connectOne(url)));
-    if (this.closed) throw new Error("RelayPool is closed.");
+    // A reconnecting pool can start on one usable relay. Waiting for every
+    // initial attempt lets an unreachable relay hold a healthy one hostage
+    // until its connection timeout. Register before opening any socket.
+    let waiter;
+    const ready = this.reconnect ? new Promise((resolve, reject) => this.readyWaiters.add(waiter = { resolve, reject })) : null;
+    const settled = Promise.allSettled(this.urls.map((url) => this.#connectOne(url)));
     if (this.reconnect) {
-      results.forEach((result, index) => {
-        if (result.status === "rejected") this.#redial(this.urls[index], 1);
-      });
-      if (!this.sockets.length) await new Promise((resolve, reject) => this.readyWaiters.add({ resolve, reject }));
+      // All attempts remain owned by pendingSockets. Even after readiness,
+      // observe their failures and retain the existing bounded retry policy.
+      void settled.then((results) => {
+        if (this.closed) return;
+        results.forEach((result, index) => {
+          if (result.status === "rejected") this.#redial(this.urls[index], 1);
+        });
+      }).catch((error) => waiter.reject(error));
+      try {
+        await ready;
+        if (this.closed) throw new Error("RelayPool is closed.");
+      } finally { this.readyWaiters.delete(waiter); }
       return;
     }
+    const results = await settled;
+    if (this.closed) throw new Error("RelayPool is closed.");
     if (this.sockets.length === 0) {
       const reasons = results.map((result) => result.status === "rejected" ? result.reason?.message : "").filter(Boolean);
       throw new Error(`No relay reachable${reasons.length ? `: ${reasons.join("; ")}` : "."}`);
@@ -159,6 +174,13 @@ export class RelayPool {
         finish();
         for (const waiter of this.readyWaiters) waiter.resolve();
         this.readyWaiters.clear();
+        // A session can replay its current ephemeral presence only to this
+        // newly usable relay. Never replay old offers or broadcast globally.
+        const publish = (event) => {
+          if (this.closed || !this.sockets.includes(socket)) return false;
+          try { socket.send(JSON.stringify(["EVENT", event])); this.published += 1; return true; } catch { return false; }
+        };
+        for (const handler of [...this.relayOpenHandlers]) { try { handler(publish); } catch {} }
       });
       socket.addEventListener("error", () => finish(new Error(`${url} failed to connect`)));
       socket.addEventListener("message", (message) => this.#onMessage(message.data));
@@ -249,6 +271,11 @@ export class RelayPool {
     return () => this.handlers.delete(handler);
   }
 
+  onRelayOpen(handler) {
+    this.relayOpenHandlers.add(handler);
+    return () => this.relayOpenHandlers.delete(handler);
+  }
+
   publish(event) {
     if (!this.connected || this.sockets.length === 0) throw new Error("RelayPool has no connected relay.");
     const frame = JSON.stringify(["EVENT", event]);
@@ -272,11 +299,14 @@ export class RelayPool {
     }
     this.sockets = [];
     this.handlers.clear();
+    this.relayOpenHandlers.clear();
     this.seen.clear();
   }
 }
 
 export class RelaySwarmSession {
+  #lastPresence = null;
+  #unsubscribeRelayOpen = null;
   constructor({ pool, swarmId, secretKey = generateSecretKey(), maxEventAgeSeconds = 120 } = {}) {
     if (!pool) throw new Error("RelaySwarmSession requires a relay pool.");
     if (typeof swarmId !== "string" || swarmId.length < 8 || swarmId.length > 128) throw new Error("Invalid swarm identifier.");
@@ -320,6 +350,15 @@ export class RelaySwarmSession {
     this.unsubscribe = this.pool.onEvent((event) => this.#receive(event));
     const filter = { [`#${SWARM_TAG}`]: [this.swarmId], since: Math.floor(Date.now() / 1000) - 2 };
     try {
+      this.#unsubscribeRelayOpen = this.pool.onRelayOpen?.((publish) => {
+        if (!this.started || !this.#lastPresence) return;
+        const age = Math.floor(Date.now() / 1000) - this.#lastPresence.created_at;
+        if (!Number.isFinite(age) || !Number.isFinite(this.maxEventAgeSeconds) || age < -FUTURE_TOLERANCE_SECONDS || age > this.maxEventAgeSeconds) {
+          this.#lastPresence = null;
+          return;
+        }
+        publish(this.#lastPresence);
+      });
       // Native initialisation and periodic announcements can take longer than
       // the signal replay window. Presence remains advisory and age-checked.
       this.subscriptionId = this.pool.subscribe({ ...filter, since: Math.floor(Date.now() / 1000) - this.maxEventAgeSeconds, kinds: [KIND_PRESENCE] });
@@ -329,6 +368,7 @@ export class RelaySwarmSession {
       for (const id of this.subscriptionIds) this.pool.unsubscribe?.(id);
       this.subscriptionIds = [];
       this.unsubscribe?.(); this.unsubscribe = null; this.started = false;
+      this.#unsubscribeRelayOpen?.(); this.#unsubscribeRelayOpen = null; this.#lastPresence = null;
       throw error;
     }
   }
@@ -382,6 +422,9 @@ export class RelaySwarmSession {
       content,
     }, this.secretKey);
     this.pool.publish(event);
+    // Own the envelope: a host mutating the returned event cannot alter a
+    // later relay replay. This is one bounded presence, never a signal queue.
+    this.#lastPresence = JSON.parse(JSON.stringify(event));
     return event;
   }
 
@@ -500,6 +543,7 @@ export class RelaySwarmSession {
 
   close() {
     this.unsubscribe?.();
+    this.#unsubscribeRelayOpen?.(); this.#unsubscribeRelayOpen = null; this.#lastPresence = null;
     for (const id of this.subscriptionIds) this.pool.unsubscribe?.(id);
     this.subscriptionIds = [];
     this.unsubscribe = null;

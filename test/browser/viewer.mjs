@@ -36,11 +36,14 @@ let commitmentRequests = 0;
 const resourceSamples = [];
 const resourceHighWater = { samples: 0, firstAtMs: null, lastAtMs: null, activePeers: 0, heldBytes: 0, relays: 0, jsHeapBytes: 0 };
 const testConnections = new Set();
+const createdConnections = new WeakSet();
 const testIceErrors = [];
+const peerDelivery = { bytes: 0, observations: 0, unknownConnections: 0, invalidEvents: 0, counterMismatches: 0 };
 class ObservedPeerConnection extends RTCPeerConnection {
   constructor(configuration) {
     super(configuration);
     testConnections.add(this);
+    createdConnections.add(this);
     this.addEventListener("icecandidateerror", (event) => { if (testIceErrors.length < 100) testIceErrors.push(event.errorCode); });
     this.addEventListener("connectionstatechange", () => { if (this.connectionState === "closed") testConnections.delete(this); });
   }
@@ -65,7 +68,15 @@ const swarm = useSwarm
       relays: [params.get("relay")],
       iceServers: globalThis.__relaySwarmTestIce?.iceServers ?? [],
       iceTransportPolicy: globalThis.__relaySwarmTestIce?.iceTransportPolicy ?? "all",
-      ...(globalThis.__relaySwarmTestIce ? { RTCPeerConnectionImpl: ObservedPeerConnection } : {}),
+      RTCPeerConnectionImpl: ObservedPeerConnection,
+      onPeerDelivery: value => {
+        if (!createdConnections.has(value.connection) || !(value.connection instanceof RTCPeerConnection)) peerDelivery.unknownConnections++;
+        if (Object.keys(value).sort().join(",") !== "bytes,connection" || !Number.isSafeInteger(value.bytes) || value.bytes <= 0) peerDelivery.invalidEvents++;
+        peerDelivery.bytes += value.bytes; peerDelivery.observations++;
+        // A multi-holder object updates its complete peer total before the
+        // first of its per-connection observations. Never observe future bytes.
+        if (swarm.metrics().bytes.peerFirst < peerDelivery.bytes) peerDelivery.counterMismatches++;
+      },
       originFallbackMs: Number(params.get("fallbackMs") || 1500),
       ...(params.get("core") === "1" ? { coreWasm: "/relayswarm-core.wasm" } : {}),
       ...(params.get("multi") === "1" ? { multiHolder: true } : {}),
@@ -99,7 +110,10 @@ const liveSyncDurationCount = mode === "peer-first" ? 4 : 3;
 const hls = new Hls({ liveSyncDurationCount, enableWorker: true,
   ...(mode === "peer-first" ? { maxBufferLength: 4, maxMaxBufferLength: 6 } : {}),
 });
-hls.on(Hls.Events.FRAG_LOADED, () => { player.fragsLoaded += 1; });
+hls.on(Hls.Events.FRAG_LOADED, () => {
+  player.fragsLoaded += 1;
+  if (swarm && mode === "peer-first" && swarm.metrics().bytes.peerFirst !== peerDelivery.bytes) peerDelivery.counterMismatches++;
+});
 hls.on(Hls.Events.ERROR, (_event, data) => {
   player.errors += 1;
   player.errorDetails[data.details] = (player.errorDetails[data.details] || 0) + 1;
@@ -123,9 +137,13 @@ window.__viewer = {
   })),
   viewer,
   useSwarm,
-  report: () => ({ viewer, useSwarm, player: { ...player, currentTime: video.currentTime }, swarm: swarm?.metrics() ?? null, iceCandidateErrors: [...testIceErrors], resourceSamples: [...resourceSamples], resourceHighWater: { ...resourceHighWater } }),
+  report: () => ({ viewer, useSwarm, player: { ...player, currentTime: video.currentTime }, swarm: swarm?.metrics() ?? null,
+    peerConnectionSnapshot: { count: swarm?.peerConnections().length ?? 0,
+      allKnown: swarm?.peerConnections().every(pc => createdConnections.has(pc) && pc instanceof RTCPeerConnection) ?? true },
+    peerDelivery: { ...peerDelivery }, iceCandidateErrors: [...testIceErrors], resourceSamples: [...resourceSamples], resourceHighWater: { ...resourceHighWater } }),
   stop: () => swarm?.stop(),
   loaderRestored: () => !hls.config.fLoader,
   stoppedMetrics: () => swarm?.metrics(),
+  stoppedConnectionCount: () => swarm?.peerConnections().length ?? 0,
   trace: () => swarm?.trace() ?? null,
 };

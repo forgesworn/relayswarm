@@ -121,6 +121,55 @@ test("an onProgress that abandons on the first chunk drains to an early eof", as
   assert.ok(outcome.log.some((entry) => entry.busyAfterEof === false));
 });
 
+test("a cancelled six MiB ranged upload ends behind queued bytes and reuses the reliable core link", async t => {
+  const core = await loadCore(compiled), source = new Uint8Array(6 * 1024 * 1024).fill(37);
+  const holderChannel = new Channel(), receiverChannel = new Channel(), queued = [], cancelled = [];
+  const holderSend = holderChannel.send.bind(holderChannel), receiverSend = receiverChannel.send.bind(receiverChannel);
+  holderChannel.send = data => {
+    holderSend(data);
+    queued.push(typeof data === "string" ? data : data.slice().buffer);
+  };
+  receiverChannel.send = data => {
+    receiverSend(data);
+    queueMicrotask(() => holderChannel.receive(data));
+  };
+  const holder = core.peerLink({ pubkey: "receiver", channel: holderChannel, pc: new PC(), maxSegmentBytes: source.length,
+    onRequest: () => source, onUploadCancelled: (_link, bytes) => cancelled.push(bytes) });
+  const receiver = core.peerLink({ pubkey: "holder", channel: receiverChannel, pc: new PC(), maxSegmentBytes: source.length });
+  t.after(() => { holder.close(); receiver.close(); });
+  const controller = new AbortController();
+  const first = receiver.request(KEY, 5_000, { signal: controller.signal, expectedSize: source.length,
+    range: { start: 0, end: 64, objectSize: source.length },
+    onProgress: () => controller.abort(PeerLink.ABANDON_REASON) });
+  await tick();
+  assert.ok(holderChannel.bufferedAmount > 128 * 1024);
+  assert.equal(holder.outboundInFlight, 1);
+  const queuedBinaryBytes = holderChannel.sent.reduce((sum, message) => sum + (message.bytes ?? 0), 0);
+  holderChannel.control("cancel", { id: 99 });
+  assert.equal(holderChannel.sent.filter(message => message.t === "eof").length, 0, "unmatched cancel cannot wake an upload");
+  receiverChannel.receive(queued.shift()); // metadata
+  receiverChannel.receive(queued.shift()); // first binary chunk triggers cancellation
+  assert.equal(await first, null);
+  await tick();
+  assert.equal(holderChannel.sent.at(-1).t, "eof", "matching cancel appends EOF without a bufferedamountlow event");
+  assert.equal(holderChannel.sent.reduce((sum, message) => sum + (message.bytes ?? 0), 0), queuedBinaryBytes, "cancel adds no binary bytes");
+  assert.deepEqual(cancelled, [source.length - queuedBinaryBytes]);
+  assert.equal(receiver.busy, true, "the requester still quarantines queued untagged binary bytes");
+  assert.equal(await receiver.request(KEY, 5_000), null, "no next request can interleave before matching EOF");
+  while (queued.length) receiverChannel.receive(queued.shift());
+  assert.equal(receiver.busy, false);
+  assert.equal(holder.closed || receiver.closed, false);
+  holderChannel.bufferedAmount = 0;
+  holderChannel.dispatchEvent(new Event("bufferedamountlow"));
+  const second = receiver.request(KEY, 5_000, { expectedSize: 98_304, range: { start: 0, end: 1, objectSize: source.length } });
+  await tick();
+  while (queued.length) receiverChannel.receive(queued.shift());
+  assert.deepEqual(await second, source.slice(0, 98_304));
+  assert.equal(holder.closed || receiver.closed, false);
+  assert.equal(holder.outboundInFlight, 0);
+  assert.equal(receiver.busy, false);
+});
+
 test("a refused text send closes as send-error and a refused chunk as serve-error", async () => {
   const text = await both({
     async run({ link, channel }) { channel.failText = true; link.sendHave([KEY]); },

@@ -108,6 +108,7 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `reannounceDebounceMs` / `minReannounceGapMs` | `4000` / `12000` | Bound capacity-change presence announcements. |
 | `presenceIntervalMs` | `20000` | Presence heartbeat, jittered 30%. |
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
+| `onPeerDelivery` | none | Optional `({ connection, bytes }) => void` observation for each accepted, verified peer-first media contribution. `connection` is the actual `RTCPeerConnection`; `bytes` is the positive media payload byte count. A single-holder delivery fires once with its whole payload; a multi-holder delivery fires once per contributing connection with only its first-verified-copy bytes, excluding origin and duplicate pieces. It fires only after the complete verified object is accepted for the player. Aggregate peer-first counters are updated first, then all contributions are observed immediately before the player's success callback. Host exceptions and rejected promises are ignored without changing playback or other observations. It does not fire for protocol traffic, shadow measurement, origin fallback, corrupt/rejected media, an incomplete multi-holder object or loads aborted, stopped or too late for the peer-first handoff. |
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
 | `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The relay session starts once the module has loaded or failed, after at most 2 seconds; fragments loaded meanwhile go to origin. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
@@ -147,6 +148,34 @@ consent. Receive-only still discovers peers and exposes its address to them;
 `mode: "off"` or `stop()` provides origin-only playback.
 
 ## Metrics
+
+`onPeerDelivery` and `peerConnections()` are main-branch additions after
+v0.3.0. The immutable v0.3.0 release assets do not include them; consume a
+commit that contains these APIs.
+
+`peerConnections()` returns a fresh array of the actual `RTCPeerConnection`
+objects for accepted, active peer links. Pending offers, dials, glare
+negotiations and closed/disconnected links are excluded. It returns an empty
+array after `stop()`. Changing the returned array does not change the swarm's
+membership. Use this snapshot to draw connected peers; observing native
+constructors also sees negotiations that never become peers. Connection
+references are deliberately separate from serialisable `metrics()` data.
+
+Use `onPeerDelivery` to attribute verified video to its contributing connections.
+For a multi-holder delivery, each connection is observed once with the bytes
+its pieces contributed to the completed object. The first verified copy of
+each piece wins; duplicate or origin-winning pieces add no peer credit. All
+contributions sum to the increase in `bytes.peerFirst`. An incomplete or
+rejected object emits no observation even if some pieces verified. Aggregate
+counters include the whole delivery before its first observation runs.
+Keep connection references in local maps rather
+than serialising them into receipts. The callback provides no URL, peer key,
+SDP or payload buffer, and does not add a network request or change a deadline.
+It observes bytes accepted for the player, not the segment currently playing
+from its buffer. Browser RTC byte statistics include connection and protocol
+messages and must not be presented as verified video delivery. Likewise, the
+`payload` outcome in `peerRequestDiagnostics` precedes hash verification and
+is not an alternative to this callback.
 
 `onMetrics(metrics)` and `metrics()` return a version-2 snapshot: `v`, `swarmId`,
 `mode`, `disabledReason`, `stopped`, `pubkey` (the ephemeral swarm key,
@@ -395,11 +424,19 @@ A timed-out or cancelled request resolves promptly for origin fallback. On a
 known ordered, fully reliable channel, the link stays busy while discarding
 that response up to a matching validated EOF, or a refusal before metadata.
 Only then can another request use the channel. The receiver also sends
-`cancel`; a holder that honours it stops at its next chunk and sends EOF early,
-or refuses before metadata. Holders without `cancel` send the response in full.
+`cancel`; a holder that honours it stops adding binary data and queues EOF
+behind the bytes already sent, including when it is waiting for the channel's
+buffer-low event, or refuses before metadata. Holders without `cancel` send the response in full.
 A holder queues more of a response only while at most 128 KiB is waiting to
 be sent on the channel, so chunks queued before a cancel arrives still flow. The existing drain limit closes
 an incomplete response; host stop and admission withdrawal close immediately.
+Schema 3 multi-holder peer requests verify progress in batches of at most four
+canonical pieces and 512 KiB; a canonical piece larger than that is requested
+alone. The remaining pieces stay queued for that holder, so a later abandoned
+request preserves earlier verified pieces. Origin keeps its contiguous HTTP
+ranges. Run `npm run test:core-link:browser` for native Chrome loopback coverage
+of a cancelled six-MiB ranged response and a subsequent hash-checked range on
+the same reliable connection.
 Fresh-origin coordination is bounded by safe buffered playback and measured
 HTTP fallback time. hls.js owns quality selection. These mechanisms do not
 prove optimal internet scheduling or net savings.

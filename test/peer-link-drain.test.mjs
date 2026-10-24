@@ -412,6 +412,9 @@ test("a holder stops a response at the next chunk after a matching cancel and en
   channel.receive(JSON.stringify({ t: "want", id: 5, k: KEY })); await turn();
   assert.deepEqual(channel.sent, [{ t: "meta", id: 5, size: 40_000 }, { bytes: 16_384 }]);
   channel.receive(JSON.stringify({ t: "cancel", id: 5 }));
+  await turn();
+  assert.deepEqual(channel.sent, [{ t: "meta", id: 5, size: 40_000 }, { bytes: 16_384 }, { t: "eof", id: 5 }], "cancel queues EOF without a low-water event or extra binary");
+  assert.ok(channel.bufferedAmount > 128 * 1024, "already queued binary is still backpressured");
   channel.bufferedAmount = 0; channel.dispatchEvent(new Event("bufferedamountlow")); await turn();
   assert.deepEqual(channel.sent, [{ t: "meta", id: 5, size: 40_000 }, { bytes: 16_384 }, { t: "eof", id: 5 }]);
   assert.deepEqual(cancelled, [40_000 - 16_384]); assert.equal(link.bytesOut, 16_384);
@@ -467,7 +470,11 @@ test("paired links end a cancelled response early and then serve the next reques
   toReceiver.holdAfterChunk = true;
   const first = receiver.request(KEY, 1500, { expectedSize: payload.byteLength }); await turn();
   assert.equal(receiver.pending.received, 16_384);
-  t.mock.timers.tick(1500); assert.equal(await first, null); assert.equal(receiver.busy, true);
+  t.mock.timers.tick(1500);
+  assert.equal(receiver.busy, true, "the timeout first quarantines the untagged response until matching EOF");
+  assert.equal(await first, null); await turn();
+  assert.equal(receiver.busy, false, "matching cancellation EOF does not wait for low-water");
+  assert.ok(toReceiver.bufferedAmount > 128 * 1024);
   toReceiver.holdAfterChunk = false; toReceiver.bufferedAmount = 0;
   toReceiver.dispatchEvent(new Event("bufferedamountlow")); await turn();
   assert.equal(receiver.busy, false); assert.equal(receiver.closed, false); assert.equal(served.closed, false);

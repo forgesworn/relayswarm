@@ -292,7 +292,8 @@ try {
   for (const { role, tab } of pages) {
     if (!role.swarm) continue;
     await tab.evaluate(() => window.__viewer.stop());
-    stopChecks.push({ viewer: role.viewer, metrics: await tab.evaluate(() => window.__viewer.stoppedMetrics()), loaderRestored: await tab.evaluate(() => window.__viewer.loaderRestored()) });
+    stopChecks.push({ viewer: role.viewer, metrics: await tab.evaluate(() => window.__viewer.stoppedMetrics()),
+      peerConnectionCount: await tab.evaluate(() => window.__viewer.stoppedConnectionCount()), loaderRestored: await tab.evaluate(() => window.__viewer.loaderRestored()) });
   }
 
   // --- the receipt ----------------------------------------------------------
@@ -431,7 +432,13 @@ try {
     const faulted = honest.find((report) => report.viewer === "v1");
     if (!faulted?.swarm.segments.commitmentRejected || !faulted?.swarm.segments.commitmentUnavailable) failures.push("invalid and stalled commitments were not exercised");
   }
+  if (reports.some(report => report.peerDelivery.unknownConnections || report.peerDelivery.invalidEvents || report.peerDelivery.counterMismatches)) failures.push("peer delivery observation lost native connection identity, payload size or counter ordering");
+  if (reports.some(report => !report.peerConnectionSnapshot.allKnown || report.peerConnectionSnapshot.count !== (report.swarm?.peers.connected ?? 0))) failures.push("accepted peer connection snapshot did not match real active library links");
+  if (MODE === "peer-first" && honest.some(report => report.peerDelivery.bytes !== report.swarm.bytes.peerFirst)) failures.push("peer delivery observations did not match verified player media bytes");
+  if (MODE === "peer-first" && !MULTI && honest.some(report => report.peerDelivery.observations !== report.swarm.segments.peerFirstLoaded)) failures.push("single-holder observation counts did not match player deliveries");
+  if (reports.some(report => (MODE === "shadow" || report.corrupt || !report.useSwarm) && report.peerDelivery.observations > 0)) failures.push("a shadow or origin-only player received a peer-first delivery observation");
   if (stopChecks.some((check) => check.metrics.peers.connected || check.metrics.peers.dialling || check.metrics.relays.connected || check.metrics.bytes.held)) failures.push("stop() left swarm resources alive");
+  if (stopChecks.some(check => check.peerConnectionCount)) failures.push("stop() retained an accepted peer connection reference");
   if (stopChecks.some((c) => !c.loaderRestored)) failures.push("stop() did not restore the fragment loader");
   if (pageErrors.length) failures.push(`${pageErrors.length} uncaught page error(s)`);
   if (summary.aggregate.swarmErrors > 0) failures.push(`${summary.aggregate.swarmErrors} swarm error(s)`);

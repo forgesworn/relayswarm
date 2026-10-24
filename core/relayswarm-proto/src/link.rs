@@ -689,6 +689,19 @@ impl Link {
                         upload.cancelled = true;
                     }
                 }
+                // A cancelled upload adds no more binary data. Its EOF can
+                // follow the bytes already queued on the reliable channel;
+                // waiting for the low-water event would retain the upload
+                // deadline and could close a healthy cancelled connection.
+                if let Some(Active {
+                    upload,
+                    stage: Stage::Draining { bytes, sent, .. },
+                }) = self
+                    .active
+                    .take_if(|active| active.upload.id == id && matches!(active.stage, Stage::Draining { .. }))
+                {
+                    self.send_chunks(now, upload, bytes, sent, true);
+                }
             }
             Some("meta") => self.on_meta(&message),
             Some("eof") => self.on_eof(&message),
