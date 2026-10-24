@@ -1062,19 +1062,21 @@ class HlsSwarm {
           if (peerBytes > 0) swarm.counters.peerFirstLoaded += 1;
           swarm.counters.peerFirstBytes += peerBytes;
           swarm.counters.bytesFromPeers += peerBytes;
-          if (!result.multi) swarm.discovery.holderDelivered(result.holderContext, result.pubkey);
-          else {
-            const contributed = new Set(result.contributions.filter(row => row.bytes > 0).map(row => row.connection));
-            for (const link of swarm.links.values()) if (contributed.has(link.pc)) {
-              swarm.discovery.holderDelivered(result.holderContext, link.pubkey);
+          if (peerBytes > 0) {
+            if (!result.multi) swarm.discovery.holderDelivered(result.holderContext, result.pubkey);
+            else {
+              const contributed = new Set(result.contributions.filter(row => row.bytes > 0).map(row => row.connection));
+              for (const link of swarm.links.values()) if (contributed.has(link.pc)) {
+                swarm.discovery.holderDelivered(result.holderContext, link.pubkey);
+              }
             }
+            if (swarm.discovery.verified(result.discoveryContext)
+              && swarm.discovery.window?.context === result.discoveryContext) swarm.#endDiscovery();
+            if (swarm.firstPeerSegmentAtMs === null) swarm.firstPeerSegmentAtMs = Date.now() - swarm.startedAt;
+            pushSample(swarm.peerLatencySamples, end - t0);
+            if (context.frag) swarm.peerFragments.add(context.frag);
           }
-          if (swarm.discovery.verified(result.discoveryContext)
-            && swarm.discovery.window?.context === result.discoveryContext) swarm.#endDiscovery();
-          if (swarm.firstPeerSegmentAtMs === null) swarm.firstPeerSegmentAtMs = Date.now() - swarm.startedAt;
-          pushSample(swarm.peerLatencySamples, end - t0);
           swarm.#hold(result.key, result.bytes.slice());
-          if (context.frag) swarm.peerFragments.add(context.frag);
           if (typeof swarm.options.onPeerDelivery === "function") {
             // Observation runs after counters, just before the player callback.
             // Host observer failures cannot change delivery or trigger fallback.

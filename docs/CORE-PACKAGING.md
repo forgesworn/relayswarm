@@ -1,6 +1,6 @@
 # Native core release packaging
 
-The v0.3.0 release uses this workflow to prepare native core assets. It creates no tag or GitHub release,
+The v0.4.0 release uses this workflow to prepare native core assets. It creates no tag or GitHub release,
 publishes nothing to npm, and leaves `core/apple/Package.swift` using `path:`.
 A binary URL dependency remains a separate release decision.
 

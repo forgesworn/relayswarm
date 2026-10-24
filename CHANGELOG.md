@@ -1,6 +1,6 @@
 # RelaySwarm changelog
 
-## Unreleased
+## v0.4.0 (24 October 2026)
 
 The old JavaScript field qualifier R70 passed 15 of 16 gates at `20693ea`;
 in-place link renewal failed. This integration with the current core is not
@@ -10,8 +10,7 @@ open. See [Status](docs/STATUS.md).
 - Count a linked holder that was asked for a segment and did not deliver it in
   time as a miss. Previously a holder whose HAVE held the key was treated as
   ahead and cleared, so one that was ahead but too slow was never stale and kept
-  neighbour discovery off. Each peer-first load is now decided once, when it
-  ends. A verified delivery clears only the link it came from. A load that goes
+  neighbour discovery off. Each single-holder load is decided once, when it ends. A verified delivery clears only the link it came from. A load that goes
   to origin charges only the links that were judged: those that were asked and
   did not deliver in time, and at `peerNoFit` those whose own estimate did not
   fit. Declines made on swarm-wide estimates or the buffer charge no holder, and
@@ -52,6 +51,20 @@ open. See [Status](docs/STATUS.md).
   snapshot and are not part of the numeric operator report.
 - The late-arrival projection, deadlines, abandonment, bounded peer work,
   admission and HTTP fallback are unchanged.
+
+- Expose accepted native connections with `peerConnections()` and attribute
+  first-verified accepted media through `onPeerDelivery`, including multi-holder
+  contributions. Wire/control traffic and unsuccessful media receive no credit.
+- Preserve partially verified scheduler progress when origin has reserved the
+  tail, and keep reliable channels alive while cancelled responses drain.
+- Start a reconnecting pool on its first healthy relay and replay only current
+  presence to later relays; pending sockets and retries retain bounded ownership.
+- Carry the holder re-arm state, trial selection and diagnostics through Rust,
+  WASM and generated native bindings. Keep the existing framing and signed-media
+  schemas; update the matching binary and bindings together.
+- Include the native real-time source integration added after v0.3.0, with
+  guarded backend preparation and bounded TURN teardown. Native core packages
+  do not provide that separate WebRTC transport.
 
 ## v0.3.0 (24 October 2026)
 

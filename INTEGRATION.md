@@ -473,6 +473,12 @@ offer evictions by the victim's tier, `neighbourDiscovery.counters.victimUnhelpf
 `victimServing` and `victimConsumer` count discovery replacements, and
 `peers.evicted` still counts every eviction.
 
+Held-miss charging and the untested-holder trial below govern the single-holder
+whole-object path. Schema-3 multi-holder loads retain the core piece scheduler;
+their accepted, first-verified peer contributors clear holder history. An
+all-origin assembly does not renew a peer replacement or become a peer timing
+or ABR sample. Neither path changes the signed-media acceptance checks.
+
 A serving link normally counts as a neighbour for its rendition even before it
 holds any segment, which keeps discovery off. Each load that reached the HAVE
 check is decided once, when it ends. If a verified segment came from a link, that

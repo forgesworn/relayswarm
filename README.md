@@ -4,12 +4,12 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.3.0 is the experimental GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.3.0).
-It adds the opt-in Rust/WASM core, experimental piece commitments and
-multi-holder transfer, Swift/Kotlin bindings, advisory peer supply hints and
-switch-cost reporting. JavaScript/WASM and native core downloads have separate
-checksums. MIT licensed, Node 22.13+; CI uses Node 24. The npm registry is
-unpublished.
+**Status:** [v0.4.0 is the experimental GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.0).
+It integrates holder recovery with the Rust/WASM core, accepted connection and
+verified-media observations, bounded cancellation/draining and relay recovery.
+JavaScript/WASM and native core downloads have separate checksums. Native
+real-time transport remains experimental. MIT licensed, Node 22.13+; CI uses
+Node 24. The npm registry is unpublished.
 
 Production acceptance remains incomplete. The dated
 [pilot evidence](docs/STATUS.md#current-delivery-checkpoint) records earlier
@@ -28,7 +28,7 @@ and [current source evidence](docs/STATUS.md).
 Install ffmpeg with libx264 for synthetic media, then:
 
 ```sh
-git clone --branch v0.3.0 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.4.0 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo

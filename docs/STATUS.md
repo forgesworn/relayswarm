@@ -4,11 +4,26 @@
 [Changelog](../CHANGELOG.md)
 
 Checkpoint: 24 October 2026. The experimental shared-core release is
-[v0.3.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.3.0).
-The [changelog](../CHANGELOG.md#v030-24-october-2026) records its source changes;
+[v0.4.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.0).
+The [changelog](../CHANGELOG.md#v040-24-october-2026) records its source changes;
 the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Integrated library release (24 October 2026)
+
+v0.4.0 integrates holder recovery with Rust/WASM/native discovery, accepted
+connection snapshots and verified-media observations, partial-progress retention,
+reliable-channel cancellation draining and first-healthy-relay recovery. Native
+real-time source support added after v0.3.0 is included. No public service or
+pilot deployment is part of this library release. Operators choose media,
+relays, upload consent and transport policy.
+
+The old JavaScript R70 qualifier at `20693ea` passed 15 of 16 gates: in-place
+renewal failed, with a thin high-quality delivery margin. Those historical
+results are retained. The integrated source has not rerun that distributed
+profile. Physical devices, public NAT, sustained quality and net benefit remain
+unproved; local/CI regressions do not close those gates.
 
 ## Shared-core release checkpoint (24 October 2026)
 

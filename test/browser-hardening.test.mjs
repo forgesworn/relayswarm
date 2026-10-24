@@ -4675,6 +4675,9 @@ test("multi-holder: origin ranges go through the player's loader with its config
     assert.equal(multiContext.rangeEnd, undefined, "the player's context is not changed");
     assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
     assert.deepEqual(observed, [], "an all-origin transfer has no peer contribution");
+    assert.equal(f.swarm.metrics().segments.firstPeerSegmentAtMs, null);
+    assert.equal(f.swarm.metrics().segments.peerLatencyMedianMs, null);
+    assert.equal(f.swarm.metrics().neighbourDiscovery.counters.verified, 0);
   } finally { await f.close(); }
 });
 
