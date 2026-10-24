@@ -106,7 +106,7 @@ See the [P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
 
 ## Evidence and maintenance
 
-- [Evidence and remaining work](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md): Dated release, CI/soak measurements, distribution proof and unverified gates.
+- [Evidence and remaining work](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md): Dated release, CI/soak measurements, distribution proof, deterministic silent-holder deadline classifications and unverified gates.
 - [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): Unreleased production/broadcaster work and published release history.
 - [Maintaining the docs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/MAINTAINING-DOCS.md): AI-context generation, link/freshness checks and public metadata.
 

@@ -740,10 +740,10 @@ class ServingChannel extends RecordedChannel {
 // Virtual time for loader timing tests: host timer lateness (Windows
 // granularity, a loaded machine) cannot eat a budget. Each step yields to real
 // I/O, then moves performance.now() and the mocked setTimeout on by 1ms.
-function virtualClock(t) {
+function virtualClock(t, fraction = 0) {
   const realSetTimeout = setTimeout;
-  // A whole-millisecond start keeps deadline arithmetic exact.
-  let clock = Math.ceil(performance.now());
+  // Integer by default; a fraction deliberately exercises shell rounding.
+  let clock = Math.ceil(performance.now()) + fraction;
   t.mock.method(performance, "now", () => clock);
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const step = async () => { await new Promise((resolve) => realSetTimeout(resolve, 1)); clock += 1; t.mock.timers.tick(1); };
@@ -3636,28 +3636,49 @@ test("multi-holder: a holder that sends a bad piece is banned and the other comp
 });
 
 test("multi-holder: a silent holder's pieces come from origin by range at the deadline", async (t) => {
-  // The silent holder is untested, so it gets one trial piece projected at
-  // the rate floor (2 s), past the 400 ms deadline: the endgame does not act
-  // first, and only the deadline hand-over can finish the segment. A slow
-  // origin finishes it after the deadline, which the transfer, not a
-  // whole-segment fallback, owns.
-  const f = await multiFixture(t, { holders: [{}, { silent: true }], size: 12 * 65_536, originFallbackMs: 400, originDelayMs: 150 });
-  try {
-    sameBytes(await f.load(), f.bytes, "not the origin loader's whole-segment bytes");
-    const [silent] = f.channels[1].wants;
-    assert.equal(silent[1] - silent[0], 1, "the silent holder had one trial piece");
-    const { multiHolder } = f.swarm.metrics().core;
-    assert.ok(f.ranges.length > 0 && multiHolder.originRanges === f.ranges.length);
-    assert.ok(f.channels[1].wants.length > 0, "the silent holder was asked");
-    assert.equal(multiHolder.originBytes + multiHolder.peerBytes, f.bytes.length);
-    assert.equal(f.swarm.metrics().bytes.fromPeers, multiHolder.peerBytes);
-    // Ending the silent holder's request at the deadline is not an
-    // abandonment. The transfer's floor tick and the request's own timeout
-    // fall on the same millisecond, so either may end it first.
-    const counters = () => f.swarm.metrics().peerRequestDiagnostics.counters;
-    await until(() => counters().abort + counters().closed + counters().timeout > 0);
-    assert.equal(counters().abandoned, 0);
-  } finally { await f.close(); }
+  // The link truncates remainingMs to an integer timeout, independently of
+  // the transfer's floored absolute deadline. With an integer clock the
+  // loader's earlier-registered floor timer wins; a fractional clock can
+  // put the link timeout one millisecond before it. Pin both valid endings.
+  for (const [fraction, outcome] of [[0, "abort"], [0.75, "timeout"]]) {
+    await t.test(`${outcome} at clock fraction ${fraction}`, async (t) => {
+      const clock = virtualClock(t, fraction);
+      let f;
+      try {
+        // One silent trial piece projects past the 400 ms floor. Origin
+        // finishes after that floor; the transfer owns it, not a whole load.
+        f = await clock.settle(multiFixture(t, { holders: [{}, { silent: true }], size: 12 * 65_536,
+          originFallbackMs: 400, originDelayMs: 150, traceRequests: 4096 }));
+        sameBytes(await clock.settle(f.load()), f.bytes, "not the origin loader's whole-segment bytes");
+        const [silent] = f.channels[1].wants;
+        assert.equal(silent[1] - silent[0], 1, "the silent holder had one trial piece");
+        const { multiHolder } = f.swarm.metrics().core;
+        assert.ok(f.ranges.length > 0 && multiHolder.originRanges === f.ranges.length);
+        assert.ok(f.channels[1].wants.length > 0, "the silent holder was asked");
+        assert.equal(multiHolder.originBytes + multiHolder.peerBytes, f.bytes.length);
+        assert.equal(f.swarm.metrics().bytes.fromPeers, multiHolder.peerBytes);
+        const diagnostics = f.swarm.metrics().peerRequestDiagnostics;
+        const silentRequests = diagnostics.records.filter((row) => row.holder === 2);
+        assert.equal(silentRequests.length, 1);
+        assert.equal(silentRequests[0].outcome, outcome);
+        assert.equal(diagnostics.counters.abandoned, 0, "a deadline ending is not early abandonment");
+        const calls = f.swarm.trace().rows.filter((row) => row.k === "xfer");
+        const cancelled = calls.findIndex((row) => row.out.c.some((command) => command.t === "cancel" && command.peer === 2));
+        const failed = calls.findIndex((row) => row.op === "failed" && row.source === 2);
+        if (outcome === "abort") {
+          assert.ok(cancelled >= 0 && failed > cancelled, "floor cancellation precedes the failed callback");
+          assert.equal(calls[cancelled].at, calls[0].deadline, "cancelled exactly at the transfer floor");
+        } else {
+          assert.equal(cancelled, -1, "the link timeout retires the holder before the floor can cancel it");
+          assert.ok(failed >= 0);
+          assert.equal(calls[0].deadline - calls[failed].at, 1, "duration truncation puts the link one millisecond earlier");
+        }
+      } finally {
+        if (f) await clock.settle(f.close());
+        clock.restore();
+      }
+    });
+  }
 });
 
 test("multi-holder: fast holders take back origin's pieces and finish before a slow origin", async (t) => {

@@ -11,6 +11,24 @@ acceptance remains open. The previous prerelease,
 `3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. Later documentation corrections
 on `main` do not change either tag or its immutable downloaded assets.
 
+## Silent-holder deadline classification, 24 October 2026
+
+The silent-holder regression now pins two timer orders using virtual time.
+The loader registers its floor timer before issuing link requests. At an
+integer clock time it cancels the silent request at the floor (`abort`).
+With a fractional start, the link truncates its remaining duration separately
+from the transfer's floored absolute deadline; the link can time out one
+millisecond earlier (`timeout`). Both paths preserve verified delivery, origin
+fallback, source accounting and zero early-abandonment charges.
+
+Origin take-back adds verified deliveries and re-arms the transfer timer as
+work moves. Those extra callbacks can change timer registration phases under
+host load; the relative frequency of either ending is not a scheduler
+invariant. The two deadline contracts are unchanged.
+The regression asserts the request outcome and trace ordering/timestamps for
+each phase instead of depending on wall-clock luck. This is an in-process
+clock/ordering check, not a field timing or physical-device result.
+
 ## Current delivery checkpoint
 
 Checkpoint: 21 October 2026. [PR 9](https://github.com/forgesworn/relayswarm/pull/9)
