@@ -5,20 +5,25 @@ capture, encode, decrypt, record or play media. The existing browser adapter,
 NIP-44 session, application admission and media queues remain separate.
 
 `src/node/native-realtime.mjs` loads no native dependency on import. A dedicated
-operator supplies **node-datachannel 0.33.4**, whose native library identifies
-itself as **libdatachannel 0.24.5**. Both versions are checked. Dependency
-installation belongs to the embedding application; RelaySwarm does not add
-this dependency to every browser or native consumer.
+operator supplies a source-built **node-datachannel 0.33.4** addon whose
+native library identifies itself as **0.24.5-forgesworn-turn-close.1**. Both
+versions are checked. The stock npm binary is refused. Browser consumers
+load no native code; explicit preparation belongs to the operator build.
 
 ## API and ownership
 
 ```js
-import * as nodeDataChannel from 'node-datachannel';
+import { createRequire } from 'node:module';
+import { readPreparedNativeRealtime } from './scripts/build-native-realtime.mjs';
+const directory = '/absolute/path/to/prepared-native';
+const { receipt } = await readPreparedNativeRealtime(directory);
+const binding = directory + '/native-addon.node';
+const nodeDataChannel = createRequire(binding)(binding);
 import { createNativeRealtimeBackend } from './src/node/native-realtime.mjs';
 
 const backend = await createNativeRealtimeBackend({
   nodeDataChannel,
-  packageVersion: '0.33.4', // Read the installed package metadata in the host.
+  packageVersion: receipt.bindingVersion,
   maxPacketLifeTimeMs: 250,
   maxPeers: 16,
 });
@@ -83,12 +88,15 @@ remain relevant; accepted-send counters alone do not prove delivery.
 
 ```sh
 node --test test/native-realtime.test.mjs
-E2E_NATIVE_PACKAGE_ROOT=/absolute/path/to/node_modules/node-datachannel \
+node scripts/build-native-realtime.mjs --output target/realtime-native
+E2E_NATIVE_ARTIFACT=/absolute/path/to/target/realtime-native \
   node test/native-realtime-browser.mjs
+E2E_NATIVE_BINDING=/absolute/path/to/target/realtime-native/native-addon.node \
+  python3 test/native-turn-lifecycle.py
 ```
 
-The browser command requires an explicit installed package and fails on a
-missing/wrong version. There is no successful skipped mode. An optional
+The browser command verifies the explicit prepared receipt and binary, then
+fails on missing, altered or mismatched inputs. There is no successful skipped mode. An optional
 `E2E_CHROMIUM_EXECUTABLE` selects a host-installed test browser. It exercises
 the real native initiator against a real Chromium answerer through encrypted
 RelaySwarm signalling and verifies actual browser DCEP reliability, binary
@@ -128,8 +136,10 @@ This adapter's original source follows RelaySwarm's MIT licence. The native
 dependency is separately **MPL-2.0**; the combined distribution must not be
 labelled MIT-only. Binary packaging must retain its licence/notices and make
 the covered source, including any modifications, available as required by
-that licence. The binary's remaining dependency notices need an inventory
-before distribution. This work modifies no upstream native/SCTP source.
+that licence. The prepared artifact includes the reviewed dependency licence inventory,
+exact source revisions, complete patches and hashes of its emitted files.
+Modified MPL-covered files are libjuice `src/agent.c`, `src/agent.h` and
+libdatachannel `include/rtc/version.h`; SCTP source is unchanged.
 
 Primary pinned sources:
 
@@ -138,6 +148,48 @@ Primary pinned sources:
 - [Pinned native build configuration](https://github.com/murat-dogan/node-datachannel/blob/v0.33.4/CMakeLists.txt)
 - [libdatachannel 0.24.5 source and licence](https://github.com/paullouisageneau/libdatachannel/tree/v0.24.5)
 - [Buffered-send contract](https://github.com/paullouisageneau/libdatachannel/blob/v0.24.5/include/rtc/channel.hpp)
+
+### Source-built allocation teardown
+
+Explicit preparation builds only pinned source inputs with at most two jobs.
+Each invocation owns fresh source and derived directories; it never trusts an
+existing OpenSSL/CMake cache or modifies an installed npm prebuild. The
+receipt and library version identify a modified binary. Preparation downloads
+sources; importing the verifier or starting an operator never does.
+
+The libjuice change sends explicit authenticated `Refresh(lifetime=0)` on the
+existing allocation socket before destroying it. Receive processing remains
+alive for stale-nonce challenges; a single closing loop owns retries and
+transaction IDs. Each agent has a 500ms deadline and at most six requests per
+allocation. A 438 updates the nonce and starts a fresh transaction. Validated
+success with explicit lifetime zero, or allocation-mismatch 437, completes
+release. Success validation uses upstream transaction IDs and MESSAGE-INTEGRITY;
+upstream error handling does not require error-response integrity. This patch
+does not introduce a general TURN response-source validation change.
+
+Release is best effort under packet loss or partition: an unreachable server
+can retain its allocation until expiry. Eight serial fully blackholed agents
+can consume approximately four seconds plus scheduling overhead. This bound
+is per agent, not per process. No credential rotation or quota increase is a
+substitute for cleanup.
+
+`test/native-turn-lifecycle.py` uses only authenticated synthetic loopback TURN
+with a cap of eight and one unchanged fixture credential. It checks normal
+and dropped-request `8 → 0 → 8 → 0` reuse, delayed 350ms stale-nonce challenges,
+invalid-HMAC and wrong-transaction success replies, lost/late acknowledgements,
+and bounded whole-process cleanup when all release packets are blackholed.
+[The retained macOS arm64 lifecycle run](evidence/native-turn-lifecycle-20261024.json)
+passed all eight scenarios. Normal, dropped-first-two and delayed-nonce cases
+each released and reused eight slots twice. All-eight blackhole cleanup
+returned in 4254ms while the fake server correctly retained eight allocations.
+[Patched native/browser qualification](evidence/native-realtime-patched-loopback-20261024.json)
+also passed actual unordered 250ms DCEP and binary exchange. These are
+synthetic loopback gates; Linux runtime and public Spry lifecycle acceptance
+remain separate.
+
+Every accepted release request must carry the correct HMAC, realm, username,
+nonce and original client UDP tuple. Blackhole allocation retention is an
+expected limitation, reported separately from successful release.
 
 Neither native implementation, operator independence nor absent call logs
 establishes an Online Safety Act exemption.

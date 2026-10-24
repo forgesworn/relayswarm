@@ -4,3 +4,4 @@ deploy/.env
 operator-header
 **/account-budget.json*
 .interop-sdk/
+target/realtime-native/

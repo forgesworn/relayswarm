@@ -21,7 +21,7 @@ export const NATIVE_SOURCES = Object.freeze({
   nodeAddonApi: '8.5.0:sha512:/bRZty2mXUIFY/xU5HLvveNHlswNJej+RnxBjOMkidWfwZzgTbPG1E3K5TOxRLOR+5hX7bSofy8yf1hZevMS8A==',
 });
 export const NATIVE_PATCHES = Object.freeze({
-  'libjuice-turn-close.patch': '5d6dcbdc6b1731e204a1c65532a5618436d6f0b2d55e17a1dc12dfe4a94807ec',
+  'libjuice-turn-close.patch': 'fe802d2af81470a65f9f2dee2c393a8d8468129a228714f2041960e013020069',
   'libdatachannel-version.patch': 'a81117db1686a20f8a9eeb95325018b2e2f65cdab7dbc90c74b26300db717e50',
 });
 const licences = ['node-datachannel', 'libdatachannel', 'libjuice', 'usrsctp', 'plog', 'openssl', 'node-addon-api', 'node-headers'];
