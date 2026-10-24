@@ -77,6 +77,13 @@ Normal HTTP never waits for metadata; stopping the swarm cancels its peer
 arm while that pending HTTP request continues. Progressive hls.js loads skip
 the race. See the [options and lifecycle contract](../INTEGRATION.md#options).
 
+The opt-in `sustainablePeerWait: true` additionally bounds serial peer waits
+and multi-holder extensions by each fragment/part's duration minus measured
+whole-origin recovery time with a 25% and 100 ms margin. The ordinary
+buffer reserve remains in force. Unknown duration or no spare duration starts
+HTTP immediately; an enabled cached-peer race retains its independent
+window. This is an admission bound, not a smooth-playback guarantee.
+
 `trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
 `traceRequests` (none by default): each peer-first load, eligibility
 decision, peer request and origin request (whole or ranged), joined by a load

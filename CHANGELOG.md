@@ -1,6 +1,22 @@
 # RelaySwarm changelog
 
-## Unreleased
+## v0.4.3 (24 October 2026)
+
+Prepared experimental library prerelease following
+[v0.4.2](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.2).
+Physical iPhone/iPad and Android/Vanadium continuity, public NAT, sustained
+distributed playback and net benefit remain unverified. No service is deployed.
+
+- Add opt-in `sustainablePeerWait`: bound serial peer waits and all extensions
+  by each fragment/part's duration minus measured whole-origin recovery with
+  a 25% and 100 ms margin. Existing buffer reserves remain in force; the
+  independent cached-peer race still runs alongside immediate HTTP.
+- Pass only requested range bytes into the WASM upload path when the matching
+  core supports it. Previously each small range copied the entire held object
+  into WASM before slicing. The peer wire protocol and upload charging remain
+  unchanged; older committed cores retain the existing whole-object ABI.
+- Retain the historical v0.4.2 failed cached-race CI attempts. Local loader
+  regressions establish the new wait bound, not physical-phone playback.
 
 - Make the native cached-peer race fixture wait for framing-2 presence from
   the accepted peer as well as its cached-object advertisement. A controlled
