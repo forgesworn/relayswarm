@@ -1,0 +1,223 @@
+{
+  "at": "2026-10-24T17:40:40.867Z",
+  "baseCommit": "2c2708c9e11daf8e85bc059682d3eda09a0c4ffb",
+  "scope": "Native Chrome/WASM synthetic-byte loopback fixture correction; no production, wire, core or release asset change.",
+  "historicalCI": {
+    "url": "https://github.com/forgesworn/relayswarm/actions/runs/40100436726",
+    "attempts": [
+      1,
+      2
+    ],
+    "status": "failure",
+    "assertion": "normal HTTP starts before asynchronous segment-key hashing",
+    "limit": "Historical logs do not retain per-load state. Matching local failure and deterministic delayed-presence control explain the race; the failed CI framing state cannot be directly recovered."
+  },
+  "localReproduction": {
+    "ok": false,
+    "error": "normal HTTP starts before asynchronous segment-key hashing",
+    "browserVersion": "155.0.8059.85",
+    "load": "receiver-1",
+    "trace": [
+      {
+        "load": "receiver-1",
+        "event": "key-hash",
+        "at": 1307.9000000953674
+      },
+      {
+        "load": "receiver-1",
+        "event": "origin-start",
+        "at": 1308.0999999046326
+      },
+      {
+        "load": "receiver-1",
+        "event": "key-hash",
+        "at": 3687.199999809265
+      }
+    ],
+    "connected": 1,
+    "advertisedKeys": 3,
+    "races": 0,
+    "wins": 0,
+    "peerBytes": 0
+  },
+  "oldPredicateControl": {
+    "ok": false,
+    "error": "HAVE alone is insufficient before framing capabilities arrive\n\ntrue !== false\n",
+    "mutation": "Only ready(keys) changed from readiness(keys).ready to readiness(keys).cached through a Node module load hook. Assertions and deadlines unchanged.",
+    "loads": 0
+  },
+  "corrected": {
+    "ok": true,
+    "browserVersion": "155.0.8059.85",
+    "presenceReadiness": {
+      "beforePresence": {
+        "cached": true,
+        "ready": false,
+        "peers": [
+          {
+            "pubkey": "858592dd729feac00c02aa90f1f791d240c86bb82d907435d16337a6fb0ec83a",
+            "framing": null,
+            "pendingPresence": 1
+          }
+        ]
+      },
+      "releasedPresence": 2,
+      "afterPresence": {
+        "cached": true,
+        "ready": true,
+        "peers": [
+          {
+            "pubkey": "858592dd729feac00c02aa90f1f791d240c86bb82d907435d16337a6fb0ec83a",
+            "framing": 2,
+            "pendingPresence": 0
+          }
+        ]
+      }
+    },
+    "loads": [
+      {
+        "label": "receiver-1",
+        "races": 1,
+        "wins": 1,
+        "peerBytes": 6291456,
+        "sha256": "1c9f8eecb9f26e9668cb8416ab78d5a4d207a62e4988fe8c8259ab3380332a24",
+        "trace": [
+          {
+            "load": "receiver-1",
+            "event": "origin-start",
+            "at": 1941
+          },
+          {
+            "load": "receiver-1",
+            "event": "key-hash",
+            "at": 1941.5
+          },
+          {
+            "load": "receiver-1",
+            "event": "key-hash",
+            "at": 1941.7999997138977
+          }
+        ],
+        "origin": [
+          {
+            "name": "receiver-1",
+            "bytes": 655360,
+            "aborted": true,
+            "callbacks": {
+              "success": 0,
+              "abort": 0
+            }
+          }
+        ]
+      },
+      {
+        "label": "receiver-2",
+        "races": 1,
+        "wins": 0,
+        "peerBytes": 0,
+        "sha256": "1c9f8eecb9f26e9668cb8416ab78d5a4d207a62e4988fe8c8259ab3380332a24",
+        "trace": [
+          {
+            "load": "receiver-2",
+            "event": "origin-start",
+            "at": 2423.7999997138977
+          },
+          {
+            "load": "receiver-2",
+            "event": "key-hash",
+            "at": 2424
+          },
+          {
+            "load": "receiver-2",
+            "event": "key-hash",
+            "at": 2424
+          },
+          {
+            "load": "receiver-2",
+            "event": "key-hash",
+            "at": 2432.7999997138977
+          }
+        ],
+        "origin": [
+          {
+            "name": "receiver-2",
+            "bytes": 6291456,
+            "aborted": false,
+            "callbacks": {
+              "success": 1,
+              "abort": 0
+            }
+          }
+        ]
+      },
+      {
+        "label": "receiver-3",
+        "races": 1,
+        "wins": 1,
+        "peerBytes": 6291456,
+        "sha256": "1c9f8eecb9f26e9668cb8416ab78d5a4d207a62e4988fe8c8259ab3380332a24",
+        "trace": [
+          {
+            "load": "receiver-3",
+            "event": "origin-start",
+            "at": 2636.5
+          },
+          {
+            "load": "receiver-3",
+            "event": "key-hash",
+            "at": 2636.699999809265
+          },
+          {
+            "load": "receiver-3",
+            "event": "key-hash",
+            "at": 2636.699999809265
+          }
+        ],
+        "origin": [
+          {
+            "name": "receiver-3",
+            "bytes": 655360,
+            "aborted": true,
+            "callbacks": {
+              "success": 0,
+              "abort": 0
+            }
+          }
+        ]
+      }
+    ],
+    "stopped": [
+      [
+        "closed"
+      ],
+      [
+        "closed"
+      ]
+    ],
+    "pageErrors": []
+  },
+  "receipts": {
+    "reproduction": {
+      "path": "artifacts/cached-race-ci-diagnosis-20261024.json",
+      "sha256": "217da496de6b4001a7e504d09b3b917dd33d2fff21ef06d1ed41c4d0baa34356"
+    },
+    "oldReadiness": {
+      "path": "artifacts/cached-race-old-readiness-20261024.json",
+      "sha256": "f4af465b97d30eabea9483e854bf211ee664f165bf64baa27742f20000675ad8"
+    },
+    "corrected": {
+      "path": "artifacts/cached-race-ci-fixed-20261024.json",
+      "sha256": "6289385ace1d1cb1c40cc78847bd00546a5e365cc6171921862b8f5167f6a2de"
+    }
+  },
+  "review": "Independent fixture and loader analyses agreed that HAVE can precede framing capability. Implementation read-only reviewed by loader subagent; no substantive blocker.",
+  "checks": {
+    "syntax": "192 modules pass",
+    "diff": "pass"
+  },
+  "limits": [
+    "Synthetic protocol bytes, not video qualification",
+    "No physical devices, public NAT or distributed R70 acceptance",
+    "Historical v0.4.2 tag result remains RED; release assets unchanged"
+  ]
+}

@@ -25,7 +25,33 @@ function browserFixture(createHlsSwarm) {
   };
   const digest = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), byte => byte.toString(16).padStart(2, "0")).join("");
   const connections = [], channels = [], trace = [], loads = [], observations = [];
-  let swarm, hls, role, currentLoad = null;
+  let swarm, hls, role, currentLoad = null, holdPresence = false;
+  const presence = new Map(), heldPresence = [];
+  class ObservedWebSocket extends WebSocket {
+    constructor(...args) {
+      super(...args);
+      // Delay actual signed presence frames, leaving SDP signalling and the
+      // native data channel untouched. HAVE can arrive before capabilities.
+      this.addEventListener("message", event => {
+        let frame;
+        try { frame = JSON.parse(event.data); } catch { return; }
+        if (frame[0] !== "EVENT" || frame[2]?.kind !== 24170) return;
+        if (holdPresence) {
+          heldPresence.push({ socket: this, data: event.data, pubkey: frame[2].pubkey });
+          event.stopImmediatePropagation();
+          return;
+        }
+        presence.set(frame[2].pubkey, JSON.parse(frame[2].content));
+      });
+    }
+  }
+  const readiness = keys => {
+    const peers = swarm.peerConnectionDetails().map(({ pubkey }) => ({ pubkey,
+      framing: presence.get(pubkey)?.transports.find(transport => transport.type === "webrtc")?.obj ?? null,
+      pendingPresence: heldPresence.filter(frame => frame.pubkey === pubkey).length }));
+    const cached = swarm.metrics().peers.connected === 1 && channels.some(record => record.channel.readyState === "open" && keys.every(key => record.have.has(key)));
+    return { cached, ready: cached && peers.some(peer => peer.framing >= 2), peers };
+  };
   const observeChannel = channel => {
     const record = { channel, have: new Set() }; channels.push(record);
     channel.addEventListener("message", event => {
@@ -96,6 +122,7 @@ function browserFixture(createHlsSwarm) {
   window.fixture = {
     async start(value) {
       role = value;
+      holdPresence = role === "receiver";
       const bootstrap = await fetch("/bootstrap.json").then(response => response.json());
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -104,7 +131,7 @@ function browserFixture(createHlsSwarm) {
       hls = { config: { loader: HttpLoader, progressive: false }, media: { currentTime: 0, buffered: { length: 0, start() { throw new Error("empty"); }, end() { throw new Error("empty"); } } } };
       swarm = createHlsSwarm({ mode: "peer-first", swarmId: bootstrap.swarmId, relays: [bootstrap.relay], streamEvent: bootstrap.streamEvent,
         coreWasm: "/core.wasm", multiHolder: true, zeroBudgetPeerRace: role === "receiver", serve: true,
-        maxPeers: 1, maxUploadPeers: 1, maxDialsInFlight: 1, iceServers: [], RTCPeerConnectionImpl: ObservedPC,
+        maxPeers: 1, maxUploadPeers: 1, maxDialsInFlight: 1, iceServers: [], RTCPeerConnectionImpl: ObservedPC, WebSocketImpl: ObservedWebSocket,
         maxPeerWaitMs: 5_000, originFallbackMs: 1_200, presenceIntervalMs: 1_000,
         maxHeldBytes: 32 * 1024 * 1024, maxUploadBytesPerSecond: 64 * 1024 * 1024, traceRequests: 512,
         segmentKey: url => new URL(url).pathname,
@@ -124,10 +151,18 @@ function browserFixture(createHlsSwarm) {
       await wait(() => swarm.metrics().core.state === "ready" && swarm.metrics().relays.connected === 1, "WASM/relay did not initialise");
       return { bufferedRanges: hls.media.buffered.length, core: swarm.metrics().core.state };
     },
-    ready(keys) { return swarm.metrics().peers.connected === 1 && channels.some(record => record.channel.readyState === "open" && keys.every(key => record.have.has(key))); },
+    readiness,
+    ready(keys) { return readiness(keys).ready; },
+    releasePresence() {
+      holdPresence = false;
+      const pending = heldPresence.splice(0);
+      for (const { socket, data } of pending) socket.dispatchEvent(new MessageEvent("message", { data }));
+      return pending.length;
+    },
     async load(sn) {
       currentLoad = `${role}-${sn}`;
       const label = currentLoad, before = swarm.metrics(), hookBefore = observations.length;
+      const channelState = channels.map(({ channel, have }) => ({ readyState: channel.readyState, bufferedAmount: channel.bufferedAmount, have: [...have] }));
       const url = `${location.origin}/media/segment-${sn}.m4s?role=${role}`;
       const context = { url, responseType: "arraybuffer", part: null,
         frag: { sn, cc: 0, level: 0, type: "main", start: (sn - 1) * 2, duration: 2, url, baseurl: `${location.origin}/media/index.m3u8` } };
@@ -151,8 +186,13 @@ function browserFixture(createHlsSwarm) {
         linksOpened: after.peers.linksOpened, linksClosed: after.peers.linksClosed,
         connected: after.peers.connected, nativeStates: connections.map(pc => pc.connectionState),
         core: after.core, peerRequests: after.peerRequestDiagnostics.counters, errors: after.errors,
+        before, channelState, eligibility: after.peerEligibilityDiagnostics, loaderTrace: swarm.trace(),
       };
     },
+    diagnostics() { return { role, currentLoad, metrics: swarm?.metrics(), loaderTrace: swarm?.trace(), trace, loads,
+      presence: [...presence], heldPresence: heldPresence.map(({ pubkey }) => ({ pubkey })),
+      channels: channels.map(({ channel, have }) => ({ readyState: channel.readyState, bufferedAmount: channel.bufferedAmount, have: [...have] })),
+      nativeStates: connections.map(pc => pc.connectionState) }; },
     async settled() {
       await wait(() => channels.every(({ channel }) => channel.readyState !== "open" || channel.bufferedAmount === 0), "native channel did not drain");
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -177,7 +217,12 @@ const commitments = keys.map((key, index) => finalizeEvent({ kind: KIND_SEGMENT_
 const wasm = await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url));
 const bundle = await build({ stdin: { contents: `import { createHlsSwarm } from './src/browser/hls-swarm.mjs';\n(${browserFixture.toString()})(createHlsSwarm);`, resolveDir: root }, bundle: true, platform: "browser", format: "esm", write: false, logLevel: "silent" });
 const requests = [], timers = new Set();
-let relay, server, browser, guard;
+let relay, server, browser, guard, pages = [];
+const results = [], errors = [];
+const receiptIndex = process.argv.indexOf("--receipt");
+const saveReceipt = async value => {
+  if (receiptIndex >= 0) await writeFile(process.argv[receiptIndex + 1], `${JSON.stringify(value, null, 2)}\n`);
+};
 try {
   relay = await startLocalRelay({ replayEphemeral: false });
   server = createServer((request, response) => {
@@ -207,8 +252,8 @@ try {
   browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true,
     args: ["--disable-features=WebRtcHideLocalIpsWithMdns", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] });
   const contexts = await Promise.all([browser.newContext({ permissions: ["microphone"] }), browser.newContext({ permissions: ["microphone"] })]);
-  const pages = await Promise.all(contexts.map(context => context.newPage()));
-  const errors = []; pages.forEach(page => page.on("pageerror", error => errors.push(error.message)));
+  pages = await Promise.all(contexts.map(context => context.newPage()));
+  pages.forEach(page => page.on("pageerror", error => errors.push(error.message)));
   const base = `http://127.0.0.1:${server.address().port}`;
   await Promise.all(pages.map(page => page.goto(base)));
   await Promise.all(pages.map(page => page.waitForFunction(() => !!window.fixture)));
@@ -219,10 +264,22 @@ try {
       assert.equal(warm.sha256, expectedHash); assert.equal(warm.size, payload.length);
     }
     await pages[1].evaluate(() => window.fixture.start("receiver"));
+    await pages[1].waitForFunction(keys => {
+      const state = window.fixture.readiness(keys);
+      return state.cached && state.peers.some(peer => peer.pendingPresence > 0);
+    }, keys, { timeout: 15_000 });
+    const beforePresence = await pages[1].evaluate(keys => ({ ...window.fixture.readiness(keys), ready: window.fixture.ready(keys) }), keys);
+    assert.equal(beforePresence.cached, true, "native connection already advertises all cached objects");
+    assert.equal(beforePresence.ready, false, "HAVE alone is insufficient before framing capabilities arrive");
+    assert.ok(beforePresence.peers.every(peer => peer.framing === null));
+    const releasedPresence = await pages[1].evaluate(() => window.fixture.releasePresence());
+    assert.ok(releasedPresence > 0);
     await pages[1].waitForFunction(keys => window.fixture.ready(keys), keys, { timeout: 15_000 });
-    const results = [];
+    const afterPresence = await pages[1].evaluate(keys => window.fixture.readiness(keys), keys);
     for (const sn of [1, 2, 3]) {
       const result = await pages[1].evaluate(sn => window.fixture.load(sn), sn);
+      // Retain the failing load as well as earlier successes in CI artefacts.
+      results.push(result);
       assert.equal(result.size, payload.length); assert.equal(result.sha256, expectedHash);
       assert.deepEqual(result.callbacks, { success: 1, error: 0, abort: 0 });
       assert.equal(result.bufferedRanges, 0); assert.equal(result.connected, 1);
@@ -242,7 +299,6 @@ try {
         assert.ok(result.origin[0].bytes > 0 && result.origin[0].bytes < payload.length, "peer winner aborts a genuinely partial origin response");
       }
       await Promise.all(pages.map(page => page.evaluate(() => window.fixture.settled())));
-      results.push(result);
     }
     assert.equal(results[0].hook[0].connection, results[2].hook[0].connection, "next peer load uses the same native connection");
     assert.equal(results[2].linksOpened, results[0].linksOpened); assert.equal(results[2].linksClosed, 0);
@@ -256,12 +312,28 @@ try {
     const stopped = await Promise.all(pages.map(page => page.evaluate(() => window.fixture.stop())));
     assert.ok(stopped.flat().every(state => state === "closed")); assert.deepEqual(errors, []);
     return { ok: true, at: new Date().toISOString(), fixture: "Two independent Chrome contexts, local Nostr signalling, native SCTP and WASM; synthetic protocol data, not video/NAT qualification",
-      browserVersion: browser.version(), payloadBytes: payload.length, sha256: expectedHash, pieceSize, results, requests: requests.map(({ timer, ...record }) => record), stopped, pageErrors: errors };
+      browserVersion: browser.version(), payloadBytes: payload.length, sha256: expectedHash, pieceSize,
+      presenceReadiness: { beforePresence, releasedPresence, afterPresence }, results, requests: requests.map(({ timer, ...record }) => record), stopped, pageErrors: errors };
   };
   const result = await Promise.race([run(), new Promise((_, reject) => { guard = setTimeout(() => reject(new Error("Native cached race fixture exceeded 60 seconds.")), 60_000); })]);
-  const receiptIndex = process.argv.indexOf("--receipt");
-  if (receiptIndex >= 0) await writeFile(process.argv[receiptIndex + 1], `${JSON.stringify(result, null, 2)}\n`);
+  await saveReceipt(result);
   console.log(JSON.stringify(result, null, 2));
+} catch (error) {
+  let diagnosticGuard;
+  let diagnostics;
+  try {
+    diagnostics = await Promise.race([
+      Promise.allSettled(pages.map(page => page.evaluate(() => window.fixture?.diagnostics()))),
+      new Promise(resolve => { diagnosticGuard = setTimeout(() => resolve([{ status: "rejected", reason: "Browser diagnostics exceeded 2 seconds." }]), 2_000); }),
+    ]);
+  } finally { clearTimeout(diagnosticGuard); }
+  const failure = { ok: false, at: new Date().toISOString(), browserVersion: browser?.version(),
+    error: { name: error.name, message: error.message, stack: error.stack }, results,
+    diagnostics: diagnostics.map(result => result.status === "fulfilled" ? result.value : { error: String(result.reason) }),
+    requests: requests.map(({ timer, ...record }) => record), pageErrors: errors };
+  await saveReceipt(failure);
+  console.error(JSON.stringify(failure, null, 2));
+  throw error;
 } finally {
   clearTimeout(guard); for (const timer of timers) clearTimeout(timer);
   await browser?.close();

@@ -55,6 +55,30 @@ not prove net savings: an aborted HTTP arm may already have transferred bytes.
 No public service or pilot is deployed. The field and device gates below
 remain open; publishing these libraries does not close them.
 
+### Cached-peer fixture readiness correction (24 October 2026)
+
+The [v0.4.2 tag workflow](https://github.com/forgesworn/relayswarm/actions/runs/40100436726)
+failed the HTTP-before-key-hash assertion on both attempts. Those historical
+failures remain RED; the later renewal and broadcast steps were skipped.
+An instrumented local run reproduced the assertion on the first receiver load:
+the native channel advertised all three objects, but no cached-peer race ran.
+An incoming connection can deliver HAVE before the holder's next presence
+supplies its framing-2 capability. The ordinary zero-budget HTTP fallback
+then legitimately hashes its accounting key before starting the HTTP loader.
+
+Current main's fixture requires framing-2 presence from the accepted peer's
+identity as well as connected/HAVE readiness. It withholds actual signed
+presence frames while allowing real SDP and native SCTP through, asserts that
+HAVE alone is insufficient, then releases those unchanged frames and runs the
+original three-load assertions. The old readiness predicate fails this control;
+the corrected fixture passes two verified 6 MiB peer wins, one HTTP win and
+same-connection reuse. Failures now retain the offending load, HTTP/hash order,
+eligibility diagnostics and loader trace. See the
+[local evidence](../spikes/results/cached-race-readiness-20261024.json).
+This changes test readiness, not the loader, wire protocol, core or immutable
+v0.4.2 release assets. The original CI logs lack per-load diagnostics, so their
+missing prerequisite cannot be read back directly from those logs.
+
 ## Integrated library release (24 October 2026)
 
 v0.4.0 integrates holder recovery with Rust/WASM/native discovery, accepted
