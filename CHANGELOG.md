@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- Reduce hot-path work, measured in [Performance](docs/PERFORMANCE.md):
+  - Remember proved Schnorr signatures in both commitment verifiers, keyed by
+    the recomputed event hash, public key and signature. The unchanged stream
+    event, delegation and revocations are no longer re-proved per segment;
+    every other check still runs on every call.
+  - Copy peer objects once across the WebAssembly boundary, reserve a
+    commitment-expected receive size once, and keep only the requested piece
+    range inside the core when serving. The link frame format is unchanged.
+  - Compile the core's SHA-256 at `opt-level = 3`, halving multi-holder piece
+    and object hashing time for about 0.7 KB more gzip module.
+  - Derive each peer's NIP-44 conversation key once per session.
+  - Add `RelayPool` `readyOnFirstRelay`; the installed native client uses it
+    so one stalled relay no longer spends its peer deadline, and overlaps the
+    DHT bootstrap with Nostr discovery.
+  - Receive native objects into one buffer of the trusted size, hashing as
+    bytes arrive.
+  - Copy and hash origin segments in the loader only when a sampled
+    comparison or serving needs them, and cache the core discovery's
+    candidate list until a hint or clear changes it.
+  - Join identical in-flight commitment requests instead of refusing them at
+    the concurrency limit, read media playlists concurrently, and reuse the
+    previous parse when every playlist is byte-identical (never for
+    `EXT-X-SKIP` deltas). Add the `commitmentJoins` publisher counter.
+  - Make account-allowance validation linear in its bounded state.
+  - Serve the demo page assets compressed with ETag revalidation; other
+    routes keep `no-store`. Serialise demo relay fan-out frames once.
+  - Add `npm run bench:hot-paths` for local before/after comparisons.
 - Make the native cached-peer race fixture wait for framing-2 presence from
   the accepted peer as well as its cached-object advertisement. A controlled
   delayed heartbeat proves that a connected channel with HAVE is insufficient.

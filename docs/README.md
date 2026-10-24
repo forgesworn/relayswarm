@@ -29,6 +29,7 @@ its measured scope and acceptance gaps in [Status](STATUS.md).
 | Separate tested, released and outstanding capabilities | [Evidence and remaining work](STATUS.md) |
 | Answer common questions and compare other projects | [FAQ](FAQ.md), [Landscape](LANDSCAPE.md) |
 | Compare core and imported signature verification costs | [Signature budget](CORE-SIGNATURE-BUDGET.md) |
+| Review measured hot-path costs and performance follow-ups | [Performance](PERFORMANCE.md) |
 | Inspect dated measurements and reproduction commands | [Spike results](../spikes/RESULTS.md) |
 | Prepare native binary assets without releasing | [Core packaging](CORE-PACKAGING.md) |
 | Follow release and documentation changes | [Changelog](../CHANGELOG.md) |

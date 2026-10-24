@@ -38,7 +38,10 @@ object-transfer modules into an ordinary browser page.
 `RelayPool.connect()` with `reconnect: true` becomes ready on the first usable
 relay while the other initial attempts and bounded retries remain owned by
 the pool. Without reconnect it waits for all initial attempts and reports an
-all-failed connection error. `close()` cancels attempts, waiters and retries.
+all-failed connection error, unless `readyOnFirstRelay: true` makes it ready
+on the first usable relay; it then still reports the all-failed error, and a
+slower relay joins when it opens, with no retry. The installed native client
+uses this so one stalled relay cannot spend its whole peer deadline. `close()` cancels attempts, waiters and retries.
 `onRelayOpen(handler)` supplies a publish function scoped to that newly opened
 socket; it becomes inert after the socket or pool closes.
 
@@ -286,7 +289,9 @@ The returned object contains:
   before starting or joining the next one; it supports watch-before-read HTTP
   handling without exposing media or encryption-key bodies.
 - `getMetrics()`: request, cache, streamed hashing, signing, renewal, eviction,
-  changed-read, bounded playlist-retry and concurrency counters. A playlist
+  changed-read, bounded playlist-retry and concurrency counters.
+  `commitmentJoins` counts requests that joined an identical one already in
+  flight; joined requests take no concurrency slot. A playlist
   rejected by the byte/stat change guard gets one fresh full-catalogue retry;
   invalid data and changed segment bytes still reject. These counters do not
   measure network delivery.
@@ -477,7 +482,8 @@ This illustrates lifetime management; `relay.example` is a placeholder.
 
 `new RelayPool(urls, options)` requires 1–8 `wss://` relay URLs (`ws://` is
 allowed on loopback). Options are `label`, `WebSocketImpl`, `connectTimeoutMs`
-(8,000), `reconnect` (false), and `reconnectMaxMs` (30,000). Methods:
+(8,000), `reconnect` (false), `reconnectMaxMs` (30,000) and
+`readyOnFirstRelay` (false). Methods:
 
 - `await connect()`, `close()`.
 - `subscribe(filter)` → subscription id; `unsubscribe(id)` sends CLOSE.
