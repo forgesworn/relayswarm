@@ -13,3 +13,8 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Piece and object digests run on the player's main thread. At "z" SHA-256
+# is about twice as slow, for under 1 KB of compressed module size.
+[profile.release.package.sha2]
+opt-level = 3

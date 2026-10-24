@@ -9,7 +9,6 @@ const OP = { text: 0, binary: 1, request: 2, abort: 3, close: 4, tick: 5, serve:
   sendHave: 8, sendHaveChange: 9, sendContribution: 10, sendFetching: 11, state: 12, sets: 13, requestRange: 14 };
 const EVENT = { sendText: 1, sendBinary: 2, closed: 3, report: 4, resolved: 5, haveChanged: 6,
   scheduleChanged: 7, serveRequest: 8, uploadCancelled: 9, progress: 10, serveRange: 11 };
-const HEADER = 13;
 const HIGH_WATER_BYTES = 128 * 1024;
 const LOW_WATER_BYTES = 32 * 1024;
 const CLOSE_REASONS = new Set([
@@ -224,9 +223,9 @@ export class CorePeerLink {
     if (frame) this.#process(frame);
   }
 
-  #process(bytes) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const header = Array.from({ length: HEADER }, (_, index) => view.getFloat64(index * 8, true));
+  // `header` holds the frame's scalars and `events` its events, already
+  // copied out of the module by the host.
+  #process({ header, events }) {
     const [version, closed, busy, transferring, inFlight, bytesIn, bytesOut, openedAt, lastServedAt, lastDeliveredAt, deadline, requestId, waiting] = header;
     this.closed = closed === 1;
     this.#busy = busy === 1;
@@ -244,12 +243,7 @@ export class CorePeerLink {
     if (version !== this.#version) this.#sync(version);
     if (this.closed) this.announced.clear();
     const frame = ++this.#frames;
-    for (let offset = HEADER * 8; offset < bytes.byteLength;) {
-      const tag = bytes[offset], length = view.getUint32(offset + 1, true);
-      const payload = bytes.subarray(offset + 5, offset + 5 + length);
-      offset += 5 + length;
-      this.#event(tag, payload);
-    }
+    for (const event of events) this.#event(event);
     // A call made from a callback has already scheduled from a later frame.
     if (frame === this.#frames && this.#handle !== null) {
       this.#schedule(deadline);
@@ -286,8 +280,8 @@ export class CorePeerLink {
     if (sets.closeReason !== null) this.closeReason = sets.closeReason;
   }
 
-  #event(tag, payload) {
-    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  #event({ tag, payload, id }) {
+    const number = (index) => new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getFloat64(index * 8, true);
     switch (tag) {
       case EVENT.sendText: {
         if (this.#sendFailed) return;
@@ -317,10 +311,10 @@ export class CorePeerLink {
         return;
       }
       case EVENT.resolved: {
-        const id = view.getFloat64(0, true), has = payload[8] === 1;
+        // The host copied the object into its own buffer, or null for none.
         const entry = Number.isNaN(id) ? this.#starting : this.#requests.get(id);
         if (!entry) return;
-        entry.settle(has ? payload.slice(9) : null);
+        entry.settle(payload);
         return;
       }
       case EVENT.haveChanged: {
@@ -343,11 +337,11 @@ export class CorePeerLink {
         return;
       }
       case EVENT.uploadCancelled: {
-        this.onUploadCancelled?.(this, view.getFloat64(0, true));
+        this.onUploadCancelled?.(this, number(0));
         return;
       }
       case EVENT.progress: {
-        const received = view.getFloat64(0, true), size = view.getFloat64(8, true);
+        const received = number(0), size = number(1);
         for (const entry of this.#requests.values()) {
           if (entry.settled) continue;
           if (entry.firstByteAt === null) entry.firstByteAt = clockNow();

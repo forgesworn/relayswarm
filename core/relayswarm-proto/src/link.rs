@@ -14,6 +14,7 @@
 //! [`Link::serve_response`], and reports the channel draining with
 //! [`Link::buffered_amount_low`].
 
+use std::borrow::Cow;
 use std::collections::VecDeque;
 
 use indexmap::{IndexMap, IndexSet};
@@ -909,6 +910,16 @@ impl Link {
     /// `None` when they are not held or serving is declined. Upload already
     /// charged for a cancelled response is not refunded.
     pub fn serve_response(&mut self, now: u64, bytes: Option<Vec<u8>>) {
+        self.serve(now, bytes.map(Cow::Owned));
+    }
+
+    /// As [`Link::serve_response`], borrowing the held object: only the bytes
+    /// the response sends are copied, so a piece range copies just the range.
+    pub fn serve_response_slice(&mut self, now: u64, bytes: Option<&[u8]>) {
+        self.serve(now, bytes.map(Cow::Borrowed));
+    }
+
+    fn serve(&mut self, now: u64, bytes: Option<Cow<'_, [u8]>>) {
         self.clock = now;
         let Some(Active {
             upload,
@@ -918,19 +929,28 @@ impl Link {
             return;
         };
         let none = [("t", &Value::from("none")), ("id", &Value::from(upload.id))];
-        let Some(mut bytes) = bytes else {
+        let Some(held) = bytes else {
             self.send_text(&none);
             return self.finish_upload();
         };
         // A range the held object does not have is answered with `none`.
-        if let Some(range) = upload.range {
-            let Some((from, to)) = range_bytes(bytes.len() as u64, range) else {
-                self.send_text(&none);
-                return self.finish_upload();
-            };
-            bytes.truncate(to as usize);
-            bytes.drain(..from as usize);
-        }
+        let bytes = match upload.range {
+            Some(range) => {
+                let Some((from, to)) = range_bytes(held.len() as u64, range) else {
+                    self.send_text(&none);
+                    return self.finish_upload();
+                };
+                match held {
+                    Cow::Owned(mut bytes) => {
+                        bytes.truncate(to as usize);
+                        bytes.drain(..from as usize);
+                        bytes
+                    }
+                    Cow::Borrowed(bytes) => bytes[from as usize..to as usize].to_vec(),
+                }
+            }
+            None => held.into_owned(),
+        };
         if upload.cancelled {
             self.events.push(LinkEvent::UploadCancelled(bytes.len() as u64));
             self.send_text(&none);
@@ -1021,6 +1041,12 @@ impl Link {
         }
         if pending.draining {
             return;
+        }
+        // A size the caller expected (from a signed commitment, and equal to
+        // `meta`) is reserved once, on the first byte. A size only the remote
+        // declared grows as bytes arrive, so `meta` alone holds no memory.
+        if pending.parts.capacity() == 0 && pending.expected.is_some() {
+            pending.parts.reserve_exact(size as usize);
         }
         pending.parts.extend_from_slice(chunk);
         let received = pending.received;

@@ -1,4 +1,4 @@
-import { verifyEvent } from "nostr-tools/pure";
+import { getEventHash, verifyEvent } from "nostr-tools/pure";
 
 // Experimental assignments, not an accepted NIP. Delegates require an explicit
 // author-signed scope and a host-provided revocation view; no relay is queried.
@@ -11,9 +11,30 @@ const DOMAIN_V2 = "relayswarm-segment-v2";
 const DOMAIN_V3 = "relayswarm-segment-v3";
 const DOMAINS = { 1: DOMAIN, 2: DOMAIN_V2, 3: DOMAIN_V3 };
 const encoder = new TextEncoder();
+// Schnorr verdicts already proved, keyed by the recomputed event hash, pubkey
+// and signature. The stream event, a delegation and its revocations are
+// checked again on every segment; the hash is recomputed on every call, so a
+// changed field is a different key. Least recently used entries go first.
+const PROVED_CAPACITY = 512;
+const proved = new Map();
 
 function validSignature(event) {
-  return verifyEvent({ id: event.id, pubkey: event.pubkey, created_at: event.created_at, kind: event.kind, tags: event.tags, content: event.content, sig: event.sig });
+  // A fresh copy, so a verdict cached on the host's object is never trusted.
+  const copy = { id: event.id, pubkey: event.pubkey, created_at: event.created_at, kind: event.kind, tags: event.tags, content: event.content, sig: event.sig };
+  let hash;
+  try { hash = getEventHash(copy); } catch { return false; }
+  if (hash !== copy.id || typeof copy.sig !== "string") return false;
+  // The hash commits to the pubkey; separators keep the key unambiguous anyway.
+  const key = `${hash}:${copy.pubkey}:${copy.sig}`;
+  if (proved.has(key)) {
+    proved.delete(key);
+    proved.set(key, true);
+    return true;
+  }
+  if (!verifyEvent(copy)) return false;
+  if (proved.size >= PROVED_CAPACITY) proved.delete(proved.keys().next().value);
+  proved.set(key, true);
+  return true;
 }
 function bounded(event) { return encoder.encode(JSON.stringify(event)).length <= 16 * 1024; }
 function tag(event, name) {
