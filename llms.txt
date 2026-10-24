@@ -84,6 +84,7 @@ See the [P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
 
 ## Documentation
 
+- [Experimental real-time transport](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/REALTIME-TRANSPORT.md): Source-only unordered datagram adapter over existing NIP-44 sessions; not a call SDK, SFU or managed service.
 - [Goals and agent handover](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/AGENT-GOALS.md): Agreed P01-P12 goals, latest retained deployment evidence, remaining acceptance sequence and local evidence paths for a continuing agent.
 - [Production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md): Implemented source features, trust boundaries and native fallback.
 - [Production delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md): Full implementation, publication, deployment and real-world acceptance scope.
