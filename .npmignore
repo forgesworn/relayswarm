@@ -15,6 +15,7 @@ state/
 **/youtube-url
 
 # Native build output ships as separate release assets.
+/target/
 /core/target/
 /core/apple/.build/
 /core/apple/.swiftpm/

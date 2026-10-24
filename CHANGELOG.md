@@ -16,6 +16,7 @@ public-NAT and sustained acceptance remain open. See [Status](docs/STATUS.md).
   both sides retain the exact connection while delivering four verified 256 KiB
   objects; later revocation sends zero peer bytes. This is synthetic loopback
   protocol evidence, not distributed field acceptance.
+- Exclude local native real-time build output from the JavaScript tarball.
 
 ## v0.4.1 (24 October 2026)
 
