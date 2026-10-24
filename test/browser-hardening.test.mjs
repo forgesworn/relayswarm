@@ -1097,7 +1097,7 @@ test("the Rust core verifies peer-first commitments, and its rejection stands", 
     const metrics = fixture.swarm.metrics();
     assert.equal(metrics.segments.commitmentRejected, 1);
     assert.equal(metrics.segments.peerFirstLoaded, 1);
-    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", discovery: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", discovery: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
   } finally { await fixture.close(); }
 });
 
@@ -1113,7 +1113,7 @@ test("a trapping or unloadable core hands its links and verification to JavaScri
       const metrics = fixture.swarm.metrics();
       assert.equal(metrics.segments.peerFirstLoaded, 1);
       // The trapping core fails on the first link it opens, which then runs in JavaScript.
-      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
       assert.equal(metrics.errors.byStage.core, 1);
     } finally { await fixture.close(); }
   }
@@ -1129,7 +1129,7 @@ test("a core that answers malformed results retires and the loader carries on in
     const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder")).catch(() => null);
     await until(() => fixture.swarm.metrics().core.state === "failed");
     const { core, errors } = fixture.swarm.metrics();
-    assert.deepEqual({ ...core, links: core.links.wasm + core.links.js }, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: 1, fallbacks: 1, decided: { wasm: 0, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+    assert.deepEqual({ ...core, links: core.links.wasm + core.links.js }, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: 1, fallbacks: 1, decided: { wasm: 0, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
     assert.equal(errors.byStage.core, 1);
     if (channel && core.links.js === 1) {
       channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
@@ -1172,7 +1172,7 @@ test("the core option is checked and ignored outside peer-first", () => {
     assert.equal(createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm }).metrics().disabledReason, "invalid-core-wasm");
   }
   const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm });
-  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
   swarm.stop();
 });
 
@@ -4463,28 +4463,38 @@ function sameBytes(actual, expected, message) {
     message ?? `got ${actual.length} bytes, expected ${expected.length}`);
 }
 
-async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, originFallbackMs = 3_000, originDelayMs = 0, ignoreRanges = false, traceRequests = 0, peerSupplyHint = false, onPlayerHint = null, beforeCommitment = null, onPeerDelivery = null }) {
+async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, originFallbackMs = 3_000, originDelayMs = 0, wholeOriginDelayMs = 0, ignoreRanges = false, traceRequests = 0, peerSupplyHint = false, onPlayerHint = null, beforeCommitment = null, onPeerDelivery = null, swarmOptions = {} }) {
   const bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
   // The player's loader. It answers a range from the same object; its whole
   // segment is different bytes, so a whole-segment fallback shows.
-  const ranges = [], rangeLoaders = [];
+  const ranges = [], rangeLoaders = [], wholeLoads = [];
+  let commitmentCalls = 0;
   class RangeLoader extends Loader {
     constructor(config) { super(); this.config = config; }
     load(context, config, callbacks) {
-      if (!context.rangeEnd) return super.load(context, config, callbacks);
+      this.aborted = false;
+      if (!context.rangeEnd) {
+        this.wholeCallbacks = callbacks; this.wholeContext = context;
+        wholeLoads.push({ loader: this, context, config, callbacks });
+        return wholeOriginDelayMs
+          ? setTimeout(() => callbacks.onSuccess({ data: bytes.slice().buffer }, this.stats, context, null), wholeOriginDelayMs)
+          : super.load(context, config, callbacks);
+      }
       if (ignoreRanges) return setTimeout(() => super.load(context, config, callbacks), originDelayMs);
       rangeLoaders.push({ config: this.config, loaderConfig: config, context });
       ranges.push([context.rangeStart, context.rangeEnd - 1]);
       setTimeout(() => callbacks.onSuccess({ data: bytes.slice(context.rangeStart, context.rangeEnd).buffer }, this.stats, context, null), originDelayMs);
     }
+    abort() { this.aborted = true; this.wholeCallbacks?.onAbort?.(this.stats, this.wholeContext, null); }
+    destroy() { this.destroyed = true; }
   }
   const pieceSize = commitmentPieceSize(size), pieces = [];
   for (let at = 0; at < size; at += pieceSize) pieces.push(createHash("sha256").update(bytes.subarray(at, at + pieceSize)).digest("hex"));
   const key = createHash("sha256").update(`${base.swarmId}\n/media/seg.ts`).digest("hex");
   const signed = signedFixture({ v: 3, key, rendition: "/media/index.m3u8", playlist: "/media/index.m3u8", mediaType: "main", encryption: null,
     sha256: createHash("sha256").update(bytes).digest("hex"), size, pieceSize, pieces });
-  const f = await linkedFixture({ mode: "peer-first", streamEvent: signed.options.streamEvent, getCommitment: beforeCommitment ? async () => { await beforeCommitment(); return signed.event; } : () => signed.event, originFallbackMs,
-    segmentKey: (url) => new URL(url).pathname, coreWasm: multiCore, multiHolder, traceRequests, peerSupplyHint, onPlayerHint, onPeerDelivery, WebSocketImpl: memoryRelaySocket() }, RangeLoader);
+  const f = await linkedFixture({ mode: "peer-first", streamEvent: signed.options.streamEvent, getCommitment: async (...args) => { commitmentCalls++; await beforeCommitment?.(...args); return signed.event; }, originFallbackMs,
+    segmentKey: (url) => new URL(url).pathname, coreWasm: multiCore, multiHolder, traceRequests, peerSupplyHint, onPlayerHint, onPeerDelivery, WebSocketImpl: memoryRelaySocket(), ...swarmOptions }, RangeLoader);
   await until(() => f.swarm.metrics().core.state === "ready");
   const channels = [];
   for (const options of holders) {
@@ -4499,8 +4509,215 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
   t.mock.method(globalThis, "fetch", async () => { throw new Error("ranged origin load bypassed the player's loader"); });
   const hlsConfig = { xhrSetup: () => {} }, loaderConfig = { loadPolicy: { maxTimeToFirstByteMs: 10_000, maxLoadTimeMs: 10_000 } };
   const load = async () => new Uint8Array((await new Promise((resolve) => new f.hls.config.fLoader(hlsConfig).load(multiContext, loaderConfig, { onSuccess: resolve }))).data);
-  return { ...f, bytes, channels, load, pieceSize, ranges, rangeLoaders, hlsConfig, loaderConfig };
+  return { ...f, bytes, channels, load, pieceSize, ranges, rangeLoaders, wholeLoads, hlsConfig, loaderConfig, get commitmentCalls() { return commitmentCalls; } };
 }
+
+function beginCountedMultiLoad(f) {
+  const calls = { success: [], abort: [], error: [], progress: [] };
+  let resolve;
+  const response = new Promise(done => { resolve = done; });
+  const loader = new f.hls.config.fLoader(f.hlsConfig);
+  loader.load(multiContext, f.loaderConfig, {
+    onSuccess: (...args) => { calls.success.push(args); resolve(new Uint8Array(args[0].data)); },
+    onAbort: (...args) => calls.abort.push(args), onError: (...args) => calls.error.push(args),
+    onProgress: (...args) => calls.progress.push(args),
+  });
+  return { loader, response, calls };
+}
+
+test("zero-budget cached race starts HTTP first and accepts only a complete verified peer winner", async t => {
+  const observed = [];
+  let f;
+  f = await multiFixture(t, { holders: [{}], wholeOriginDelayMs: 100, onPeerDelivery: value => observed.push(value),
+    swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 500, segmentKey: url => {
+      assert.ok(f.wholeLoads.length > 0, "normal HTTP starts before even the local key callback"); return new URL(url).pathname;
+    } } });
+  f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+  try {
+    const load = beginCountedMultiLoad(f);
+    assert.equal(f.wholeLoads.length, 1); assert.equal(f.commitmentCalls, 0);
+    sameBytes(await load.response, f.bytes);
+    assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaces, 1);
+    assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaceWins, 1);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length);
+    assert.equal(f.wholeLoads[0].loader.aborted, true);
+    assert.deepEqual(f.ranges, [], "the dummy origin lane never sends a ranged HTTP request");
+    assert.equal(observed.reduce((sum, value) => sum + value.bytes, 0), f.bytes.length);
+    assert.equal(observed[0].connection, f.connections[0]);
+    await sleep(130);
+    assert.deepEqual([load.calls.success.length, load.calls.abort.length, load.calls.error.length], [1, 0, 0], "losing HTTP callbacks stay suppressed");
+  } finally { await f.close(); }
+});
+
+test("zero-budget cached race never delays a winning HTTP response for uncooperative metadata", async t => {
+  let metadataSignal, metadataFinished = false;
+  const observed = [];
+  const f = await multiFixture(t, { holders: [{}], wholeOriginDelayMs: 15, onPeerDelivery: value => observed.push(value),
+    beforeCommitment: (_context, { signal }) => { metadataSignal = signal; return new Promise(resolve => setTimeout(() => { metadataFinished = true; resolve(); }, 100)); },
+    swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 500 } });
+  f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+  try {
+    const load = beginCountedMultiLoad(f);
+    sameBytes(await load.response, f.bytes);
+    assert.equal(metadataFinished, false, "HTTP success precedes metadata completion");
+    assert.equal(metadataSignal.aborted, true);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaceWins, 0);
+    assert.deepEqual(observed, []);
+    assert.deepEqual(f.channels[0].wants, []);
+    assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
+    await sleep(120); assert.equal(load.calls.success.length, 1);
+  } finally { await f.close(); }
+});
+
+test("zero-budget cached race clears holder history only for an accepted peer contributor", async t => {
+  const discovery = Object.getPrototypeOf((await loadCore(multiCore)).neighbourDiscovery());
+  const delivered = [], original = discovery.holderDelivered;
+  t.mock.method(discovery, "holderDelivered", function (context, pubkey) {
+    delivered.push({ context, pubkey });
+    return original.call(this, context, pubkey);
+  });
+  for (const peerWins of [true, false]) {
+    await t.test(peerWins ? "verified peer winner" : "HTTP winner", async t => {
+      delivered.length = 0;
+      const f = await multiFixture(t, { holders: [{}], wholeOriginDelayMs: peerWins ? 100 : 15,
+        beforeCommitment: peerWins ? null : () => sleep(100),
+        swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 500 } });
+      f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+      try {
+        await f.addPeer(new RangedChannel(f.bytes));
+        const load = beginCountedMultiLoad(f);
+        sameBytes(await load.response, f.bytes);
+        if (peerWins) {
+          assert.equal(delivered.length, 1, "a connected non-contributor keeps its holder history");
+          assert.equal(delivered[0].pubkey, f.peers[0].pubkey);
+          assert.equal(delivered[0].context.mediaType, "main");
+          assert.equal(f.swarm.metrics().neighbourDiscovery.counters.verified, 1);
+        } else {
+          await sleep(120);
+          assert.deepEqual(delivered, [], "losing metadata or partial peer work never clears holder history");
+          assert.equal(f.swarm.metrics().neighbourDiscovery.counters.verified, 0);
+        }
+      } finally { await f.close(); }
+    });
+  }
+});
+
+test("zero-budget cached race discards verified partial pieces when HTTP wins the whole object", async t => {
+  const observed = [];
+  const f = await multiFixture(t, { holders: [{ delayMs: 20 }], size: 2 * 1024 * 1024, wholeOriginDelayMs: 500,
+    onPeerDelivery: value => observed.push(value), swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 1_000 } });
+  f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+  try {
+    const load = beginCountedMultiLoad(f);
+    await until(() => f.swarm.metrics().core.multiHolder.peerBytes > 0);
+    assert.equal(f.swarm.metrics().core.multiHolder.delivered, 0);
+    const origin = f.wholeLoads[0];
+    origin.callbacks.onSuccess({ data: f.bytes.slice().buffer }, origin.loader.stats, multiContext, null);
+    sameBytes(await load.response, f.bytes);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaceWins, 0);
+    assert.deepEqual(observed, [], "partial verified pieces did not become an accepted player object");
+    assert.equal(origin.loader.aborted, false);
+    assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
+  } finally { await f.close(); }
+});
+
+test("zero-budget cached race rejects an invalid commitment without requesting peer media", async t => {
+  const f = await multiFixture(t, { holders: [{}], wholeOriginDelayMs: 30,
+    swarmOptions: { zeroBudgetPeerRace: true, getCommitment: () => null } });
+  f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+  try {
+    sameBytes(await beginCountedMultiLoad(f).response, f.bytes);
+    assert.equal(f.swarm.metrics().segments.commitmentRejected, 1);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.deepEqual(f.channels[0].wants, []);
+    assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
+  } finally { await f.close(); }
+});
+
+test("zero-budget cached race option requires an explicit boolean", () => {
+  for (const zeroBudgetPeerRace of [1, "true", null]) {
+    const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], zeroBudgetPeerRace });
+    assert.equal(swarm.metrics().disabledReason, "invalid-cached-race-option");
+    swarm.stop();
+  }
+});
+
+test("zero-budget cached race requires explicit opt-in and an already advertised matching HAVE", async t => {
+  for (const variant of ["default", "no-have", "late-have", "progressive"]) await t.test(variant, async t => {
+    const f = await multiFixture(t, { holders: [{}], wholeOriginDelayMs: 20,
+      swarmOptions: variant === "default" ? {} : { zeroBudgetPeerRace: true } });
+    f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    try {
+      const key = createHash("sha256").update(`${base.swarmId}\n/media/seg.ts`).digest("hex");
+      if (variant === "no-have") f.channels[0].receive(JSON.stringify({ t: "have", keys: [] }));
+      if (variant === "late-have") f.channels[0].receive(JSON.stringify({ t: "have", keys: ["f".repeat(64)] }));
+      if (variant === "progressive") f.hlsConfig.progressive = true;
+      const load = beginCountedMultiLoad(f);
+      if (variant === "late-have") f.channels[0].receive(JSON.stringify({ t: "have", keys: [key] }));
+      sameBytes(await load.response, f.bytes);
+      assert.equal(f.commitmentCalls, 0); assert.deepEqual(f.channels[0].wants, []);
+      assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaces, 0);
+      assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
+    } finally { await f.close(); }
+  });
+});
+
+test("zero-budget cached race preserves pending HTTP on stop and cancels both arms on loader abort or destroy", async t => {
+  for (const ending of ["stop", "abort", "destroy"]) await t.test(ending, async t => {
+    const observed = [];
+    const f = await multiFixture(t, { holders: [{ silent: true }], wholeOriginDelayMs: 75, onPeerDelivery: value => observed.push(value),
+      swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 500 } });
+    f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    try {
+      const load = beginCountedMultiLoad(f);
+      await until(() => f.channels[0].wants.length > 0);
+      if (ending === "stop") f.swarm.stop(); else load.loader[ending]();
+      if (ending === "stop") sameBytes(await load.response, f.bytes);
+      await sleep(100);
+      assert.equal(load.calls.success.length, ending === "stop" ? 1 : 0);
+      assert.equal(load.calls.abort.length, ending === "abort" ? 1 : 0);
+      assert.equal(f.wholeLoads[0].loader.aborted === true, ending !== "stop");
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.deepEqual(observed, []);
+      assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
+    } finally { await f.close(); }
+  });
+});
+
+test("zero-budget cached race rejects corrupt pieces and expires only the peer arm", async t => {
+  for (const variant of ["corrupt", "timeout"]) await t.test(variant, async t => {
+    const observed = [];
+    const f = await multiFixture(t, { holders: [variant === "corrupt" ? { corrupt: true } : { silent: true }], wholeOriginDelayMs: 75,
+      onPeerDelivery: value => observed.push(value), swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 30 } });
+    f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    try {
+      const load = beginCountedMultiLoad(f);
+      sameBytes(await load.response, f.bytes);
+      assert.equal(load.calls.success.length, 1); assert.equal(load.calls.abort.length, 0);
+      assert.equal(f.wholeLoads[0].loader.aborted === true, false);
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.deepEqual(observed, []);
+      if (variant === "corrupt") assert.equal(f.swarm.metrics().core.multiHolder.bans, 1);
+      assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
+    } finally { await f.close(); }
+  });
+});
+
+test("zero-budget cached race locks to HTTP before forwarding unexpected progressive media", async t => {
+  const observed = [];
+  const f = await multiFixture(t, { holders: [{ delayMs: 40 }], wholeOriginDelayMs: 75, onPeerDelivery: value => observed.push(value),
+    swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 500 } });
+  f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+  try {
+    const load = beginCountedMultiLoad(f);
+    await until(() => f.channels[0].wants.length > 0);
+    f.wholeLoads[0].callbacks.onProgress({}, multiContext, new Uint8Array([1]).buffer, null);
+    sameBytes(await load.response, f.bytes);
+    assert.equal(load.calls.progress.length, 1); assert.equal(load.calls.success.length, 1);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.deepEqual(observed, []);
+    assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
+  } finally { await f.close(); }
+});
 
 test("multi-holder: two framing 2 holders each send pieces of one schema 3 segment", async (t) => {
   const observed = [], aggregateAtObservation = [];
@@ -4606,6 +4823,37 @@ test("multi-holder: a failed object never observes its already verified peer pie
     assert.equal(multiHolder.delivered, 0);
     assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
     assert.deepEqual(observed, [], "partial verified pieces were never handed to the player");
+  } finally {
+    if (f) await clock.settle(f.close());
+    clock.restore();
+  }
+});
+
+test("multi-holder: a slow origin tail keeps the measured recovery reserve instead of falling back after two seconds", async t => {
+  const clock = virtualClock(t), observed = [];
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { holders: [{}, { silent: true }], size: 12 * 65_536,
+      originFallbackMs: 400, originDelayMs: 3_000, wholeOriginDelayMs: 3_000, traceRequests: 256,
+      onPeerDelivery: value => observed.push(value) }));
+    f.hls.media = { currentTime: 10, buffered: { length: 0 } };
+    sameBytes(await clock.settle(f.load()), f.bytes, "first origin load establishes the real three-second recovery time");
+    f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 14.4 } };
+    const start = clock.now();
+    sameBytes(await clock.settle(f.load()), f.bytes);
+    const elapsed = clock.now() - start;
+    assert.ok(elapsed > 2_000 && elapsed < 4_400, `the ranged tail completed within the original buffered playback (${elapsed}ms)`);
+    const metrics = f.swarm.metrics(), multi = metrics.core.multiHolder;
+    assert.equal(metrics.segments.originFallbacks, 1, "no second whole-segment request discards verified peer pieces");
+    assert.equal(multi.delivered, 1);
+    assert.ok(multi.peerBytes > 0 && multi.originBytes > 0);
+    assert.equal(metrics.bytes.peerFirst, observed.reduce((sum, value) => sum + value.bytes, 0));
+    assert.equal(multi.originRangeOutcomes.payload, 2);
+    assert.equal(multi.originRangeOutcomes.abort, 0, "valid range bodies were not cancelled at the configured two-second limit");
+    const load = f.swarm.trace().rows.filter(row => row.k === "load").at(-1);
+    assert.equal(load.budgetGeometry.originReserveMs, 3_850, "the measured p90 reserve was retained by this load");
+    multi.originRangeOutcomes.payload = 999;
+    assert.equal(f.swarm.metrics().core.multiHolder.originRangeOutcomes.payload, 2, "diagnostic snapshots own their fixed counters");
   } finally {
     if (f) await clock.settle(f.close());
     clock.restore();

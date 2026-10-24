@@ -3,8 +3,8 @@
 [Documentation](README.md) · [Installation](GETTING-STARTED.md) ·
 [hls.js integration](../INTEGRATION.md)
 
-This describes current source, including additions after the published v0.3.0
-experimental prerelease. Package version `0.3.0`, session wire version `3`,
+This describes current source, including additions after the experimental
+v0.4.0 source snapshot. Package version `0.4.0`, session wire version `3`,
 segment-commitment schemas `1`/`2`/`3` (3 experimental) and metrics snapshot
 version `2` are different version numbers. Source exports and protocol fields
 are not a stable interoperability promise; immutable release assets retain
@@ -62,6 +62,14 @@ references for accepted, active links. It excludes pending dials, offers,
 glare negotiations and closed/disconnected links; `stop()` leaves it empty.
 Mutating the returned array cannot alter the swarm. Keep native references
 local to the host; serialisable metrics contain no connection objects.
+
+The opt-in `zeroBudgetPeerRace: true` races an already advertised cached
+schema 3 object against immediately started normal HTTP when no safe peer
+wait remains. It requires the WASM multi-holder engine and adds no ranged
+origin fetch. Only a complete verified peer winner counts as peer media.
+Normal HTTP never waits for metadata; stopping the swarm cancels its peer
+arm while that pending HTTP request continues. Progressive hls.js loads skip
+the race. See the [options and lifecycle contract](../INTEGRATION.md#options).
 
 `trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
 `traceRequests` (none by default): each peer-first load, eligibility

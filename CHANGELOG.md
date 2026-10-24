@@ -1,5 +1,17 @@
 # RelaySwarm changelog
 
+## Unreleased
+
+- Preserve the measured per-load HTTP recovery reserve when a multi-holder
+  deadline moves unfinished pieces to origin. Retain bounded, URL-free range
+  outcome counters so aborts, timeouts and incorrect response sizes are distinct.
+- Add opt-in `zeroBudgetPeerRace`: start the normal HTTP request immediately
+  and race only an already advertised cached schema-3 object. Only a complete
+  verified winner reaches the player; stopping the swarm leaves pending HTTP
+  running, while loader cancellation stops both arms. Defaults are unchanged.
+- Apply accepted-contributor holder recovery to both normal peer-first loads
+  and cached races; all-origin and unsuccessful peer work remain neutral.
+
 ## v0.4.0 (24 October 2026)
 
 The old JavaScript field qualifier R70 passed 15 of 16 gates at `20693ea`;

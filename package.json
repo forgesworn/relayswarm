@@ -12,6 +12,7 @@
     "test:browser": "node test/hls-swarm-browser.mjs",
     "test:proto": "node --test test/proto-vectors.test.mjs test/core-wasm.test.mjs test/core-link.test.mjs test/core-transfer.test.mjs test/trace-report.test.mjs",
     "test:core-link:browser": "node test/core-link-native-browser.mjs",
+    "test:cached-peer-race:browser": "node test/zero-budget-peer-race-native-browser.mjs",
     "core:wasm": "node scripts/build-core-wasm.mjs",
     "test:ffi:swift": "node scripts/ffi-smoke.mjs swift",
     "test:ffi:kotlin": "node scripts/ffi-smoke.mjs kotlin",

@@ -77,6 +77,9 @@ v0.4.0 integrates holder recovery across JavaScript and the core, accepted
 connection/verified-media observations, partial-progress retention, reliable
 channel cancellation draining and first-healthy-relay recovery. The old R70
 qualifier passed 15 of 16 gates; the integrated source is not field-qualified.
+Later main-branch source preserves the measured HTTP recovery reserve and adds
+opt-in cached peer races beside immediate HTTP when no safe peer wait remains.
+Only accepted verified media counts; partial competing HTTP can still transfer.
 
 Production acceptance remains open. Dated pilot records retain their exact
 sources and RED/open sustained-operation, physical-device, difficult-network
