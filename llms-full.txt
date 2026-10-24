@@ -144,11 +144,17 @@ flowchart TB
 
 Other approaches and the narrow comparison are in [Landscape](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/LANDSCAPE.md).
 [RelaySwarmKit](https://github.com/forgesworn/relayswarm-kit) is a separate Swift
-signalling/transport project. Published Kit v0.5.0 supports session version 3
-and signed media. Its public SDK received verified author/delegate HLS bytes
-from the production browser loader and rejected corruption and revocation.
+signalling/transport project. Kit v0.6.0 adopts the released Rust core and
+supports session version 3, signed schemas 1/2/3 and explicit piece transfers.
+Its public SDK received verified author/delegate HLS bytes from two production
+browser peers and rejected corruption, signature tampering and revocation.
 That measured macOS arm64/Chrome loopback journey and its boundaries are in the
 [protocol draft](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/NIP-DRAFT.md); physical-device and NAT acceptance remain open.
+
+These are libraries; running a ForgeSworn-hosted service is not required.
+Applications choose their HLS origin, signalling relays and network policy.
+The interoperability fixtures use temporary loopback servers and close them
+after each run. Historical pilot deployments are separate, dated evidence.
 
 ## Evidence
 
@@ -1389,7 +1395,8 @@ package; its minimums are iOS 16 and macOS 14, arm64 only. The AAR requires
 Android API 26+, Kotlin 2.2+ and `net.java.dev.jna:jna:5.14.0@aar`.
 See [Native core packaging](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-PACKAGING.md) for the complete dependency,
 build and verification contract. These are core bindings, with no native
-WebRTC adapter or client application, and RelaySwarmKit has not adopted them.
+WebRTC adapter or client application. RelaySwarmKit v0.6.0 separately adopts
+the released core; its existing WebRTC transport remains macOS arm64 only.
 
 ## Run the source demo
 
@@ -1467,11 +1474,12 @@ npm run test:media-browser
 npm run test:media-recovery          # actual corrupt-media repair/cancel/deadline journeys
 npm run test:interop
 npm run test:interop:kit             # published SDK API, not the historical adapter
+npm run test:interop:kit -- --pieces # schema-3, two browser holders, released core
 ```
 
 The historical adapter fixture requires macOS arm64 and read-only authenticated
 `gh` access to its pinned public sources. The current SDK fixture uses published
-Kit v0.5.0 in `../relayswarm-kit` (or `RELAYSWARM_KIT_DIR`) and requires Swift 6,
+Kit v0.6.0 in `../relayswarm-kit` (or `RELAYSWARM_KIT_DIR`) and requires Swift 6,
 macOS arm64, Chrome and ffmpeg. Its verified transfer and acceptance boundaries
 are in the [interop guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/interop/README.md).
 
@@ -1687,7 +1695,7 @@ const publisher = await createHlsPublisher({
 | `maxConcurrent` | `8` | Simultaneous signing work, configurable from 1 to 64 |
 | `maxCacheEntries` | `512` | Entries in each bounded hash/commitment cache, configurable from 1 to 4,096 |
 | `allowEncryptedMedia` | `false` | Explicit AES-128 ciphertext publication; local keys remain HTTP-only |
-| `pieceCommitments` | `false` | Experimental: sign exact-playlist contexts as schema 3 (one SHA-256 per piece) instead of schema 2. v0.2.1 and RelaySwarmKit v0.5.0 receivers reject schema 3 and load those segments from origin |
+| `pieceCommitments` | `false` | Experimental: sign exact-playlist contexts as schema 3 (one SHA-256 per piece) instead of schema 2. v0.2.1 and RelaySwarmKit v0.5.0 receivers reject schema 3; Kit v0.6.0 has an explicit schema-3 piece API |
 | `commitmentSecretKey` / `delegation` | author key / none | Author-scoped delegated commitment signing; an externally authored event permits operation without the author secret |
 | `revokedDelegationIds` / `delegationRevocations` | empty arrays | Host-trusted current revocation view; no automatic global lookup |
 
@@ -2055,10 +2063,36 @@ is not tagged-release or physical-device evidence.
 The core, multi-holder path and peer supply hint remain opt-in. The hint is
 advisory and reports known HAVE supply. Signature checks remain in the core
 following the [measured comparison](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-SIGNATURE-BUDGET.md). The scheduler
-keeps the 32 KiB/s floor and three-holder default. RelaySwarmKit adoption,
-a native WebRTC adapter/client and physical-device/public-NAT acceptance
-remain open. This release does not change the controlled pilot deployment
-or turn its historical RED results into current acceptance.
+keeps the 32 KiB/s floor and three-holder default. RelaySwarmKit v0.6.0 adopts
+the released core for verification, framing and explicit schema-3 scheduling.
+A separate native application and physical-device/public-NAT acceptance remain
+open. Publishing the libraries does not deploy or qualify a pilot.
+
+## Swift core adoption (24 October 2026)
+
+[Kit v0.6.0](https://github.com/forgesworn/relayswarm-kit/releases/tag/v0.6.0)
+consumes the v0.3.0 XCFramework by URL/checksum and retains its unedited UniFFI
+wrapper and exact 140 verifier vectors and 48 link traces. Swift retains the
+application's author/admission gates, exclusive channel ownership, timers,
+cancellation and host-supplied origin policy. Native buffered amount and
+low-water callbacks pace opt-in uploads; no synthetic empty queue is used.
+
+The 54-test Kit suite passes with one opt-in public-relay test skipped. It
+includes a real 3 MiB ranged upload over multiple native queue windows, corrupt
+holder bans, exact origin ranges, final trust checks and joined cancellation.
+The current-SDK Chrome fixture covers both schema-2 whole-object reception and
+schema-3 two-holder assembly. Author/delegate cases deliver verified generated
+H.264/AAC fMP4 bytes. Corruption, signature tampering and both pre-request and
+in-flight revocation return zero media. No Swift wire adapter is used.
+The piece fixture labels its controlled timing estimates; they are not measured
+network rates. CI pins the SDK source and retains receipts with source hashes.
+
+This is macOS arm64/Chrome loopback evidence. It does not prove physical Apple
+devices, public NAT, sustained field quality or net hosting benefit. Kit's
+transport binary remains macOS arm64 only despite the core's iOS slices.
+RelaySwarm and Kit are libraries and require no ForgeSworn-hosted backend.
+Applications supply their own media, relays and policy. Test fixtures are
+temporary loopback listeners; no public pilot is required or deployed here.
 
 ## Experimental core supply hint, 24 October 2026
 

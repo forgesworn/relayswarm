@@ -132,11 +132,17 @@ flowchart TB
 
 Other approaches and the narrow comparison are in [Landscape](docs/LANDSCAPE.md).
 [RelaySwarmKit](https://github.com/forgesworn/relayswarm-kit) is a separate Swift
-signalling/transport project. Published Kit v0.5.0 supports session version 3
-and signed media. Its public SDK received verified author/delegate HLS bytes
-from the production browser loader and rejected corruption and revocation.
+signalling/transport project. Kit v0.6.0 adopts the released Rust core and
+supports session version 3, signed schemas 1/2/3 and explicit piece transfers.
+Its public SDK received verified author/delegate HLS bytes from two production
+browser peers and rejected corruption, signature tampering and revocation.
 That measured macOS arm64/Chrome loopback journey and its boundaries are in the
 [protocol draft](docs/NIP-DRAFT.md); physical-device and NAT acceptance remain open.
+
+These are libraries; running a ForgeSworn-hosted service is not required.
+Applications choose their HLS origin, signalling relays and network policy.
+The interoperability fixtures use temporary loopback servers and close them
+after each run. Historical pilot deployments are separate, dated evidence.
 
 ## Evidence
 
