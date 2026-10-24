@@ -234,11 +234,16 @@ impl PeerSelection {
                 best = link;
             }
         }
-        self.order += 1;
-        let mut value = self.summary(best.id);
-        value.last_selected = self.order;
-        self.observations.insert(best.id, value);
+        self.mark_selected(best.id);
         Some(best.id)
+    }
+
+    /// Record a host-granted trial selection without inventing an observation.
+    pub fn mark_selected(&mut self, link: u64) {
+        self.order += 1;
+        let mut value = self.summary(link);
+        value.last_selected = self.order;
+        self.observations.insert(link, value);
     }
 
     /// One attempt on `link`: `bytes` delivered (0 for a failure).

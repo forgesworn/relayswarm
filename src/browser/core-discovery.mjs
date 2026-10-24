@@ -9,8 +9,9 @@ import { validTicket } from "../relay-session.mjs";
 const HASH = /^[0-9a-f]{64}$/u;
 const OP = { context: 0, demand: 1, hint: 2, holderMiss: 3, holderAhead: 4, stale: 5, forget: 6, current: 7, candidates: 8,
   choose: 9, hinted: 10, begin: 11, valid: 12, replaced: 13, allocated: 14, abandoned: 15, failed: 16, end: 17, verified: 18,
-  live: 19, reserved: 20, suppresses: 21, snapshot: 22, clear: 23 };
+  live: 19, reserved: 20, suppresses: 21, snapshot: 22, clear: 23, rearm: 24 };
 const CANDIDATE_FRESH_MS = 60_000;
+const REPLACEMENT_REARM_MS = 20_000;
 const BOOLEAN = new Set([OP.stale, OP.current, OP.valid, OP.live, OP.reserved, OP.suppresses]);
 
 // Only a failure inside the core retires it; a throwing callback from the
@@ -44,7 +45,7 @@ export class CoreNeighbourDiscovery {
     this.clock = clock;
     // The swarm counts expired, opened, staleHolder and staleBlocked here
     // itself; the core's checks, replacements and verified are copied in.
-    this.counters = { checks: 0, replacements: 0, expired: 0, opened: 0, verified: 0, staleHolder: 0, staleBlocked: 0 };
+    this.counters = { checks: 0, replacements: 0, expired: 0, opened: 0, verified: 0, staleHolder: 0, staleBlocked: 0, heldMiss: 0, rearmed: 0, victimUnhelpful: 0, victimServing: 0, victimConsumer: 0, unmetNoHint: 0, unmetIneligible: 0 };
   }
 
   get kind() { return this.#fallback ? "js" : "wasm"; }
@@ -102,7 +103,7 @@ export class CoreNeighbourDiscovery {
         this.#contextIds.set(context, value.id);
       }
       if (context.keys.length !== value.keys.length || context.keys.some((key, index) => key !== value.keys[index])) context.keys = value.keys;
-      Object.assign(context, { lastDemandAt: value.lastDemandAt, activityAt: value.activityAt, spent: value.spent });
+      Object.assign(context, { lastDemandAt: value.lastDemandAt, activityAt: value.activityAt, spent: value.spent, spentAt: value.spentAt });
       live.set(value.id, context);
       this.#contexts.set(value.mediaType, context);
     }
@@ -126,7 +127,7 @@ export class CoreNeighbourDiscovery {
       }
     }
     this.#contextById = live;
-    [this.counters.checks, this.counters.replacements, this.counters.verified] = n;
+    [this.counters.checks, this.counters.replacements, this.counters.verified, this.counters.rearmed, this.counters.unmetNoHint, this.counters.unmetIneligible] = n;
   }
 
   #contextId(context) { return context ? this.#contextIds.get(context) ?? null : null; }
@@ -175,7 +176,21 @@ export class CoreNeighbourDiscovery {
 
   holderMiss(context, pubkey, key) {
     if (typeof pubkey !== "string" || typeof key !== "string") return;
-    this.#run(() => { this.#query(OP.holderMiss, [this.#contextId(context), pubkey, key]); }, (js) => js.holderMiss(context, pubkey, key));
+    return this.#run(() => this.#query(OP.holderMiss, [this.#contextId(context), pubkey, key]), (js) => js.holderMiss(context, pubkey, key));
+  }
+
+  holderDelivered(context, pubkey) { this.holderAhead(context, pubkey); }
+
+  spent(context) { return this.#fallback ? this.#fallback.spent(context) : context?.spentAt !== null && context?.spentAt !== undefined; }
+
+  rearm(context, allStale) {
+    return this.#run(() => {
+      const id = this.#contextId(context);
+      const now = this.clock();
+      if (id === null || !this.spent(context) || now < context.spentAt
+        || now - context.spentAt < REPLACEMENT_REARM_MS || !this.current(context)) return false;
+      return this.#mutate(OP.rearm, [id, Boolean(allStale())]);
+    }, (js) => js.rearm(context, allStale));
   }
 
   holderAhead(context, pubkey) {
@@ -204,7 +219,7 @@ export class CoreNeighbourDiscovery {
       // unmet runs only for a current context, as in neighbour-discovery.mjs.
       const wanted = contexts.filter((context) => this.#query(OP.current, [this.#contextId(context)]) && unmet(context)).map((context) => context.mediaType);
       if (wanted.length === 0) return this.#found = null;
-      return this.#foundFrom(this.#query(OP.choose, [this.#candidates(eligible), wanted, Boolean(room)]));
+      return this.#foundFrom(this.#mutate(OP.choose, [this.#candidates(eligible), wanted, Boolean(room)]));
     }, (js) => js.choose(eligible, unmet, room));
   }
 

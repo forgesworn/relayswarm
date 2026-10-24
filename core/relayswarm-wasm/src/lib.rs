@@ -181,6 +181,11 @@ pub extern "C" fn rs_sel_forget(link: u32) {
     with_selection(|selection| selection.forget(u64::from(link)));
 }
 
+#[no_mangle]
+pub extern "C" fn rs_sel_mark(link: u32) {
+    with_selection(|selection| selection.mark_selected(u64::from(link)));
+}
+
 /// Choose among `count` link handles at `links` (little-endian u32 each),
 /// which the caller has already filtered for open, idle, untried links
 /// holding the key. Returns the chosen handle, or -1 for none.
@@ -531,6 +536,7 @@ pub const DISC_RESERVED: u32 = 20;
 pub const DISC_SUPPRESSES: u32 = 21;
 pub const DISC_SNAPSHOT: u32 = 22;
 pub const DISC_CLEAR: u32 = 23;
+pub const DISC_REARM: u32 = 24;
 
 fn candidate_json(candidate: &Candidate) -> Value {
     serde_json::json!([candidate.pubkey, candidate.have, candidate.ticket, candidate.at])
@@ -554,7 +560,7 @@ fn discovery_state(discovery: &NeighbourDiscovery) -> Value {
         .contexts()
         .map(|context| {
             serde_json::json!({ "id": context_id(context.id), "mediaType": context.media_type.as_str(), "rendition": context.rendition,
-                "keys": context.keys, "lastDemandAt": context.last_demand_at, "activityAt": context.activity_at, "spent": context.spent })
+                "keys": context.keys, "lastDemandAt": context.last_demand_at, "activityAt": context.activity_at, "spent": context.spent, "spentAt": context.spent_at })
         })
         .collect();
     let window = discovery.window().map_or(Value::Null, |window| {
@@ -564,7 +570,7 @@ fn discovery_state(discovery: &NeighbourDiscovery) -> Value {
                 "ticket": attempt.ticket, "key": attempt.key, "dial": attempt.dial })) })
     });
     let counters = &discovery.counters;
-    serde_json::json!({ "c": contexts, "w": window, "n": [counters.checks, counters.replacements, counters.verified] })
+    serde_json::json!({ "c": contexts, "w": window, "n": [counters.checks, counters.replacements, counters.verified, counters.rearmed, counters.unmet_no_hint, counters.unmet_ineligible] })
 }
 
 /// One discovery operation; `None` for malformed input.
@@ -589,8 +595,7 @@ pub fn discovery_call(discovery: &mut NeighbourDiscovery, op: u32, now: u64, arg
             return Some(Value::Null);
         }
         DISC_HOLDER_MISS => {
-            discovery.holder_miss(now, context(0), text(1)?, text(2)?);
-            return Some(Value::Null);
+            return Some(Value::Bool(discovery.holder_miss(now, context(0), text(1)?, text(2)?)));
         }
         DISC_HOLDER_AHEAD => {
             discovery.holder_ahead(context(0), text(1)?);
@@ -611,7 +616,7 @@ pub fn discovery_call(discovery: &mut NeighbourDiscovery, op: u32, now: u64, arg
                 |media| unmet.iter().any(|value| value == media.as_str()),
                 arg(2).as_bool()?,
             );
-            return Some(found_json(found));
+            found_json(found)
         }
         DISC_HINTED => {
             let eligible = pubkeys(1);
@@ -648,12 +653,14 @@ pub fn discovery_call(discovery: &mut NeighbourDiscovery, op: u32, now: u64, arg
             return Some(
                 serde_json::json!({ "v": 1, "candidateCapacity": 64, "candidates": snapshot.candidates, "contexts": snapshot.contexts,
                 "requestedKeys": snapshot.requested_keys, "replacementSpent": snapshot.replacement_spent,
+                "replacementRearmMs": relayswarm_proto::discovery::REPLACEMENT_REARM_MS,
                 "opportunityActive": snapshot.opportunity_active, "remainingMs": snapshot.remaining_ms,
                 "vacancyReserved": snapshot.vacancy_reserved, "counters": { "checks": counters.checks, "replacements": counters.replacements,
                     "expired": counters.expired, "opened": counters.opened, "verified": counters.verified,
-                    "staleHolder": counters.stale_holder, "staleBlocked": counters.stale_blocked } }),
+                    "staleHolder": counters.stale_holder, "staleBlocked": counters.stale_blocked, "heldMiss": counters.held_miss, "rearmed": counters.rearmed, "victimUnhelpful": counters.victim_unhelpful, "victimServing": counters.victim_serving, "victimConsumer": counters.victim_consumer, "unmetNoHint": counters.unmet_no_hint, "unmetIneligible": counters.unmet_ineligible } }),
             );
         }
+        DISC_REARM => Value::Bool(context(0).is_some_and(|context| discovery.rearm(now, context, arg(1).as_bool().unwrap_or(false)))),
         DISC_CLEAR => {
             discovery.clear();
             FOUND.with(|cell| *cell.borrow_mut() = None);

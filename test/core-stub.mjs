@@ -9,6 +9,7 @@ export const CORE_FUNCTIONS = {
   rs_result_ptr: [[], [I32]],
   rs_sel_observe: [[F64, F64, F64, F64, F64], []],
   rs_sel_record: [[F64, I32, F64, F64], []],
+  rs_sel_mark: [[I32], []],
   rs_sel_forget: [[I32], []],
   rs_sel_select: [[I32, I32, F64, F64], [F64]],
   rs_sel_state: [[], [I32]],

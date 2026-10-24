@@ -45,7 +45,7 @@ async function instantiate(source) {
   return (await WebAssembly.instantiate(await response.arrayBuffer(), {})).instance;
 }
 
-const SELECTION_EXPORTS = ["rs_sel_observe", "rs_sel_record", "rs_sel_forget", "rs_sel_select", "rs_sel_state",
+const SELECTION_EXPORTS = ["rs_sel_observe", "rs_sel_record", "rs_sel_mark", "rs_sel_forget", "rs_sel_select", "rs_sel_state",
   "rs_sel_project", "rs_sel_minimum", "rs_sel_estimate", "rs_sel_summary", "rs_link_new", "rs_link_free", "rs_link_call", "rs_disc_call"];
 const LINK_SETS = 13;
 const LINK_HEADER_BYTES = 13 * 8;
@@ -127,6 +127,10 @@ class CorePeerSelection {
 
   record(link, elapsedMs, bytes = 0) {
     this.#run((core) => core.rs_sel_record(Date.now(), this.#id(link), elapsedMs, bytes), (js) => js.record(link, elapsedMs, bytes));
+  }
+
+  markSelected(link) {
+    this.#run((core) => core.rs_sel_mark(this.#id(link)), (js) => js.markSelected(link));
   }
 
   forget(link) {

@@ -202,7 +202,32 @@ test("discovery keeps one object per context, window and attempt, with the swarm
   discovery.counters.expired++;
   discovery.counters.staleBlocked += 2;
   const counters = discovery.snapshot().counters;
-  assert.deepEqual(counters, { checks: 1, replacements: 0, expired: 1, opened: 0, verified: 0, staleHolder: 0, staleBlocked: 2 });
+  assert.deepEqual(counters, { checks: 1, replacements: 0, expired: 1, opened: 0, verified: 0, staleHolder: 0, staleBlocked: 2,
+    heldMiss: 0, rearmed: 0, victimUnhelpful: 0, victimServing: 0, victimConsumer: 0, unmetNoHint: 0, unmetIneligible: 0 });
+});
+
+test("discovery re-arm retains its exact interval and callback guards in JavaScript and WASM", async () => {
+  for (const wasm of [false, true]) {
+    let now = 0, calls = 0;
+    const state = wasm ? await coreDiscovery(() => now) : new NeighbourDiscovery(() => now);
+    const key = "a".repeat(64), pubkey = "b".repeat(64);
+    const context = state.demand("main", "main:0", key);
+    state.hint(pubkey, [key], "ticket");
+    const attempt = state.begin(state.choose(() => true, () => true, false));
+    assert.equal(state.replaced(attempt, "victim"), true);
+    state.end();
+    const stale = () => { calls++; return true; };
+    now = 19_999;
+    assert.equal(state.rearm(context, stale), false);
+    assert.equal(calls, 0, "the host callback is not called before the bound");
+    now = 20_000;
+    assert.equal(state.rearm(context, stale), true);
+    assert.equal(state.rearm(context, stale), false);
+    assert.equal(calls, 1);
+    assert.equal(state.snapshot().replacementRearmMs, 20_000);
+    assert.equal(state.snapshot().counters.rearmed, 1);
+    if (wasm) assert.equal(state.kind, "wasm", "no fallback hides the new core operation");
+  }
 });
 
 test("discovery arguments the loader can pass match the JavaScript", async () => {

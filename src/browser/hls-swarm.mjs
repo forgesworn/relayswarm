@@ -252,17 +252,29 @@ function randomRequestId() {
  * `minLinkLifeMs` (including the one a newcomer was just given) and a banned
  * one are never candidates.
  *
+ * With an optional `tier(link)` (a number), the lowest tier among the eligible
+ * links goes first and idle longest decides within it. A tier only orders links
+ * that are already eligible; it never makes one eligible or exempt. Without it
+ * the choice is exactly the one above.
+ *
  * Exported for tests; the swarm calls it with its own links.
  */
-export function rotationCandidate(links, { minLinkLifeMs, idleEvictMs, banned = new Set() } = {}, at = Date.now()) {
-  let worst = null;
+export function rotationCandidate(links, options, at = Date.now()) {
+  return rotationChoice(links, options, at)?.link ?? null;
+}
+
+// The same choice with the tier it was ordered by, so a caller that counts the
+// victim's tier counts the value that decided, not a second reading.
+function rotationChoice(links, { minLinkLifeMs, idleEvictMs, banned = new Set(), tier } = {}, at = Date.now()) {
+  let worst = null, worstTier = 0;
   for (const link of links) {
     if (link.transferring || banned.has(link.pubkey)) continue;
     if (at - link.openedAt < minLinkLifeMs) continue;
     if (at - link.lastUsefulAt < idleEvictMs) continue;
-    if (!worst || link.lastUsefulAt < worst.lastUsefulAt) worst = link;
+    const rank = tier ? tier(link) : 0;
+    if (!worst || rank < worstTier || (rank === worstTier && link.lastUsefulAt < worst.lastUsefulAt)) { worst = link; worstTier = rank; }
   }
-  return worst;
+  return worst && { link: worst, tier: worstTier };
 }
 
 /**
@@ -418,6 +430,8 @@ class HlsSwarm {
       peerWaitExtended: 0,
       peerAbandoned: 0,
       peerNoFit: 0,
+      peerUntestedTrial: 0,
+      peerUntestedTrialLoaded: 0,
       commitmentRequests: 0,
       commitmentRejected: 0,
       commitmentUnavailable: 0,
@@ -447,6 +461,9 @@ class HlsSwarm {
       offersRefused: 0,
       admitRefused: 0,
       evicted: 0,
+      evictedUnhelpful: 0,
+      evictedServing: 0,
+      evictedConsumer: 0,
       evictionsUnavailable: 0,
       retriesScheduled: 0,
       referralsSent: 0,
@@ -686,6 +703,9 @@ class HlsSwarm {
         offersRefused: c.offersRefused,
         admitRefused: c.admitRefused,
         evicted: c.evicted,
+        evictedUnhelpful: c.evictedUnhelpful,
+        evictedServing: c.evictedServing,
+        evictedConsumer: c.evictedConsumer,
         evictionsUnavailable: c.evictionsUnavailable,
         retriesScheduled: c.retriesScheduled,
         referralsSent: c.referralsSent,
@@ -716,7 +736,8 @@ class HlsSwarm {
         counters: { ...this.peerEligibilityCounters },
         records: this.peerEligibilityRecords.map((record) => ({ ...record, budgetGeometry: { ...record.budgetGeometry },
           ...("holders" in record ? { holders: record.holders && [...record.holders], haveHolders: record.haveHolders && [...record.haveHolders],
-            staleHolders: record.staleHolders && [...record.staleHolders] } : {}),
+            staleHolders: record.staleHolders && [...record.staleHolders],
+            heldMissHolders: record.heldMissHolders && [...record.heldMissHolders] } : {}),
           ...(record.projection ? { projection: { ...record.projection } } : {}) })),
       },
       peerRequestDiagnostics: {
@@ -769,6 +790,8 @@ class HlsSwarm {
         peerWaitExtended: c.peerWaitExtended,
         peerAbandoned: c.peerAbandoned,
         peerNoFit: c.peerNoFit,
+        peerUntestedTrial: c.peerUntestedTrial,
+        peerUntestedTrialLoaded: c.peerUntestedTrialLoaded,
         commitmentRequests: c.commitmentRequests,
         commitmentRejected: c.commitmentRejected,
         commitmentUnavailable: c.commitmentUnavailable,
@@ -1003,6 +1026,7 @@ class HlsSwarm {
         } };
         swarm.#peerFirst(context, controller.signal, plan, budgetMs, budgetGeometry).then((result) => {
           if (this.active !== token || controller.signal.aborted || swarm.stopped) return;
+          if (result && !result.multi && now() >= plan.deadline) swarm.#recordOutcome(result.demand);
           if (!result || (now() >= plan.deadline && !result.multi)) return fallback();
           this.active = null;
           this.pendingCallbacks = null;
@@ -1021,6 +1045,7 @@ class HlsSwarm {
           if (peerBytes > 0) swarm.counters.peerFirstLoaded += 1;
           swarm.counters.peerFirstBytes += peerBytes;
           swarm.counters.bytesFromPeers += peerBytes;
+          if (!result.multi) swarm.discovery.holderDelivered(result.holderContext, result.pubkey);
           if (swarm.discovery.verified(result.discoveryContext)
             && swarm.discovery.window?.context === result.discoveryContext) swarm.#endDiscovery();
           if (swarm.firstPeerSegmentAtMs === null) swarm.firstPeerSegmentAtMs = Date.now() - swarm.startedAt;
@@ -1200,8 +1225,9 @@ class HlsSwarm {
 
   #holderLabel(pubkey) { return this.holderLabels.get(pubkey) ?? 0; }
 
-  // Labels for a diagnostic row: serving links, links holding the key, and the
-  // serving links that are stale. Reads only; no decision depends on it.
+  // Labels for a diagnostic row: serving links, links holding the key, the
+  // serving links that are stale, and the links recorded as a held miss on this
+  // decision (filled in when the load ends). Reads only; no decision depends on it.
   #holderDiagnostics({ key, rendition, context }) {
     const small = (labels) => labels.sort((a, b) => a - b).slice(0, 8);
     const holders = [], haveHolders = [], staleHolders = [];
@@ -1213,21 +1239,36 @@ class HlsSwarm {
       }
       if (link.have.has(key)) haveHolders.push(label);
     }
-    return { holders: small(holders), haveHolders: small(haveHolders), staleHolders: small(staleHolders) };
+    return { holders: small(holders), haveHolders: small(haveHolders), staleHolders: small(staleHolders), heldMissHolders: [] };
   }
 
-  // One decision per load that reached the HAVE check. A serving link whose HAVE
-  // holds the demanded key is ahead (its miss history is dropped); one that
-  // lacks it at a miss decision gains a miss. Zero-budget, aborted and
-  // no-longer-eligible loads never reach here. Advisory: nothing waits on it.
-  #noteHolders({ key, rendition, context }, outcome) {
-    if (!context) return;
+  // The outcome of a load that went to origin, recorded once per load.
+  //  - Nobody held the key (and the caller says the wait or entry projection ended
+  //    with nobody ahead): every serving link takes a miss.
+  //  - Otherwise only a link that was judged takes a held miss: one that was asked
+  //    and did not deliver a verified segment in time, or one named in `unfit`
+  //    (it held the key and its own estimate did not fit the room). A decline made
+  //    on swarm-wide estimates or on the buffer (projected-late, skipped-late)
+  //    charges no holder, and a link that was never asked is left alone.
+  // Delivered, aborted and other neutral outcomes never reach here. Advisory.
+  #recordOutcome(demand, { everyServing = false, unfit = [] } = {}) {
+    const { key, rendition, context } = demand;
+    if (!context || demand.recorded) return;
+    demand.recorded = true;
     try {
-      for (const link of this.links.values()) {
-        if (!this.#servesRendition(link, rendition)) continue;
-        if (outcome === "ahead") { if (link.have.has(key)) this.discovery.holderAhead(context, link.pubkey); }
-        else if (!link.have.has(key)) this.discovery.holderMiss(context, link.pubkey, key);
+      const serving = [...this.links.values()].filter((link) => this.#servesRendition(link, rendition));
+      if (everyServing && ![...this.links.values()].some((link) => link.have.has(key))) {
+        for (const link of serving) this.discovery.holderMiss(context, link.pubkey, key);
+        return;
       }
+      const judged = serving.filter((link) => demand.asked.has(link.pubkey) || unfit.includes(link.pubkey));
+      const labels = [];
+      for (const link of judged) {
+        if (!this.discovery.holderMiss(context, link.pubkey, key)) continue;
+        this.discovery.counters.heldMiss++;
+        labels.push(this.#holderLabel(link.pubkey));
+      }
+      if (labels.length && demand.row?.heldMissHolders) demand.row.heldMissHolders = labels.sort((a, b) => a - b).slice(0, 8);
     } catch {}
   }
 
@@ -1241,7 +1282,7 @@ class HlsSwarm {
     if (this.discovery.hinted(context, (candidate) => this.#discoveryEligible(candidate))) this.discovery.counters.staleBlocked++;
   }
 
-  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry, projection, demand) {
+  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry, projection, demand, trial = false) {
     // Observe only decisions already made. In particular a zero budget must
     // not hash a key or inspect HAVE merely to fill this local diagnostic.
     try {
@@ -1255,10 +1296,14 @@ class HlsSwarm {
         cc, level, budgetMs: Number.isFinite(budgetMs) && budgetMs >= 0 ? budgetMs : null,
         reason, matchingHave: typeof matchingHave === "boolean" ? matchingHave : null, budgetGeometry: { ...budgetGeometry } };
       if (projection) record.projection = { ...projection };
+      // Set only on the row that records an untested-holder trial grant.
+      if (trial === true) record.trial = true;
       // Only decisions that already computed the key and inspected links.
       if (demand) {
         try { Object.assign(record, this.#holderDiagnostics(demand)); }
-        catch { Object.assign(record, { holders: null, haveHolders: null, staleHolders: null }); }
+        catch { Object.assign(record, { holders: null, haveHolders: null, staleHolders: null, heldMissHolders: null }); }
+        // The latest row of this decision is the one a held miss annotates.
+        demand.row = record;
       }
       this.peerEligibilityCounters[reason] = increment(this.peerEligibilityCounters[reason]);
       if (this.peerEligibilityRecords.length === 64) {
@@ -1325,6 +1370,24 @@ class HlsSwarm {
       firstByteMs: ms(this.peerSelection.firstByteMs()), rateBytesPerSecond: Number.isFinite(rate) ? Math.round(rate * 1000) : null };
   }
 
+  // A link that is open, free, not banned, holds the key, has never had an
+  // attempt recorded and is not stale for this context. The first such link in
+  // link order: an untested link has no observation to order by.
+  #untestedHolder(key, context) {
+    for (const link of this.links.values()) {
+      if (link.closed || link.busy || this.banned.has(link.pubkey) || !link.have.has(key)) continue;
+      if (this.peerSelection.summary(link).attempts !== 0) continue;
+      if (context && this.discovery.stale(context, link.pubkey)) continue;
+      return link;
+    }
+    return null;
+  }
+
+  // A trial needs an untested holder and room for at least a typical first byte.
+  #trialAvailable(demand, plan) {
+    return plan.limit - now() > (this.peerSelection.firstByteMs() ?? 0) && Boolean(this.#untestedHolder(demand.key, demand.context));
+  }
+
   async #peerFirst(context, signal, plan, budgetMs, budgetGeometry) {
     // The initial deadline; plan.deadline may grow from it. Test availability
     // instrumentation (test/support/broadcast-availability-transform.mjs)
@@ -1346,7 +1409,7 @@ class HlsSwarm {
       try { this.#noteStaleBlocked(holderContext, checks); } catch {}
     }
     // What the diagnostic rows and the holder bookkeeping below refer to.
-    const demand = { key, rendition, context: holderContext };
+    const demand = { key, rendition, context: holderContext, recorded: false, asked: new Set(), row: null };
     const coordinated = ![...this.links.values()].some((peer) => peer.have.has(key));
     if (coordinated && !this.#shouldWaitForOrigin(key, rendition)) {
       this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry, undefined, demand);
@@ -1357,11 +1420,19 @@ class HlsSwarm {
     const sizeHint = this.renditionSizes.get(rendition);
     const holderWait = coordinated ? this.#holderWaitMs(key, rendition) : 0;
     const entryTransfer = sizeHint ? this.peerSelection.projectMs(sizeHint) : null;
-    const entry = this.#projection(entryTransfer, holderWait, plan);
+    let entry = this.#projection(entryTransfer, holderWait, plan);
+    // One try for a holder that has never been asked (see #untestedHolder). The
+    // detail is kept for the have-at-entry row, which is the row this load writes next.
+    let trial = null;
+    if (entry === "late" && !coordinated && this.#trialAvailable(demand, plan)) {
+      trial = this.#projectionDetail("entry", entryTransfer, holderWait, plan);
+      entry = "stretch";
+    }
     if (entry === "late") {
       this.#peerEligibility(context, budgetMs, "projected-late", !coordinated, budgetGeometry, this.#projectionDetail("entry", entryTransfer, holderWait, plan), demand);
-      // Nobody held the key at entry: a miss for every serving link. A held key: ahead.
-      this.#noteHolders(demand, coordinated ? "miss" : "ahead");
+      // Nobody held the key at entry: a miss for every serving link. Otherwise
+      // only the serving links that held it take a held miss.
+      this.#recordOutcome(demand, { everyServing: true });
       this.counters.peerProjectedLate += 1;
       return null;
     }
@@ -1395,12 +1466,13 @@ class HlsSwarm {
         // A miss is the wait reaching its deadline, whether the loop or the
         // fallback timer saw it first. A loader abort or stop says nothing about
         // the holder. Decided by cause (plan.expired), never by comparing clocks.
-        if (!cancelled || (plan.expired && !this.stopped)) this.#noteHolders(demand, "miss");
+        if (!cancelled || (plan.expired && !this.stopped)) this.#recordOutcome(demand, { everyServing: true });
         return null;
       }
     }
-    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry, undefined, demand);
-    this.#noteHolders(demand, "ahead");
+    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry, trial ?? undefined, demand, trial !== null);
+    // Holding the key is not a delivery: leave every holder entry alone until a
+    // verified segment arrives.
     let commitment;
     try {
       const result = await commitmentResult;
@@ -1424,8 +1496,17 @@ class HlsSwarm {
     }
     // The committed size is now known and a holder has it.
     const transfer = this.peerSelection.projectMs(commitment.size);
-    const known = this.#projection(transfer, 0, plan);
+    let known = this.#projection(transfer, 0, plan);
+    // The same single trial: a grant made at entry continues here, and otherwise one is
+    // granted if available. The latest row of this decision takes the commitment detail.
+    // An entry grant is not a second grant; the request loop re-checks the holder.
+    if (known === "late" && !coordinated && (trial !== null || this.#trialAvailable(demand, plan))) {
+      trial = this.#projectionDetail("commitment", transfer, 0, plan);
+      known = "stretch";
+      if (demand.row) { demand.row.projection = { ...trial }; demand.row.trial = true; }
+    }
     if (known === "late") {
+      // Judged on swarm-wide estimates, not on any link's own: no holder is charged.
       this.#peerEligibility(context, budgetMs, "projected-late", true, budgetGeometry, this.#projectionDetail("commitment", transfer, 0, plan), demand);
       this.counters.peerProjectedLate += 1;
       return null;
@@ -1445,16 +1526,22 @@ class HlsSwarm {
         return null;
       }
       const fits = (peer, ms) => this.peerSelection.estimate(peer, commitment.size) === null || this.peerSelection.estimate(peer, commitment.size) * 1.25 + 25 <= ms;
-      const link = this.peerSelection.select(this.links.values(), key, tried, commitment.size, room);
+      // The first request of a load granted a trial goes to an untested holder.
+      const trialLink = trial && tried.size === 0 ? this.#untestedHolder(key, demand.context) : null;
+      if (trialLink) this.peerSelection.markSelected(trialLink);
+      const link = trialLink ?? this.peerSelection.select(this.links.values(), key, tried, commitment.size, room);
       if (!link) {
         if (![...this.links.values()].some((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, room))) {
           this.counters.peerNoFit += 1;
+          // Holders whose own estimate does not fit, and links already asked and failed.
+          this.#recordOutcome(demand, { unfit: [...this.links.values()].filter((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key) && !fits(peer, room)).map((peer) => peer.pubkey) });
           return null;
         }
         await this.#waitForHave(key, Math.min(100, plan.deadline - now()), signal);
         continue;
       }
-      tried.add(link.pubkey);
+      tried.add(link.pubkey); demand.asked.add(link.pubkey);
+      if (trialLink) this.counters.peerUntestedTrial += 1;
       const estimateMs = this.peerSelection.estimate(link, commitment.size);
       if (estimateMs !== null && plan.extend(now() + estimateMs * 1.25 + 25)) this.counters.peerWaitExtended += 1;
       const requestedAt = now();
@@ -1478,6 +1565,7 @@ class HlsSwarm {
       if (attempt.abandoned) {
         this.#recordSelection(link, now() - requestedAt);
         this.counters.peerAbandoned += 1;
+        this.#recordOutcome(demand);
         return null;
       }
       if (!bytes || signal.aborted || this.stopped) {
@@ -1485,19 +1573,35 @@ class HlsSwarm {
         continue;
       }
       const digest = await sha256Hex(bytes);
-      if (signal.aborted || this.stopped) return null;
+      if (this.stopped) return null;
       if (bytes.byteLength !== commitment.size || digest !== commitment.sha256) {
+        // Bad payloads are banned before cancellation and never charged as held misses.
         this.#recordSelection(link, now() - requestedAt);
         this.counters.peerCorrupt += 1;
         this.banned.add(link.pubkey);
+        demand.asked.delete(link.pubkey);
         link.close("integrity");
+        if (signal.aborted) {
+          // An earlier asked link may still have failed in time: record once, as at the loop's end.
+          if (plan.expired) this.#recordOutcome(demand);
+          return null;
+        }
         continue;
+      }
+      if (signal.aborted) {
+        // The payload would have verified but the origin timer's deadline had passed: a to-origin outcome.
+        if (plan.expired) this.#recordOutcome(demand);
+        return null;
       }
       if (commitment.expiresAt <= Math.floor(Date.now() / 1000)) return null;
       this.#recordSelection(link, now() - requestedAt, bytes.byteLength);
       if (coordinated) this.counters.coordinatedPeerLoads += 1;
-      return { key, bytes, discoveryContext };
+      if (trialLink) this.counters.peerUntestedTrialLoaded += 1;
+      return { key, bytes, discoveryContext, holderContext, pubkey: link.pubkey, demand };
     }
+    // The deadline passed or every holder tried failed. The origin timer's abort
+    // (plan.expired) is the deadline; a caller abort or stop is neutral.
+    if (!this.stopped && (!signal.aborted || plan.expired)) this.#recordOutcome(demand);
     return null;
   }
 
@@ -2246,16 +2350,23 @@ class HlsSwarm {
   }
 
   #unmetDiscovery(context) {
-    // A serving link that has repeatedly lacked this viewer's segments at the
-    // deadline no longer meets the context, unless it holds a demanded key.
-    return ![...this.links.values()].some(link => this.#servesRendition(link, context.rendition) && !this.discovery.stale(context, link.pubkey)
-      || context.keys.some(key => link.have.has(key)));
+    // A link meets the context when it serves the rendition or its HAVE holds a
+    // demanded key, but only while it is not stale for that context: a stale link
+    // may still advertise a key it never delivers.
+    return ![...this.links.values()].some(link => !this.discovery.stale(context, link.pubkey)
+      && (this.#servesRendition(link, context.rendition) || context.keys.some(key => link.have.has(key))));
   }
 
   // At least one link serves this context's rendition and every one is stale.
   #onlyStaleServing(context) {
     const serving = [...this.links.values()].filter(link => this.#servesRendition(link, context.rendition));
     return serving.length > 0 && serving.every(link => this.discovery.stale(context, link.pubkey));
+  }
+
+  // No link serves this context's rendition, or every one that does is stale.
+  #noFreshServing(context) {
+    return [...this.links.values()].filter(link => this.#servesRendition(link, context.rendition))
+      .every(link => this.discovery.stale(context, link.pubkey));
   }
 
   #discoveryEligible(candidate) {
@@ -2265,12 +2376,14 @@ class HlsSwarm {
       && (this.retries.get(candidate.pubkey) || 0) <= this.options.maxRetriesPerPeer;
   }
 
+  // The victim and the tier it was ordered by, or null.
   #discoveryVictim(context) {
-    if (context.spent || this.links.size < 2 || Date.now() - this.lastEvictionAt < this.options.evictionCooldownMs) return null;
+    if (this.discovery.spent(context) || this.links.size < 2 || Date.now() - this.lastEvictionAt < this.options.evictionCooldownMs) return null;
     // Preserve a useful sibling audio/video neighbour as well as the target.
     const contexts = [...this.discovery.contexts.values()].filter(value => Date.now() - value.activityAt < 30_000);
-    return rotationCandidate([...this.links.values()].filter(link => !contexts.some(value =>
-      this.#servesRendition(link, value.rendition) && !this.discovery.stale(value, link.pubkey) || value.keys.some(key => link.have.has(key)))), { ...this.options, banned: this.banned });
+    return rotationChoice([...this.links.values()].filter(link => !contexts.some(value =>
+      !this.discovery.stale(value, link.pubkey) && (this.#servesRendition(link, value.rendition) || value.keys.some(key => link.have.has(key))))),
+    { ...this.options, banned: this.banned, tier: link => this.#rotationTier(link) });
   }
 
   #endDiscovery(window = this.discovery.window, closePending = true) {
@@ -2299,6 +2412,7 @@ class HlsSwarm {
     if (this.stopped || this.options.mode !== "peer-first") return;
     this.#expireDiscovery();
     if (!this.#hasOutgoingSlot()) return;
+    for (const context of this.discovery.contexts.values()) this.discovery.rearm(context, () => this.#noFreshServing(context));
     const room = this.links.size + this.dials.size < this.options.maxPeers;
     const choice = this.discovery.choose(candidate => this.#discoveryEligible(candidate),
     context => this.#unmetDiscovery(context) && (room || this.discovery.reserved() || Boolean(this.#discoveryVictim(context))), room);
@@ -2326,8 +2440,33 @@ class HlsSwarm {
       .map(([pubkey]) => pubkey);
   }
 
+  // The link to drop for an offer and the tier it was ordered by, or null.
   #rotationCandidate() {
-    return rotationCandidate(this.links.values(), { ...this.options, banned: this.banned });
+    return rotationChoice(this.links.values(), { ...this.options, banned: this.banned, tier: link => this.#rotationTier(link) });
+  }
+
+  // The order in which rotation may drop links it could already drop:
+  //   0 unhelpful  a non-serving remote that is not a consumer of this viewer;
+  //   1 serving    the remote is serving;
+  //   2 consumer   this viewer is serving, the remote is not, and the remote announced
+  //                (within two presence intervals) a rendition this viewer plays now,
+  //                so it is playing what this viewer can give it.
+  // An ordering, never an exemption: it changes which eligible link goes first only.
+  #rotationTier(link) {
+    if (link.contribution?.serving === true) return 1;
+    if (!this.#servingAllowed()) return 0;
+    const at = Date.now(), recently = 2 * this.options.presenceIntervalMs;
+    for (const [rendition, announcedAt] of link.announced ?? []) {
+      if (at - announcedAt > recently) continue;
+      const played = this.renditions.get(rendition);
+      if (played !== undefined && at - played <= 30_000) return 2;
+    }
+    return 0;
+  }
+
+  #noteVictimTier(counters, tier, prefix) {
+    const name = ["Unhelpful", "Serving", "Consumer"][tier];
+    counters[`${prefix}${name}`]++;
   }
 
   /** Room now, or a rotation a caller with no peers at all could trigger. */
@@ -2358,10 +2497,12 @@ class HlsSwarm {
     if (askerPeers !== 0 && !heldRepair) return null;
     if (this.links.size < 2) return null;
     if (Date.now() - this.lastEvictionAt < this.options.evictionCooldownMs) return null;
-    const link = this.#rotationCandidate();
-    if (!link) return null;
+    const choice = this.#rotationCandidate();
+    if (!choice) return null;
+    const link = choice.link;
     this.lastEvictionAt = Date.now();
     this.counters.evicted += 1;
+    this.#noteVictimTier(this.counters, choice.tier, "evicted");
     link.close("rotation");
     return link;
   }
@@ -2671,9 +2812,10 @@ class HlsSwarm {
       return;
     }
     if (discovery && this.links.size + this.dials.size >= this.options.maxPeers) {
-      const victim = this.#discoveryVictim(discovery.window.context);
+      const choice = this.#discoveryVictim(discovery.window.context), victim = choice?.link;
       if (!victim || !this.discovery.replaced(discovery, victim.pubkey)) { this.discovery.abandoned(discovery); return; }
       this.lastEvictionAt = Date.now(); this.counters.evicted++;
+      this.#noteVictimTier(this.discovery.counters, choice.tier, "victim");
       this.cooldowns.set(victim.pubkey, discovery.window.expiresAt);
       victim.close("rotation");
     }
