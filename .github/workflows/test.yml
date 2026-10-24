@@ -84,7 +84,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: forgesworn/relayswarm-kit
-          ref: bfaa285276b296f7ef7f0af2091fbd99cfcd0388
+          ref: f312c0a0229397050dd115aa4c854d31477f665d
           path: .interop-sdk
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
