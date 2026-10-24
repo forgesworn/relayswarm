@@ -124,6 +124,11 @@ export class PeerSelection {
     return selected;
   }
 
+  /** Drop a closed link's history. */
+  forget(link) {
+    this.observations.delete(link);
+  }
+
   record(link, elapsedMs, bytes = 0) {
     const value = this.summary(link);
     const blend = (previous, next) => previous === null ? next : previous * 0.75 + next * 0.25;

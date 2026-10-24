@@ -15,7 +15,7 @@ are not a stable interoperability promise.
 |---|---|---|
 | `relayswarm` | Node or a browser bundler | `RelayPool`, `RelaySwarmSession`, `validTicket`, `RELAYSWARM_VERSION`, `KIND_PRESENCE`, `KIND_SIGNAL`, `SWARM_TAG` |
 | `relayswarm/hls-swarm` | Browser with hls.js | `createHlsSwarm`, `HLS_SWARM_METRICS_VERSION`, `rotationCandidate`, `retryAfterFor`, `readRefusal` |
-| `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `delegationContent`, `revocationContent`, `validStreamAuthorisation`, `verifyCommitmentDelegation`, `segmentMediaContext`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT`, `KIND_COMMITMENT_DELEGATION`, `KIND_COMMITMENT_REVOCATION` |
+| `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `commitmentPieceSize`, `delegationContent`, `revocationContent`, `validStreamAuthorisation`, `verifyCommitmentDelegation`, `segmentMediaContext`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT`, `KIND_COMMITMENT_DELEGATION`, `KIND_COMMITMENT_REVOCATION` |
 | `relayswarm/hls-publisher` | Node only | `createHlsPublisher`, `PublisherError` |
 | `relayswarm/publisher-state` | Node only | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent`, `createCommitmentDelegation`, `createCommitmentRevocation` |
 | `relayswarm/stream-discovery` | Browser or Node | `resolveTrustedStream`, `discoverTrustedStreams`, `StreamDiscoveryError` |
@@ -33,11 +33,27 @@ object-transfer modules into an ordinary browser page.
 ## Browser loader
 
 `createHlsSwarm(options)` returns
-`{ attach(hls), updateTicket(ticket), stop(), metrics() }`.
+`{ attach(hls), updateTicket(ticket), stop(), metrics(), trace() }`.
 `attach` wraps `hls.config.fLoader`; call it before `loadSource`. `stop` is the
 origin-only kill switch and closes connections, cancels pending work, releases
 held bytes and restores the original loader. Create a new swarm to participate
 again. Uploading defaults to off; `mode` defaults to `shadow`.
+
+`trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
+`traceRequests` (none by default): each peer-first load, eligibility
+decision, peer request and origin request (whole or ranged), joined by a load
+ID, and each multi-holder scheduler call with its inputs and the commands it
+returned, so a recorded transfer replays against the module offline. Times are
+whole milliseconds from the swarm's creation; holders are session labels, not
+keys. It is kept out of `metrics()`, which receipts snapshot repeatedly.
+`node scripts/trace-report.mjs file.json...` summarises saved traces (from a
+harness receipt, a demo field receipt, a bare trace or a list of any of them): it replays every
+transfer against the committed module and reports a mismatch, then gives
+holders offered and used, bytes by holder rank, origin and redundant shares,
+slack at finish, request timing and buffer ahead of the playhead.
+`--what-if 1,2,3` replays transfers with other holder limits against each
+holder's measured timing; it ignores shared uplinks, so it is an estimate of
+whether fewer holders would do, not evidence for more.
 
 `updateTicket(ticket)` refreshes this viewer's bounded opaque admission ticket
 without rebuilding connections, the loader or upload accounting. It returns
@@ -188,6 +204,7 @@ const publisher = await createHlsPublisher({
 | `maxConcurrent` | `8` | Simultaneous signing work, configurable from 1 to 64 |
 | `maxCacheEntries` | `512` | Entries in each bounded hash/commitment cache, configurable from 1 to 4,096 |
 | `allowEncryptedMedia` | `false` | Explicit AES-128 ciphertext publication; local keys remain HTTP-only |
+| `pieceCommitments` | `false` | Experimental: sign exact-playlist contexts as schema 3 (one SHA-256 per piece) instead of schema 2. v0.2.1 and RelaySwarmKit v0.5.0 receivers reject schema 3 and load those segments from origin |
 | `commitmentSecretKey` / `delegation` | author key / none | Author-scoped delegated commitment signing; an externally authored event permits operation without the author secret |
 | `revokedDelegationIds` / `delegationRevocations` | empty arrays | Host-trusted current revocation view; no automatic global lookup |
 
@@ -366,6 +383,14 @@ See [broadcast setup](BROADCASTING.md) and [container deployment](../deploy/READ
 `relayswarm-segment-v1`, schema `v: 1` and fixed field order. It serialises fields;
 it does not sign an event or validate media bytes.
 
+`commitmentPieceSize(size)` returns the piece size that experimental schema 3
+(`v: 3`, `relayswarm-segment-v3`) requires: at least 64 KiB, at most 64 pieces
+per segment, rounded up to a multiple of 16 KiB. Schema 3 adds `pieceSize` and
+one lowercase SHA-256 per piece in `pieces` to schema 2. The verifier accepts
+it; the publisher signs it only with `pieceCommitments: true`. The loader
+fetches and verifies pieces from several holders only with `multiHolder`
+(see `INTEGRATION.md`).
+
 `validStreamAuthorisation(event)` checks the signed kind-30311 event, a `d` tag,
 bounded event size and the exact redistribution tag.
 
@@ -416,7 +441,10 @@ uses a fresh ephemeral key by default; maximum event age defaults to 120 s.
   signal subscription; closing the session does not close its shared pool.
 - `onPresence`, `onSignal`, `onError` register handlers and return unsubscribe callbacks.
 - `announcePresence({ role, transports?, have?, open?, ticket? })` returns
-  the signed event. Capabilities are `{ type, publicKey }`; `have` contains digests.
+  the signed event. Capabilities are `{ type, publicKey, obj? }`; `have` contains
+  digests. Experimental `obj` is the object framing version, an integer 1 to 15
+  (absent means 1); received presence keeps a valid `obj` and drops any other.
+  Session wire version 3 is unchanged, and v0.2.1 peers ignore the field.
 - `sendSignal(toPubkey, { type, transport, requestId, payload? })` returns a
   signed NIP-44-encrypted event addressed to that session key.
 - `waitForPresence(predicate, timeoutMs?)` / `waitForSignal(predicate,

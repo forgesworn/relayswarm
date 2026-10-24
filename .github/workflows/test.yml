@@ -34,7 +34,7 @@ jobs:
   hls-playback:
     name: hls.js playback and field-test demo
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -42,7 +42,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: scripts/ci-install-ffmpeg.sh
       - run: npx playwright-core install --with-deps chrome
       - run: npm run test:playback -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
       - run: npm run test:playback:resume -- --chrome /opt/google/chrome/chrome --resultsDir playback-receipts
@@ -106,7 +106,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: scripts/ci-install-ffmpeg.sh
       - run: npx playwright-core install --with-deps chrome
       - run: npm run test:browser -- --chrome /opt/google/chrome/chrome --mode peer-first --viewers 12 --duration "${{ inputs.soak_duration }}" --churnEvery 600 --churnCount 2 --stagger 1000 --waves 3 --waveGap 30000 --maxPeers 4 --resultsDir soak-receipts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -130,7 +130,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: scripts/ci-install-ffmpeg.sh
       - run: npx playwright-core install --with-deps chrome
       - run: npm run test:browser -- --chrome /opt/google/chrome/chrome --mode ${{ matrix.mode }} --viewers 6 --duration 30 --stagger 1000 --waves 2 --waveGap 15000 --maxPeers 4 --resultsDir browser-receipts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -159,6 +159,102 @@ jobs:
       - run: npm run test:native
       - run: npm run test:swarm
       - run: npm run test:publisher
+
+  rust-core:
+    name: Rust core and shared vectors
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:proto
+      - run: npm run proto:traces
+      - name: Rust format, lint, test and WebAssembly build
+        working-directory: core
+        env:
+          RELAYSWARM_REQUIRE_JS_TRACES: '1'
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
+          cargo build --locked --target wasm32-unknown-unknown -p relayswarm-proto
+      # The committed module is checked by test:proto above, including its
+      # stamp of the core/ sources it was built from. A fresh build from this
+      # commit must give the same verdicts; its bytes may differ by host.
+      - name: Fresh WebAssembly module against the shared vectors
+        run: |
+          node scripts/build-core-wasm.mjs --out "$RUNNER_TEMP/relayswarm-core.wasm"
+          RELAYSWARM_CORE_WASM="$RUNNER_TEMP/relayswarm-core.wasm" node --test test/core-wasm.test.mjs test/core-link.test.mjs test/core-transfer.test.mjs
+      # Once, on Linux: the suite's timing tests are tight enough that running
+      # it twice per Windows job doubles their chance of a slow-runner miss.
+      - name: Loader suite with links, selection and verification in the Rust core
+        run: npm run test:swarm:core
+      # The runner image ships Swift, so the UniFFI bindings compile and run
+      # against the shared vectors and link traces here, not only on a Mac.
+      - name: Swift bindings through UniFFI
+        run: |
+          swift --version
+          npm run test:ffi:swift
+      # The image ships kotlinc and a JDK; JNA comes pinned from Maven Central.
+      # Runs after a Swift failure too, so each run reports both bindings.
+      - name: Kotlin bindings through UniFFI
+        if: ${{ !cancelled() }}
+        run: |
+          kotlinc -version
+          npm run test:ffi:kotlin
+
+  apple-package:
+    name: Apple package of the Rust core
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run proto:traces
+      # In core/, so the targets go to the toolchain rust-toolchain.toml pins.
+      - name: Rust targets for iPhone, the simulator and macOS
+        working-directory: core
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin
+      # Builds the XCFramework and package, links the smoke for iPhone and
+      # runs it on macOS and in an iPhone simulator.
+      - name: Package, link and replay
+        run: |
+          xcodebuild -version
+          npm run test:ffi:apple
+
+  android-package:
+    name: Android library of the Rust core
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # In core/, so the targets go to the toolchain rust-toolchain.toml pins.
+      - name: Rust targets and cargo-ndk
+        working-directory: core
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          cargo install --locked cargo-ndk --version 4.1.2
+      # The image ships the SDK, NDKs, kotlinc and Gradle. Builds the AAR and
+      # an app against it; the emulator run stays local.
+      - name: Package and build an app against it
+        run: |
+          echo "SDK $ANDROID_HOME, NDK ${ANDROID_NDK_HOME:-newest under the SDK}"
+          kotlinc -version
+          gradle --version
+          npm run test:ffi:android
 
   live-relays:
     name: browser transport against live relays

@@ -36,6 +36,7 @@ bounded peer-first mode using author-signed segment commitments.
 | `npm run poc:native` | Two-peer native HyperDHT PoC (`native-poc.mjs`) |
 | `npm run test:native` | Native path tests, local relay + local DHT bootstrap |
 | `npm run test:swarm` | `src/browser/hls-swarm.mjs` unit tests |
+| `npm run test:swarm:core` | Loader hardening suite with peer-first fixtures on the Rust core |
 | `npm run test:browser` | hls.js browser test (`--mode shadow` or `--mode peer-first`) |
 | `npm run test:publisher` | Publisher context/range and demo HTTP/relay tests |
 | `npm run test:operator` | Chrome upload allowance, remote policy and opt-in reports |
@@ -46,6 +47,11 @@ bounded peer-first mode using author-signed segment commitments.
 | `npm run test:playback` | Two-rendition Chrome playback and field-test demo regression |
 | `npm run demo` | Local publisher/player, synthetic live media unless `--media-dir` supplied |
 | `npm run audit` | `npm audit --audit-level=high` |
+| `npm run test:proto` | Check committed shared vectors against the JavaScript verifier |
+| `npm run proto:vectors` | Regenerate `core/vectors/commitments.json` (new signatures each run) |
+| `npm run proto:traces` | Write seeded selection/discovery sequences for the Rust tests (`core/target/`) |
+| `cargo test` (in `core/`) | Rust core tests, including the shared vectors and traces |
+| `npm run core:wasm` | Rebuild `src/browser/relayswarm-core.wasm` from `core/` (paths remapped) |
 | `npm run check:docs` | Links, AI-index format and generated-context freshness |
 | `npm run docs:generate` | Regenerate `llms-full.txt` from maintained Markdown |
 
@@ -60,6 +66,9 @@ The native tests do not need the network; they bootstrap a local DHT.
 src/relay-session.mjs          RelayPool, RelaySwarmSession, ticket validation (main export)
 src/browser/hls-swarm.mjs      hls.js shadow and peer-first integration (./hls-swarm export)
 src/browser/segment-commitment.mjs  experimental signed media commitment contract
+src/browser/core-wasm.mjs      loader for the Rust core (relayswarm-core.wasm, committed): verifier, selection
+src/browser/core-peer-link.mjs PeerLink with its protocol in the Rust core
+src/browser/core-discovery.mjs NeighbourDiscovery with its state in the Rust core
 src/browser/peer-link.mjs      browser WebRTC peer link
 src/hls-publisher.mjs          Node-only local HLS publisher and signed commitments
 demo/                         runnable publisher/player with consent and local receipts
@@ -68,6 +77,8 @@ src/native-dht-transport.mjs   NativeDhtTransport, HyperDHT wiring
 src/object-transfer.mjs        framing, hashing and object transfer primitives
 poc.mjs                        two-peer WebRTC proof of concept (CLI)
 native-poc.mjs                 two-peer native HyperDHT proof of concept (CLI)
+core/relayswarm-proto/         Rust port: commitments, peer-link protocol, selection, discovery (no I/O)
+core/vectors/                  JavaScript-generated vectors and link traces both suites check
 test/                          e2e and unit tests
 spikes/                        throwaway measurement code, see spikes/RESULTS.md
 docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.md, FAQ.md
@@ -114,7 +125,19 @@ docs/                          NATIVE-TRANSPORT.md, THREAT-MODEL.md, LANDSCAPE.m
 - The demo keeps its author key on the server and receipts in the browser.
   Preserve playlist-bound signing and explicit upload consent. Chrome fixture
   tests are loopback; do not describe them as physical-device/NAT validation.
-- Package version 0.2.1, session wire version 3, commitment schemas 1/2 and metrics
+- The Rust core under `core/` is unreleased. Its commitment verifier, peer
+  selection, discovery and peer link are used only when a host passes `coreWasm`; the
+  demo does. Rebuild and commit `src/browser/relayswarm-core.wasm` with
+  `npm run core:wasm` after any change under `core/` that affects
+  verification, selection, discovery or links. A change to `peer-link.mjs` needs the
+  same change in `core/relayswarm-proto/src/link.rs`, regenerated traces and
+  `npm run test:proto` and `npm run test:swarm:core`; a change to
+  `peer-selection.mjs` or `neighbour-discovery.mjs` needs the same change in
+  `selection.rs` or `discovery.rs` and both commands.
+  It must match the JavaScript verifier on every vector; change the JavaScript,
+  regenerate the vectors, then make Rust agree. Its toolchain is pinned in
+  `core/rust-toolchain.toml`; reuse `core/target/`.
+- Package version 0.2.1, session wire version 3, commitment schemas 1/2/3 (3 experimental) and metrics
   version 2 are distinct. Published RelaySwarmKit v0.5.0 supports wire version 3
   and signed media; current SDK/browser interoperability is measured on macOS
   arm64 loopback. Physical Apple devices and public-NAT interop remain unproved.

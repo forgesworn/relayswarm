@@ -375,6 +375,11 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
+| `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The relay session starts once the module has loaded or failed, after at most 2 seconds; fragments loaded meanwhile go to origin. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
+| `multiHolder` | `false` | Experimental; needs `coreWasm`. A schema 3 segment (signed with the publisher's `pieceCommitments`) is fetched from several holders at once by piece range, with an HTTP `Range` fetch from origin for any tail the peers are projected to miss; a holder that proves fast once idle takes back pieces origin has not yet sent, and the first verified copy wins; every piece is verified against the commitment before the segment is delivered. A holder that stays silent or whose flow cannot finish its range in time is abandoned early, by the single-holder rules, and its pieces move to the other sources; unlike the single-holder path, a flow that stops after its first byte is also checked every 250 ms rather than left to its timeout. Used only with holders whose presence advertises object framing 2, and the viewer advertises it only while every one of its links runs in the core. Ranged origin requests go through the player's own fragment loader with `rangeStart` and `rangeEnd` set, as for an `EXT-X-BYTERANGE` segment, so headers and credentials from hls.js `xhrSetup`, `fetchSetup` or a custom loader apply. A body that is not exactly the range (a server that ignored `Range` and sent the whole segment) is discarded, and a refused range sends the segment to the whole-segment origin load. After one such answer the origin (scheme, host and port) is not asked for ranges again in that session, and its segments take the single-holder path. A ranged upload is charged by the bytes it sends. |
+| `maxHoldersPerObject` | `3` | Holders per segment under `multiHolder`, 1 to 8. Provisional: not yet set from a replayed field trace. |
+| `abrIgnorePeers` | `false` | Peer-first. Keeps a peer-delivered fragment out of the hls.js bandwidth and first-byte estimates, so automatic quality follows the origin path; otherwise the time a peer delivery took, including any wait for a holder, is sampled as if it were an origin download. The loader skips the estimator's samples only while hls.js dispatches `FRAG_LOADED` and `FRAG_BUFFERED` for that fragment, and puts hls.js back on `stop()`. The one sample it cannot withhold is the first-byte sample hls.js's own timer takes when a load has waited past half a segment with no byte, the check that can switch quality down mid-load. A fragment fetched under `multiHolder` counts as peer-delivered even when origin sent part of it. `metrics().segments.abrPeerSamplesWithheld` counts the skipped samples. Needs the default hls.js ABR controller; with another one it does nothing. |
+| `traceRequests` | `0` | Rows kept for `trace()`, 0 to 32,768, oldest dropped first: loads, eligibility decisions, peer and origin requests and multi-holder scheduler calls, enough to replay a transfer offline. For field runs that need a replayable input; it is not part of `metrics()`, so a receipt must take `trace()` itself. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 
@@ -454,7 +459,32 @@ not an identity), `uptimeMs`, `serving`, plus:
   a timestamp), `sinceDropped` (events dropped only by the subscription `since`
   filter, unverified and so unauthenticated; a device clock ahead of its peers
   raises it), `publishErrors`.
-- `errors`: `total` and `byStage`.
+- `errors`: `total` and `byStage`. A module named by `coreWasm` that fails to
+  load or traps counts once under `core`.
+- `core`: `state` (`off`, `loading`, `ready` or `failed`), `verifier` (`wasm`
+  or `js`, whichever decides the next commitment), `selection` (`wasm` or
+  `js`, whichever chooses peers), `discovery` (`wasm` or `js`, whichever
+  runs neighbour discovery), `links` (`wasm` and `js`: how many links
+  each opened; links opened before the module loads are JavaScript),
+  `fallbacks` (traps that handed the core's
+  work to JavaScript) and `decided` (`wasm` and `js`: how many commitments
+  each verifier decided). Selection moves to the core when it loads only if
+  no peer has been chosen yet, and back to a fresh JavaScript selection,
+  without link history, after a trap. Discovery moves to the core only while
+  it holds no context, hint or window, and after a trap to a fresh JavaScript
+  instance that keeps its counters. `multiHolder` reports whether framing 2
+  is advertised (`enabled`) and counts `transfers`, `delivered`, `late`
+  (planned past the deadline even with origin), `failed`, `bans`,
+  `abandoned` (holders dropped early as silent or too slow), the bytes
+  each source was first to verify (`peerBytes`, `originBytes`), the bytes
+  received that verified nothing new, such as the slower copy of a piece
+  sent by both a holder and origin (`unusedBytes`), `originRanges`,
+  and `originRangesIgnored`, the origins that answered a range with
+  something else (each once).
+  `timings` gives p50 and p90 over the last 128 delivered transfers of their
+  duration, their slowest single request and their request count.
+  Peer byte totals elsewhere count only a transfer's peer share. An additive
+  metrics-v2 field.
 - `config`: the effective settings, so a receipt says what produced it.
 
 Snapshots contain no IP addresses, user agent or long-term key, but the
@@ -856,6 +886,145 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 # RelaySwarm changelog
 
+## Unreleased
+
+- Add `core/relayswarm-proto`, a Rust port of signed segment commitment,
+  scoped delegation and revocation verification (schemas 1 and 2; schema 3
+  below). It performs no I/O and builds for WebAssembly. The browser loader
+  uses it only with `coreWasm` (below); the native path does not use it.
+- Add 120 shared vectors generated from the JavaScript verifier
+  (`core/vectors/commitments.json`). The Rust and JavaScript test suites both
+  check them, and a new CI job runs both with the Rust lint and WebAssembly
+  build.
+- Port the browser data-channel protocol (`peer-link.mjs`) to
+  `relayswarm_proto::link`, a state machine with no I/O. 48 traces recorded
+  from the real `PeerLink` check its events and state step by step.
+- Port peer selection and neighbour discovery to `relayswarm_proto::selection`
+  and `relayswarm_proto::discovery`. Seeded random and scripted operation
+  sequences from the JavaScript check every output and state after each step.
+- Add the opt-in `coreWasm` loader option: peer-first viewers verify segment
+  commitments with the Rust core compiled to WebAssembly
+  (`src/browser/relayswarm-core.wasm`, then 200,458 bytes, 87,373 gzip). The
+  JavaScript verifier decides until it loads, and for the rest of the session
+  if it fails to load or traps. A new metrics field, `core`, reports which
+  verifier decided. The demo serves the module, uses it, and allows
+  `'wasm-unsafe-eval'` in its Content Security Policy.
+- With `coreWasm`, peer selection also runs in the Rust core: each swarm
+  binds it when the module loads, provided no peer has been chosen yet. A
+  trap anywhere in the module hands both selection and verification to
+  JavaScript, and selection starts again without link history. The module is
+  now 227,541 bytes (94,900 gzip). `core.selection` in the metrics reports
+  which one chooses peers.
+- With `coreWasm`, links opened once the module is ready run the peer link
+  protocol in the Rust core (`src/browser/core-peer-link.mjs` keeps the
+  channel, timer and callbacks). All 48 committed link traces match through
+  the module. A trap closes the links it ran, and later links are
+  JavaScript. `core.links` counts links of each kind. The module is now
+  274,837 bytes (112,644 gzip). `npm run test:swarm:core` runs the loader
+  hardening suite with every peer-first fixture on the module.
+- With `coreWasm`, neighbour discovery also runs in the Rust core
+  (`src/browser/core-discovery.mjs` keeps one object per context, window
+  and attempt, as the swarm compares them by identity). Each swarm binds it
+  when the module loads, provided discovery holds no context, hint or window
+  yet. The seeded and scripted discovery sequences match through the module.
+  A trap hands discovery to a fresh JavaScript instance that keeps the
+  counters. `core.discovery` in the metrics reports which one runs. The
+  module is now 315,803 bytes (122,029 gzip).
+- With `coreWasm`, the relay session starts once the module has loaded or
+  failed, waiting at most 2 seconds; the relay connection opens meanwhile.
+  Fragments loaded during the wait go to origin and leave discovery empty, so
+  discovery, selection and links start in the module. One CI viewer had
+  kept discovery in JavaScript after hints arrived before the module loaded.
+- Experimental commitment schema 3 (`relayswarm-segment-v3`): schema 2 plus
+  `pieceSize` and one SHA-256 per piece, at most 64 pieces. Both verifiers
+  accept it and `commitmentPieceSize` is exported; 19 new shared vectors
+  (139 in all).
+- Add piece-range requests (framing 2, `"p"` on `want` and `meta`) to the
+  Rust link, and `relayswarm_proto::scheduler`, which plans one schema 3
+  object across up to three holders with origin for a late tail and runs the
+  transfer with per-piece verification. The loader uses both only with
+  `multiHolder` (below); the holder and lookahead defaults are provisional.
+- Add the publisher option `pieceCommitments` and the demo flag
+  `--piece-commitments` (both off by default): exact-playlist contexts are
+  signed as schema 3 instead of schema 2, with piece digests from the same
+  read pass. Schema 3 replaces schema 2 rather than being published beside
+  it, so v0.2.1 and RelaySwarmKit v0.5.0 receivers load those segments from
+  origin.
+- Add the experimental loader option `multiHolder` (with `coreWasm`): a
+  schema 3 segment comes from up to `maxHoldersPerObject` framing 2 holders
+  at once by piece range, run by the core's scheduler, with ranged HTTP
+  fetches from origin for a late tail and for pieces still outstanding at
+  the deadline. Presence carries `obj: 2` only while every link runs in the
+  core. Off by default. A ranged upload is charged against upload allowances
+  and `reserveUploadBytes` by the bytes it sends, not the whole segment.
+- Under `multiHolder`, abandon a silent or too-slow holder early, by the
+  single-holder rules, and move its pieces, instead of waiting for the
+  deadline; counted as `core.multiHolder.abandoned`. Unlike the single-holder
+  path, a flow that stops after its first byte is also rechecked every 250 ms.
+- Under `multiHolder`, load ranged origin pieces through the player's own
+  fragment loader, so headers and credentials from `xhrSetup`, `fetchSetup`
+  or a custom loader apply; a body that is not exactly the range is discarded.
+- Under `multiHolder`, a holder whose first request proves it fast takes
+  back pieces origin has not yet delivered, as many as it can finish before
+  origin is projected to, leaving busy holders their share; the first
+  verified copy wins and origin's request keeps running. Before, untested
+  holders got one trial piece each and origin the rest in one request, and
+  nothing moved that work back: over RelaySwarmKit's data channels, with
+  8 MB and origin at 300 bytes per ms, 60 of 62 pieces came from origin in
+  27.9 s against a 10 s deadline. `core.multiHolder.peerBytes` and
+  `originBytes` now count the bytes each source was first to verify, and the
+  new `unusedBytes` counts received bytes that verified nothing new.
+- Under `multiHolder`, stop asking an origin for ranges once it has answered
+  one with something else, and send its later segments down the
+  single-holder path for the session; counted as
+  `core.multiHolder.originRangesIgnored`. A loader downloads the whole body
+  before the length check can reject it, and a failed origin piece fails the
+  transfer, so without this every such segment came from origin twice.
+  Cloudflare Stream answered a probe for a segment range with the whole
+  segment (200); Apple's, Mux's and Unified Streaming's test streams
+  answered 206.
+- Add the loader option `traceRequests` (off by default) and `trace()`: a
+  bounded ring of loads, eligibility decisions, peer and origin requests and
+  every multi-holder scheduler call with its inputs and commands. A test
+  replays a recorded transfer through the module and gets the same commands.
+  The Chrome harness takes `--trace N` and stores each viewer's trace.
+- Add `scripts/trace-report.mjs`, which replays saved traces against the
+  module and summarises holder use, origin share, request timing and buffer
+  ahead, with an optional what-if over other holder limits (an estimate that
+  ignores shared uplinks).
+- Document commitment schema 3, object framing 2 and the presence `obj`
+  field in `docs/NIP-DRAFT.md`.
+- The demo player takes `multiHolder=1` and `trace=N` page URL parameters
+  and keeps the latest scheduler traces in its receipt, which
+  `scripts/trace-report.mjs` reads.
+- `abrIgnorePeers` (off by default) keeps peer-delivered fragments out of the
+  hls.js bandwidth and first-byte estimates; without it the time a peer
+  delivery took, holder waits included, is sampled as origin throughput. The
+  demo takes it as `abrIgnorePeers=1`, and its receipt records hls.js's
+  bandwidth estimate with each fragment.
+- The Rust verifier now rejects a commitment whose content omits `part`, as
+  the JavaScript one does (a new shared vector, 140 in all). Under
+  `multiHolder`, an untested holder is planned with the shared first-byte
+  time rather than none, origin stays live once peers verify its pieces,
+  requests stopped because the segment is done or another holder won count
+  as aborts rather than abandonments, and a closed link's last result no
+  longer leaves an entry in the core's peer selection.
+- Add `core/relayswarm-ffi`, a UniFFI facade over the Rust core for Swift and
+  Kotlin: the commitment verifiers (JSON in and out), the schema 3 piece
+  helpers, the multi-holder transfer scheduler, the peer link protocol, peer
+  selection and neighbour discovery. `npm run test:ffi:swift` and
+  `npm run test:ffi:kotlin` check all 140 vectors, all 48 recorded link
+  traces, a transfer, a piece range exchange and the seeded selection and
+  discovery sequences through generated bindings, and CI runs both.
+  `npm run build:ffi:apple` packages it as a Swift package with an
+  arm64 XCFramework for iPhone, the iOS simulator and macOS (iOS 16, macOS 14);
+  `npm run test:ffi:apple` runs the same checks against the package on macOS
+  and in an iPhone simulator, and links it for iPhone. RelaySwarmKit does not
+  use it yet. `npm run build:ffi:android` packages it as an Android library
+  (AAR) for arm64-v8a, armeabi-v7a and x86_64, API 26 and later;
+  `npm run test:ffi:android` builds an app against it with the Android Gradle
+  plugin, and the same checks pass on an API 35 arm64 emulator.
+
 ## v0.2.1 (21 October 2026)
 
 Experimental [GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1) of the source from
@@ -1252,7 +1421,7 @@ are not a stable interoperability promise.
 |---|---|---|
 | `relayswarm` | Node or a browser bundler | `RelayPool`, `RelaySwarmSession`, `validTicket`, `RELAYSWARM_VERSION`, `KIND_PRESENCE`, `KIND_SIGNAL`, `SWARM_TAG` |
 | `relayswarm/hls-swarm` | Browser with hls.js | `createHlsSwarm`, `HLS_SWARM_METRICS_VERSION`, `rotationCandidate`, `retryAfterFor`, `readRefusal` |
-| `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `delegationContent`, `revocationContent`, `validStreamAuthorisation`, `verifyCommitmentDelegation`, `segmentMediaContext`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT`, `KIND_COMMITMENT_DELEGATION`, `KIND_COMMITMENT_REVOCATION` |
+| `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `commitmentPieceSize`, `delegationContent`, `revocationContent`, `validStreamAuthorisation`, `verifyCommitmentDelegation`, `segmentMediaContext`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT`, `KIND_COMMITMENT_DELEGATION`, `KIND_COMMITMENT_REVOCATION` |
 | `relayswarm/hls-publisher` | Node only | `createHlsPublisher`, `PublisherError` |
 | `relayswarm/publisher-state` | Node only | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent`, `createCommitmentDelegation`, `createCommitmentRevocation` |
 | `relayswarm/stream-discovery` | Browser or Node | `resolveTrustedStream`, `discoverTrustedStreams`, `StreamDiscoveryError` |
@@ -1270,11 +1439,27 @@ object-transfer modules into an ordinary browser page.
 ## Browser loader
 
 `createHlsSwarm(options)` returns
-`{ attach(hls), updateTicket(ticket), stop(), metrics() }`.
+`{ attach(hls), updateTicket(ticket), stop(), metrics(), trace() }`.
 `attach` wraps `hls.config.fLoader`; call it before `loadSource`. `stop` is the
 origin-only kill switch and closes connections, cancels pending work, releases
 held bytes and restores the original loader. Create a new swarm to participate
 again. Uploading defaults to off; `mode` defaults to `shadow`.
+
+`trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
+`traceRequests` (none by default): each peer-first load, eligibility
+decision, peer request and origin request (whole or ranged), joined by a load
+ID, and each multi-holder scheduler call with its inputs and the commands it
+returned, so a recorded transfer replays against the module offline. Times are
+whole milliseconds from the swarm's creation; holders are session labels, not
+keys. It is kept out of `metrics()`, which receipts snapshot repeatedly.
+`node scripts/trace-report.mjs file.json...` summarises saved traces (from a
+harness receipt, a demo field receipt, a bare trace or a list of any of them): it replays every
+transfer against the committed module and reports a mismatch, then gives
+holders offered and used, bytes by holder rank, origin and redundant shares,
+slack at finish, request timing and buffer ahead of the playhead.
+`--what-if 1,2,3` replays transfers with other holder limits against each
+holder's measured timing; it ignores shared uplinks, so it is an estimate of
+whether fewer holders would do, not evidence for more.
 
 `updateTicket(ticket)` refreshes this viewer's bounded opaque admission ticket
 without rebuilding connections, the loader or upload accounting. It returns
@@ -1425,6 +1610,7 @@ const publisher = await createHlsPublisher({
 | `maxConcurrent` | `8` | Simultaneous signing work, configurable from 1 to 64 |
 | `maxCacheEntries` | `512` | Entries in each bounded hash/commitment cache, configurable from 1 to 4,096 |
 | `allowEncryptedMedia` | `false` | Explicit AES-128 ciphertext publication; local keys remain HTTP-only |
+| `pieceCommitments` | `false` | Experimental: sign exact-playlist contexts as schema 3 (one SHA-256 per piece) instead of schema 2. v0.2.1 and RelaySwarmKit v0.5.0 receivers reject schema 3 and load those segments from origin |
 | `commitmentSecretKey` / `delegation` | author key / none | Author-scoped delegated commitment signing; an externally authored event permits operation without the author secret |
 | `revokedDelegationIds` / `delegationRevocations` | empty arrays | Host-trusted current revocation view; no automatic global lookup |
 
@@ -1603,6 +1789,14 @@ See [broadcast setup](https://raw.githubusercontent.com/forgesworn/relayswarm/ma
 `relayswarm-segment-v1`, schema `v: 1` and fixed field order. It serialises fields;
 it does not sign an event or validate media bytes.
 
+`commitmentPieceSize(size)` returns the piece size that experimental schema 3
+(`v: 3`, `relayswarm-segment-v3`) requires: at least 64 KiB, at most 64 pieces
+per segment, rounded up to a multiple of 16 KiB. Schema 3 adds `pieceSize` and
+one lowercase SHA-256 per piece in `pieces` to schema 2. The verifier accepts
+it; the publisher signs it only with `pieceCommitments: true`. The loader
+fetches and verifies pieces from several holders only with `multiHolder`
+(see `INTEGRATION.md`).
+
 `validStreamAuthorisation(event)` checks the signed kind-30311 event, a `d` tag,
 bounded event size and the exact redistribution tag.
 
@@ -1653,7 +1847,10 @@ uses a fresh ephemeral key by default; maximum event age defaults to 120 s.
   signal subscription; closing the session does not close its shared pool.
 - `onPresence`, `onSignal`, `onError` register handlers and return unsubscribe callbacks.
 - `announcePresence({ role, transports?, have?, open?, ticket? })` returns
-  the signed event. Capabilities are `{ type, publicKey }`; `have` contains digests.
+  the signed event. Capabilities are `{ type, publicKey, obj? }`; `have` contains
+  digests. Experimental `obj` is the object framing version, an integer 1 to 15
+  (absent means 1); received presence keeps a valid `obj` and drops any other.
+  Session wire version 3 is unchanged, and v0.2.1 peers ignore the field.
 - `sendSignal(toPubkey, { type, transport, requestId, payload? })` returns a
   signed NIP-44-encrypted event addressed to that session key.
 - `waitForPresence(predicate, timeoutMs?)` / `waitForSignal(predicate,
@@ -4757,6 +4954,33 @@ Aggregate counts cover the whole page session. Detail is bounded to the last
 session totals are retained. Stalls exclude user seeks, whose recovery is
 recorded separately. Startup begins at the Start playback action.
 
+### Scheduler traces
+
+The demo player always loads the Rust core. Two page URL parameters, off by
+default, record what the multi-holder scheduler needs offline:
+
+- `multiHolder=1` turns on multi-holder transfers (`multiHolder` in
+  [INTEGRATION.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md)). They need schema 3 commitments, so start
+  the server with `--piece-commitments`. Without it every segment carries
+  schema 2 and the option does nothing.
+- `trace=N`, with N from 1 to 32,768, keeps N trace rows per mode session
+  (`traceRequests`). Any other value records nothing.
+- `abrIgnorePeers=1` keeps peer-delivered segments out of the player's
+  bandwidth estimate (`abrIgnorePeers`), so automatic quality follows the
+  origin path.
+
+For example `https://demo.example/?multiHolder=1&trace=4096&abrIgnorePeers=1`.
+Each viewer opens the same URL. The receipt records all three values in
+`current` and `sessions`, and each fragment record carries hls.js's
+`bandwidthEstimate` as that fragment arrived. It
+keeps the trace of the running session and of the latest eight stopped ones.
+Traces name holders only by per-session labels.
+
+`node scripts/trace-report.mjs receipt.json...` replays every multi-holder
+transfer in the receipts through the committed module and reports holder
+shares, request timing and buffer ahead; `--what-if 1,2,3` adds an estimate
+for other holder limits. Loopback traces test the tool only; they do not set scheduler defaults.
+
 ## Automated coverage and remaining field gates
 
 ```bash
@@ -7407,8 +7631,9 @@ Source: [docs/NIP-DRAFT.md](https://raw.githubusercontent.com/forgesworn/relaysw
 
 This is a local specification of the implemented RelaySwarm session and browser
 object contracts. It is **not an accepted Nostr NIP**. Session wire version 3,
-commitment schemas 1 and 2, the browser object framing and native object framing
-have separate version boundaries. The original `poc.mjs` uses older plaintext
+commitment schemas 1 to 3, browser object framings 1 and 2 and native object
+framing have separate version boundaries. Schema 3 and framing 2 are
+experimental and off by default. The original `poc.mjs` uses older plaintext
 signalling and must not be described as this encrypted contract.
 
 ## Session events
@@ -7438,6 +7663,9 @@ Presence content has this shape:
 
 `role` and transport `type` are lowercase tokens, up to 32 characters, matching
 `[a-z0-9][a-z0-9-]*`. `transports` is required and contains at most eight entries.
+A capability may carry `obj`, its browser object framing version, an integer
+from 1 to 15; absent reads as 1, and other values reject the presence. v0.2.1
+accepts the field and discards it.
 `have` is required and contains at most 32 lowercase 64-character hexadecimal
 object keys. `open` is optional and advisory. An optional opaque `ticket` is a
 non-empty string of at most 2 KiB UTF-8; admission is the host's responsibility.
@@ -7494,6 +7722,21 @@ that do not implement it ignore the message and send the response in full.
 The existing bounded drain timeout closes an incomplete response; unknown or partially reliable
 channels close immediately. Host stop and admission withdrawal still close
 immediately. Upload queues and backpressure retain their original bounds.
+Framing 2 adds a piece range `"p":[start,end]` to `want` and `meta`, with `end`
+exclusive and `0 <= start < end <= 64`. Pieces are those of commitment schema 3,
+whose piece size is a function of the object size alone, so both sides derive
+the byte offsets without exchanging them. A holder that has the object answers
+with `meta` echoing the same range and `size` equal to the range's exact byte
+length, then those bytes; a range past the held object's last piece is answered
+with `none`. A malformed range closes the link. The requester closes the link
+when `meta` omits or changes the range or its size differs, which is how a
+framing 1 holder that ignores `p` and sends the whole object is detected. A
+requester sends `p` only to a holder whose current presence advertises
+`obj: 2` or higher, and a viewer advertises framing 2 only while every one of
+its links can serve ranges. A holder charges a ranged response against upload
+allowances by the bytes it sends. Requests without `p` behave exactly as in
+framing 1.
+
 Optional `contribution` and `fetching` controls coordinate serving and short
 fetch leases; they are advisory and never authorise media or spend upload
 allowance.
@@ -7519,6 +7762,18 @@ identity. This avoids treating player level indices, which codec filtering can
 renumber, as trusted media identities. Content must equal the canonical field
 order emitted by `commitmentContent` in
 [segment-commitment.mjs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/src/browser/segment-commitment.mjs).
+
+Schema 3 uses `relayswarm-segment-v3` and adds `pieceSize` and `pieces` to the
+schema 2 fields, after `encryption`. `pieceSize` must equal
+`ceil(max(65536, ceil(size / 64)) / 16384) * 16384`: at least 64 KiB, at most 64
+pieces, a multiple of 16 KiB. `pieces` holds exactly `ceil(size / pieceSize)`
+lowercase SHA-256 digests, one per piece in order; the last piece may be
+short. A receiver may verify and keep each piece as it arrives, from any
+source, and still requires the whole object to match `sha256` and `size`
+before delivery to the player. The local publisher signs schema 3 instead of
+schema 2, never both, when its `pieceCommitments` option is set. v0.2.1 and
+RelaySwarmKit v0.5.0 reject schema 3, so their viewers load those segments
+from origin.
 
 The receiver independently matches every context field. Commitments are at
 most 120 seconds old, at most 30 seconds ahead and expire within 300 seconds of

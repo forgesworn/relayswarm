@@ -294,6 +294,33 @@ Aggregate counts cover the whole page session. Detail is bounded to the last
 session totals are retained. Stalls exclude user seeks, whose recovery is
 recorded separately. Startup begins at the Start playback action.
 
+### Scheduler traces
+
+The demo player always loads the Rust core. Two page URL parameters, off by
+default, record what the multi-holder scheduler needs offline:
+
+- `multiHolder=1` turns on multi-holder transfers (`multiHolder` in
+  [INTEGRATION.md](../INTEGRATION.md)). They need schema 3 commitments, so start
+  the server with `--piece-commitments`. Without it every segment carries
+  schema 2 and the option does nothing.
+- `trace=N`, with N from 1 to 32,768, keeps N trace rows per mode session
+  (`traceRequests`). Any other value records nothing.
+- `abrIgnorePeers=1` keeps peer-delivered segments out of the player's
+  bandwidth estimate (`abrIgnorePeers`), so automatic quality follows the
+  origin path.
+
+For example `https://demo.example/?multiHolder=1&trace=4096&abrIgnorePeers=1`.
+Each viewer opens the same URL. The receipt records all three values in
+`current` and `sessions`, and each fragment record carries hls.js's
+`bandwidthEstimate` as that fragment arrived. It
+keeps the trace of the running session and of the latest eight stopped ones.
+Traces name holders only by per-session labels.
+
+`node scripts/trace-report.mjs receipt.json...` replays every multi-holder
+transfer in the receipts through the committed module and reports holder
+shares, request timing and buffer ahead; `--what-if 1,2,3` adds an estimate
+for other holder limits. Loopback traces test the tool only; they do not set scheduler defaults.
+
 ## Automated coverage and remaining field gates
 
 ```bash

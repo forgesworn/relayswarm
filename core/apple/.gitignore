@@ -1,0 +1,5 @@
+# Built by scripts/ffi-apple.mjs
+/relayswarm_ffiFFI.xcframework/
+/.build/
+/.swiftpm/
+/Package.resolved

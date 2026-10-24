@@ -110,6 +110,11 @@ Publisher, policy or peer-configuration changes still require reconfiguration.
 | `metricsIntervalMs` | `10000` | How often `onMetrics` fires. |
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
+| `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The relay session starts once the module has loaded or failed, after at most 2 seconds; fragments loaded meanwhile go to origin. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
+| `multiHolder` | `false` | Experimental; needs `coreWasm`. A schema 3 segment (signed with the publisher's `pieceCommitments`) is fetched from several holders at once by piece range, with an HTTP `Range` fetch from origin for any tail the peers are projected to miss; a holder that proves fast once idle takes back pieces origin has not yet sent, and the first verified copy wins; every piece is verified against the commitment before the segment is delivered. A holder that stays silent or whose flow cannot finish its range in time is abandoned early, by the single-holder rules, and its pieces move to the other sources; unlike the single-holder path, a flow that stops after its first byte is also checked every 250 ms rather than left to its timeout. Used only with holders whose presence advertises object framing 2, and the viewer advertises it only while every one of its links runs in the core. Ranged origin requests go through the player's own fragment loader with `rangeStart` and `rangeEnd` set, as for an `EXT-X-BYTERANGE` segment, so headers and credentials from hls.js `xhrSetup`, `fetchSetup` or a custom loader apply. A body that is not exactly the range (a server that ignored `Range` and sent the whole segment) is discarded, and a refused range sends the segment to the whole-segment origin load. After one such answer the origin (scheme, host and port) is not asked for ranges again in that session, and its segments take the single-holder path. A ranged upload is charged by the bytes it sends. |
+| `maxHoldersPerObject` | `3` | Holders per segment under `multiHolder`, 1 to 8. Provisional: not yet set from a replayed field trace. |
+| `abrIgnorePeers` | `false` | Peer-first. Keeps a peer-delivered fragment out of the hls.js bandwidth and first-byte estimates, so automatic quality follows the origin path; otherwise the time a peer delivery took, including any wait for a holder, is sampled as if it were an origin download. The loader skips the estimator's samples only while hls.js dispatches `FRAG_LOADED` and `FRAG_BUFFERED` for that fragment, and puts hls.js back on `stop()`. The one sample it cannot withhold is the first-byte sample hls.js's own timer takes when a load has waited past half a segment with no byte, the check that can switch quality down mid-load. A fragment fetched under `multiHolder` counts as peer-delivered even when origin sent part of it. `metrics().segments.abrPeerSamplesWithheld` counts the skipped samples. Needs the default hls.js ABR controller; with another one it does nothing. |
+| `traceRequests` | `0` | Rows kept for `trace()`, 0 to 32,768, oldest dropped first: loads, eligibility decisions, peer and origin requests and multi-holder scheduler calls, enough to replay a transfer offline. For field runs that need a replayable input; it is not part of `metrics()`, so a receipt must take `trace()` itself. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
 
@@ -189,7 +194,32 @@ not an identity), `uptimeMs`, `serving`, plus:
   a timestamp), `sinceDropped` (events dropped only by the subscription `since`
   filter, unverified and so unauthenticated; a device clock ahead of its peers
   raises it), `publishErrors`.
-- `errors`: `total` and `byStage`.
+- `errors`: `total` and `byStage`. A module named by `coreWasm` that fails to
+  load or traps counts once under `core`.
+- `core`: `state` (`off`, `loading`, `ready` or `failed`), `verifier` (`wasm`
+  or `js`, whichever decides the next commitment), `selection` (`wasm` or
+  `js`, whichever chooses peers), `discovery` (`wasm` or `js`, whichever
+  runs neighbour discovery), `links` (`wasm` and `js`: how many links
+  each opened; links opened before the module loads are JavaScript),
+  `fallbacks` (traps that handed the core's
+  work to JavaScript) and `decided` (`wasm` and `js`: how many commitments
+  each verifier decided). Selection moves to the core when it loads only if
+  no peer has been chosen yet, and back to a fresh JavaScript selection,
+  without link history, after a trap. Discovery moves to the core only while
+  it holds no context, hint or window, and after a trap to a fresh JavaScript
+  instance that keeps its counters. `multiHolder` reports whether framing 2
+  is advertised (`enabled`) and counts `transfers`, `delivered`, `late`
+  (planned past the deadline even with origin), `failed`, `bans`,
+  `abandoned` (holders dropped early as silent or too slow), the bytes
+  each source was first to verify (`peerBytes`, `originBytes`), the bytes
+  received that verified nothing new, such as the slower copy of a piece
+  sent by both a holder and origin (`unusedBytes`), `originRanges`,
+  and `originRangesIgnored`, the origins that answered a range with
+  something else (each once).
+  `timings` gives p50 and p90 over the last 128 delivered transfers of their
+  duration, their slowest single request and their request count.
+  Peer byte totals elsewhere count only a transfer's peer share. An additive
+  metrics-v2 field.
 - `config`: the effective settings, so a receipt says what produced it.
 
 Snapshots contain no IP addresses, user agent or long-term key, but the

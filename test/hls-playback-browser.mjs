@@ -116,6 +116,17 @@ try {
   const reference = receipt.viewers.find((viewer) => viewer.name === "baseline").receipt.player;
   const measured = receipt.viewers.find((viewer) => viewer.name === "consumer").receipt.player;
   assert.equal(measured.fatalErrors, 0); assert.equal(reference.fatalErrors, 0);
+  const consumerReport = receipt.viewers.find((viewer) => viewer.name === "consumer").receipt;
+  const peerFirstSessions = [...consumerReport.sessions, ...(consumerReport.current ? [consumerReport.current] : [])].filter((session) => session.metrics.mode === "peer-first");
+  assert.ok(peerFirstSessions.length > 0, "the consumer never ran peer-first");
+  for (const session of peerFirstSessions) {
+    // JavaScript may decide a commitment that arrives before the module loads.
+    // Selection binds to the module only before the first choice, which
+    // needs a peer link and so comes well after the module loads.
+    const { state, verifier, selection, links, fallbacks, decided } = session.metrics.core;
+    assert.deepEqual({ state, verifier, selection, fallbacks, jsLinks: links.js }, { state: "ready", verifier: "wasm", selection: "wasm", fallbacks: 0, jsLinks: 0 }, "the consumer did not link, verify and select with the Rust core");
+    assert.ok(decided.wasm > 0, "the module decided no commitments");
+  }
   assert.ok(measured.stalls <= reference.stalls, `consumer stalled ${measured.stalls} times vs baseline ${reference.stalls}`);
   assert.ok(measured.startupMs <= reference.startupMs + 2000, "peer mode added more than two seconds to startup");
   assert.ok(measured.seeks >= 2 && measured.seekRecoveryMs.length >= 2, "seek recovery was not recorded");

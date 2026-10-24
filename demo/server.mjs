@@ -40,7 +40,7 @@ export function httpRange(header, size) {
 
 export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host = "127.0.0.1", port = 0, publicUrl, tlsKey, tlsCert, relays = [], iceServers, iceTransportPolicy = "all",
   publisherState, operatorToken, operatorTokenFile, operatorState, telemetry = false, reportCapacity, reportTtlMs, operatorExtraStatus, beforeListen,
-  admissionOptions, accountBudget, turnCredentials, policySessionSnapshot = true, blockingPlaylistReload = true, mediaCapabilities = { parts: false }, allowEncryptedMedia = false, commitmentSecretKey, delegation, revokedDelegationIds = [], delegationRevocations = [] } = {}) {
+  admissionOptions, accountBudget, turnCredentials, policySessionSnapshot = true, blockingPlaylistReload = true, mediaCapabilities = { parts: false }, allowEncryptedMedia = false, pieceCommitments = false, commitmentSecretKey, delegation, revokedDelegationIds = [], delegationRevocations = [] } = {}) {
   if (!["all", "relay"].includes(iceTransportPolicy)) throw new Error("Invalid ICE transport policy; use all or relay.");
   // Programmatic compatibility option; there is no viewer control or CLI flag.
   if (typeof policySessionSnapshot !== "boolean") throw new Error("Invalid policy session snapshot option.");
@@ -60,10 +60,10 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
   if (operatorToken && operatorTokenFile) throw new Error("Supply only one operator token source.");
   const token = operatorTokenFile ? await readOperatorTokenFile(operatorTokenFile) : operatorToken;
   const state = publisherState ? await loadPublisherState(publisherState, { manifest }) : {};
-  const publisher = await createHlsPublisher({ mediaDir, manifest, ...state, allowEncryptedMedia, commitmentSecretKey, delegation, revokedDelegationIds, delegationRevocations });
+  const publisher = await createHlsPublisher({ mediaDir, manifest, ...state, allowEncryptedMedia, pieceCommitments, commitmentSecretKey, delegation, revokedDelegationIds, delegationRevocations });
   const playlistReload = createBlockingPlaylistReload({ publisher, enabled: blockingPlaylistReload });
-  const [page, css, bundle] = await Promise.all([
-    readFile(join(here, "index.html")), readFile(join(here, "style.css")),
+  const [page, css, coreWasm, bundle] = await Promise.all([
+    readFile(join(here, "index.html")), readFile(join(here, "style.css")), readFile(join(here, "../src/browser/relayswarm-core.wasm")),
     build({ entryPoints: [join(here, "client.mjs")], bundle: true, format: "esm", platform: "browser", write: false, minify: true, logLevel: "silent" }),
   ]);
   const admission = createAdmissionControls({ ...admissionOptions, swarmId: publisher.swarmId });
@@ -82,7 +82,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
     const requestStartedAt = performance.now();
     requestDiagnostics.observe(request, response);
     const connect = ["'self'", ...relays.map((value) => new URL(value).origin), base?.replace(/^http/u, "ws")].filter(Boolean).join(" ");
-    response.setHeader("content-security-policy", `default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; connect-src ${connect}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`);
+    response.setHeader("content-security-policy", `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; connect-src ${connect}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`);
     response.setHeader("x-content-type-options", "nosniff");
     response.setHeader("referrer-policy", "no-referrer");
     response.setHeader("cache-control", "no-store");
@@ -106,6 +106,7 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
       if (url.pathname === "/") return send("text/html; charset=utf-8", page);
       if (url.pathname === "/style.css") return send("text/css; charset=utf-8", css);
       if (url.pathname === "/client.js") return send("text/javascript; charset=utf-8", bundle.outputFiles[0].contents);
+      if (url.pathname === "/relayswarm-core.wasm") return send("application/wasm", coreWasm);
       if (url.pathname === "/stream.json") return send("application/json", JSON.stringify(advertisement));
       if (url.pathname === "/session.json") return send("application/json", JSON.stringify(publicSession()));
       if (url.pathname === "/commitment") {
@@ -220,8 +221,8 @@ export async function startDemoServer({ mediaDir, manifest = "master.m3u8", host
 
 async function main() {
   const { values } = parseArgs({ options: { "media-dir": { type: "string" }, manifest: { type: "string", default: "master.m3u8" }, host: { type: "string", default: "127.0.0.1" }, port: { type: "string", default: "8787" },
-    "public-url": { type: "string" }, "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, "ice-transport-policy": { type: "string", default: "all" }, "turn-credentials-url": { type: "string" }, "turn-url-projection": { type: "string", default: "issued" }, "publisher-state": { type: "string" }, "operator-token-file": { type: "string" }, "operator-state": { type: "string" }, "account-budget-state": { type: "string" }, "allow-encrypted-media": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" } } });
-  if (values.help) { console.log("npm run demo -- [--media-dir DIR --manifest master.m3u8] [--host 127.0.0.1 --port 8787] [--public-url https://demo.example] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE | --turn-credentials-url https://issuer.example/turn] [--ice-transport-policy all|relay] [--turn-url-projection issued|tls-tcp] [--publisher-state FILE] [--operator-token-file FILE] [--account-budget-state FILE] [--telemetry]\nWithout --media-dir, ffmpeg generates a two-rendition live test stream. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/FIELD-TEST.md."); return; }
+    "public-url": { type: "string" }, "tls-key": { type: "string" }, "tls-cert": { type: "string" }, relay: { type: "string", multiple: true }, stun: { type: "string", multiple: true }, "ice-config": { type: "string" }, "ice-transport-policy": { type: "string", default: "all" }, "turn-credentials-url": { type: "string" }, "turn-url-projection": { type: "string", default: "issued" }, "publisher-state": { type: "string" }, "operator-token-file": { type: "string" }, "operator-state": { type: "string" }, "account-budget-state": { type: "string" }, "allow-encrypted-media": { type: "boolean", default: false }, "piece-commitments": { type: "boolean", default: false }, telemetry: { type: "boolean", default: false }, help: { type: "boolean" } } });
+  if (values.help) { console.log("npm run demo -- [--media-dir DIR --manifest master.m3u8] [--host 127.0.0.1 --port 8787] [--public-url https://demo.example] [--tls-key FILE --tls-cert FILE] [--relay wss://relay.example] [--stun stun:stun.example:3478 | --ice-config FILE | --turn-credentials-url https://issuer.example/turn] [--ice-transport-policy all|relay] [--turn-url-projection issued|tls-tcp] [--publisher-state FILE] [--operator-token-file FILE] [--account-budget-state FILE] [--piece-commitments] [--telemetry]\nWithout --media-dir, ffmpeg generates a two-rendition live test stream. ICE configuration must be a private POSIX file; browser TURN credentials are disclosed to viewers. See docs/FIELD-TEST.md."); return; }
   if (!["all", "relay"].includes(values["ice-transport-policy"])) throw new Error("Invalid ICE transport policy; use all or relay.");
   validateTurnUrlProjection(values["turn-url-projection"]);
   if (values["turn-url-projection"] !== "issued" && values["turn-credentials-url"] === undefined) throw new Error("TURN URL projection requires --turn-credentials-url.");
@@ -241,7 +242,7 @@ async function main() {
   try {
     demo = await startDemoServer({ mediaDir: values["media-dir"] || fixture.directory, manifest: values.manifest, host: values.host, port,
       publisherState: values["publisher-state"], operatorTokenFile: values["operator-token-file"], operatorToken: values["operator-token-file"] ? undefined : process.env.RELAYSWARM_OPERATOR_TOKEN, telemetry: values.telemetry,
-      operatorState: values["operator-state"], ...(values["account-budget-state"] ? { accountBudget: { statePath: values["account-budget-state"] } } : {}), allowEncryptedMedia: values["allow-encrypted-media"],
+      operatorState: values["operator-state"], ...(values["account-budget-state"] ? { accountBudget: { statePath: values["account-budget-state"] } } : {}), allowEncryptedMedia: values["allow-encrypted-media"], pieceCommitments: values["piece-commitments"],
       iceTransportPolicy: values["ice-transport-policy"], publicUrl: values["public-url"], tlsKey: values["tls-key"], tlsCert: values["tls-cert"], relays: values.relay,
       ...(iceServers ? { iceServers } : {}), ...(values["turn-credentials-url"] !== undefined ? { turnCredentials: { url: values["turn-credentials-url"], urlProjection: values["turn-url-projection"] } } : {}) });
     console.log(`RelaySwarm field-test player: ${demo.base}\n${values["publisher-state"] ? "Publisher identity is restored from the private server state file." : "Publisher key is ephemeral and stays on this server."} Press Ctrl-C to stop.`);

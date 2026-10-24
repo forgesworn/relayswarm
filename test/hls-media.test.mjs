@@ -92,3 +92,22 @@ test("context extraction excludes unknown queries, remote keys, invalid protocol
   for (const baseurl of ["https://example.test/media/index.m3u8?token=secret", "file:///media/index.m3u8", "https://example.test/media/index.m3u8?_HLS_msn=1&_HLS_msn=2"]) assert.equal(segmentMediaContext({ frag: { baseurl } }), null);
   assert.equal(segmentMediaContext({ frag: { ...context.frag, type: "subtitle" } }), null);
 });
+
+test("piece commitments sign one digest per piece, across read boundaries, only for exact playlist identity", async (t) => {
+  for (const size of [200_000, 4 * 1024 * 1024 + 1]) {
+    const bytes = Buffer.alloc(size);
+    for (let i = 0; i < size; i++) bytes[i] = (i * 31 + 7) & 255;
+    const directory = await fixture(t, { "index.m3u8": plain, "shared.m4s": bytes });
+    const publisher = await createHlsPublisher({ mediaDir: directory, manifest: "index.m3u8", pieceCommitments: true });
+    const input = { path: "/media/shared.m4s", playlist: "/media/index.m3u8", mediaType: "main", level: 0, sequence: 10, discontinuity: 0 };
+    const verified = verifySegmentCommitment(await publisher.commitment(input), { streamEvent: publisher.streamEvent, swarmId: publisher.swarmId,
+      key: digest(`${publisher.swarmId}\n${input.path}`), maxSegmentBytes: 16 * 1024 * 1024,
+      context: { frag: { level: 0, sn: 10, cc: 0, type: "main", baseurl: `https://example.test${input.playlist}` } } });
+    assert.equal(verified.v, 3);
+    const expected = [];
+    for (let at = 0; at < size; at += verified.pieceSize) expected.push(digest(bytes.subarray(at, at + verified.pieceSize)));
+    assert.deepEqual(verified.pieces, expected, `size ${size}`);
+    assert.equal(verified.sha256, digest(bytes));
+  }
+  await assert.rejects(createHlsPublisher({ mediaDir: await fixture(t, { "index.m3u8": plain, "shared.m4s": "x" }), manifest: "index.m3u8", pieceCommitments: "yes" }), /piece commitment/u);
+});

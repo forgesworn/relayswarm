@@ -13,8 +13,8 @@ import { transform } from "./broadcast-availability-transform.mjs";
 export async function buildObservedBundle(beforeAction = () => {}) {
   beforeAction();
   const clientPath = fileURLToPath(new URL("../../demo/client.mjs", import.meta.url));
-  const paths = new Map([[resolve(dirname(clientPath), "../src/browser/hls-swarm.mjs"), "swarm"], [resolve(dirname(clientPath), "../src/browser/peer-link.mjs"), "peer"]]);
-  const hits = { client: 0, swarm: 0, peer: 0 }, pins = {};
+  const paths = new Map([[resolve(dirname(clientPath), "../src/browser/hls-swarm.mjs"), "swarm"], [resolve(dirname(clientPath), "../src/browser/peer-link.mjs"), "peer"], [resolve(dirname(clientPath), "../src/browser/core-peer-link.mjs"), "corePeer"]]);
+  const hits = { client: 0, swarm: 0, peer: 0, corePeer: 0 }, pins = {};
   function observed(kind, original) {
     assert.equal(hits[kind]++, 0); const changed = transform(kind, original);
     assert.equal(changed.undo(changed.source), original);
@@ -26,13 +26,13 @@ export async function buildObservedBundle(beforeAction = () => {}) {
     plugins: [{ name: "pinned-availability-observation", setup(builder) {
       builder.onResolve({ filter: /^relayswarm-test-availability-observer$/ }, () => ({ path: "collector", namespace: "test-availability" }));
       builder.onLoad({ filter: /.*/, namespace: "test-availability" }, async () => ({ contents: await readFile(new URL("./broadcast-availability-observer.mjs", import.meta.url), "utf8"), loader: "js" }));
-      builder.onLoad({ filter: /(?:hls-swarm|peer-link)\.mjs$/, namespace: "file" }, async args => {
+      builder.onLoad({ filter: /[\\/](?:hls-swarm|peer-link|core-peer-link)\.mjs$/, namespace: "file" }, async args => {
         const kind = paths.get(args.path); assert.ok(kind, "Only exact owned modules may be transformed");
         return { contents: observed(kind, await readFile(args.path, "utf8")), resolveDir: dirname(args.path), loader: "js" };
       });
     } }],
   });
-  assert.deepEqual(hits, { client: 1, swarm: 1, peer: 1 }); beforeAction();
+  assert.deepEqual(hits, { client: 1, swarm: 1, peer: 1, corePeer: 1 }); beforeAction();
   const bytes = bundle.outputFiles[0].contents;
   return { bytes, observation: { sourcePins: pins, transformedModules: hits, observedBytes: bytes.byteLength, observedSHA256: createHash("sha256").update(bytes).digest("hex"), diagnosticOnly: true, injectedTestBundle: true, ordinaryQualificationEvidence: false } };
 }

@@ -25,7 +25,8 @@ import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes, createHash } from "node:crypto";
 import { finalizeEvent, generateSecretKey } from "nostr-tools/pure";
-import { commitmentContent, KIND_SEGMENT_COMMITMENT } from "../src/browser/segment-commitment.mjs";
+import { commitmentContent, commitmentPieceSize, KIND_SEGMENT_COMMITMENT } from "../src/browser/segment-commitment.mjs";
+import { httpRange } from "../demo/server.mjs";
 import { build } from "esbuild";
 import { chromium } from "playwright-core";
 import { startLocalRelay } from "./support/local-relay.mjs";
@@ -56,6 +57,15 @@ const MAX_PEERS = Number(flag("maxPeers", 6));
 // it. Useful for the integrity assertion, noise for the rotation one, so a
 // saturation run turns it off.
 const CORRUPT_PEER = flag("corruptPeer", "1") !== "0";
+// Peer-first viewers verify commitments with the Rust core unless --core js.
+const CORE = flag("core", "wasm");
+// --multiHolder 1: schema 3 commitments with exact playlist identity (media
+// under /media/), ranged origin responses and multiHolder viewers.
+const MULTI = flag("multiHolder", "0") === "1";
+// --trace N: each viewer keeps N trace rows (traceRequests) and its final
+// report carries swarm.trace(), so the receipt holds a replayable trace.
+const TRACE = Number(flag("trace", 0));
+const MEDIA = MULTI ? "/media/" : "/hls/";
 const FALLBACK_MS = Number(flag("fallback", 1500));
 const CHROME = flag("chrome", process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
 // Credentials stay in an owner-only scratch file and browser memory, never receipts.
@@ -107,6 +117,7 @@ try {
     logLevel: "silent",
   });
   const bundleText = bundle.outputFiles[0].text;
+  const coreModule = await readFile(join(here, "../src/browser/relayswarm-core.wasm"));
   const page = `<!doctype html><meta charset="utf-8"><video playsinline muted autoplay width="320"></video><script type="module" src="/viewer.js"></script>`;
 
   const server = createServer(async (req, res) => {
@@ -115,9 +126,9 @@ try {
     if (url.pathname === "/authorisation.json") return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(streamEvent));
     if (url.pathname === "/commitment") {
       const path = url.searchParams.get("path") || "";
-      if (!/^\/hls\/seg[0-9]+\.ts$/.test(path)) return res.writeHead(400).end();
+      if (!new RegExp(`^${MEDIA}seg[0-9]+\\.ts$`).test(path)) return res.writeHead(400).end();
       try {
-        const bytes = await readFile(join(hlsDir, path.slice(5)));
+        const bytes = await readFile(join(hlsDir, path.slice(MEDIA.length)));
         const digest = (value) => createHash("sha256").update(value).digest("hex");
         const fields = {
           streamEventId: streamEvent.id, swarmId, key: digest(`${swarmId}\n${path}`),
@@ -125,22 +136,33 @@ try {
           discontinuity: Number(url.searchParams.get("cc")), part: null,
           sha256: digest(bytes), size: bytes.length, expiresAt: Math.floor(Date.now() / 1000) + 30,
         };
+        if (MULTI) {
+          const pieceSize = commitmentPieceSize(bytes.length), pieces = [];
+          for (let at = 0; at < bytes.length; at += pieceSize) pieces.push(digest(bytes.subarray(at, at + pieceSize)));
+          const playlist = url.searchParams.get("bad") === "1" ? "/media/wrong.m3u8" : `${MEDIA}index.m3u8`;
+          Object.assign(fields, { v: 3, rendition: playlist, playlist, mediaType: "main", encryption: null, pieceSize, pieces });
+        }
         const event = finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: Math.floor(Date.now() / 1000), tags: [["x", swarmId], ["e", streamEvent.id]], content: commitmentContent(fields) }, streamKey);
         return res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify(event));
       } catch { return res.writeHead(404).end(); }
     }
+    if (url.pathname === "/relayswarm-core.wasm") return res.writeHead(200, { "content-type": "application/wasm" }).end(coreModule);
     if (url.pathname === "/viewer.js") return res.writeHead(200, { "content-type": "text/javascript" }).end(bundleText);
-    if (url.pathname.startsWith("/hls/")) {
-      const file = normalize(join(hlsDir, url.pathname.slice(5)));
+    if (url.pathname.startsWith(MEDIA)) {
+      const file = normalize(join(hlsDir, url.pathname.slice(MEDIA.length)));
       if (!file.startsWith(hlsDir)) return res.writeHead(403).end();
       try {
         const body = await readFile(file);
         const type = extname(file) === ".m3u8" ? "application/vnd.apple.mpegurl" : "video/mp2t";
-        return res.writeHead(200, {
+        let range = null;
+        try { range = httpRange(req.headers.range, body.length); } catch { return res.writeHead(416, { "content-range": `bytes */${body.length}` }).end(); }
+        return res.writeHead(range ? 206 : 200, {
           "content-type": type,
           "access-control-allow-origin": "*",
+          "access-control-expose-headers": "content-range",
           "cache-control": extname(file) === ".m3u8" ? "no-cache" : "max-age=60",
-        }).end(body);
+          ...(range ? { "content-range": `bytes ${range.start}-${range.end}/${body.length}` } : {}),
+        }).end(range ? body.subarray(range.start, range.end + 1) : body);
       } catch {
         return res.writeHead(404).end();
       }
@@ -199,12 +221,15 @@ try {
     const query = new URLSearchParams({
       mode: role.corrupt ? "shadow" : MODE, viewer: role.viewer, swarm: role.swarm ? "1" : "0", corrupt: role.corrupt ? "1" : "0",
       commitmentFaults: MODE === "peer-first" && role.viewer === "v1" ? "1" : "0",
-      swarmId, relay: relay.url, src: `${base}/hls/index.m3u8`, fallbackMs: String(FALLBACK_MS), unlockInterfaces: "1",
+      swarmId, relay: relay.url, src: `${base}${MEDIA}index.m3u8`, fallbackMs: String(FALLBACK_MS), unlockInterfaces: "1",
       rotation: process.env.RELAYSWARM_NO_ROTATION === "1" ? "0" : "1",
       maxPeers: String(MAX_PEERS),
+      core: CORE === "wasm" ? "1" : "0",
+      multi: MULTI ? "1" : "0",
+      trace: String(TRACE),
     });
     const network = { originSegmentRequests: 0 };
-    tab.on("request", (request) => { if (/\/hls\/seg[0-9]+\.ts/.test(request.url())) network.originSegmentRequests++; });
+    tab.on("request", (request) => { if (/\/(hls|media)\/seg[0-9]+\.ts/.test(request.url())) network.originSegmentRequests++; });
     await tab.goto(`${base}/?${query}`);
     pages.push({ role, tab, network, context, joinedAt: Date.now() });
     log(`joined ${role.viewer} (wave ${role.wave})`);
@@ -261,7 +286,8 @@ try {
   const reports = [];
   for (const { role, tab, network, joinedAt } of pages) reports.push({ ...role, network,
     observedSeconds: (Date.now() - joinedAt) / 1000, ...(await tab.evaluate(() => window.__viewer.report())),
-    iceEvidence: await tab.evaluate(() => window.__viewer.iceEvidence()) });
+    iceEvidence: await tab.evaluate(() => window.__viewer.iceEvidence()),
+    ...(TRACE && role.swarm ? { trace: await tab.evaluate(() => window.__viewer.trace()) } : {}) });
   const stopChecks = [];
   for (const { role, tab } of pages) {
     if (!role.swarm) continue;
@@ -318,7 +344,7 @@ try {
     rotation: process.env.RELAYSWARM_NO_ROTATION === "1" ? "off" : "on",
     transport: { policy: ICE_CONFIG?.iceTransportPolicy ?? "all", configuredIceServers: ICE_CONFIG ? testIceForViewer(ICE_CONFIG, "v0").iceServers.length : 0,
       credentialScope: ICE_CONFIG?.iceServersByViewer ? "per-viewer" : ICE_CONFIG ? "shared" : "none", testTlsCertificateBypass: TEST_TLS_BYPASS },
-    shape: { liveSyncDurationCount: MODE === "peer-first" ? 4 : 3, ...(MODE === "peer-first" ? { maxBufferLength: 4, maxMaxBufferLength: 6 } : {}), viewers: VIEWERS, waves: WAVES, waveGapMs: WAVE_GAP_MS, maxPeers: MAX_PEERS, corruptPeer: CORRUPT_PEER, plusCorruptPeer: CORRUPT_PEER ? 1 : 0, plusBaselineWithoutSwarm: 1, durationS: DURATION_S, staggerMs: STAGGER_MS, segmentSeconds: 2, videoKbps: 1500, originFallbackMs: FALLBACK_MS },
+    shape: { liveSyncDurationCount: MODE === "peer-first" ? 4 : 3, ...(MODE === "peer-first" ? { maxBufferLength: 4, maxMaxBufferLength: 6 } : {}), viewers: VIEWERS, waves: WAVES, waveGapMs: WAVE_GAP_MS, maxPeers: MAX_PEERS, corruptPeer: CORRUPT_PEER, plusCorruptPeer: CORRUPT_PEER ? 1 : 0, plusBaselineWithoutSwarm: 1, durationS: DURATION_S, staggerMs: STAGGER_MS, segmentSeconds: 2, videoKbps: 1500, originFallbackMs: FALLBACK_MS, multiHolder: MULTI },
     waves: waveRows,
     churn: { intervalSeconds: CHURN_EVERY_S, countPerInterval: CHURN_COUNT, departures: churn, observationMs: Date.now() - observationAt },
     aggregate: {
@@ -345,6 +371,17 @@ try {
       swarmErrors: reports.filter((r) => r.swarm).reduce((t, r) => t + r.swarm.errors.total, 0),
       relayEventsPublished: reports.filter((r) => r.swarm).reduce((t, r) => t + r.swarm.relays.published, 0),
       corruptPeerBannedBy: honest.filter((r) => r.swarm.peers.banned > 0).length,
+      coreVerifiers: Object.fromEntries(["wasm", "js"].map((kind) => [kind, honest.filter((r) => r.swarm.core?.verifier === kind).length])),
+      coreLinks: honest.reduce((total, r) => ({ wasm: total.wasm + (r.swarm.core?.links?.wasm ?? 0), js: total.js + (r.swarm.core?.links?.js ?? 0) }), { wasm: 0, js: 0 }),
+      coreSelections: Object.fromEntries(["wasm", "js"].map((kind) => [kind, honest.filter((r) => (r.swarm.core?.selection ?? "js") === kind).length])),
+      coreDiscovery: Object.fromEntries(["wasm", "js"].map((kind) => [kind, honest.filter((r) => (r.swarm.core?.discovery ?? "js") === kind).length])),
+      multiHolder: honest.reduce((total, r) => {
+        for (const [name, value] of Object.entries(r.swarm.core?.multiHolder ?? {})) if (typeof value === "number") total[name] = (total[name] || 0) + value;
+        return total;
+      }, { enabledViewers: honest.filter((r) => r.swarm.core?.multiHolder?.enabled).length }),
+      ...(TRACE ? { trace: { viewers: honest.filter((r) => r.trace?.rows?.length).length, rows: honest.reduce((n, r) => n + (r.trace?.rows?.length ?? 0), 0),
+        dropped: honest.reduce((n, r) => n + (r.trace?.dropped ?? 0), 0),
+        xfer: honest.reduce((n, r) => n + (r.trace?.rows?.filter((row) => row.k === "xfer").length ?? 0), 0) } } : {}),
     },
     player: {
       withSwarm: honest.map((r) => ({ viewer: r.viewer, observedSeconds: r.observedSeconds, stalls: r.player.stalls, fatalErrors: r.player.fatalErrors, currentTime: Number(r.player.currentTime.toFixed(1)) })),
@@ -387,6 +424,9 @@ try {
     // Fresh segments still need origin seeders. A viewer that uploads those
     // bytes to consumers can legitimately receive every own segment by HTTP.
   }
+  if (MODE === "peer-first" && CORE === "wasm" && honest.some((report) => report.swarm.core?.verifier !== "wasm" || report.swarm.core.selection !== "wasm" || report.swarm.core.discovery !== "wasm" || !report.swarm.core.links?.wasm || report.swarm.core.links.js || report.swarm.core.fallbacks || !report.swarm.core.decided.wasm)) failures.push("a peer-first viewer did not link, verify, select or discover with the Rust core");
+  if (MULTI && MODE === "peer-first" && CORE === "wasm" && !summary.aggregate.multiHolder.delivered) failures.push("no segment was delivered by a multi-holder transfer");
+  if (TRACE && !summary.aggregate.trace.rows) failures.push("--trace was set but no viewer recorded a trace");
   if (MODE === "peer-first" && VIEWERS >= 2) {
     const faulted = honest.find((report) => report.viewer === "v1");
     if (!faulted?.swarm.segments.commitmentRejected || !faulted?.swarm.segments.commitmentUnavailable) failures.push("invalid and stalled commitments were not exercised");

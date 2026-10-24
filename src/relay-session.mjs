@@ -360,10 +360,11 @@ export class RelaySwarmSession {
     if (!Array.isArray(transports) || transports.length > 8) throw new Error("Invalid transport capability list.");
     if (!Array.isArray(have) || have.length > 32 || have.some((hash) => !HEX64.test(hash))) throw new Error("Invalid object hash list.");
     const normalizedTransports = transports.map((transport) => {
-      if (!transport || typeof transport !== "object" || !validToken(transport.type) || !HEX64.test(transport.publicKey)) {
+      if (!transport || typeof transport !== "object" || !validToken(transport.type) || !HEX64.test(transport.publicKey)
+        || (transport.obj !== undefined && !validObjectFraming(transport.obj))) {
         throw new Error("Invalid transport capability.");
       }
-      return { type: transport.type, publicKey: transport.publicKey };
+      return { type: transport.type, publicKey: transport.publicKey, ...(transport.obj === undefined ? {} : { obj: transport.obj }) };
     });
     const content = JSON.stringify({
       v: RELAYSWARM_VERSION,
@@ -464,7 +465,8 @@ export class RelaySwarmSession {
       if (!transport || typeof transport !== "object" || !validToken(transport.type) || !HEX64.test(transport.publicKey)) {
         throw new Error("Invalid transport capability.");
       }
-      return { type: transport.type, publicKey: transport.publicKey };
+      // `obj` is the object framing version; absent or invalid reads as 1.
+      return { type: transport.type, publicKey: transport.publicKey, ...(validObjectFraming(transport.obj) ? { obj: transport.obj } : {}) };
     });
     // `open` is advisory and optional; anything but a boolean reads as unknown.
     const open = typeof payload.open === "boolean" ? payload.open : null;
@@ -507,6 +509,9 @@ export class RelaySwarmSession {
     this.errorHandlers.clear();
   }
 }
+
+/** Object framing version in a transport capability: an integer 1 to 15. */
+function validObjectFraming(value) { return Number.isSafeInteger(value) && value >= 1 && value <= 15; }
 
 /** A ticket is an opaque string the host page issues and checks; bounded so presence stays small. */
 export function validTicket(ticket) {

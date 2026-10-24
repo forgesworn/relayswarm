@@ -21,9 +21,9 @@ import { createOperatorControls } from "../demo/operator.mjs";
 
 const bundle = await build({ entryPoints: ["demo/client.mjs"], bundle: true, write: false, format: "esm", plugins: [{ name: "fixture", setup(builder) {
   builder.onResolve({ filter: /^(hls\.js|\.\.\/src\/browser\/hls-swarm\.mjs)$/ }, (args) => ({ path: args.path, namespace: "fixture" }));
-  builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={MANIFEST_PARSED:'manifest',FRAG_LOADED:'fragment',LEVEL_SWITCHED:'level',LEVEL_UPDATED:'update',ERROR:globalThis.fixture.hlsErrorEvent}; static DefaultConfig=globalThis.fixture.hlsDefaults; static isSupported(){return !globalThis.fixture.nativeHls;} constructor(config){this.config={...Hls.DefaultConfig,...config};this.callbacks=new Map();this.levels=[];this.id=globalThis.fixture.players.length;globalThis.fixture.players.push(this);} on(name,callback){this.callbacks.set(name,callback);} emit(name,data){this.callbacks.get(name==='error'?Hls.Events.ERROR:name)?.('',data);} loadSource(){globalThis.fixture.sourceLoads++;globalThis.fixture.playerOperations.push(['load-source',this.id]);} attachMedia(){} destroy(){this.destroyImpl?.();this.destroyed=true;globalThis.fixture.playerOperations.push(['destroy',this.id]);} stopLoad(){globalThis.fixture.playerOperations.push(['stop',this.id]);} startLoad(){globalThis.fixture.playerOperations.push(['start',this.id]);} recoverMediaError(){globalThis.fixture.playerOperations.push(['recover',this.id]);} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0, tickets:[], lifecycle:new AbortController()}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;record.lifecycle.abort();}, updateTicket(ticket){if(record.stopped||globalThis.fixture.rejectTicketUpdates||globalThis.fixture.disabledSwarm)return false; options.ticket=ticket; record.tickets.push(ticket); return true;}, attach(hls){if(globalThis.fixture.disabledSwarm)return;hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, metrics(){return {mode:globalThis.fixture.disabledSwarm?'off':options.mode, disabledReason:globalThis.fixture.disabledSwarm?'no-webrtc':null, serving:!globalThis.fixture.disabledSwarm&&options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
+  builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: args.path === "hls.js" ? `export default class Hls { static version='fixture'; static Events={MANIFEST_PARSED:'manifest',FRAG_LOADED:'fragment',LEVEL_SWITCHED:'level',LEVEL_UPDATED:'update',ERROR:globalThis.fixture.hlsErrorEvent}; static DefaultConfig=globalThis.fixture.hlsDefaults; static isSupported(){return !globalThis.fixture.nativeHls;} constructor(config){this.config={...Hls.DefaultConfig,...config};this.callbacks=new Map();this.levels=[];this.id=globalThis.fixture.players.length;globalThis.fixture.players.push(this);} on(name,callback){this.callbacks.set(name,callback);} emit(name,data){this.callbacks.get(name==='error'?Hls.Events.ERROR:name)?.('',data);} loadSource(){globalThis.fixture.sourceLoads++;globalThis.fixture.playerOperations.push(['load-source',this.id]);} attachMedia(){} destroy(){this.destroyImpl?.();this.destroyed=true;globalThis.fixture.playerOperations.push(['destroy',this.id]);} stopLoad(){globalThis.fixture.playerOperations.push(['stop',this.id]);} startLoad(){globalThis.fixture.playerOperations.push(['start',this.id]);} recoverMediaError(){globalThis.fixture.playerOperations.push(['recover',this.id]);} }` : `export function createHlsSwarm(options){ const record={options, uploaded:0, tickets:[], lifecycle:new AbortController()}; globalThis.fixture.swarms.push(record); return { stop(){record.stopped=true;record.lifecycle.abort();}, updateTicket(ticket){if(record.stopped||globalThis.fixture.rejectTicketUpdates||globalThis.fixture.disabledSwarm)return false; options.ticket=ticket; record.tickets.push(ticket); return true;}, attach(hls){if(globalThis.fixture.disabledSwarm)return;hls.config.fLoader=options.mode==='off'?undefined:'swarm';}, trace(){return {v:1,capacity:options.traceRequests,dropped:0,rows:[{k:'load',load:globalThis.fixture.swarms.indexOf(record)}]};}, metrics(){return {mode:globalThis.fixture.disabledSwarm?'off':options.mode, disabledReason:globalThis.fixture.disabledSwarm?'no-webrtc':null, serving:!globalThis.fixture.disabledSwarm&&options.serve, bytes:{uploaded:record.uploaded,peerFirst:0},segments:{peerFirstLoaded:0},peers:{connected:0}};} }; }` }));
 } }] });
-async function page(storage = new Map(), { realClock = false, fetchImpl, nativeHls = false, initialTurnCredentials, inlinePolicySession = false, hlsDefaults = ActualHls.DefaultConfig } = {}) {
+async function page(storage = new Map(), { realClock = false, fetchImpl, nativeHls = false, initialTurnCredentials, inlinePolicySession = false, hlsDefaults = ActualHls.DefaultConfig, search = "" } = {}) {
   const elements = new Map(), intervals = [], timers = new Map(), windowEvents = new Map(), documentEvents = new Map();
   let clock = 0; const wallStart = Date.now(), performanceStart = performance.now();
   const now = () => realClock ? performance.now() - performanceStart : clock;
@@ -41,7 +41,7 @@ async function page(storage = new Map(), { realClock = false, fetchImpl, nativeH
   const fixture = { nativeHls, hlsDefaults, hlsErrorEvent: ActualHls.Events.ERROR, swarms: [], players: [], playerOperations: [], playCalls: 0, pauseCalls: 0, nativeLoads: 0, sourceLoads: 0, policy: { mode: null, revision: 0, telemetry: false }, session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment", ...(initialTurnCredentials === undefined ? {} : { turnCredentials: initialTurnCredentials }) } };
   if (inlinePolicySession) Object.assign(fixture.session, { deliveryPolicyEndpoint: "/delivery-policy.json?session=1", deliveryPolicySession: "inline-v1" });
   fixture.requests = [];
-  const context = { Date: ClockDate, fixture, location: { origin: "https://viewer.example" }, document: { visibilityState: "visible", createElement: () => ({}), addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, structuredClone, TextDecoder, TextEncoder, queueMicrotask, console,
+  const context = { Date: ClockDate, fixture, location: { origin: "https://viewer.example", search }, document: { visibilityState: "visible", createElement: () => ({}), addEventListener(name, callback) { documentEvents.set(name, callback); }, getElementById: element, querySelector: () => video }, navigator: { locks: { request: async (_name, _options, callback) => callback() } }, crypto: webcrypto, localStorage: { getItem: (name) => storage.get(name) ?? null, setItem: (name, value) => storage.set(name, value) }, performance: { now }, isSecureContext: true, URL, URLSearchParams, AbortSignal, AbortController, structuredClone, TextDecoder, TextEncoder, queueMicrotask, console,
     fetch: async (url, init) => { fixture.requests.push({ url, init }); if (fetchImpl) return fetchImpl(url, init); if (fixture.response) { const response = await fixture.response(url, init); if (response) return response; } const value = fixture.fetch ? await fixture.fetch(url, init) : url === "/session.json" ? fixture.session : inlinePolicySession ? { ...fixture.policy, session: fixture.session } : fixture.policy; return { ok: true, json: async () => structuredClone(value) }; },
     setTimeout(callback, ms) { const id = realClock ? setTimeout(() => { timers.delete(id); callback(); }, ms) : Symbol(); timers.set(id, { callback, ms }); return id; }, clearTimeout(id) { if (realClock) clearTimeout(id); timers.delete(id); },
     setInterval(callback, ms) { intervals.push({ callback, ms }); }, clearInterval() {}, window: { addEventListener(name, callback) { windowEvents.set(name, callback); } } };
@@ -545,6 +545,39 @@ test("operator mode cannot defeat viewer origin kill or grant upload consent", a
   assert.equal(p.fixture.swarms.at(-1).options.mode, "off");
 });
 
+test("field-run URL options reach the loader and the receipt keeps the latest eight session traces", async () => {
+  const plain = await page();
+  plain.element("mode").value = "peer-first"; await plain.submit();
+  assert.equal(plain.fixture.swarms.at(-1).options.multiHolder, false);
+  assert.equal(plain.fixture.swarms.at(-1).options.abrIgnorePeers, false);
+  assert.equal(plain.fixture.swarms.at(-1).options.traceRequests, 0);
+  const plainReport = plain.context.window.relaySwarmDemo.report();
+  assert.equal(plainReport.current.trace, undefined);
+  assert.equal(plainReport.sessions.some((entry) => "trace" in entry), false);
+  plain.close();
+  for (const search of ["?trace=32769", "?trace=-1", "?trace=1.5", "?multiHolder=true", "?abrIgnorePeers=true"]) {
+    const p = await page(new Map(), { search }); p.element("mode").value = "peer-first"; await p.submit();
+    assert.equal(p.fixture.swarms.at(-1).options.multiHolder, false, search);
+    assert.equal(p.fixture.swarms.at(-1).options.abrIgnorePeers, false, search);
+    assert.equal(p.fixture.swarms.at(-1).options.traceRequests, 0, search);
+    p.close();
+  }
+  const p = await page(new Map(), { search: "?multiHolder=1&trace=4096&abrIgnorePeers=1" });
+  p.element("mode").value = "peer-first";
+  for (let i = 0; i < 10; i++) await p.submit();
+  const active = p.fixture.swarms.at(-1);
+  assert.equal(active.options.multiHolder, true); assert.equal(active.options.abrIgnorePeers, true);
+  assert.equal(active.options.traceRequests, 4096);
+  const receipt = JSON.parse(JSON.stringify(p.context.window.relaySwarmDemo.report()));
+  assert.equal(receipt.current.multiHolder, true); assert.equal(receipt.current.abrIgnorePeers, true); assert.equal(receipt.current.traceRequests, 4096);
+  assert.deepEqual(receipt.current.trace.rows, [{ k: "load", load: p.fixture.swarms.length - 1 }]);
+  const traced = receipt.sessions.filter((entry) => entry.trace);
+  assert.equal(traced.length, 8);
+  assert.deepEqual(traced.map((entry) => entry.trace.rows[0].load), receipt.sessions.slice(-8).map((_, index) => p.fixture.swarms.length - 9 + index));
+  assert.ok(receipt.sessions.every((entry) => entry.multiHolder === true && entry.traceRequests === 4096));
+  p.close();
+});
+
 test("ICE policy normalises absent to all and a change requires new Apply and upload consent", async () => {
   const p = await page();
   try {
@@ -850,7 +883,7 @@ test("a refused in-place ticket update fails closed without returning spent allo
   const p = await admittedPage(10), active = p.fixture.swarms.at(-1);
   await active.options.reserveUploadBytes(123); p.fixture.rejectTicketUpdates = true; await p.poll();
   assert.equal(active.stopped, true); assert.equal(p.element("upload").checked, false);
-  const receipt = p.context.window.relaySwarmDemo.report();
+  const receipt = JSON.parse(JSON.stringify(p.context.window.relaySwarmDemo.report()));
   assert.equal(receipt.policyRenewal.fresh, false); assert.equal(receipt.uploadBudget.spent, 123);
   assert.equal(receipt.current.mode, "off");
 });

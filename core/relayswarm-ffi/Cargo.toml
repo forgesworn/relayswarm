@@ -1,0 +1,29 @@
+[package]
+name = "relayswarm-ffi"
+version = "0.0.0"
+description = "UniFFI bindings for the RelaySwarm core, for Swift and Kotlin"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "relayswarm_ffi"
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+# Only the binding generator needs the CLI; the library stays lean.
+bindgen = ["uniffi/cli", "uniffi/cargo-metadata"]
+
+[dependencies]
+relayswarm-proto = { path = "../relayswarm-proto" }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+uniffi = { version = "=0.29.5", default-features = false }
+
+[dev-dependencies]
+sha2 = { version = "0.10", default-features = false }
