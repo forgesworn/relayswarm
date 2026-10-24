@@ -1,0 +1,206 @@
+{
+  "date": "2026-10-24",
+  "scope": "desktop Chrome, macOS arm64, loopback only; not a performance benchmark or phone/NAT acceptance",
+  "spry_release": "v0.2.1",
+  "spry_archive_sha256": "b08bbd04415c375a4971cdb7fe1c248a38242982bd4f9d1724540ff0ae8a5df0",
+  "spry_binary_sha256": "0bbcfa0c3efd6cce6a749c706e144de1740e37eb44c146f37a8887319c7085fb",
+  "relayswarm_base_commit": "55424c9cda739091acc5d641d3ef701678d97ffd",
+  "source_hashes": {
+    "src/browser/hls-swarm.mjs": "c7be2d187b96929751db5b342d7a96ea3f956abcc965cca85bb37c97dc30f098",
+    "src/browser/peer-link.mjs": "33208e3a5f9646fe7a0a4280d2dfd6206458b68288ffb339af92beead9641663",
+    "test/hls-swarm-browser.mjs": "132da94a18d0cf9a1f77bf88aa816bdb159d30174eede9cc42c123eb0810b057",
+    "test/browser/viewer.mjs": "fcd9e37f130d506603302682edf55cc1d3514fdaddf51ace5e8fe6d8a455af1c",
+    "test/support/fixture-ice.mjs": "e03a8a75262ad09e0244cc7d8a6ac06306985f3509b8202461535f062c7d1682"
+  },
+  "runner_sha256": "7c718c579b20f60a012f0f97502fe102a2d713e3e5e29598badb4cd8722fc44f",
+  "fixture_sha256": "a811feb6820900e46c88c23cf46fd80a4e266787f996e53c6ef0e116a8e614bd",
+  "fixture_source": "Spry v0.2.0 tests/interop.py, frozen controller with explicit v0.2.1 executable",
+  "generated_media": "FFmpeg testsrc2 and sine, H.264/AAC HLS; no camera or microphone media",
+  "credential_scope": "distinct short-lived TURN principal per simulated viewer; default per-user limit 8, relay ports 49160:49223",
+  "shared_credential_diagnostic": {
+    "transport": "tcp",
+    "observed_error_code": 486,
+    "observed_error_count": 12,
+    "meaning": "Allocation Quota Reached",
+    "interpretation": "One principal shared across all viewers exhausted the default per-credential limit. Earlier results do not isolate a Spry transport defect."
+  },
+  "retained_unsuccessful_trials": [
+    "Initial shared-credential v0.2.1 UDP attempt timed out without a completed browser receipt; controller retained failure.",
+    "Shared-credential v0.2.1 TCP and TLS trials and numeric ICE diagnostic retained privately.",
+    "Earlier v0.2.0 UDP/TCP/TLS scalar receipt remains published separately."
+  ],
+  "results": [
+    {
+      "transport": "udp",
+      "ok": true,
+      "aggregate": {
+        "originLoaded": 43,
+        "peerFirstLoaded": 0,
+        "originFallbacks": 0,
+        "peerFirstBytes": 0,
+        "raced": 42,
+        "noPeers": 0,
+        "peerInTime": 34,
+        "peerLate": 3,
+        "peerMiss": 3,
+        "peerCorrupt": 2,
+        "inTimeShare": 0.81,
+        "sampledInTimeShare": 0.81,
+        "peerFirstShare": null,
+        "medianOfViewerPeerLatencyMs": 704,
+        "bytesFromPeers": 15648744,
+        "bytesUploaded": 17357476,
+        "candidatePairs": {
+          "relay/relay": 4
+        },
+        "swarmErrors": 0,
+        "relayEventsPublished": 20,
+        "corruptPeerBannedBy": 2
+      },
+      "failures": [],
+      "ice_candidate_errors": {},
+      "selected_paths": [
+        {
+          "local": "relay",
+          "remote": "relay",
+          "relayProtocol": "udp",
+          "localPort": 49174,
+          "remotePort": 49168,
+          "bytesSent": 8732798,
+          "bytesReceived": 8634668
+        },
+        {
+          "local": "relay",
+          "remote": "relay",
+          "relayProtocol": "udp",
+          "localPort": 49168,
+          "remotePort": 49174,
+          "bytesSent": 8663692,
+          "bytesReceived": 8656568
+        }
+      ],
+      "honest_playback": [
+        {
+          "viewer": "v0",
+          "seconds": 43.733665,
+          "fatal_errors": 0
+        },
+        {
+          "viewer": "v1",
+          "seconds": 44.289074,
+          "fatal_errors": 0
+        }
+      ],
+      "test_tls_certificate_bypass": false,
+      "clean_stop": true
+    },
+    {
+      "transport": "tcp",
+      "ok": false,
+      "aggregate": {
+        "originLoaded": 44,
+        "peerFirstLoaded": 0,
+        "originFallbacks": 0,
+        "peerFirstBytes": 0,
+        "raced": 37,
+        "noPeers": 2,
+        "peerInTime": 10,
+        "peerLate": 8,
+        "peerMiss": 17,
+        "peerCorrupt": 2,
+        "inTimeShare": 0.27,
+        "sampledInTimeShare": 0.256,
+        "peerFirstShare": null,
+        "medianOfViewerPeerLatencyMs": 2925,
+        "bytesFromPeers": 7633740,
+        "bytesUploaded": 13533744,
+        "candidatePairs": {
+          "relay/relay": 12
+        },
+        "swarmErrors": 0,
+        "relayEventsPublished": 33,
+        "corruptPeerBannedBy": 2
+      },
+      "failures": [
+        "late-wave in-time share 0.27 below 0.5",
+        "in-time share 0.27 below 0.5"
+      ],
+      "ice_candidate_errors": {},
+      "selected_paths": [
+        {
+          "local": "relay",
+          "remote": "relay",
+          "relayProtocol": "tcp",
+          "localPort": 49164,
+          "remotePort": 49160,
+          "bytesSent": 1050950,
+          "bytesReceived": 1100532
+        }
+      ],
+      "honest_playback": [
+        {
+          "viewer": "v0",
+          "seconds": 44.33671,
+          "fatal_errors": 0
+        },
+        {
+          "viewer": "v1",
+          "seconds": 44.623858,
+          "fatal_errors": 0
+        }
+      ],
+      "test_tls_certificate_bypass": false,
+      "clean_stop": true
+    },
+    {
+      "transport": "tls",
+      "ok": false,
+      "aggregate": {
+        "originLoaded": 44,
+        "peerFirstLoaded": 0,
+        "originFallbacks": 0,
+        "peerFirstBytes": 0,
+        "raced": 37,
+        "noPeers": 3,
+        "peerInTime": 14,
+        "peerLate": 7,
+        "peerMiss": 14,
+        "peerCorrupt": 2,
+        "inTimeShare": 0.378,
+        "sampledInTimeShare": 0.35,
+        "peerFirstShare": null,
+        "medianOfViewerPeerLatencyMs": 1356,
+        "bytesFromPeers": 8830548,
+        "bytesUploaded": 13035920,
+        "candidatePairs": {
+          "relay/relay": 10
+        },
+        "swarmErrors": 0,
+        "relayEventsPublished": 27,
+        "corruptPeerBannedBy": 2
+      },
+      "failures": [
+        "selected TURN paths did not carry bidirectional traffic",
+        "late-wave in-time share 0.378 below 0.5",
+        "in-time share 0.378 below 0.5"
+      ],
+      "ice_candidate_errors": {},
+      "selected_paths": [],
+      "honest_playback": [
+        {
+          "viewer": "v0",
+          "seconds": 44.825201,
+          "fatal_errors": 0
+        },
+        {
+          "viewer": "v1",
+          "seconds": 45.167944,
+          "fatal_errors": 0
+        }
+      ],
+      "test_tls_certificate_bypass": true,
+      "clean_stop": true
+    }
+  ],
+  "overall_qualification": "RED: per-viewer UDP passed; TCP and TLS carried verified media without ICE errors but missed the existing 50% in-time delivery gate. TLS also had no active selected path at the final sample. The remaining failures are not attributed to either implementation. HTTP playback remained available."
+}

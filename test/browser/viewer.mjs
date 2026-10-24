@@ -36,10 +36,12 @@ let commitmentRequests = 0;
 const resourceSamples = [];
 const resourceHighWater = { samples: 0, firstAtMs: null, lastAtMs: null, activePeers: 0, heldBytes: 0, relays: 0, jsHeapBytes: 0 };
 const testConnections = new Set();
+const testIceErrors = [];
 class ObservedPeerConnection extends RTCPeerConnection {
   constructor(configuration) {
     super(configuration);
     testConnections.add(this);
+    this.addEventListener("icecandidateerror", (event) => { if (testIceErrors.length < 100) testIceErrors.push(event.errorCode); });
     this.addEventListener("connectionstatechange", () => { if (this.connectionState === "closed") testConnections.delete(this); });
   }
 }
@@ -121,7 +123,7 @@ window.__viewer = {
   })),
   viewer,
   useSwarm,
-  report: () => ({ viewer, useSwarm, player: { ...player, currentTime: video.currentTime }, swarm: swarm?.metrics() ?? null, resourceSamples: [...resourceSamples], resourceHighWater: { ...resourceHighWater } }),
+  report: () => ({ viewer, useSwarm, player: { ...player, currentTime: video.currentTime }, swarm: swarm?.metrics() ?? null, iceCandidateErrors: [...testIceErrors], resourceSamples: [...resourceSamples], resourceHighWater: { ...resourceHighWater } }),
   stop: () => swarm?.stop(),
   loaderRestored: () => !hls.config.fLoader,
   stoppedMetrics: () => swarm?.metrics(),
