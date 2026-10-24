@@ -3,14 +3,14 @@
 [Documentation](README.md) · [API](API.md) · [hls.js integration](../INTEGRATION.md)
 
 The supported release is an experimental
-[v0.2.1 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1).
-Node 22+ is required; CI runs Node 24. `npm install relayswarm` is not the
+[v0.3.0 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.3.0).
+Node 22.13+ is required; CI runs Node 24. `npm install relayswarm` is not the
 documented distribution path: the npm registry is unpublished.
 
 ## Install for a host application
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.2.1/relayswarm-0.2.1.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.3.0/relayswarm-0.3.0.tgz
 npm install hls.js
 ```
 
@@ -29,17 +29,17 @@ this hls.js loader.
 A Git dependency can also be pinned to the immutable release tag:
 
 ```sh
-npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.2.1'
+npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.3.0'
 ```
 
 ## Use the standalone browser bundle
 
 Download
-[`relayswarm-hls-swarm-0.2.1.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.1/relayswarm-hls-swarm-0.2.1.mjs)
+[`relayswarm-hls-swarm-0.3.0.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.3.0/relayswarm-hls-swarm-0.3.0.mjs)
 and serve it from your own application:
 
 ```js
-import { createHlsSwarm } from './relayswarm-hls-swarm-0.2.1.mjs';
+import { createHlsSwarm } from './relayswarm-hls-swarm-0.3.0.mjs';
 ```
 
 The bundle contains the loader's runtime dependencies; hls.js remains the
@@ -47,17 +47,45 @@ host's dependency. Prefer vendoring the verified file to relying on GitHub
 release-download URLs as a JavaScript CDN. The separate publisher helper uses
 Node filesystem/crypto APIs and does not belong in a browser bundle.
 
-The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.2.1/SHA256SUMS)
-covers both assets. Download all three into one directory and verify:
+The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.3.0/SHA256SUMS)
+covers the tarball, browser bundle, WASM module and JavaScript build metadata.
+Download those four files and the manifest into one directory and verify:
 
 ```sh
 shasum -a 256 -c SHA256SUMS
 ```
 
+## Use the optional shared core
+
+Download [`relayswarm-core-0.3.0.wasm`](https://github.com/forgesworn/relayswarm/releases/download/v0.3.0/relayswarm-core-0.3.0.wasm)
+and serve it beside the browser bundle with `Content-Type: application/wasm`.
+Pass its URL through `coreWasm`; enable experimental `multiHolder` and
+`peerSupplyHint` only when the host intends to use them. A Content Security
+Policy must permit WebAssembly compilation, for example with
+`'wasm-unsafe-eval'` in `script-src`. See [Integration](../INTEGRATION.md) for
+fallback, feature requirements and the advisory hint callback.
+The tarball also contains the committed module under `src/browser/`.
+
+## Use the native core assets
+
+The [v0.3.0 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.3.0)
+includes `relayswarm-core.xcframework.zip`, its `.checksum`,
+`relayswarm-core-swift-bindings.zip` and `relayswarm-core.aar`. Download the
+platform's `SHA256SUMS-apple` or `SHA256SUMS-android` and every file listed in
+it, then run `shasum -a 256 -c SHA256SUMS-apple` (or the Android manifest).
+Native metadata identifies the same tagged source as the JavaScript metadata.
+
+Extract both Apple archives beside one another to use the local-path Swift
+package; its minimums are iOS 16 and macOS 14, arm64 only. The AAR requires
+Android API 26+, Kotlin 2.2+ and `net.java.dev.jna:jna:5.14.0@aar`.
+See [Native core packaging](CORE-PACKAGING.md) for the complete dependency,
+build and verification contract. These are core bindings, with no native
+WebRTC adapter or client application, and RelaySwarmKit has not adopted them.
+
 ## Run the source demo
 
 ```sh
-git clone --branch v0.2.1 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.3.0 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -108,7 +136,7 @@ Current evidence and remaining device/network gates are in [STATUS.md](STATUS.md
 
 ## Development source
 
-The published commands above install v0.2.1. Later development lands on
+The published commands above install v0.3.0. Later development lands on
 `main`, a mutable reference; its
 [production features](PRODUCTION-FEATURES.md) and
 [delivery requirements](PRODUCTION-READINESS.md) have separate evidence.
@@ -121,8 +149,8 @@ npm ci
 npm run demo
 ```
 
-This source requires Node 22.13+ and adds the installed native executable,
-verified HTTP fallback and wider-media tests:
+Both v0.3.0 and current development source include the installed native
+executable, verified HTTP fallback and wider-media tests:
 
 ```sh
 npm run native:fetch -- --help

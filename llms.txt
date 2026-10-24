@@ -3,18 +3,19 @@
 > Experimental peer-assisted HLS video delivery with WebRTC data channels,
 > Nostr relay rendezvous, author-signed segment commitments and an hls.js
 > loader. A separate native Node path uses HyperDHT and Noise. MIT licensed;
-> v0.2.1 is the published experimental prerelease; production acceptance remains open.
+> v0.3.0 is the experimental prerelease; production acceptance remains open.
 
 The canonical repository is https://github.com/forgesworn/relayswarm. Node 22.13+
 is required; CI uses Node 24. Public distribution includes an installable
-GitHub tarball, a standalone browser ESM bundle and SHA-256 checksums. The
+GitHub tarball, a standalone browser ESM bundle, the optional WASM module, native core
+archives and SHA-256 checksums. The
 source demo runs with `npm run demo`; synthetic media needs ffmpeg/libx264.
 
 The original WebRTC CLI signs plaintext SDP and uses a digest supplied by its
 seeder. The browser loader and shared session wire version 3 use pairwise
 NIP-44-encrypted signals; the native path encrypts dial authorisation and uses
-Noise for transfer. Package version 0.2.1, session version 3, commitment schemas
-1/2 and metrics version 2 are distinct. Published Swift RelaySwarmKit v0.5.0
+Noise for transfer. Package version 0.3.0, session version 3, commitment schemas
+1/2/3 (3 experimental) and metrics version 2 are distinct. Published Swift RelaySwarmKit v0.5.0
 supports wire version 3 and signed media, with actual SDK/Chrome loopback proof;
 physical Apple-device and public-NAT compatibility remain unverified.
 
@@ -42,8 +43,8 @@ file hashes/signatures, limits cumulative media upload, measures peer choice and
 provides authenticated operator policy, bounded admission and durable idempotent
 opt-in numeric reports. Upload budgets persist across reloads/tabs without consent.
 Optional Nostr or host website accounts share a private durable allowance across
-devices; account changes leave uploading off until fresh consent. The deployed
-3f706a9 pilot offers Nostr; integrating websites supply their own account resolver.
+devices; account changes leave uploading off until fresh consent. The dated
+pilot evidence records Nostr sign-in; integrating websites supply their own account resolver.
 Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The example origin adds bounded blocking reload for compatible complete live
 playlists across all renditions, with 24 waiters inside 32 media requests.
@@ -65,22 +66,16 @@ Peer-first media loads/bytes avoided are not net connection-data savings, and
 upload counters measure committed media payload rather than acknowledged delivery.
 Pending durable reservations can consume quota without entering those counters.
 Documentation on main can include corrections after the immutable releases.
-Current deployed source `5f2ece0`. Nine required CI jobs, fresh 284-member
-package consumption and guarded HTTPS deployment passed. The demo selects
-four neighbours; the SDK default stays six. Nostr and an authenticated
-host-supplied account API are implemented. The pilot selects 900 address
-requests per minute; the default remains 600 and global capacity 2,048.
+v0.3.0 adds the opt-in Rust/WASM core, experimental schema 3 piece commitments
+and multi-holder transfers, UniFFI Swift/Kotlin bindings, advisory peer supply
+hints and receipt switch-cost reporting. Core bindings do not include a native
+WebRTC adapter or client. RelaySwarmKit has not adopted this core. The scheduler
+retains the 32 KiB/s cold floor and at most three holders.
 
-The agreed feature surfaces are implemented, but production acceptance is
-incomplete. On `5f2ece0`, reporting lifecycle acceptance (P05) and parent-crash
-recovery (P07) passed. The fourteen-role qualifier is RED: R65 completed its
-300-second measurement and passed 14 of 16 gates, but only one of four receivers
-obtained high-quality peer media and one contributor uploaded nothing during
-measurement. The two-hour run waits for a matching short qualifier pass.
-Matching capacity, two-hour/churn, natural expiry, physical/browser breadth,
-difficult networks, measured wire/cost benefit and downloaded-release
-acceptance remain open. v0.2.1 is published as an experimental prerelease.
-See the [P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
+Production acceptance remains open. Dated pilot records retain their exact
+sources and RED/open sustained-operation, physical-device, difficult-network
+and net-benefit gates. This release does not deploy or qualify the pilot.
+See the P01-P12 checklist and dated status evidence.
 
 ## Documentation
 
@@ -109,13 +104,13 @@ See the [P01–P12 checklist](docs/PRODUCTION-READINESS.md#delivery-checklist).
 ## Evidence and maintenance
 
 - [Evidence and remaining work](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md): Dated release, CI/soak measurements, distribution proof, deterministic silent-holder deadline classifications and unverified gates.
-- [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): Unreleased production/broadcaster work and published release history.
+- [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): Shared-core v0.3.0 changes and published release history.
 - [Maintaining the docs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/MAINTAINING-DOCS.md): AI-context generation, link/freshness checks and public metadata.
 
 ## Optional
 
 - [Core signature budget](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-SIGNATURE-BUDGET.md): Dated compressed asset and actual Chrome verification measurements; an isolated prototype, with no production verifier change.
-- [Native core packaging](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-PACKAGING.md): Tag-gated release attachments and dispatch-only native build artefacts, checksums and source verification; no release or URL dependency decision.
+- [Native core packaging](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-PACKAGING.md): Tag-gated release attachments and dispatch-only native build artefacts, checksums and source verification; source-bound assets and an unchanged local-path Swift package.
 
 - [Full documentation context](https://raw.githubusercontent.com/forgesworn/relayswarm/main/llms-full.txt): Generated maintained guides with absolute links; larger than the index.
 - [Landscape](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/LANDSCAPE.md): Primary-source comparison with other rendezvous/media projects.

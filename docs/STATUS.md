@@ -3,13 +3,40 @@
 [Documentation](README.md) · [Field-test guide](FIELD-TEST.md) ·
 [Changelog](../CHANGELOG.md)
 
-Checkpoint: 21 October 2026. The published experimental prerelease is
-[v0.2.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.1), built from `main` after PR 9 merged; field
-acceptance remains open. The previous prerelease,
-[v0.2.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.2.0), was built after PR 8 merged. The earlier
-[v0.1.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.1.0) points to
-`3e480e19dfe4d675f14bcb2968f3dc4926fbca25`. Later documentation corrections
-on `main` do not change either tag or its immutable downloaded assets.
+Checkpoint: 24 October 2026. The experimental shared-core release is
+[v0.3.0](https://github.com/forgesworn/relayswarm/releases/tag/v0.3.0).
+The [changelog](../CHANGELOG.md#v030-24-october-2026) records its source changes;
+the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
+native downloads and checksum verification. The npm registry is unpublished.
+Earlier release and pilot evidence below retains its date and source.
+
+## Shared-core release checkpoint (24 October 2026)
+
+PRs [14](https://github.com/forgesworn/relayswarm/pull/14),
+[15](https://github.com/forgesworn/relayswarm/pull/15),
+[16](https://github.com/forgesworn/relayswarm/pull/16),
+[17](https://github.com/forgesworn/relayswarm/pull/17),
+[18](https://github.com/forgesworn/relayswarm/pull/18) and
+[19](https://github.com/forgesworn/relayswarm/pull/19) merged after their
+required CI jobs passed. Integration also advances the peer link's wall clock
+with the loader's virtual clock in the deadline regression; both pinned
+outcomes pass without loosening byte accounting or deadline assertions. The
+hint regression holds commitment delivery until its idle-HAVE snapshot has
+been observed, so key-resolution timing cannot make the holder busy first.
+
+Native packaging's [dispatch dry run](https://github.com/forgesworn/relayswarm/actions/runs/40051822407)
+built and verified both platforms on its packaging PR source; attachment was
+skipped. Release downloads carry the actual tagged source commit in their
+metadata. The packaging guide describes exact-source verification; a dry run
+is not tagged-release or physical-device evidence.
+
+The core, multi-holder path and peer supply hint remain opt-in. The hint is
+advisory and reports known HAVE supply. Signature checks remain in the core
+following the [measured comparison](CORE-SIGNATURE-BUDGET.md). The scheduler
+keeps the 32 KiB/s floor and three-holder default. RelaySwarmKit adoption,
+a native WebRTC adapter/client and physical-device/public-NAT acceptance
+remain open. This release does not change the controlled pilot deployment
+or turn its historical RED results into current acceptance.
 
 ## Experimental core supply hint, 24 October 2026
 

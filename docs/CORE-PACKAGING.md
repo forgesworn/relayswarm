@@ -1,6 +1,6 @@
 # Native core release packaging
 
-This workflow prepares native core assets. It creates no tag or GitHub release,
+The v0.3.0 release uses this workflow to prepare native core assets. It creates no tag or GitHub release,
 publishes nothing to npm, and leaves `core/apple/Package.swift` using `path:`.
 A binary URL dependency remains a separate release decision.
 
@@ -84,3 +84,12 @@ Source commits and hashes bind each platform's outputs to the same checkout.
 These checks cover build/packaging and local or CI consumption. They do not
 prove physical-device, mobile battery, public-NAT or field acceptance, and add
 no native WebRTC adapter, client application or transport dependency.
+
+## JavaScript and WASM downloads
+
+From a clean release commit after `npm ci`, run `npm run release:build`.
+It checks the committed WASM source stamp, audits the npm package file list,
+bundles the browser loader without external imports and writes the tarball,
+separate module, source metadata and `SHA256SUMS` under `artifacts/release`.
+It creates no tag or release. Verify fresh consumption before uploading those
+files to the same release as the source-matched native assets.
