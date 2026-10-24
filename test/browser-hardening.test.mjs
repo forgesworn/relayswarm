@@ -4531,17 +4531,17 @@ function beginCountedMultiLoad(f) {
 }
 
 test("zero-budget cached race starts HTTP first and accepts only a complete verified peer winner", async t => {
-  const observed = [];
+  const clock = virtualClock(t), observed = [];
   let f;
-  f = await multiFixture(t, { holders: [{}], wholeOriginDelayMs: 100, onPeerDelivery: value => observed.push(value),
-    swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 500, segmentKey: url => {
-      assert.ok(f.wholeLoads.length > 0, "normal HTTP starts before even the local key callback"); return new URL(url).pathname;
-    } } });
-  f.hls.media = { currentTime: 0, buffered: { length: 0 } };
   try {
+    f = await clock.settle(multiFixture(t, { holders: [{}], wholeOriginDelayMs: 100, onPeerDelivery: value => observed.push(value),
+      swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 500, segmentKey: url => {
+        assert.ok(f.wholeLoads.length > 0, "normal HTTP starts before even the local key callback"); return new URL(url).pathname;
+      } } }));
+    f.hls.media = { currentTime: 0, buffered: { length: 0 } };
     const load = beginCountedMultiLoad(f);
     assert.equal(f.wholeLoads.length, 1); assert.equal(f.commitmentCalls, 0);
-    sameBytes(await load.response, f.bytes);
+    sameBytes(await clock.settle(load.response), f.bytes);
     assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaces, 1);
     assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaceWins, 1);
     assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length);
@@ -4549,9 +4549,12 @@ test("zero-budget cached race starts HTTP first and accepts only a complete veri
     assert.deepEqual(f.ranges, [], "the dummy origin lane never sends a ranged HTTP request");
     assert.equal(observed.reduce((sum, value) => sum + value.bytes, 0), f.bytes.length);
     assert.equal(observed[0].connection, f.connections[0]);
-    await sleep(130);
+    await clock.advance(130);
     assert.deepEqual([load.calls.success.length, load.calls.abort.length, load.calls.error.length], [1, 0, 0], "losing HTTP callbacks stay suppressed");
-  } finally { await f.close(); }
+  } finally {
+    if (f) await clock.settle(f.close());
+    clock.restore();
+  }
 });
 
 test("zero-budget cached race never delays a winning HTTP response for uncooperative metadata", async t => {
