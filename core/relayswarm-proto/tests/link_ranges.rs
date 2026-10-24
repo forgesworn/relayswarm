@@ -266,7 +266,10 @@ fn a_pre_sliced_host_response_preserves_middle_and_final_range_bytes() {
     let bytes = object(SIZE);
     let mut holder = Link::new(config(), NOW);
     for (id, requested) in [(1, range(1, 3)), (2, range(3, 4))] {
-        holder.handle_text(NOW, &json!({ "t": "want", "id": id, "k": KEY, "p": [requested.start, requested.end] }).to_string());
+        holder.handle_text(
+            NOW,
+            &json!({ "t": "want", "id": id, "k": KEY, "p": [requested.start, requested.end] }).to_string(),
+        );
         holder.drain_events();
         let (from, to) = range_bytes(SIZE as u64, requested).unwrap();
         holder.observe_buffered(0);
@@ -276,12 +279,20 @@ fn a_pre_sliced_host_response_preserves_middle_and_final_range_bytes() {
         }
         let events = holder.drain_events();
         let text = texts(&events);
-        assert_eq!(text[0], json!({ "t": "meta", "id": id, "size": to - from, "p": [requested.start, requested.end] }));
+        assert_eq!(
+            text[0],
+            json!({ "t": "meta", "id": id, "size": to - from, "p": [requested.start, requested.end] })
+        );
         assert_eq!(text.last(), Some(&json!({ "t": "eof", "id": id })));
-        let body: Vec<u8> = events.iter().filter_map(|event| match event {
-            LinkEvent::SendBinary(chunk) => Some(chunk.as_slice()),
-            _ => None,
-        }).flatten().copied().collect();
+        let body: Vec<u8> = events
+            .iter()
+            .filter_map(|event| match event {
+                LinkEvent::SendBinary(chunk) => Some(chunk.as_slice()),
+                _ => None,
+            })
+            .flatten()
+            .copied()
+            .collect();
         assert_eq!(body, bytes[from as usize..to as usize]);
     }
     assert!(!holder.closed());
@@ -298,7 +309,10 @@ fn a_pre_sliced_host_response_rejects_invalid_geometry_without_poisoning_the_que
         (SIZE as u64, range(3, 4), 65_536),
     ] {
         let mut holder = Link::new(config(), NOW);
-        holder.handle_text(NOW, &json!({ "t": "want", "id": 1, "k": KEY, "p": [requested.start, requested.end] }).to_string());
+        holder.handle_text(
+            NOW,
+            &json!({ "t": "want", "id": 1, "k": KEY, "p": [requested.start, requested.end] }).to_string(),
+        );
         holder.drain_events();
         holder.serve_range_response(NOW, object_size, vec![0; len]);
         assert_eq!(texts(&holder.drain_events()), vec![json!({ "t": "none", "id": 1 })]);
@@ -343,15 +357,25 @@ fn a_cancelled_pre_sliced_response_accounts_only_the_range_and_serves_the_next_r
 #[test]
 fn a_late_host_response_cannot_discard_an_active_upload() {
     let size = 6 * 1024 * 1024;
-    let mut holder = Link::new(LinkConfig { max_segment_bytes: size, ..config() }, NOW);
+    let mut holder = Link::new(
+        LinkConfig {
+            max_segment_bytes: size,
+            ..config()
+        },
+        NOW,
+    );
     holder.handle_text(NOW, &json!({ "t": "want", "id": 1, "k": KEY, "p": [0, 4] }).to_string());
     holder.drain_events();
     let (_, to) = range_bytes(size, range(0, 4)).unwrap();
     holder.serve_range_response(NOW, size, vec![1; to as usize]);
-    let sent: u64 = holder.drain_events().iter().filter_map(|event| match event {
-        LinkEvent::SendBinary(bytes) => Some(bytes.len() as u64),
-        _ => None,
-    }).sum();
+    let sent: u64 = holder
+        .drain_events()
+        .iter()
+        .filter_map(|event| match event {
+            LinkEvent::SendBinary(bytes) => Some(bytes.len() as u64),
+            _ => None,
+        })
+        .sum();
     assert!(holder.upload_waiting());
     holder.serve_range_response(NOW, size, vec![2; to as usize]);
     holder.serve_response(NOW, None);

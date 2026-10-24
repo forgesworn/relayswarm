@@ -507,7 +507,15 @@ pub unsafe extern "C" fn rs_link_call(handle: u32, op: u32, now: f64, open: u32,
 /// # Safety
 /// `bytes` must address `len` initialised bytes from `rs_alloc` (or `len` 0).
 #[no_mangle]
-pub unsafe extern "C" fn rs_link_serve_range(handle: u32, now: f64, open: u32, object_size: f64, buffered: f64, bytes: *const u8, len: usize) -> i32 {
+pub unsafe extern "C" fn rs_link_serve_range(
+    handle: u32,
+    now: f64,
+    open: u32,
+    object_size: f64,
+    buffered: f64,
+    bytes: *const u8,
+    len: usize,
+) -> i32 {
     rs_link_call(handle, LINK_SERVE_RANGE, now, open, object_size, buffered, bytes, len)
 }
 
