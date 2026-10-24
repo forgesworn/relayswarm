@@ -1,5 +1,29 @@
 # RelaySwarm changelog
 
+## v0.4.4 (24 October 2026)
+
+Prepared experimental library prerelease following
+[v0.4.3](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3).
+Sustained physical-device continuity and net network benefit remain open.
+
+- Let eligible already-advertised, framing-2 schema-3 media reach the bounded
+  mixed piece planner even when the whole-object peer estimate is late.
+  The planner can take a small verified peer fraction and load the remainder
+  from origin. Schemas 1/2 retain their whole-object timing check. Integrity,
+  sustainable deadlines, origin reserve and the estimator's 300 ms flow floor
+  remain unchanged; no Rust/WASM rebuild or wire change is required.
+- Require a live same-key FETCH lease from a fresh same-rendition serving
+  contributor before waiting for unavailable recorded main-rendition media.
+  The exact demanded rendition must explicitly report VOD; live, unknown and
+  alternate-audio contexts retain bounded rendezvous coordination. Bare
+  serving presence and key rank no longer hold a known-VOD prefetch leader.
+- Retain real-WASM regressions and the previous-source failing control.
+  Paired with separate website clock/first-frame fixes, a physical Pixel/M4
+  candidate passed a bounded 45.5-second original-4K window: 6,553,600 verified
+  peer bytes, zero reported post-first-frame stalls and zero dropped frames.
+  Earlier longer-window seek/loop interruptions remain recorded; sustained
+  continuity and net network benefit remain open.
+
 ## v0.4.3 (24 October 2026)
 
 Prepared experimental library prerelease following

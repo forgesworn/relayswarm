@@ -4,11 +4,70 @@
 [Changelog](../CHANGELOG.md)
 
 Checkpoint: 24 October 2026. The prepared experimental shared-core prerelease is
-[v0.4.3](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3).
-The [changelog](../CHANGELOG.md#v043-24-october-2026) records its source changes;
+[v0.4.4](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4).
+The [changelog](../CHANGELOG.md#v044-24-october-2026) records its source changes;
 the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Cached mixed admission and fetch-backed waits (24 October 2026)
+
+A fresh slow partial-flow estimate could reject an entire large object before
+the schema-3 mixed planner ran, although a contributor held the requested
+media and could supply a smaller useful fraction. Eligible already-HAVE
+framing-2 holders now reach that planner after commitment verification. The
+planner, sustainable deadline and origin reserve still bound peer work;
+valid schemas 1/2 retain their whole-object projection. The 300 ms estimator
+floor, integrity verifier, wire and committed WASM bytes are unchanged.
+
+For known-VOD main media, an unavailable object is waited for only while a
+fresh same-rendition serving contributor advertises a live FETCH lease for
+that exact key. A contributor behind a recorded-media prefetch leader no longer
+causes a wait merely by serving or ranking ahead. VOD is the exact demanded
+main level's explicit `details.live === false`, rather than `currentLevel`;
+live, unknown, alternate-audio and invalid-level contexts retain the previous
+bounded coordination. A lying or expired lease cannot move the deadline.
+
+Twenty focused real-WASM checks cover repeated mixed delivery after an actual
+slow partial flow, both valid legacy schemas, missing/wrong/expired leases,
+valid availability, a bounded lying lease, live/unknown compatibility and
+exact-level/track-family classification. The same corrected fixture on
+the previous `6f63fb2` source fails the mixed-admission and missing-lease
+controls. Test channels model native reliable/ordered SCTP and allow losing
+EOF frames to drain before the next eligible demand.
+The initial candidate's complete WASM loader sweep passed 301 tests with one expected
+JavaScript-prototype-only skip (302 total). Syntax and authored/generated
+documentation checks passed. The first parallel JavaScript loader sweep had
+four timed holder-accounting failures; the same four passed on both previous
+and candidate source in quiet isolation without changing their assertions.
+Its complete serial JavaScript loader rerun then passed all 370 tests with
+zero failures in 125.875 seconds.
+
+The initial hosted broadcast fixture exposed a synchronous live-release race:
+donor HAVE arrived 29–58 ms after the consumer's decision, while the first
+candidate admitted waits only after observing FETCH. The recorded-media scope
+above preserves the prior live coordination and the unchanged strict peer
+playback assertion; that failed initial attempt remains recorded.
+
+Physical candidate checks used original 2160p HLS on Pixel/Vanadium and an
+M4 browser, actual Nostr signalling and the owner's existing Archy Spry TLS
+service with private expiring credentials. Selected DTLS fingerprints and
+native data-channel byte counts establish the paired transport. With separate
+website clock/first-frame fixes, the final staged 45.5-second window passed:
+both decoded 3842×2160, Pixel accepted 6,553,600 verified peer bytes, M4 recorded
+7,602,176 uploaded media bytes, and both reported zero post-first-frame stalls
+and zero dropped frames. This is bounded physical application evidence.
+An earlier 100-second run accepted 24,739,840 peer bytes but retained clock-seek
+and recording-loop interruptions; those failures remain recorded.
+Some ordinary HTTP responses were served from browser cache, so accepted
+origin media bytes are not wire traffic or net network savings. Cold-follower
+and default-buffer observations remain distinct from cached and tiered trials.
+Phone privacy settings and the existing service were preserved; profiles
+stayed private. Sustained continuity and net network benefit remain open.
+A later cold-consumer window verified each HTTP response's network/cache
+classification but delivered only about 245 KiB of peer media: its usable
+native link arrived about 67 seconds into the 100-second observation. That
+qualification remains failed and reliable cold discovery remains open.
 
 ## Sustainable peer waits and range-sized WASM uploads (24 October 2026)
 

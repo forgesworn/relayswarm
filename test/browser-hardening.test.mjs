@@ -1410,6 +1410,7 @@ test("peer eligibility observes coordination with one bounded commitment per eli
   try {
     const peer = await fixture.addPeer(new ServingChannel(playback.bytes, 1, requested, "existing-peer"));
     peer.receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:0" }));
+    peer.receive(JSON.stringify({ t: "fetching", k: playback.key, ms: 2000 }));
     let clock = performance.now();
     t.mock.method(performance, "now", () => clock);
     t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -1933,8 +1934,9 @@ test("fresh live-edge objects wait for a same-rendition contributor without dela
   try {
     const peer = await fixture.addPeer(new ServingChannel(playback.bytes, 2, trace, "seeder"));
     peer.receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:0" }));
+    peer.receive(JSON.stringify({ t: "fetching", k: playback.key, ms: 100 }));
     const pending = fixture.load();
-    setTimeout(() => { peer.receive(JSON.stringify({ t: "fetching", k: playback.key, ms: 100 })); peer.receive(JSON.stringify({ t: "have", add: [playback.key] })); }, 30);
+    setTimeout(() => peer.receive(JSON.stringify({ t: "have", add: [playback.key] })), 30);
     assert.deepEqual(new Uint8Array((await pending).data), playback.bytes);
     assert.deepEqual(trace, ["seeder"]);
     assert.equal(fixture.swarm.metrics().segments.coordinatedWaits, 1);
@@ -1989,6 +1991,7 @@ test("fresh-object coordination is bounded for lying contributors and ignores un
     try {
       const peer = await fixture.addPeer(new ServingChannel(playback.bytes, 2, trace, "seeder"));
       peer.receive(JSON.stringify({ t: "contribution", serving: true, rendition }));
+      peer.receive(JSON.stringify({ t: "fetching", k: playback.key, ms: 2000 }));
       time = virtualClock(t);
       const started = performance.now(); await time.settle(fixture.load(), 160);
       assert.ok(performance.now() - started < 160, "a malicious contributor cannot suppress HTTP recovery");
@@ -3215,6 +3218,7 @@ async function overlapControlledFixture(t, { expiresAt, wrongRendition = false, 
   const otherPeers = [];
   for (let i = 0; i < extraPeers; i++) otherPeers.push(await fixture.addPeer(new RecordedChannel()));
   peer.receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:1" }));
+  peer.receive(JSON.stringify({ t: "fetching", k: key, ms: 2000 }));
   fixture.hls.media = { currentTime: 0, buffered: { length: 1, start: () => 0, end: () => 5 } };
   let clock = realNow();
   performanceMock = t.mock.method(performance, "now", () => clock);
@@ -3635,15 +3639,20 @@ async function staleHolderFixture(t, { maxPeers = 2, answering = false, sibling 
   };
   const rank = (pubkey, key) => [...pubkey].map((digit, i) => (parseInt(digit, 16) ^ parseInt(key[i], 16)).toString(16)).join("");
   let counter = 0;
-  // Only segments the viewer will wait for: the stuck holder out-ranks it.
+  // Retain the fixture's distinct, consistently ranked keys. Wait authority
+  // comes from the actual FETCH lease announced in load(), not that rank.
   const next = () => {
     for (;;) {
       const name = `stale-${counter++}`, key = createHash("sha256").update(`${base.swarmId}\n/${name}.ts`).digest("hex");
       if (rank(holderKey, key) < rank(own, key)) return { name, key };
     }
   };
-  const load = (name, level = 0) => new Promise(resolve => new f.hls.config.fLoader({}).load({ ...context,
-    url: `https://origin.example/${name}.ts`, frag: { ...context.frag, level } }, {}, { onSuccess: resolve }));
+  const load = (name, level = 0) => {
+    const key = createHash("sha256").update(`${base.swarmId}\n/${name}.ts`).digest("hex");
+    holder.receive(JSON.stringify({ t: "fetching", k: key, ms: 2000 }));
+    return new Promise(resolve => new f.hls.config.fLoader({}).load({ ...context,
+      url: `https://origin.example/${name}.ts`, frag: { ...context.frag, level } }, {}, { onSuccess: resolve }));
+  };
   const rows = () => f.swarm.metrics().peerEligibilityDiagnostics.records;
   const counters = () => f.swarm.metrics().peerEligibilityDiagnostics.counters;
   const discovery = () => f.swarm.metrics().neighbourDiscovery.counters;
@@ -4465,6 +4474,7 @@ test("a caller abort during the wait is not a miss", async t => {
     for (let i = 0; i < 2; i++) {
       const segment = f.next(); via.announce(segment.key); await sleep(30); f.touch();
       const waits = f.counters()["no-have-wait"], aborts = f.counters()["wait-aborted"];
+      f.holderChannel.receive(JSON.stringify({ t: "fetching", k: segment.key, ms: 2000 }));
       const loader = new f.hls.config.fLoader({});
       loader.load({ ...context, url: `https://origin.example/${segment.name}.ts` }, {}, { onSuccess() {}, onAbort() {} });
       await until(() => f.counters()["no-have-wait"] === waits + 1, 2_000);
@@ -4529,7 +4539,7 @@ function sameBytes(actual, expected, message) {
     message ?? `got ${actual.length} bytes, expected ${expected.length}`);
 }
 
-async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, originFallbackMs = 3_000, originDelayMs = 0, wholeOriginDelayMs = 0, ignoreRanges = false, traceRequests = 0, peerSupplyHint = false, onPlayerHint = null, beforeCommitment = null, onPeerDelivery = null, swarmOptions = {} }) {
+async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, commitmentVersion = 3, originFallbackMs = 3_000, originDelayMs = 0, wholeOriginDelayMs = 0, ignoreRanges = false, traceRequests = 0, peerSupplyHint = false, onPlayerHint = null, beforeCommitment = null, onPeerDelivery = null, swarmOptions = {} }) {
   const bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
   // The player's loader. It answers a range from the same object; its whole
   // segment is different bytes, so a whole-segment fallback shows.
@@ -4557,14 +4567,14 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
   const pieceSize = commitmentPieceSize(size), pieces = [];
   for (let at = 0; at < size; at += pieceSize) pieces.push(createHash("sha256").update(bytes.subarray(at, at + pieceSize)).digest("hex"));
   const key = createHash("sha256").update(`${base.swarmId}\n/media/seg.ts`).digest("hex");
-  const signed = signedFixture({ v: 3, key, rendition: "/media/index.m3u8", playlist: "/media/index.m3u8", mediaType: "main", encryption: null,
+  const signed = signedFixture({ v: commitmentVersion, key, rendition: commitmentVersion === 1 ? "0" : "/media/index.m3u8", playlist: "/media/index.m3u8", mediaType: "main", encryption: null,
     sha256: createHash("sha256").update(bytes).digest("hex"), size, pieceSize, pieces });
   const f = await linkedFixture({ mode: "peer-first", streamEvent: signed.options.streamEvent, getCommitment: async (...args) => { commitmentCalls++; await beforeCommitment?.(...args); return signed.event; }, originFallbackMs,
     segmentKey: (url) => new URL(url).pathname, coreWasm: multiCore, multiHolder, traceRequests, peerSupplyHint, onPlayerHint, onPeerDelivery, WebSocketImpl: memoryRelaySocket(), ...swarmOptions }, RangeLoader);
   await until(() => f.swarm.metrics().core.state === "ready");
   const channels = [];
   for (const options of holders) {
-    const channel = await f.addPeer(new RangedChannel(bytes, options));
+    const channel = await f.addPeer(new (options.Channel ?? RangedChannel)(bytes, options));
     channel.receive(JSON.stringify({ t: "have", keys: [key] }));
     channels.push(channel);
   }
@@ -4590,6 +4600,181 @@ function beginCountedMultiLoad(f) {
   });
   return { loader, response, calls };
 }
+
+// A real partial payload establishes a fresh slow estimate. Later requests
+// arrive in short bursts, too short to replace that estimate's 300ms flow
+// floor. No selection state or private swarm fields are injected by the test.
+class PartialThenBurstChannel extends RangedChannel {
+  ordered = true;
+  maxRetransmits = null;
+  maxPacketLifeTime = null;
+  trainingId = null;
+  send(data) {
+    const frame = typeof data === "string" ? JSON.parse(data) : null;
+    if (frame?.t === "want" && this.trainingId === null) {
+      this.trainingId = frame.id;
+      RecordedChannel.prototype.send.call(this, data);
+      this.wants.push(frame.p ?? null);
+      const pieceSize = commitmentPieceSize(this.bytes.length);
+      const size = frame.p ? Math.min(this.bytes.length, frame.p[1] * pieceSize) - frame.p[0] * pieceSize : this.bytes.length;
+      setTimeout(() => {
+        if (this.readyState !== "open") return;
+        this.receive(JSON.stringify({ t: "meta", id: frame.id, size, ...(frame.p ? { p: frame.p } : {}) }));
+        const from = frame.p ? frame.p[0] * pieceSize : 0;
+        this.receive(this.bytes.slice(from, from + 16_384).buffer);
+      }, 400);
+      setTimeout(() => {
+        if (this.readyState !== "open" || this.cancels) return;
+        const from = frame.p ? frame.p[0] * pieceSize : 0;
+        this.receive(this.bytes.slice(from + 16_384, from + 32_768).buffer);
+      }, 600);
+      return;
+    }
+    if (frame?.t === "cancel" && frame.id === this.trainingId) {
+      RecordedChannel.prototype.send.call(this, data); this.cancels++;
+      setTimeout(() => this.receive(JSON.stringify({ t: "eof", id: frame.id })), 1);
+      return;
+    }
+    super.send(data);
+  }
+}
+
+test("mixed admission retains repeated verified peer fractions despite a fresh late whole-object estimate", async t => {
+  const clock = virtualClock(t), observed = [];
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { holders: [{ Channel: PartialThenBurstChannel, delayMs: 50 }], size: 12 * 65_536,
+      originFallbackMs: 800, originDelayMs: 50, wholeOriginDelayMs: 50, traceRequests: 4096,
+      onPeerDelivery: value => observed.push(value), swarmOptions: { maxPeerWaitMs: 800, sustainablePeerWait: true } }));
+    const context = { ...multiContext, frag: { ...multiContext.frag, duration: 2 } };
+    f.hls.media = { currentTime: 10, buffered: { length: 0 } };
+    sameBytes(await clock.settle(f.load(context)), f.bytes);
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+    sameBytes(await clock.settle(f.load(context)), f.bytes, "the stalled training range still recovers through verified origin pieces");
+    await clock.advance(2);
+    const training = f.swarm.metrics().peerRequestDiagnostics.records[0];
+    assert.ok(training.receivedBytes >= 32_768 && training.elapsedMs - training.firstByteMs >= 300,
+      `actual slow partial flow, rather than a mocked estimate, trained selection: ${JSON.stringify(training)}`);
+    const transferCount = f.swarm.metrics().core.multiHolder.transfers;
+    for (let repeat = 0; repeat < 3; repeat++) {
+      // Let any reliable-channel EOF from a losing speculative range drain
+      // before the next VOD demand. An actually busy link is not eligible.
+      await clock.advance(60);
+      const before = f.swarm.metrics(), start = clock.now();
+      sameBytes(await clock.settle(f.load(context)), f.bytes);
+      const after = f.swarm.metrics();
+      assert.ok(after.bytes.peerFirst > before.bytes.peerFirst, `a valid small peer fraction is not rejected because the whole object would be late: ${JSON.stringify({ repeat,
+        before: before.bytes.peerFirst, after: after.bytes.peerFirst, multi: after.core.multiHolder, rows: after.peerEligibilityDiagnostics.records.slice(-2), requests: after.peerRequestDiagnostics.records.slice(-3) })}`);
+      assert.equal(after.segments.peerProjectedLate, before.segments.peerProjectedLate);
+      assert.ok(clock.now() - start < 2_000, "mixed delivery remains within the segment's sustainable time");
+    }
+    const metrics = f.swarm.metrics();
+    assert.equal(metrics.core.multiHolder.transfers, transferCount + 3);
+    assert.equal(metrics.segments.originFallbacks, 1, "there is no second whole origin request alongside the mixed ranges");
+    assert.ok(metrics.core.multiHolder.peerBytes > 0 && metrics.core.multiHolder.originBytes > 0);
+    assert.equal(observed.reduce((sum, value) => sum + value.bytes, 0), metrics.bytes.peerFirst);
+    assert.ok(observed.every(value => value.connection === f.connections[0]));
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test("recorded VOD coordination requires a live same-key FETCH lease and preserves its deadline", async t => {
+  for (const variant of ["no-lease", "other-key", "expired", "live", "live-unavailable"]) await t.test(variant, async t => {
+    const playback = peerPlaybackOptions(120), requested = [];
+    const f = await linkedFixture({ ...playback.options, WebSocketImpl: memoryRelaySocket(), coreWasm: multiCore });
+    let clock;
+    try {
+      await until(() => f.swarm.metrics().core.state === "ready");
+      f.hls.levels = [{ details: { live: false } }];
+      const channel = await f.addPeer(new ServingChannel(playback.bytes, 1, requested, "fetching-holder"));
+      channel.receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:0" }));
+      clock = virtualClock(t);
+      if (variant !== "no-lease") channel.receive(JSON.stringify({ t: "fetching", k: variant === "other-key" ? "f".repeat(64) : playback.key, ms: variant === "expired" ? 10 : 2000 }));
+      if (variant === "expired") await clock.advance(11);
+      const began = clock.now(), pending = new Promise(resolve => new f.hls.config.fLoader({}).load({ ...context,
+        frag: { ...context.frag, type: "main" } }, {}, { onSuccess: resolve }));
+      if (variant === "live") setTimeout(() => channel.receive(JSON.stringify({ t: "have", keys: [playback.key] })), 20);
+      await clock.settle(pending, 200);
+      const metrics = f.swarm.metrics();
+      if (variant.startsWith("live")) {
+        assert.equal(metrics.segments.coordinatedWaits, 1);
+        assert.ok(clock.now() - began <= 125, "even a lying lease cannot extend the loader deadline");
+        assert.equal(metrics.segments.coordinatedPeerLoads, variant === "live" ? 1 : 0);
+      } else {
+        assert.equal(metrics.segments.coordinatedWaits, 0, "generic contribution, other keys and expired leases are not pending supply");
+        assert.equal(metrics.segments.commitmentRequests, 0);
+        assert.ok(clock.now() - began < 10, "a prefetch leader does not spend its peer wait on an idle follower");
+      }
+    } finally { clock?.restore(); await f.close(); }
+  });
+});
+
+test("live and unknown playlists retain bounded receive-only and ranked coordination", async t => {
+  const variants = [
+    { name: "live", levels: [{ details: { live: true } }], arrives: true },
+    { name: "unknown", arrives: true },
+    { name: "exact-live-demand", levels: [{ details: { live: true } }, { details: { live: false } }], currentLevel: 1, arrives: true },
+    { name: "exact-vod-demand", levels: [{ details: { live: false } }, { details: { live: true } }], currentLevel: 1, vod: true },
+    { name: "alternate-audio", type: "audio", levels: [{ details: { live: false } }] },
+    { name: "invalid-negative-level", level: -1, levels: Object.assign([], { "-1": { details: { live: false } } }) },
+    { name: "invalid-outside-level", level: 3, levels: [{ details: { live: false } }] },
+    { name: "live-ranked-contributor", levels: [{ details: { live: true } }], serve: true },
+    { name: "unknown-ranked-contributor", serve: true },
+  ];
+  for (const variant of variants) await t.test(variant.name, async t => {
+    const playback = peerPlaybackOptions(120), requested = [];
+    const f = await linkedFixture({ ...playback.options, serve: variant.serve ?? false, WebSocketImpl: memoryRelaySocket(), coreWasm: multiCore });
+    let clock;
+    try {
+      await until(() => f.swarm.metrics().core.state === "ready");
+      f.hls.levels = variant.levels; f.hls.currentLevel = variant.currentLevel ?? 0;
+      const channel = await f.addPeer(new ServingChannel(playback.bytes, 1, requested, "live-holder"));
+      const frag = { ...context.frag, type: variant.type ?? "main", level: variant.level ?? 0 };
+      channel.receive(JSON.stringify({ t: "contribution", serving: true, rendition: `${frag.type}:${frag.level}` }));
+      let loadContext = { ...context, frag };
+      if (variant.serve) {
+        const rank = (pubkey, key) => [...pubkey].map((digit, i) => (parseInt(digit, 16) ^ parseInt(key[i], 16)).toString(16)).join("");
+        const own = f.swarm.metrics().pubkey, remote = f.peers[0].pubkey;
+        for (let n = 0; ; n++) {
+          const path = `/live-ranked-${n}.ts`, key = createHash("sha256").update(`${base.swarmId}\n${path}`).digest("hex");
+          if (rank(remote, key) < rank(own, key)) { loadContext = { ...loadContext, url: `https://origin.example${path}` }; break; }
+          assert.ok(n < 1024, "a bounded deterministic key establishes the contributor rank");
+        }
+      }
+      clock = virtualClock(t);
+      const began = clock.now(), pending = new Promise(resolve => new f.hls.config.fLoader({}).load(loadContext, {}, { onSuccess: resolve }));
+      if (variant.arrives) setTimeout(() => channel.receive(JSON.stringify({ t: "have", keys: [playback.key] })), 20);
+      await clock.settle(pending, 200);
+      const metrics = f.swarm.metrics();
+      assert.equal(metrics.segments.coordinatedWaits, variant.vod ? 0 : 1,
+        "only an explicit VOD main-demand rendition suppresses legacy coordination");
+      assert.equal(metrics.segments.coordinatedPeerLoads, variant.arrives ? 1 : 0);
+      assert.ok(clock.now() - began <= 125, "live, unknown and invalid-context waits keep the original deadline");
+      if (variant.vod) assert.ok(clock.now() - began < 10, "currentLevel cannot override the exact VOD demand");
+      else assert.equal(metrics.segments.commitmentRequests, 1);
+    } finally { clock?.restore(); await f.close(); }
+  });
+});
+
+test("mixed admission retains whole-object projection for valid v1 and v2 commitments", async t => {
+  for (const commitmentVersion of [1, 2]) await t.test(`v${commitmentVersion}`, async t => {
+    const clock = virtualClock(t);
+    let f;
+    try {
+      f = await clock.settle(multiFixture(t, { commitmentVersion, holders: [{ delayMs: 50 }], wholeOriginDelayMs: 50 }));
+      sameBytes(await clock.settle(f.load()), f.bytes, "the legacy commitment and payload must actually verify first");
+      const wants = f.channels[0].wants.length, before = f.swarm.metrics();
+      f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 12.02 } };
+      sameBytes(await clock.settle(f.load()), f.bytes);
+      const after = f.swarm.metrics();
+      assert.equal(after.segments.commitmentRejected, 0, "a valid older schema is declined for timing, not mistaken for corruption");
+      assert.equal(after.bytes.peerFirst, before.bytes.peerFirst);
+      assert.equal(f.channels[0].wants.length, wants, "no whole peer request fits the twenty-millisecond buffer budget");
+      assert.equal(after.segments.peerProjectedLate, before.segments.peerProjectedLate + 1);
+      assert.equal(after.peerEligibilityDiagnostics.records.at(-1).projection.stage, "commitment", "the signed legacy schema retains its whole-object gate");
+      assert.equal(after.core.multiHolder.transfers, 0);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
 
 test("sustainable peer waits bound multi-holder extensions by measured recovery and segment duration", async t => {
   const clock = virtualClock(t);

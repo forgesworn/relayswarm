@@ -84,6 +84,17 @@ buffer reserve remains in force. Unknown duration or no spare duration starts
 HTTP immediately; an enabled cached-peer race retains its independent
 window. This is an admission bound, not a smooth-playback guarantee.
 
+For eligible already-HAVE framing-2 holders, a verified schema-3 commitment
+can enter mixed piece planning without passing a whole-object peer forecast.
+The planner may use only a bounded peer fraction alongside origin pieces;
+valid schemas 1/2 retain their whole-object projection. Waiting for unavailable
+known-VOD main media requires a live same-key FETCH lease from a fresh serving
+contributor. VOD is read from the exact demanded main level's `details.live ===
+false`; live, unknown and alternate-audio contexts retain their bounded
+coordination. The current player level does not override the demand's level.
+These changes preserve the estimator floor, integrity checks and existing
+deadline/reserve bounds; the committed core module is unchanged.
+
 `trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
 `traceRequests` (none by default): each peer-first load, eligibility
 decision, peer request and origin request (whole or ranged), joined by a load
