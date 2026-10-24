@@ -3,7 +3,7 @@
 > Experimental peer-assisted HLS video delivery with WebRTC data channels,
 > Nostr relay rendezvous, author-signed segment commitments and an hls.js
 > loader. A separate native Node path uses HyperDHT and Noise. MIT licensed;
-> v0.4.1 is the experimental prerelease; production acceptance remains open.
+> v0.4.2 is the experimental prerelease; production acceptance remains open.
 
 The canonical repository is https://github.com/forgesworn/relayswarm. Node 22.13+
 is required; CI uses Node 24. Public distribution includes an installable
@@ -14,7 +14,7 @@ source demo runs with `npm run demo`; synthetic media needs ffmpeg/libx264.
 The original WebRTC CLI signs plaintext SDP and uses a digest supplied by its
 seeder. The browser loader and shared session wire version 3 use pairwise
 NIP-44-encrypted signals; the native path encrypts dial authorisation and uses
-Noise for transfer. Package version 0.4.1, session version 3, commitment schemas
+Noise for transfer. Package version 0.4.2, session version 3, commitment schemas
 1/2/3 (3 experimental) and metrics version 2 are distinct. Swift RelaySwarmKit v0.6.0
 adopts the released core and supports wire version 3 and signed schemas 1/2/3,
 with actual SDK/two-holder Chrome loopback proof;
@@ -46,7 +46,7 @@ opt-in numeric reports. Upload budgets persist across reloads/tabs without conse
 Optional Nostr or host website accounts share a private durable allowance across
 devices; account changes leave uploading off until fresh consent. The dated
 pilot evidence records Nostr sign-in; integrating websites supply their own account resolver.
-The unreleased loader fix makes uploads that overlap a changed-ticket admission check join its bounded online
+v0.4.2 makes uploads that overlap a changed-ticket admission check join its bounded online
 decision before spending allowance or sending media. Native Chrome/WASM loopback
 checks retain the same connection through three admission-ticket rotations;
 refusal, timeout and shutdown prevent delivery. Distributed R70 retention, TURN
@@ -121,7 +121,7 @@ fixtures use temporary loopback servers, not a public pilot deployment.
 ## Evidence and maintenance
 
 - [Evidence and remaining work](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/STATUS.md): Dated release, CI/soak measurements, distribution proof, deterministic silent-holder deadline classifications and unverified gates.
-- [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): v0.4.1 cached-race changes and published release history.
+- [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md): v0.4.2 admission-renewal changes and published release history.
 - [Maintaining the docs](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/MAINTAINING-DOCS.md): AI-context generation, link/freshness checks and public metadata.
 
 ## Optional

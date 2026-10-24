@@ -4,13 +4,17 @@
 [Changelog](../CHANGELOG.md)
 
 Checkpoint: 24 October 2026. The experimental shared-core release is
-[v0.4.1](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.1).
-The [changelog](../CHANGELOG.md#v041-24-october-2026) records its source changes;
+[v0.4.2](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.2).
+The [changelog](../CHANGELOG.md#v042-24-october-2026) records its source changes;
 the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
-## Unreleased admission-renewal overlap fix (24 October 2026)
+## Admission-renewal overlap release (24 October 2026)
+
+v0.4.2 also exposes accepted peer connection identities with
+`peerConnectionDetails()` for distinguishing retained links from replacements.
+No service or pilot deployment is part of this library prerelease.
 
 A media request arriving during a peer's changed-ticket admission check could
 close the live link: the upload checked the old ticket while the new ticket
