@@ -1,6 +1,6 @@
 # RelaySwarm full documentation context
 
-> Generated from maintained Markdown. Source package 0.4.3; release and deployment evidence is recorded in docs/STATUS.md.
+> Generated from maintained Markdown. Source package 0.4.4; release and deployment evidence is recorded in docs/STATUS.md.
 
 Canonical repository: https://github.com/forgesworn/relayswarm. Main-branch documentation can correct released documentation. Historical spike evidence is indexed separately in llms.txt.
 
@@ -16,10 +16,13 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.4.3 is the prepared experimental prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3).
+**Status:** [v0.4.4 is the prepared experimental prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4).
+Cached schema-3 media can combine a bounded peer fraction with origin pieces
+even when a whole-object peer estimate is late. Waiting for unavailable media
+requires a live same-key fetch lease from a contributor.
 Its opt-in sustainable peer waits preserve origin-recovery time within a
 segment's duration; its matching WASM core takes only requested upload ranges
-across the byte-copy boundary. Physical-phone continuity remains unverified.
+across the byte-copy boundary. Longer physical-phone continuity remains open.
 It integrates holder recovery with the Rust/WASM core, accepted connection and
 verified-media observations, bounded cancellation/draining and relay recovery.
 JavaScript/WASM and native core downloads have separate checksums. Native
@@ -43,7 +46,7 @@ and [current source evidence](https://raw.githubusercontent.com/forgesworn/relay
 Install ffmpeg with libx264 for synthetic media, then:
 
 ```sh
-git clone --branch v0.4.3 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.4.4 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -745,6 +748,15 @@ Fresh-origin coordination is bounded by safe buffered playback and measured
 HTTP fallback time. hls.js owns quality selection. These mechanisms do not
 prove optimal internet scheduling or net savings.
 
+For an eligible already-advertised framing-2 object, schema-3 mixed admission
+does not require the whole object to fit a peer-only forecast. After verifying
+the commitment, the bounded piece planner may assign a smaller peer fraction
+and obtain the rest from origin. Closed, busy, banned, stale or non-range
+holders do not gain this exception. An unavailable range path or valid schema
+1/2 still uses the whole-object projection; all existing deadlines and
+verification remain in force. This does not force peer traffic when an
+already-running normal HTTP/cache response wins a cached-peer race.
+
 When a peer-first viewer's current rendition has no linked serving neighbour
 or matching HAVE, bounded local discovery can replace one old idle unsuitable
 link to seek an admitted peer advertising an exact requested key. Signed
@@ -1012,7 +1024,10 @@ not make a segment fit a room shorter than a relayed transfer needs, and a load
 with less room than that still goes to origin.
 
 When an eligible same-rendition contributor is fetching a new segment, the
-loader requests its signed commitment while waiting for availability. It
+loader waits only if a live FETCH lease names that exact key. Bare serving
+presence or rendezvous rank is insufficient, since the contributor may be
+behind this viewer's prefetch frontier. The loader requests its signed
+commitment while waiting for availability. It
 verifies the commitment after availability arrives, before requesting peer
 bytes. Both operations share the loader's deadline. An eligible wait may make
 one commitment request even if availability never arrives. A failed commitment
@@ -1114,6 +1129,28 @@ loopback behaviour, with no field or physical-device acceptance yet.
 Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md)
 
 # RelaySwarm changelog
+
+## v0.4.4 (24 October 2026)
+
+Prepared experimental library prerelease following
+[v0.4.3](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3).
+Sustained physical-device continuity and net network benefit remain open.
+
+- Let eligible already-advertised, framing-2 schema-3 media reach the bounded
+  mixed piece planner even when the whole-object peer estimate is late.
+  The planner can take a small verified peer fraction and load the remainder
+  from origin. Schemas 1/2 retain their whole-object timing check. Integrity,
+  sustainable deadlines, origin reserve and the estimator's 300 ms flow floor
+  remain unchanged; no Rust/WASM rebuild or wire change is required.
+- Require a live same-key FETCH lease from a fresh same-rendition serving
+  contributor before waiting for unavailable media. Bare serving presence
+  and key rank no longer make a prefetch leader wait for an idle follower.
+- Retain real-WASM regressions and the previous-source failing control.
+  Paired with separate website clock/first-frame fixes, a physical Pixel/M4
+  candidate passed a bounded 45.5-second original-4K window: 6,553,600 verified
+  peer bytes, zero reported post-first-frame stalls and zero dropped frames.
+  Earlier longer-window seek/loop interruptions remain recorded; sustained
+  continuity and net network benefit remain open.
 
 ## v0.4.3 (24 October 2026)
 
@@ -1638,7 +1675,7 @@ Source: [docs/GETTING-STARTED.md](https://raw.githubusercontent.com/forgesworn/r
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [API](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) · [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md)
 
 These installation instructions target the prepared experimental
-[v0.4.3 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3).
+[v0.4.4 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4).
 Confirm that tag and its checksum-listed assets have been published before
 using these pinned commands; a prepared version is not a verified download.
 Node 22.13+ is required; CI runs Node 24. `npm install relayswarm` is not the
@@ -1647,7 +1684,7 @@ documented distribution path: the npm registry is unpublished.
 ## Install for a host application
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.3/relayswarm-0.4.3.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/relayswarm-0.4.4.tgz
 npm install hls.js
 ```
 
@@ -1666,17 +1703,17 @@ this hls.js loader.
 A Git dependency can also be pinned to the versioned release tag:
 
 ```sh
-npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.4.3'
+npm install 'git+https://github.com/forgesworn/relayswarm.git#v0.4.4'
 ```
 
 ## Use the standalone browser bundle
 
 Download
-[`relayswarm-hls-swarm-0.4.3.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.3/relayswarm-hls-swarm-0.4.3.mjs)
+[`relayswarm-hls-swarm-0.4.4.mjs`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/relayswarm-hls-swarm-0.4.4.mjs)
 and serve it from your own application:
 
 ```js
-import { createHlsSwarm } from './relayswarm-hls-swarm-0.4.3.mjs';
+import { createHlsSwarm } from './relayswarm-hls-swarm-0.4.4.mjs';
 ```
 
 The bundle contains the loader's runtime dependencies; hls.js remains the
@@ -1684,7 +1721,7 @@ host's dependency. Prefer vendoring the verified file to relying on GitHub
 release-download URLs as a JavaScript CDN. The separate publisher helper uses
 Node filesystem/crypto APIs and does not belong in a browser bundle.
 
-The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.3/SHA256SUMS)
+The release's [`SHA256SUMS`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/SHA256SUMS)
 covers the tarball, browser bundle, WASM module and JavaScript build metadata.
 Download those four files and the manifest into one directory and verify:
 
@@ -1694,7 +1731,7 @@ shasum -a 256 -c SHA256SUMS
 
 ## Use the optional shared core
 
-Download [`relayswarm-core-0.4.3.wasm`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.3/relayswarm-core-0.4.3.wasm)
+Download [`relayswarm-core-0.4.4.wasm`](https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/relayswarm-core-0.4.4.wasm)
 and serve it beside the browser bundle with `Content-Type: application/wasm`.
 Pass its URL through `coreWasm`; enable experimental `multiHolder` and
 `peerSupplyHint` only when the host intends to use them. A Content Security
@@ -1705,7 +1742,7 @@ The tarball also contains the committed module under `src/browser/`.
 
 ## Use the native core assets
 
-The [v0.4.3 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3)
+The [v0.4.4 release](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4)
 includes `relayswarm-core.xcframework.zip`, its `.checksum`,
 `relayswarm-core-swift-bindings.zip` and `relayswarm-core.aar`. Download the
 platform's `SHA256SUMS-apple` or `SHA256SUMS-android` and every file listed in
@@ -1722,7 +1759,7 @@ WebRTC adapter or client application. RelaySwarmKit v0.6.0 separately consumes t
 ## Run the source demo
 
 ```sh
-git clone --branch v0.4.3 --depth 1 https://github.com/forgesworn/relayswarm.git
+git clone --branch v0.4.4 --depth 1 https://github.com/forgesworn/relayswarm.git
 cd relayswarm
 npm ci
 npm run demo
@@ -1773,7 +1810,7 @@ Current evidence and remaining device/network gates are in [STATUS.md](https://r
 
 ## Development source
 
-The published commands above install v0.4.3. Later development lands on
+The published commands above install v0.4.4. Later development lands on
 `main`, a mutable reference; its
 [production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md) and
 [delivery requirements](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) have separate evidence.
@@ -1786,7 +1823,7 @@ npm ci
 npm run demo
 ```
 
-Both v0.4.3 and current development source include the installed native
+Both v0.4.4 and current development source include the installed native
 executable, verified HTTP fallback and wider-media tests:
 
 ```sh
@@ -1893,6 +1930,14 @@ whole-origin recovery time with a 25% and 100 ms margin. The ordinary
 buffer reserve remains in force. Unknown duration or no spare duration starts
 HTTP immediately; an enabled cached-peer race retains its independent
 window. This is an admission bound, not a smooth-playback guarantee.
+
+For eligible already-HAVE framing-2 holders, a verified schema-3 commitment
+can enter mixed piece planning without passing a whole-object peer forecast.
+The planner may use only a bounded peer fraction alongside origin pieces;
+valid schemas 1/2 retain their whole-object projection. Waiting for unavailable
+media requires a live same-key FETCH lease from a fresh serving contributor.
+These changes preserve the estimator floor, integrity checks and existing
+deadline/reserve bounds; the committed core module is unchanged.
 
 `trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
 `traceRequests` (none by default): each peer-first load, eligibility
@@ -2414,11 +2459,58 @@ Source: [docs/STATUS.md](https://raw.githubusercontent.com/forgesworn/relayswarm
 [Changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md)
 
 Checkpoint: 24 October 2026. The prepared experimental shared-core prerelease is
-[v0.4.3](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.3).
-The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md#v043-24-october-2026) records its source changes;
+[v0.4.4](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4).
+The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md#v044-24-october-2026) records its source changes;
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Cached mixed admission and fetch-backed waits (24 October 2026)
+
+A fresh slow partial-flow estimate could reject an entire large object before
+the schema-3 mixed planner ran, although a contributor held the requested
+media and could supply a smaller useful fraction. Eligible already-HAVE
+framing-2 holders now reach that planner after commitment verification. The
+planner, sustainable deadline and origin reserve still bound peer work;
+valid schemas 1/2 retain their whole-object projection. The 300 ms estimator
+floor, integrity verifier, wire and committed WASM bytes are unchanged.
+
+An unavailable object is waited for only while a fresh same-rendition serving
+contributor advertises a live FETCH lease for that exact key. A contributor
+behind a prefetch leader no longer causes a wait merely by serving or ranking
+ahead. A lying or expired lease cannot move the loader's deadline.
+
+Ten focused real-WASM checks cover repeated mixed delivery after an actual
+slow partial flow, both valid legacy schemas, missing/wrong/expired leases,
+valid availability and a bounded lying lease. The same corrected fixture on
+the previous `6f63fb2` source fails the mixed-admission and missing-lease
+controls. Test channels model native reliable/ordered SCTP and allow losing
+EOF frames to drain before the next eligible demand.
+The complete WASM loader sweep passed 301 tests with one expected
+JavaScript-prototype-only skip (302 total). Syntax and authored/generated
+documentation checks passed. The first parallel JavaScript loader sweep had
+four timed holder-accounting failures; the same four passed on both previous
+and candidate source in quiet isolation without changing their assertions.
+
+Physical candidate checks used original 2160p HLS on Pixel/Vanadium and an
+M4 browser, actual Nostr signalling and the owner's existing Archy Spry TLS
+service with private expiring credentials. Selected DTLS fingerprints and
+native data-channel byte counts establish the paired transport. With separate
+website clock/first-frame fixes, the final staged 45.5-second window passed:
+both decoded 3842×2160, Pixel accepted 6,553,600 verified peer bytes, M4 recorded
+7,602,176 uploaded media bytes, and both reported zero post-first-frame stalls
+and zero dropped frames. This is bounded physical application evidence.
+An earlier 100-second run accepted 24,739,840 peer bytes but retained clock-seek
+and recording-loop interruptions; those failures remain recorded.
+Some ordinary HTTP responses were served from browser cache, so accepted
+origin media bytes are not wire traffic or net network savings. Cold-follower
+and default-buffer observations remain distinct from cached and tiered trials.
+Phone privacy settings and the existing service were preserved; profiles
+stayed private. Sustained continuity and net network benefit remain open.
+A later cold-consumer window verified each HTTP response's network/cache
+classification but delivered only about 245 KiB of peer media: its usable
+native link arrived about 67 seconds into the 100-second observation. That
+qualification remains failed and reliable cold discovery remains open.
 
 ## Sustainable peer waits and range-sized WASM uploads (24 October 2026)
 

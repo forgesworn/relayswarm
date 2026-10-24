@@ -479,6 +479,15 @@ Fresh-origin coordination is bounded by safe buffered playback and measured
 HTTP fallback time. hls.js owns quality selection. These mechanisms do not
 prove optimal internet scheduling or net savings.
 
+For an eligible already-advertised framing-2 object, schema-3 mixed admission
+does not require the whole object to fit a peer-only forecast. After verifying
+the commitment, the bounded piece planner may assign a smaller peer fraction
+and obtain the rest from origin. Closed, busy, banned, stale or non-range
+holders do not gain this exception. An unavailable range path or valid schema
+1/2 still uses the whole-object projection; all existing deadlines and
+verification remain in force. This does not force peer traffic when an
+already-running normal HTTP/cache response wins a cached-peer race.
+
 When a peer-first viewer's current rendition has no linked serving neighbour
 or matching HAVE, bounded local discovery can replace one old idle unsuitable
 link to seek an admitted peer advertising an exact requested key. Signed
@@ -746,7 +755,10 @@ not make a segment fit a room shorter than a relayed transfer needs, and a load
 with less room than that still goes to origin.
 
 When an eligible same-rendition contributor is fetching a new segment, the
-loader requests its signed commitment while waiting for availability. It
+loader waits only if a live FETCH lease names that exact key. Bare serving
+presence or rendezvous rank is insufficient, since the contributor may be
+behind this viewer's prefetch frontier. The loader requests its signed
+commitment while waiting for availability. It
 verifies the commitment after availability arrives, before requesting peer
 bytes. Both operations share the loader's deadline. An eligible wait may make
 one commitment request even if availability never arrives. A failed commitment
