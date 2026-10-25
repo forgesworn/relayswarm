@@ -48,6 +48,7 @@ bounded peer-first mode using author-signed segment commitments.
 | `npm run test:playback` | Two-rendition Chrome playback and field-test demo regression |
 | `npm run demo` | Local publisher/player, synthetic live media unless `--media-dir` supplied |
 | `npm run audit` | `npm audit --audit-level=high` |
+| `npm run bench:hot-paths` | In-memory link, verification, multi-holder and native-receive timings |
 | `npm run test:proto` | Check committed shared vectors against the JavaScript verifier |
 | `npm run proto:vectors` | Regenerate `core/vectors/commitments.json` (new signatures each run) |
 | `npm run proto:traces` | Write seeded selection/discovery sequences for the Rust tests (`core/target/`) |

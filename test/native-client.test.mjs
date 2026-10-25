@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { once, EventEmitter } from "node:events";
@@ -189,6 +190,51 @@ test("native installed client discovers cached presence, transfers in a separate
     await assert.rejects(promisify(execFile)(process.execPath, args, { timeout: 15000 }));
     assert.deepEqual(await readFile(output), context.bytes);
   } finally { await seeder?.close(); await context.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("a relay that accepts but never answers does not spend the native peer deadline", { timeout: 20000 }, async () => {
+  const bytes = Buffer.from(Array.from({ length: 70001 }, (_, i) => (i * 7) % 251));
+  const context = await fixture((_request, response) => response.end("unexpected fallback"), { bytes });
+  // Accepts TCP, never completes the WebSocket upgrade.
+  const held = new Set(), stalled = createNetServer((socket) => { held.add(socket); socket.on("close", () => held.delete(socket)); });
+  await new Promise((resolve) => stalled.listen(0, "127.0.0.1", resolve));
+  let seeder;
+  try {
+    seeder = await createNativeObjectSeeder({ bytes, swarmId: context.descriptor.swarmId,
+      relayUrls: [context.relay.url], bootstrap: context.dht.bootstrap, allowLoopback: true });
+    const descriptor = { ...seeder.descriptor, relayUrls: [`ws://127.0.0.1:${stalled.address().port}`, context.relay.url] };
+    const started = performance.now();
+    const result = await fetchNativeObject(descriptor, { ...context.options, peerTimeoutMs: 4000, timeoutMs: 8000 });
+    assert.equal(result.receipt.source, "hyperdht-v1");
+    assert.deepEqual(result.bytes, bytes);
+    assert.ok(performance.now() - started < 3000, "the healthy relay alone carries discovery");
+    assert.equal(context.requests(), 0);
+  } finally {
+    await seeder?.close();
+    for (const socket of held) socket.destroy();
+    await new Promise((resolve) => stalled.close(resolve));
+    await context.close();
+  }
+});
+
+test("an immediate DHT failure falls back without waiting for a relay that never answers", { timeout: 20000 }, async (t) => {
+  const context = await fixture((_request, response) => response.end("independently trusted native object"));
+  const held = new Set(), stalled = createNetServer((socket) => { held.add(socket); socket.on("close", () => held.delete(socket)); });
+  await new Promise((resolve) => stalled.listen(0, "127.0.0.1", resolve));
+  // As when the host refuses to bind UDP: bootstrap rejects at once.
+  t.mock.method(NativeDhtTransport.prototype, "ready", async () => { throw new Error("bind EACCES"); });
+  try {
+    const descriptor = { ...context.descriptor, relayUrls: [`ws://127.0.0.1:${stalled.address().port}`] };
+    const started = performance.now();
+    const result = await fetchNativeObject(descriptor, { ...context.options, peerTimeoutMs: 4000, timeoutMs: 8000 });
+    assert.equal(result.receipt.fallback, true);
+    assert.deepEqual(result.bytes, context.bytes);
+    assert.ok(performance.now() - started < 2000, "the DHT failure ends the peer attempt before the relay deadline");
+  } finally {
+    for (const socket of held) socket.destroy();
+    await new Promise((resolve) => stalled.close(resolve));
+    await context.close();
+  }
 });
 
 test("native peer absence falls back automatically to size and digest verified HTTP", { timeout: 10000 }, async () => {

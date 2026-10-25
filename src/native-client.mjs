@@ -58,12 +58,20 @@ function waitFor(session, method, predicate, signal) {
 }
 
 async function peerObject(descriptor, { bootstrap, signal, peerTimeoutMs, WebSocketImpl, maxObjectBytes }) {
-  const pool = new RelayPool(descriptor.relayUrls, { WebSocketImpl, connectTimeoutMs: peerTimeoutMs });
+  // One stalled relay must not spend the whole peer deadline before discovery.
+  const pool = new RelayPool(descriptor.relayUrls, { WebSocketImpl, connectTimeoutMs: peerTimeoutMs, readyOnFirstRelay: true });
   const session = new RelaySwarmSession({ pool, swarmId: descriptor.swarmId });
   const transport = new NativeDhtTransport({ bootstrap, connectionTimeoutMs: peerTimeoutMs });
   let socket;
   try {
-    await cancellable(Promise.all([pool.connect(), transport.ready()]), signal);
+    // Discovery needs only the transport's public key, so the DHT bootstrap
+    // overlaps the presence round trip; the dial still waits for both.
+    const transportReady = transport.ready();
+    transportReady.catch(() => {});
+    // A DHT failure still ends the relay wait at once, as the joint wait did.
+    const transportFailed = new Promise((_, reject) => { transportReady.catch(reject); });
+    transportFailed.catch(() => {});
+    await cancellable(Promise.race([pool.connect(), transportFailed]), signal);
     const presence = waitFor(session, "onPresence", ({ from, payload }) => descriptor.trustedSeeders.includes(from)
       && payload.role === "seeder" && payload.have.includes(descriptor.sha256)
       && payload.transports.some(({ type }) => type === NATIVE_TRANSPORT), signal);
@@ -75,7 +83,8 @@ async function peerObject(descriptor, { bootstrap, signal, peerTimeoutMs, WebSoc
     // after subscribing, without advertising an inbound service or held objects.
     session.announcePresence({ role: "leecher", transports: [{ type: NATIVE_TRANSPORT, publicKey: transport.publicKey }],
       have: [], open: false });
-    const seeder = await presence;
+    // Either failing ends the attempt at once.
+    const [seeder] = await Promise.all([presence, cancellable(transportReady, signal)]);
     const key = seeder.payload.transports.find(({ type }) => type === NATIVE_TRANSPORT).publicKey;
     const requestId = randomBytes(16).toString("hex");
     const ready = waitFor(session, "onSignal", ({ from, payload }) => from === seeder.from

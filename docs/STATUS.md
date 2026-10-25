@@ -31,7 +31,7 @@ unsuccessful request invalidates that useful-delivery allowance. The
 optional WASM capability is additive, with safe origin/known-holder fallback
 for older modules and unchanged existing native start signatures.
 
-The release profile now favours throughput over minimum module size. These
+SHA-256 uses the throughput-oriented optimisation override; the remaining core retains its size-oriented release profile. These
 source changes are unreleased. Focused tests cover actual verified small
 fractions, origin-winning cancellation, corrupt and late probes, old-module
 compatibility, per-lane silence and replay of the bounded-probe inputs.

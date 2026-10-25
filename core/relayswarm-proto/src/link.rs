@@ -1043,6 +1043,12 @@ impl Link {
         if pending.draining {
             return;
         }
+        // A size the caller expected (from a signed commitment, and equal to
+        // `meta`) is reserved once, on the first byte. A size only the remote
+        // declared grows as bytes arrive, so `meta` alone holds no memory.
+        if pending.parts.capacity() == 0 && pending.expected.is_some() {
+            pending.parts.reserve_exact(size as usize);
+        }
         pending.parts.extend_from_slice(chunk);
         let received = pending.received;
         self.events.push(LinkEvent::Progress { received, size });

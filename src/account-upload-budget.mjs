@@ -33,12 +33,19 @@ export function createAccountUploadBudget({ statePath, defaultLimit = 100000000,
     for (const g of state.grants) expiries.set(g.token, { grant: mono + Math.min(grantTtlSeconds * 1000, Math.max(0, g.expiresAt - at)), delegation: mono + Math.min(delegationTtlSeconds * 1000, Math.max(0, g.delegationExpiresAt - at)) });
   })();
   readyPromise.catch(() => { broken = true; lease?.close(); });
-  function canonical(data, id) {
+  // For callers that do not change accounts while looking up. The first
+  // matching entry wins, as with find().
+  function accountLookup(data) {
+    const index = new Map();
+    for (const entry of data.accounts) if (!index.has(entry.id)) index.set(entry.id, entry);
+    return (id) => index.get(id);
+  }
+  function canonical(data, id, lookup = (value) => data.accounts.find((entry) => entry.id === value)) {
     const visited = new Set();
     for (;;) {
       if (visited.has(id)) refuse("account-state-invalid", 503);
       visited.add(id);
-      const value = data.accounts.find((entry) => entry.id === id);
+      const value = lookup(id);
       if (!value) refuse("account-state-invalid", 503);
       if (!value.aliasTo) return value;
       id = value.aliasTo;
@@ -49,20 +56,22 @@ export function createAccountUploadBudget({ statePath, defaultLimit = 100000000,
       || !Array.isArray(data.accounts) || data.accounts.length > accountCapacity || !Array.isArray(data.identities) || data.identities.length > identityCapacity
       || !Array.isArray(data.grants) || data.grants.length > grantCapacity || !Array.isArray(data.operations) || data.operations.length > operationCapacity) refuse("account-state-invalid", 503);
     for (const [rows, field] of [[data.accounts, "id"], [data.identities, "id"], [data.grants, "token"]]) if (new Set(rows.map((r) => r[field])).size !== rows.length) refuse("account-state-invalid", 503);
+    // Built once so validation stays linear in the bounded state.
+    const lookup = accountLookup(data), grantTokens = new Set(data.grants.map((g) => g.token));
     for (const a of data.accounts) {
       if (!hex(a.id, 32) || (a.aliasTo ? !hex(a.aliasTo, 32) || Object.keys(a).length !== 2
         : !amount(a.limit) || !Number.isSafeInteger(a.spent) || a.spent < 0 || !Number.isSafeInteger(a.revision) || a.revision < 1 || !Number.isSafeInteger(a.generation) || a.generation < 1)) refuse("account-state-invalid", 503);
-      canonical(data, a.id);
+      canonical(data, a.id, lookup);
     }
-    for (const i of data.identities) if (!hex(i.id, 64) || !["nostr", "website"].includes(i.method) || !data.accounts.some((a) => a.id === i.accountId)) refuse("account-state-invalid", 503);
+    for (const i of data.identities) if (!hex(i.id, 64) || !["nostr", "website"].includes(i.method) || !lookup(i.accountId)) refuse("account-state-invalid", 503);
     for (const g of data.grants) if (!hex(g.token, 64) || !hex(g.pagePubkey, 64) || !methodsValid(g.methods)
-      || !data.accounts.some((a) => a.id === g.accountId) || !Number.isSafeInteger(g.epoch) || !Number.isSafeInteger(g.expiresAt) || !Number.isSafeInteger(g.delegationExpiresAt)
+      || !lookup(g.accountId) || !Number.isSafeInteger(g.epoch) || !Number.isSafeInteger(g.expiresAt) || !Number.isSafeInteger(g.delegationExpiresAt)
       || g.expiresAt > g.delegationExpiresAt || typeof g.revoked !== "boolean" || (g.websiteIdentity !== null && !hex(g.websiteIdentity, 64))
       || (g.renewal !== null && (!hex(g.renewal.operationId, 32) || !hex(g.renewal.token, 64)))) refuse("account-state-invalid", 503);
     const operations = new Set();
     for (const o of data.operations) {
       const id = `${o.grant}:${o.operationId}`;
-      if (operations.has(id) || !data.grants.some((g) => g.token === o.grant) || !hex(o.operationId, 32) || !amount(o.bytes) || o.bytes < 1 || typeof o.accepted !== "boolean") refuse("account-state-invalid", 503);
+      if (operations.has(id) || !grantTokens.has(o.grant) || !hex(o.operationId, 32) || !amount(o.bytes) || o.bytes < 1 || typeof o.accepted !== "boolean") refuse("account-state-invalid", 503);
       operations.add(id);
     }
   }
@@ -79,8 +88,9 @@ export function createAccountUploadBudget({ statePath, defaultLimit = 100000000,
     for (const token of expiries.keys()) if (!live.has(token)) expiries.delete(token);
   }
   function snapshot(data, account) {
+    const lookup = accountLookup(data);
     return { v: 1, limit: account.limit, spent: account.spent, remaining: Math.max(0, account.limit - account.spent), revision: account.revision, generation: account.generation,
-      linkedMethods: [...new Set(data.identities.filter((i) => canonical(data, i.accountId).id === account.id).map((i) => i.method))].sort() };
+      linkedMethods: [...new Set(data.identities.filter((i) => canonical(data, i.accountId, lookup).id === account.id).map((i) => i.method))].sort() };
   }
   function grant(data, token) {
     const value = data.grants.find((g) => g.token === token);

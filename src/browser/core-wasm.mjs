@@ -49,7 +49,9 @@ const SELECTION_EXPORTS = ["rs_sel_observe", "rs_sel_record", "rs_sel_mark", "rs
   "rs_sel_project", "rs_sel_minimum", "rs_sel_estimate", "rs_sel_summary", "rs_link_new", "rs_link_free", "rs_link_call", "rs_disc_call"];
 const LINK_SETS = 13;
 const LINK_SERVE_RANGE = 15;
-const LINK_HEADER_BYTES = 13 * 8;
+const LINK_HEADER = 13;
+const LINK_HEADER_BYTES = LINK_HEADER * 8;
+const LINK_RESOLVED = 5;
 const orNull = (value) => Number.isNaN(value) ? null : value;
 // Read memory only after the call: a call can grow it, detaching the old buffer.
 const numbers = (core, pointer) => new Float64Array(core.memory.buffer, pointer, 6);
@@ -67,6 +69,26 @@ function withBytes(exports, bytes, run) {
 }
 
 const resultBytes = (exports, length) => new Uint8Array(exports.memory.buffer, exports.rs_result_ptr(), length);
+
+// Read a link frame out of the module before any callback can call in again:
+// the header scalars, then each event as `{ tag, payload }` with its own copy.
+// A resolved object is copied once, straight into a buffer of its exact size,
+// with its request ID as `id`; `payload` is null when nothing was resolved.
+function readLinkFrame(exports, length) {
+  const bytes = resultBytes(exports, length);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, length);
+  const header = new Array(LINK_HEADER);
+  for (let index = 0; index < LINK_HEADER; index++) header[index] = view.getFloat64(index * 8, true);
+  const events = [];
+  for (let offset = LINK_HEADER_BYTES; offset < length;) {
+    const tag = bytes[offset], start = offset + 5, end = start + view.getUint32(offset + 1, true);
+    offset = end;
+    if (tag !== LINK_RESOLVED) { events.push({ tag, payload: bytes.slice(start, end) }); continue; }
+    if (end - start < 9 || end > length) throw new Error("Core link frame has a truncated resolution.");
+    events.push({ tag, id: view.getFloat64(start, true), payload: bytes[start + 8] === 1 ? bytes.slice(start + 9, end) : null });
+  }
+  return { header, events };
+}
 
 /**
  * PeerSelection backed by the core. Arguments cross as WebAssembly doubles,
@@ -227,17 +249,23 @@ export async function loadCore(source, { onFailure } = {}) {
         const size = withBytes(exports, bytes, (pointer, length) => op === LINK_SERVE_RANGE && host.rangeUploads
           ? exports.rs_link_serve_range(handle, now, channel, a, b, pointer, length)
           : exports.rs_link_call(handle, op, now, channel, a, b, pointer, length));
-        if (size < 0 || (op !== LINK_SETS && size < LINK_HEADER_BYTES)) throw new Error(`Core link ${handle} refused operation ${op}.`);
-        return resultBytes(exports, size).slice();
+        if (size < 0 || size < LINK_HEADER_BYTES) throw new Error(`Core link ${handle} refused operation ${op}.`);
+        return readLinkFrame(exports, size);
       } catch (error) {
         fail(error);
         return null;
       }
     },
     sets(handle) {
-      const bytes = host.call(handle, LINK_SETS, 0, 0, 0, 0, new Uint8Array(0));
-      if (!bytes) return null;
-      try { return JSON.parse(decoder.decode(bytes)); } catch (error) { fail(error); return null; }
+      if (retired) return null;
+      try {
+        const size = withBytes(exports, EMPTY_BYTES, (pointer, length) => exports.rs_link_call(handle, LINK_SETS, 0, 0, 0, 0, pointer, length));
+        if (size < 0) throw new Error(`Core link ${handle} refused operation ${LINK_SETS}.`);
+        return JSON.parse(decoder.decode(resultBytes(exports, size)));
+      } catch (error) {
+        fail(error);
+        return null;
+      }
     },
   };
 
@@ -343,11 +371,14 @@ class CoreTransfer {
       const length = withBytes(exports, bytes,
         (pointer, size) => exports.rs_xfer_call(this.#handle, op, Math.floor(now), source === "origin" ? -1 : source, a, b, pointer, size));
       if (length < 4) throw new Error(`Core transfer refused operation ${op}.`);
-      const out = resultBytes(exports, length).slice();
-      const jsonLength = new DataView(out.buffer).getUint32(0, true);
+      // Read straight from module memory: the JSON is decoded and a delivered
+      // object copied once into its own buffer before anything can call in.
+      const out = resultBytes(exports, length);
+      const jsonLength = new DataView(out.buffer, out.byteOffset, length).getUint32(0, true);
       const state = JSON.parse(decoder.decode(out.subarray(4, 4 + jsonLength)));
+      const object = length > 4 + jsonLength ? out.slice(4 + jsonLength) : null;
       const commands = state.c.map((command) => command.p ? { ...command, range: { start: command.p[0], end: command.p[1] } } : command);
-      return { commands, next: state.next, late: state.late, finished: state.finished, verified: state.verified ?? null, bytes: out.length > 4 + jsonLength ? out.subarray(4 + jsonLength) : null };
+      return { commands, next: state.next, late: state.late, finished: state.finished, verified: state.verified ?? null, bytes: object };
     } catch (error) {
       this.#fail(error);
       return null;

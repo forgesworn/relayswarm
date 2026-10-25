@@ -1033,27 +1033,26 @@ class HlsSwarm {
             onAbort: (...args) => { traceOrigin("abort"); finishOrigin(); callbacks.onAbort?.(...args); },
             onSuccess: (response, stats, ctx, details) => {
               const receivedMs = firstByteWallMs(stats);
-              let copy = null;
-              try { if (response.data?.byteLength) copy = response.data.slice(0); } catch {}
-              traceOrigin("payload", copy?.byteLength ?? null);
+              const { copy, size } = swarm.#originCopy(response);
+              traceOrigin("payload", size || null);
               completed = true;
               pushSample(swarm.originLatencySamples, now() - originStarted);
               swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - originStarted);
-              if (swarm.options.peerSupplyHint && copy) {
+              if (swarm.options.peerSupplyHint && size) {
                 const rendition = swarm.#renditionContext(context);
                 if (!swarm.hintSizes.has(rendition) && swarm.hintSizes.size >= 16) swarm.hintSizes.delete(swarm.hintSizes.keys().next().value);
-                swarm.hintSizes.set(rendition, copy.byteLength);
+                swarm.hintSizes.set(rendition, size);
                 const elapsedMs = now() - originStarted;
-                if (elapsedMs > 0) pushSample(swarm.hintOriginRates, copy.byteLength / elapsedMs);
+                if (elapsedMs > 0) pushSample(swarm.hintOriginRates, size / elapsedMs);
               }
               callbacks.onSuccess(response, stats, ctx, details);
               swarm.#noteOriginClock(details, receivedMs);
-              if (copy && !swarm.stopped) swarm.#guard("peer-first-origin", async () => {
+              if (size && !swarm.stopped) swarm.#guard("peer-first-origin", async () => {
                 swarm.counters.originLoaded += 1;
-                swarm.counters.bytesFromOrigin += copy.byteLength;
+                swarm.counters.bytesFromOrigin += size;
                 try {
                   const key = await swarm.#segmentKey(context);
-                  if (!swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
+                  if (copy && !swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
                 } finally { finishOrigin(); }
               });
               else finishOrigin();
@@ -1150,16 +1149,15 @@ class HlsSwarm {
           onSuccess: (response, stats, ctx, details) => {
             if (!finishOrigin()) return;
             const receivedMs = firstByteWallMs(stats);
-            let copy = null;
-            try { if (response.data?.byteLength) copy = response.data.slice(0); } catch {}
+            const { copy, size } = swarm.#originCopy(response);
             pushSample(swarm.originLatencySamples, now() - t0);
             swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - t0);
             callbacks.onSuccess(response, stats, ctx, details);
             swarm.#noteOriginClock(details, receivedMs);
-            if (copy && !swarm.stopped) swarm.#guard("cached-race-origin", async () => {
-              swarm.counters.originLoaded += 1; swarm.counters.bytesFromOrigin += copy.byteLength;
+            if (size && !swarm.stopped) swarm.#guard("cached-race-origin", async () => {
+              swarm.counters.originLoaded += 1; swarm.counters.bytesFromOrigin += size;
               const key = await swarm.#segmentKey(context);
-              if (!swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
+              if (copy && !swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
             });
           },
         }); } catch (error) { finishOrigin(); throw error; }
@@ -1200,6 +1198,16 @@ class HlsSwarm {
     };
   }
 
+  // An origin response's size, and a copy of its bytes only when #hold may
+  // keep them. Copied before the player sees the buffer, which it may transfer.
+  #originCopy(response) {
+    try {
+      const data = response.data, size = data?.byteLength;
+      if (!size) return { copy: null, size: 0 };
+      return { copy: this.#mayServe() ? data.slice(0) : null, size };
+    } catch { return { copy: null, size: 0 }; }
+  }
+
   #completePeerLoad(loader, result, context, callbacks, t0) {
     const end = now(), size = result.bytes.byteLength;
     loader.peerStats = loader.inner.stats;
@@ -1227,7 +1235,8 @@ class HlsSwarm {
       pushSample(this.peerLatencySamples, end - t0);
       if (context.frag) this.peerFragments.add(context.frag);
     }
-    this.#hold(result.key, result.bytes.slice());
+    // #hold keeps nothing while serving is off or the key is already held.
+    if (this.#servingAllowed() && !this.held.has(result.key)) this.#hold(result.key, result.bytes.slice());
     if (typeof this.options.onPeerDelivery === "function") {
       const contributions = result.multi ? result.contributions : [{ connection: result.connection, bytes: size }];
       for (const { connection, bytes } of contributions) {
@@ -1495,7 +1504,7 @@ class HlsSwarm {
         this.peerEligibilityDropped = increment(this.peerEligibilityDropped);
       }
       this.peerEligibilityRecords.push(record);
-      this.#trace({ k: "eligibility", load: this.#traceLoad(context), at: this.#traceAt(), ...structuredClone(record) });
+      if (this.options.traceRequests) this.#trace({ k: "eligibility", load: this.#traceLoad(context), at: this.#traceAt(), ...structuredClone(record) });
     } catch {}
   }
 
@@ -2054,8 +2063,10 @@ class HlsSwarm {
           this.multiHolder.delivered += 1;
           this.multiHolderTimings.push([now() - begunAt, slowestMs, requestCount]);
           if (this.multiHolderTimings.length > 128) this.multiHolderTimings.shift();
+          // The core hands over a buffer of exactly the object; copy only a view.
+          const bytes = state.bytes.byteOffset === 0 && state.bytes.byteLength === state.bytes.buffer.byteLength ? state.bytes : state.bytes.slice();
           finish(commitment.expiresAt <= Math.floor(Date.now() / 1000) ? null : {
-            key, bytes: state.bytes.slice(), discoveryContext, multi: true, peerBytes: Math.max(0, commitment.size - originShare),
+            key, bytes, discoveryContext, multi: true, peerBytes: Math.max(0, commitment.size - originShare),
             contributions: [...contributions].map(([connection, bytes]) => ({ connection, bytes })),
             shortRefreshes: [...shortRefreshes].map(([connection, at]) => ({ connection, at })),
           });
@@ -2087,9 +2098,10 @@ class HlsSwarm {
         ? null : this.peerSelection.firstByteMs();
       const probePeers = [...ids].filter(([, link]) => models.get(link).rate === null).map(([id]) => id);
       const estimates = { peers, origin, sharedFirstByteMs, sharedRate: this.peerSelection.rate(), probePeers };
-      const started = xfer("start", { size: commitment.size, pieces: commitment.pieces.length, pieceSize, deadline: deadline - base,
+      // The input is for the trace only.
+      const started = xfer("start", this.options.traceRequests ? { size: commitment.size, pieces: commitment.pieces.length, pieceSize, deadline: deadline - base,
         maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...structuredClone(estimates),
-        holders: [...ids].map(([id, link]) => [id, this.#holderLabel(link.pubkey)]) }, (at) => transfer.start(at, estimates));
+        holders: [...ids].map(([id, link]) => [id, this.#holderLabel(link.pubkey)]) } : null, (at) => transfer.start(at, estimates));
       if (started?.late) this.multiHolder.late += 1;
       apply(started);
     });
@@ -2202,27 +2214,36 @@ class HlsSwarm {
         this.race = race;
         if (!race) return this.inner.load(context, config, callbacks);
         const progress = [];
+        let progressBytes = 0;
+        // Bytes are kept only for a sampled comparison or for serving. Chunks
+        // are kept or not for the whole load, so a join is never partial.
+        const keepChunks = race.sampled || swarm.#mayServe();
         const tapped = {
           ...callbacks,
           onProgress: callbacks.onProgress
             ? (stats, ctx, data, details) => {
-                try { if (data?.byteLength) progress.push(data.slice(0)); } catch {}
+                try { if (data?.byteLength) { if (keepChunks) progress.push(data.slice(0)); progressBytes += data.byteLength; } } catch {}
                 callbacks.onProgress(stats, ctx, data, details);
               }
             : undefined,
           onSuccess: (response, stats, ctx, details) => {
             const receivedMs = firstByteWallMs(stats);
             // Copy before hls.js sees the buffer: it may transfer it to a worker.
-            let copy = null;
+            let copy = null, size = 0;
             try {
               const data = response?.data;
-              if (data?.byteLength) copy = data.slice(0);
-              else if (progress.length) copy = RelaySwarmShadowLoader.join(progress);
-            } catch {}
+              if (data?.byteLength) {
+                if (keepChunks) copy = data.slice(0);
+                size = data.byteLength;
+              } else if (progressBytes) {
+                if (keepChunks) copy = RelaySwarmShadowLoader.join(progress);
+                size = progressBytes;
+              }
+            } catch { copy = null; size = 0; }
             race.originSucceeded = true;
             callbacks.onSuccess(response, stats, ctx, details);
             swarm.#noteOriginClock(details, receivedMs);
-            if (copy) swarm.#guard("origin-loaded", () => swarm.#originLoaded(race, copy));
+            if (size) swarm.#guard("origin-loaded", () => swarm.#originLoaded(race, copy, size));
             else swarm.#guard("origin-empty", () => swarm.#originFailed(race));
           },
           onError: (...args) => {
@@ -2357,19 +2378,21 @@ class HlsSwarm {
     });
   }
 
-  async #originLoaded(race, buffer) {
+  // `buffer` is null when neither a sampled comparison nor serving needs it.
+  async #originLoaded(race, buffer, size) {
     if (this.stopped || race.originFailed) return;
-    const bytes = new Uint8Array(buffer);
+    const bytes = buffer && new Uint8Array(buffer);
     const t1 = now();
     this.counters.originLoaded += 1;
-    this.counters.bytesFromOrigin += bytes.byteLength;
-    race.originBytes = bytes.byteLength;
+    this.counters.bytesFromOrigin += size;
+    race.originBytes = size;
     pushSample(this.originLatencySamples, t1 - race.t0);
-    race.originDigest = await sha256Hex(bytes);
+    // Only a sampled race compares digests.
+    if (race.sampled) race.originDigest = await sha256Hex(bytes);
     race.originDone = true;
     await race.keyPromise;
     if (this.stopped) return;
-    this.#hold(race.key, bytes);
+    if (bytes) this.#hold(race.key, bytes);
     this.#guard("settle", () => this.#settle(race));
   }
 
@@ -2435,6 +2458,12 @@ class HlsSwarm {
     }
     if (!this.#servingAllowed()) return;
     for (const link of this.links.values()) link.sendHaveChange([key], evicted);
+  }
+
+  // Whether serving could be allowed by the time #hold runs. Allowance and
+  // network type can change during a load; consent, validity and stop cannot.
+  #mayServe() {
+    return !this.stopped && !this.disabledReason && this.options.serve === true;
   }
 
   #servingAllowed() {

@@ -7,7 +7,7 @@ export const SEAMS = Object.freeze({
   ],
   swarm: [
     ['    const key = await this.#segmentKey(context);\n    if (signal.aborted || this.stopped) {', '    availabilityObservation.key(context, key, deadline, budgetMs);\n'],
-    ['                  const key = await swarm.#segmentKey(context);\n                  if (!swarm.stopped)', '                  availabilityObservation.key(context, key);\n'],
+    ['                  const key = await swarm.#segmentKey(context);\n                  if (copy && !swarm.stopped)', '                  availabilityObservation.key(context, key);\n'],
   ],
   peer: [
     ['      this.channel.send(JSON.stringify(message));', '\n      availabilityObservation.queued(this, message);'],

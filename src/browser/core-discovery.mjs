@@ -34,6 +34,8 @@ export class CoreNeighbourDiscovery {
   #primitiveDialIds = new Map();
   #nextDial = 1;
   #found = null;
+  // The core's candidates as last read; only hint and clear change them.
+  #candidateList = null;
 
   /**
    * `call(op, now, args)` runs one core operation and returns its parsed
@@ -59,6 +61,7 @@ export class CoreNeighbourDiscovery {
   /** Stop using the core, as after a trap elsewhere in the same instance. */
   retire() {
     if (this.#fallback) return;
+    this.#candidateList = null;
     // State is not transferred; objects the swarm holds read as stale.
     this.#fallback = new NeighbourDiscovery(this.clock);
     this.#fallback.counters = this.counters;
@@ -142,7 +145,8 @@ export class CoreNeighbourDiscovery {
 
   #candidates(eligible) {
     const now = this.clock();
-    return this.#query(OP.candidates, []).filter((candidate) => now >= candidate.at && now - candidate.at < CANDIDATE_FRESH_MS && eligible(candidate))
+    this.#candidateList ??= this.#query(OP.candidates, []);
+    return this.#candidateList.filter((candidate) => now >= candidate.at && now - candidate.at < CANDIDATE_FRESH_MS && eligible(candidate))
       .map((candidate) => candidate.pubkey);
   }
 
@@ -170,7 +174,7 @@ export class CoreNeighbourDiscovery {
 
   hint(pubkey, have, ticket) {
     if (typeof pubkey !== "string" || !HASH.test(pubkey) || !Array.isArray(have)) return;
-    this.#run(() => { this.#query(OP.hint, [pubkey, have.filter((key) => typeof key === "string"), validTicket(ticket) ? ticket : null]); },
+    this.#run(() => { this.#candidateList = null; this.#query(OP.hint, [pubkey, have.filter((key) => typeof key === "string"), validTicket(ticket) ? ticket : null]); },
       (js) => js.hint(pubkey, have, ticket));
   }
 
@@ -305,6 +309,6 @@ export class CoreNeighbourDiscovery {
   }
 
   clear() {
-    this.#run(() => { this.#found = null; this.#mutate(OP.clear, []); }, (js) => js.clear());
+    this.#run(() => { this.#found = null; this.#candidateList = null; this.#mutate(OP.clear, []); }, (js) => js.clear());
   }
 }

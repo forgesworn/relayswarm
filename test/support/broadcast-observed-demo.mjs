@@ -50,8 +50,14 @@ export async function startObservedDemo(options, beforeAction = () => {}) {
     server.on("request", (req, res) => {
       if (new URL(req.url, demo.base).pathname === "/client.js") {
         const end = res.end, writeHead = res.writeHead;
+        // The replacement body is unencoded and has no production validator.
+        delete req.headers["accept-encoding"]; delete req.headers["if-none-match"];
         // The observed bundle has its own length; preserve all other server headers.
-        res.writeHead = function (status, headers) { return writeHead.call(this, status, status === 200 ? { ...headers, "content-length": bytes.byteLength } : headers); };
+        res.writeHead = function (status, headers) {
+          if (status !== 200) return writeHead.call(this, status, headers);
+          const replaced = { ...headers, "content-length": bytes.byteLength }; delete replaced.etag;
+          return writeHead.call(this, status, replaced);
+        };
         res.end = function (body, ...rest) { return end.call(this, this.statusCode === 200 ? req.method === "HEAD" ? undefined : bytes : body, ...rest); };
       }
       handlers[0](req, res);

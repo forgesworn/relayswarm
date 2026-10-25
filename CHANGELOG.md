@@ -14,9 +14,38 @@
 - Use a measured lane's own first-byte time before the shared silence fallback.
   Preserve existing native transfer signatures; older WASM modules skip sources
   requiring the optional bounded-probe capability safely.
-- Build the shared core with the throughput-oriented release optimisation
-  profile. This trades a larger module for less synchronous verification work;
-  device playback and net network benefit remain separate acceptance gates.
+- Retain the speed-optimised SHA-256 path while keeping the remaining module
+  size-optimised. Device playback and net network benefit remain separate
+  acceptance gates.
+- Reduce hot-path work, measured in [Performance](docs/PERFORMANCE.md):
+  - Remember proved Schnorr signatures in both commitment verifiers, keyed by
+    the recomputed event hash, public key and signature. The unchanged stream
+    event, delegation and revocations are no longer re-proved per segment;
+    every other check still runs on every call.
+  - Copy a received peer object once across the WebAssembly boundary and
+    reserve a commitment-expected receive size once. The link frame format
+    is unchanged.
+  - Compile the core's SHA-256 at `opt-level = 3`, halving multi-holder piece
+    and object hashing time for about 0.7 KB more gzip module.
+  - Derive each peer's NIP-44 conversation key once per session.
+  - Add `RelayPool` `readyOnFirstRelay`; the installed native client uses it
+    so one stalled relay no longer spends its peer deadline, and overlaps the
+    DHT bootstrap with Nostr discovery.
+  - Receive native objects into one buffer of the trusted size, hashing as
+    bytes arrive.
+  - Copy and hash origin segments in the loader only when a sampled
+    comparison or serving needs them, and cache the core discovery's
+    candidate list until a hint or clear changes it.
+  - Join identical in-flight commitment requests instead of refusing them at
+    the concurrency limit; each joined request is still checked against a
+    catalogue and file read after it arrived. Read media playlists
+    concurrently, and reuse the previous parse when every playlist is
+    byte-identical (never for `EXT-X-SKIP` deltas). Add the
+    `commitmentJoins` publisher counter.
+  - Make account-allowance validation linear in its bounded state.
+  - Serve the demo page assets compressed with ETag revalidation; other
+    routes keep `no-store`. Serialise demo relay fan-out frames once.
+  - Add `npm run bench:hot-paths` for local before/after comparisons.
 
 ## v0.4.4 (24 October 2026)
 

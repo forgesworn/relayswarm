@@ -50,6 +50,8 @@ test("the module was built from the Rust sources beside it", async () => {
 test("every shared vector verifies identically through WebAssembly", () => {
   assert.ok(vectors.cases.length > 100);
   for (const entry of vectors.cases) assert.deepEqual(runCore(entry, vectors.at), entry.expected, entry.name);
+  // Again with every accepted signature remembered: rejections still reject.
+  for (const entry of vectors.cases) assert.deepEqual(runCore(entry, vectors.at), entry.expected, `${entry.name} (warm)`);
 });
 
 test("host inputs the JSON boundary changes still match the JavaScript verifier", () => {

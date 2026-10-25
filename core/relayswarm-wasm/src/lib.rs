@@ -143,6 +143,24 @@ pub unsafe extern "C" fn rs_call(op: u32, pointer: *const u8, len: usize) -> i32
     })
 }
 
+/// Make `bytes` the latest result. The vector is moved, not copied, so a
+/// frame carrying a whole object is not duplicated on its way out.
+fn set_result(out: Option<Vec<u8>>) -> i32 {
+    RESULT.with(|cell| {
+        let mut buffer = cell.borrow_mut();
+        match out {
+            Some(bytes) => {
+                *buffer = bytes;
+                buffer.len() as i32
+            }
+            None => {
+                buffer.clear();
+                -1
+            }
+        }
+    })
+}
+
 /// Where the latest `rs_call` result starts; valid until the next call.
 #[no_mangle]
 pub extern "C" fn rs_result_ptr() -> *const u8 {
@@ -344,10 +362,14 @@ fn frame(link: &mut Link, request: Option<u64>) -> Vec<u8> {
                 push_event(&mut out, EVENT_REPORT, json.to_string().as_bytes());
             }
             LinkEvent::Resolved { id, bytes } => {
-                let mut payload = doubles(&[opt(id)]);
-                payload.push(u8::from(bytes.is_some()));
-                payload.extend_from_slice(bytes.as_deref().unwrap_or_default());
-                push_event(&mut out, EVENT_RESOLVED, &payload);
+                // Written in place: the object is copied once, not via a payload.
+                let body = bytes.as_deref().unwrap_or_default();
+                out.reserve(5 + 9 + body.len());
+                out.push(EVENT_RESOLVED);
+                out.extend_from_slice(&((9 + body.len()) as u32).to_le_bytes());
+                out.extend_from_slice(&opt(id).to_le_bytes());
+                out.push(u8::from(bytes.is_some()));
+                out.extend_from_slice(body);
             }
             LinkEvent::HaveChanged(keys) => push_event(&mut out, EVENT_HAVE_CHANGED, Value::from(keys).to_string().as_bytes()),
             LinkEvent::ScheduleChanged => push_event(&mut out, EVENT_SCHEDULE_CHANGED, &[]),
@@ -488,17 +510,7 @@ pub unsafe extern "C" fn rs_link_call(handle: u32, op: u32, now: f64, open: u32,
         }
         Some(frame(link, request))
     });
-    RESULT.with(|cell| {
-        let mut buffer = cell.borrow_mut();
-        buffer.clear();
-        match out {
-            Some(bytes) => {
-                buffer.extend_from_slice(&bytes);
-                buffer.len() as i32
-            }
-            None => -1,
-        }
-    })
+    set_result(out)
 }
 
 /// Optional range-upload capability. The active link validates the original
@@ -799,7 +811,8 @@ fn transfer_frame(transfer: &mut Transfer) -> Vec<u8> {
         "verified": transfer.verified_bytes(),
     })
     .to_string();
-    let mut out = (json.len() as u32).to_le_bytes().to_vec();
+    let mut out = Vec::with_capacity(4 + json.len() + payload.len());
+    out.extend_from_slice(&(json.len() as u32).to_le_bytes());
     out.extend_from_slice(json.as_bytes());
     out.extend_from_slice(&payload);
     out
@@ -884,15 +897,5 @@ pub unsafe extern "C" fn rs_xfer_call(handle: u32, op: u32, now: f64, source: f6
         }
         Some(transfer_frame(transfer))
     });
-    RESULT.with(|cell| {
-        let mut buffer = cell.borrow_mut();
-        buffer.clear();
-        match out {
-            Some(bytes) => {
-                buffer.extend_from_slice(&bytes);
-                buffer.len() as i32
-            }
-            None => -1,
-        }
-    })
+    set_result(out)
 }

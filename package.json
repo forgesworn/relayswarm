@@ -9,6 +9,7 @@
     "test:native": "node --test --test-reporter=tap test/native-*.test.mjs",
     "check": "node scripts/check-syntax.mjs",
     "audit": "npm audit --audit-level=high",
+    "bench:hot-paths": "node scripts/bench-hot-paths.mjs",
     "test:browser": "node test/hls-swarm-browser.mjs",
     "test:proto": "node --test test/proto-vectors.test.mjs test/core-wasm.test.mjs test/core-link.test.mjs test/core-transfer.test.mjs test/trace-report.test.mjs",
     "test:core-link:browser": "node test/core-link-native-browser.mjs",
