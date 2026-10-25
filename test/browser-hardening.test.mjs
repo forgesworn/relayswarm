@@ -4207,10 +4207,38 @@ test("loads that end for the viewer's own reasons record nothing against a holde
     await until(() => requested() === before + 1); l.abort(); await sleep(20); f.holderChannel.receive(haveFrame());
     assert.equal(f.discovery().heldMiss, 0, "none of these is a held miss");
     // Three real misses now make three: any miss recorded above would make the fourth.
-    for (let i = 0; i < 3; i++) await f.fail(via);
+    const beforeMisses = requested();
+    await f.failUntil(via, 3);
+    assert.equal(requested() - beforeMisses, 3, "exactly three real requests produced the misses");
     assert.equal(f.discovery().heldMiss, 3);
     f.shift.ms += 10_001; f.touch();
     assert.deepEqual((await f.trigger(via)).staleHolders, [], "the neutral loads added no misses");
+  } finally { await f.close(); }
+});
+
+test("an unasked authority timeout stays neutral before three real holder misses", async t => {
+  let delayNext = true, forcedAtMs;
+  const f = await staleHolderFixture(t, { originFallbackMs: 400, serve: { bytes: bytes32, delayMs: null },
+    getCommitment: async ctx => {
+      if (delayNext) {
+        delayNext = false; forcedAtMs = f.rows().filter(row => row.reason === "have-at-entry").at(-1)?.atMs;
+        await sleep(450); // Beyond this fixture's unchanged 400 ms peer budget.
+      }
+      return f.commitments.getCommitment(ctx);
+    } });
+  try {
+    const via = f.candidate();
+    for (let i = 0; i < 12 && delayNext; i++) await f.fail(via);
+    assert.equal(delayNext, false, "the bounded fixture reached the delayed publisher callback");
+    await sleep(60); // The late authority result cannot start a peer request either.
+    assert.equal(f.requests.length, 0);
+    assert.equal(f.discovery().heldMiss, 0);
+    assert.deepEqual(f.rows().find(row => row.reason === "have-at-entry" && row.atMs === forcedAtMs).heldMissHolders, []);
+    await f.failUntil(via, 3);
+    assert.equal(f.requests.length, 3); assert.equal(f.discovery().heldMiss, 3);
+    assert.equal(f.swarm.metrics().segments.peerFirstLoaded, 0);
+    f.shift.ms += 10_001; f.touch();
+    assert.deepEqual((await f.trigger(via)).staleHolders, [], "only the three asked requests were charged");
   } finally { await f.close(); }
 });
 
