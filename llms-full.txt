@@ -361,6 +361,7 @@ decision is not cached as permission for later upload requests.
 | `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-object origin time with a 25% and 100 ms recovery margin. Substantial origin ranges update this estimate after scaling by their actual byte count. Unknown origin timing or duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. Independent cached/late-HAVE races keep their window beside immediate HTTP. |
 | `warmAhead` | `false` | Experimental peer-first option, requiring `serve: true`: use the same player's next two parsed, unencrypted, whole main-media fragments for bounded speculative loading. A warmed object promoted to genuine demand frees the sole speculative slot. Existing demand/range limits are unchanged. Verified future objects share the held cache; at most three distinct cached/in-flight objects and 24 MiB of warm data plus all reservations fit within `maxHeldBytes`. Fresh cache permission may wait only within actual buffer headroom, up to 25 ms, before ordinary source recovery proceeds independently. |
 | `uploadPacing` | `false` | Experimental canonical-piece upload refill deferral: one FIFO waiter per link, at most `min(maxUploadPeers, maxPeers)` waiters, and a fixed 250 ms queue deadline. The existing per-second rate, twice-rate burst, session allowance and wire remain unchanged. Whole-object deficits still refuse immediately. Queue rows contain identity and numeric geometry; held bytes and current host permission are checked after waiting. |
+| `latePeerRace` | `false` | Experimental peer-first option requiring `zeroBudgetPeerRace`: permit the first peer arm of still-running whole-main-fragment HTTP with no prior peer plan to use a newly accepted, current exact-HAVE holder. Warm work must have a genuine consumer first. Bound by the earliest genuine demand plus `min(lateWindowMs, 4000)`, arming plus `min(maxPeerWaitMs, 2500)`, and the known original HTTP load deadline. Same HTTP request/timers, fresh authority and current immutable identity; no retries or extra GET. Dormant watchers share `maxConcurrentRaces`; lifecycle changes retire them. Numeric `latePeerRace` metrics do not create delivery credit. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
 | `maxPeers` | `6` | Connections in and out. The demo selects four explicitly. |
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
@@ -2078,6 +2079,30 @@ set remains bounded to three distinct objects and 24 MiB; all in-flight
 reservations reduce the existing held-cache budget together.
 There is no startup gate, pause, hidden player, clock offset or automatic seek.
 
+The separate unreleased `latePeerRace: true` option defaults to false and
+requires peer-first plus `zeroBudgetPeerRace`. When a whole main-fragment
+HTTP request began without any peer plan, its first peer arm may use a newly
+accepted framing-2 connection advertising that exact object. Speculation alone
+cannot arm it: a warm object must first have a genuine hls.js consumer. The
+window starts at that earliest genuine demand, including promotion before the
+inner loader is ready. An existing or expired peer plan is never renewed.
+
+HTTP starts immediately and keeps its original request and network timers.
+The peer arm ends by the earliest of four seconds from genuine demand,
+`lateWindowMs`, 2.5 seconds from arming, `maxPeerWaitMs`, and the known original
+HTTP load deadline. Unknown load deadlines and progressive delivery retain the
+ordinary path. Fresh admission, signed authority, exact immutable context and
+current connection identity gate peer work and final delivery. Nonempty HTTP
+progress locks the response to HTTP. Only one complete authorised result can
+win; this creates no second HTTP request or playback-clock adjustment.
+
+Dormant metadata and active cached races share `maxConcurrentRaces`.
+Pause, end, epoch/rendition/ticket change, abort, stop and original HTTP
+termination retire the watcher. `metrics().latePeerRace` exposes entered,
+armed, won, expired, retired and refused counts plus at most 64 numeric timing
+records. Waiting and arming create no peer credit. Existing load-entry
+`lateHaveRace` membership remains unchanged when this separate option is off.
+
 Future bytes need a current signed commitment and matching SHA-256 before
 entering the shared held cache. At most three warm references and 24 MiB of
 warm data/reservations fit inside the existing `maxHeldBytes` budget. The warm
@@ -2761,6 +2786,20 @@ default-off `uploadPacing` option defers canonical-piece refill in a bounded
 250 ms FIFO without increasing rate, burst or quota. Tests exercise actual
 committed-Core worker/provider contracts and unchanged cancellation framing;
 they do not establish smooth full-track playback or close room synchronisation.
+
+The subsequent 60-second M4 candidate with these retention, admission and
+pacing changes remained RED on continuity and whole-window synchronisation:
+one viewer had two waits totalling 2.49 seconds and seven dropped frames; the
+other had none. Accepted peer shares were approximately 36% and 1.9%.
+Pacing reported no refusal or expiry. The trace instead showed a needed HTTP
+object starting before a peer connected, then continuing through an underflow
+while that peer completed the same object. Its exact HAVE arrival was not
+captured. A newly implemented, default-off `latePeerRace` permits only a first
+peer arm for such genuine demand, with fresh authority and the original HTTP
+left running. Source tests cover late accepted exact-HAVE adoption, bounded
+windows, stale context and cancellation; actual playback and synchronisation
+with this option remain unmeasured. No wire-savings, public-NAT, production or
+physical-device pass is claimed.
 
 Cold-cache physical diagnostics exposed two distinct timing errors: a
 holder's completion rate already included startup, yet the piece planner

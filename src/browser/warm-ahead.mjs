@@ -61,7 +61,17 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     if (tracked() >= MAX_OBJECTS) return;
     const controller = new AbortController(), revision = generation, cfg = config, policy = loaderConfig;
     let loader, timer, finish;
-    const row = { ...item, reserved: 0, finished: false, waiters: new Set(), promise: new Promise(resolve => { finish = resolve; }),
+    const row = { ...item, reserved: 0, finished: false, waiters: new Set(), genuineAt: null,
+      promise: new Promise(resolve => { finish = resolve; }),
+      noteDemand() {
+        row.genuineAt ??= performance.now();
+        item.context[WARM_AHEAD]?.onGenuine?.();
+      },
+      genuine() {
+        if (!live(row)) return null;
+        const waiter = [...row.waiters].find(loader => loader.pendingTerminal && warmContext(loader.context)?.key === row.key);
+        return waiter && row.genuineAt !== null ? { at: row.genuineAt, context: waiter.context } : null;
+      },
       promote() { clearTimeout(timer); },
       finish: result => finish(result), cancel() {
         controller.abort(); clearTimeout(timer); try { loader?.abort(); loader?.destroy(); } catch {}
@@ -78,7 +88,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         row.reserved = permit.size;
         if (!reserve(reserved())) { row.reserved = 0; counters.rejected++; return null; }
         counters.highWaterBytes = Math.max(counters.highWaterBytes, counters.cacheBytes + reserved());
-        const warm = item.context[WARM_AHEAD] = { peerBytes: 0 };
+        const warm = item.context[WARM_AHEAD] = { peerBytes: 0, genuine: () => row.genuine() };
         loader = new Loader(cfg); counters.started++;
         const response = await new Promise(resolve => loader.load(item.context, policy, {
           onSuccess: (response, stats, _context, details) => resolve({ response, stats, details }),
@@ -138,6 +148,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         if (pending) {
           counters.coalesced++;
           pending.waiters.add(this); this.warmPending = pending;
+          pending.noteDemand();
           if (active === pending && promoted.size === 0) { active = null; promoted.add(pending); pending.promote(); counters.promotions++; }
         }
         this.reuseAbort = new AbortController();
@@ -214,7 +225,11 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     }
     releasePending() {
       const row = this.warmPending; this.warmPending = null;
-      if (row) { row.waiters.delete(this); if (promoted.has(row) && !row.waiters.size) cancelJob(row); }
+      if (row) {
+        row.waiters.delete(this);
+        if (!row.waiters.size) row.context[WARM_AHEAD]?.onGenuine?.();
+        if (promoted.has(row) && !row.waiters.size) cancelJob(row);
+      }
     }
     complete(terminal, name, args) {
       if (!terminal || terminal.settled || this.pendingTerminal !== terminal) return;

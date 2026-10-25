@@ -71,6 +71,12 @@ queue time and reservation counts never imply accepted peer delivery.
 Its matching WASM upload ABI copies only the requested range instead of the
 whole held object per request. These are bounded-policy and byte-copy changes;
 physical iPhone/iPad and Pixel/Vanadium continuity remains unverified.
+Unreleased latePeerRace defaults off: a still-running genuine whole-fragment
+HTTP request with no previous peer plan may make one first attempt using a
+newly accepted exact-HAVE peer, with fresh authority and unchanged HTTP.
+Its original genuine-demand window, peer-arm cap and original HTTP deadline
+all apply. Source fixtures do not establish playback or synchronisation;
+the preceding actual cold-4K candidate remained RED despite useful peer bytes.
 v0.4.4 lets already-HAVE framing-2 schema-3 objects enter bounded mixed piece
 planning despite a late whole-object peer forecast; valid schemas 1/2 retain
 that forecast. Known-VOD main-media waits require a live same-key FETCH lease,

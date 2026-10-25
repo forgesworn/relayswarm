@@ -114,6 +114,30 @@ set remains bounded to three distinct objects and 24 MiB; all in-flight
 reservations reduce the existing held-cache budget together.
 There is no startup gate, pause, hidden player, clock offset or automatic seek.
 
+The separate unreleased `latePeerRace: true` option defaults to false and
+requires peer-first plus `zeroBudgetPeerRace`. When a whole main-fragment
+HTTP request began without any peer plan, its first peer arm may use a newly
+accepted framing-2 connection advertising that exact object. Speculation alone
+cannot arm it: a warm object must first have a genuine hls.js consumer. The
+window starts at that earliest genuine demand, including promotion before the
+inner loader is ready. An existing or expired peer plan is never renewed.
+
+HTTP starts immediately and keeps its original request and network timers.
+The peer arm ends by the earliest of four seconds from genuine demand,
+`lateWindowMs`, 2.5 seconds from arming, `maxPeerWaitMs`, and the known original
+HTTP load deadline. Unknown load deadlines and progressive delivery retain the
+ordinary path. Fresh admission, signed authority, exact immutable context and
+current connection identity gate peer work and final delivery. Nonempty HTTP
+progress locks the response to HTTP. Only one complete authorised result can
+win; this creates no second HTTP request or playback-clock adjustment.
+
+Dormant metadata and active cached races share `maxConcurrentRaces`.
+Pause, end, epoch/rendition/ticket change, abort, stop and original HTTP
+termination retire the watcher. `metrics().latePeerRace` exposes entered,
+armed, won, expired, retired and refused counts plus at most 64 numeric timing
+records. Waiting and arming create no peer credit. Existing load-entry
+`lateHaveRace` membership remains unchanged when this separate option is off.
+
 Future bytes need a current signed commitment and matching SHA-256 before
 entering the shared held cache. At most three warm references and 24 MiB of
 warm data/reservations fit inside the existing `maxHeldBytes` budget. The warm

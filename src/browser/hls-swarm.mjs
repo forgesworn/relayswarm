@@ -37,7 +37,7 @@ import { commitmentPieceSize, validStreamAuthorisation, verifySegmentCommitment,
 import { loadCore } from "./core-wasm.mjs";
 import { createCoreTransferWorker } from "./core-transfer-worker.mjs";
 import { fetchOriginRange, loadOriginRange } from "./origin-range.mjs";
-import { createWarmAhead, WARM_AHEAD } from "./warm-ahead.mjs";
+import { createWarmAhead, warmContext, WARM_AHEAD } from "./warm-ahead.mjs";
 import { createUploadPacer } from "./upload-pacing.mjs";
 
 export const HLS_SWARM_METRICS_VERSION = 2;
@@ -125,6 +125,7 @@ const DEFAULTS = Object.freeze({
   // Opt-in with zeroBudgetPeerRace: a load-entry connection may advertise
   // the exact cached object later, within the same original peer window.
   lateHaveRace: false,
+  latePeerRace: false,
   // Provisional (CORE-SPEC open question 6): not yet set from a field trace.
   maxHoldersPerObject: 3,
   // Rows kept for trace(): every load, eligibility decision, peer and origin
@@ -404,6 +405,12 @@ class HlsSwarm {
     this.peerLeases = new Map();
     this.peerLeaseWaiters = new Set();
     this.peerAdmission = { claims: 0, waited: 0, granted: 0, expired: 0, cancelled: 0 };
+    this.latePeerOwners = new Map();
+    this.latePeerGeneration = 0;
+    this.latePeerNextId = 1;
+    this.latePeerRows = [];
+    this.latePeerDropped = 0;
+    this.latePeerCounts = { entered: 0, armed: 0, won: 0, expired: 0, retired: 0, refused: 0 };
     this.peerSelection = new PeerSelection();
     this.linkTimings = new WeakMap();
     this.core = null;
@@ -573,6 +580,7 @@ class HlsSwarm {
     if (typeof this.options.abrIgnorePeers !== "boolean") return "invalid-abr-option";
     if (typeof this.options.zeroBudgetPeerRace !== "boolean") return "invalid-cached-race-option";
     if (typeof this.options.lateHaveRace !== "boolean") return "invalid-late-have-race-option";
+    if (typeof this.options.latePeerRace !== 'boolean' || this.options.latePeerRace && (mode !== 'peer-first' || !this.options.zeroBudgetPeerRace)) return 'invalid-late-peer-race-option';
     if (typeof this.options.sustainablePeerWait !== "boolean") return "invalid-sustainable-wait-option";
     if (typeof this.options.warmAhead !== "boolean" || this.options.warmAhead && (mode !== "peer-first" || this.options.serve !== true)) return "invalid-warm-ahead-option";
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
@@ -707,6 +715,8 @@ class HlsSwarm {
   updateTicket(ticket) {
     if (this.stopped || this.disabledReason || !this.#gated() || !validTicket(ticket)) return false;
     if (ticket === this.options.ticket) return true;
+    this.latePeerGeneration++;
+    this.#retireLatePeers('ticket');
     this.warmAhead?.clear();
     this.options.ticket = ticket;
     this.#scheduleReannounce();
@@ -716,6 +726,7 @@ class HlsSwarm {
   stop() {
     if (this.stopped) return;
     this.stopped = true;
+    this.#retireLatePeers('stop');
     this.uploadPacer?.stop();
     this.warmAhead?.stop();
     this.#endDiscovery();
@@ -839,6 +850,9 @@ class HlsSwarm {
       warmAhead: this.warmAhead?.snapshot() ?? null,
       peerAdmission: { ...this.peerAdmission, claimedLinks: this.peerLeases.size, waiting: this.peerLeaseWaiters.size },
       uploadPacing: this.uploadPacer?.snapshot() ?? null,
+      latePeerRace: { enabled: this.options.latePeerRace, ...this.latePeerCounts, pending: this.latePeerOwners.size,
+        dropped: this.latePeerDropped, records: this.latePeerRows.map(row => ({ ...row, ...(row.holders ? { holders: [...row.holders] } : {}) })),
+        limits: { windowMs: Math.min(4000, this.options.lateWindowMs), peerMs: Math.min(2500, this.options.maxPeerWaitMs), owners: this.options.maxConcurrentRaces } },
       pubkey: this.session?.pubkey || null,
       uptimeMs: Date.now() - this.startedAt,
       serving: this.#servingAllowed(),
@@ -1081,11 +1095,16 @@ class HlsSwarm {
         if (swarm.stopped || !context.frag || context.frag.sn === "initSegment" || (context.part && !swarm.options.swarmParts)
           || (!swarm.options.serveOnCellular && onCellular())) return this.inner.load(context, config, callbacks);
         if (budgetMs === 0 && swarm.options.zeroBudgetPeerRace && !this.hlsConfig.progressive
-          && swarm.#rangesEnabled() && swarm.cachedRaces.size < swarm.options.maxConcurrentRaces) {
+          && swarm.#rangesEnabled() && swarm.#peerRaceCapacity()) {
           const cached = new Map([...swarm.links.values()].filter(link => swarm.#peerEntryAvailable(link, context) && link.supportsRanges
             && (swarm.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !swarm.banned.has(link.pubkey) && (link.have.size || swarm.options.lateHaveRace))
             .map(link => [link, new Set(link.have)]));
           if (cached.size) return this.loadCachedRace(context, config, callbacks, budgetGeometry, cached);
+        }
+        const parentMs = config?.loadPolicy?.maxLoadTimeMs ?? config?.timeout;
+        if (budgetMs === 0 && swarm.options.latePeerRace && !this.hlsConfig.progressive && warmContext(context) &&
+            Number.isFinite(parentMs) && parentMs > 0 && swarm.#peerRaceCapacity()) {
+          return this.loadLatePeerRace(context, config, callbacks, budgetGeometry, parentMs);
         }
         const controller = new AbortController();
         const token = {};
@@ -1284,6 +1303,69 @@ class HlsSwarm {
           if (originPending && !controller.signal.aborted && !swarm.stopped) swarm.#noteError("cached-race", error);
         }).finally(stopPeer);
       }
+      loadLatePeerRace(context, config, callbacks, budgetGeometry, parentMs) {
+        const token = {}, controller = new AbortController(), t0 = now();
+        let originPending = true, originClaimed = false, watch;
+        this.active = token; this.pendingCallbacks = { callbacks, context };
+        Object.assign(this.inner.stats, { aborted: false, loaded: 0, total: 0, chunkCount: 0, loading: { start: 0, first: 0, end: 0 } });
+        const current = () => originPending && !originClaimed && this.active === token && !swarm.stopped;
+        const finishOrigin = reason => {
+          if (!originPending || this.active !== token) return false;
+          originPending = false; this.active = null; this.pendingCallbacks = null;
+          watch?.close(reason); this.releaseFetch?.(); this.releaseFetch = null;
+          return true;
+        };
+        this.cancel = () => {
+          const pending = originPending && this.active === token;
+          originPending = false; this.active = null; watch?.close('caller-abort');
+          this.releaseFetch?.(); this.releaseFetch = null;
+          try { this.inner.abort(); } catch {}
+          return pending;
+        };
+        watch = swarm.#watchLatePeer({ context, controller, entryAt: t0, parentDeadline: t0 + parentMs, current,
+          arm: (peerContext, plan) => swarm.#peerFirst(peerContext, controller.signal, plan, 0, budgetGeometry).then(result => {
+            if (!result || !current() || controller.signal.aborted || now() >= plan.limit || !watch.valid() ||
+                typeof plan.revalidateAuthority !== 'function' || !plan.revalidateAuthority()) return false;
+            originPending = false; this.active = null; this.pendingCallbacks = null;
+            watch.close('peer-won', 'won'); this.releaseFetch?.(); this.releaseFetch = null;
+            try { this.inner.abort(); } catch {}
+            swarm.counters.zeroBudgetPeerRaceWins++;
+            // A promoted warm object keeps its original accounting role; only
+            // the real hls.js consumer later accepts its verified peer bytes.
+            swarm.#completePeerLoad(this, result, context, callbacks, t0);
+            return true;
+          }),
+        });
+        swarm.counters.originFallbacks++;
+        swarm.#peerEligibility(context, 0, 'no-budget', null, budgetGeometry);
+        try { this.inner.load(context, config, {
+          ...callbacks,
+          onProgress: (...args) => {
+            if (!originPending || this.active !== token) return;
+            if (args[2]?.byteLength > 0) { originClaimed = true; watch?.close('origin-progress'); }
+            callbacks.onProgress?.(...args);
+          },
+          onError: (...args) => { if (finishOrigin('origin-error')) callbacks.onError?.(...args); },
+          onTimeout: (...args) => { if (finishOrigin('origin-timeout')) callbacks.onTimeout?.(...args); },
+          onAbort: (...args) => { if (finishOrigin('origin-abort')) callbacks.onAbort?.(...args); },
+          onSuccess: (response, stats, ctx, details) => {
+            if (!finishOrigin('origin-success')) return;
+            const receivedMs = firstByteWallMs(stats), { copy, size } = swarm.#originCopy(response, context);
+            pushSample(swarm.originLatencySamples, now() - t0);
+            swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - t0);
+            callbacks.onSuccess(response, stats, ctx, details); swarm.#noteOriginClock(details, receivedMs);
+            if (size && !swarm.stopped) swarm.#guard('late-race-origin', async () => {
+              swarm.counters.originLoaded++; swarm.counters.bytesFromOrigin += size;
+              const key = await swarm.#segmentKey(context);
+              if (copy && !swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
+            });
+          },
+        }); } catch (error) { finishOrigin('origin-throw'); throw error; }
+        if (!originPending) return;
+        watch?.keyPromise.then(key => {
+          if (originPending && this.active === token && !swarm.stopped) this.releaseFetch = swarm.#claimOrigin(key);
+        }).catch(() => {});
+      }
       abort() {
         this.releaseFetch?.(); this.releaseFetch = null;
         const pending = this.cancel?.();
@@ -1309,6 +1391,116 @@ class HlsSwarm {
       if (!size) return { copy: null, size: 0 };
       return { copy: this.#mayServe() && !context?.[WARM_AHEAD] ? data.slice(0) : null, size };
     } catch { return { copy: null, size: 0 }; }
+  }
+
+  #peerRaceCapacity() {
+    return this.cachedRaces.size + [...this.latePeerOwners.values()].filter(owner => !owner.attempted).length < this.options.maxConcurrentRaces;
+  }
+
+  #latePeerEvent(owner, outcome, reason, holders) {
+    this.latePeerCounts[outcome]++;
+    if (this.latePeerRows.length === 64) { this.latePeerRows.shift(); this.latePeerDropped++; }
+    const frag = owner.identity.context.frag, relative = value => value === null ? null : Math.max(0, Math.round(value - this.transportStartedAt));
+    this.latePeerRows.push({ id: owner.id, atMs: relative(now()), sequence: frag.sn, cc: frag.cc, level: frag.level,
+      genuineAtMs: relative(owner.genuineAt), windowEndAtMs: relative(owner.windowEnd), armedAtMs: relative(owner.armedAt ?? null),
+      deadlineAtMs: relative(owner.peerLimit ?? null), outcome, reason,
+      ...(holders ? { holders: holders.map(link => this.#holderLabel(link.pubkey)) } : {}) });
+  }
+
+  #retireLatePeers(reason) {
+    for (const owner of [...this.latePeerOwners.values()]) owner.close(reason);
+  }
+
+  #checkLatePeers() {
+    for (const owner of [...this.latePeerOwners.values()]) owner.refresh();
+  }
+
+  #watchLatePeer(input) {
+    const identity = warmContext(input.context);
+    if (!identity || !this.#peerRaceCapacity()) return null;
+    const warm = input.context[WARM_AHEAD], directAt = input.entryAt, media = this.hls?.media;
+    const owner = { ...input, identity, id: this.latePeerNextId++, generation: this.latePeerGeneration,
+      streamId: this.options.streamEvent?.id, genuineAt: null, windowEnd: null, attempted: false, closed: false, key: null, timer: null };
+    const watching = new AbortController();
+    const clearTimer = () => { clearTimeout(owner.timer); this.timers.delete(owner.timer); owner.timer = null; };
+    owner.close = (reason, outcome = 'retired') => {
+      if (owner.closed) return;
+      owner.closed = true; clearTimer(); watching.abort();
+      if (warm?.onGenuine === owner.refresh) delete warm.onGenuine;
+      this.latePeerOwners.delete(owner.id); this.cachedRaces.delete(owner.controller);
+      owner.controller.abort(); this.#latePeerEvent(owner, outcome, reason);
+    };
+    const genuine = () => warm ? warm.genuine?.() : { at: directAt, context: input.context };
+    const eligible = (link, context) => this.links.get(link.pubkey) === link && this.#peerEntryAvailable(link, context) &&
+      link.supportsRanges === true && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !this.banned.has(link.pubkey) && link.have.has(owner.key);
+    const currentContext = () => {
+      const demand = genuine();
+      if (!demand || !Number.isFinite(demand.at) || warmContext(demand.context)?.key !== identity.key) return null;
+      return warm ? { ...demand.context, [WARM_AHEAD]: warm } : demand.context;
+    };
+    owner.valid = () => !owner.closed && input.current() && !this.stopped && owner.generation === this.latePeerGeneration &&
+      owner.streamId === this.options.streamEvent?.id && currentContext() !== null && !media?.paused && !media?.ended &&
+      now() < (owner.peerLimit ?? owner.windowEnd ?? input.parentDeadline) &&
+      [...(owner.validatedPeers ?? [])].every(([link, ticket]) => this.links.get(link.pubkey) === link && !link.closed &&
+        !this.banned.has(link.pubkey) && (!this.options.admit || this.admitted.get(link.pubkey)?.ticket === ticket));
+    owner.refresh = () => {
+      if (owner.closed) return;
+      if (!input.current() || this.stopped || owner.generation !== this.latePeerGeneration || owner.streamId !== this.options.streamEvent?.id) return owner.close('inactive');
+      const demand = genuine();
+      if (!demand) { if (owner.genuineAt !== null) owner.close('no-genuine-consumer'); return; }
+      const context = currentContext();
+      if (!context || media?.paused || media?.ended) return owner.close('context-or-playback');
+      if (owner.genuineAt === null) {
+        owner.genuineAt = demand.at;
+        owner.windowEnd = Math.min(input.parentDeadline, demand.at + Math.min(4000, this.options.lateWindowMs));
+        this.#latePeerEvent(owner, 'entered', 'genuine-demand');
+        owner.timer = this.#after(Math.max(0, owner.windowEnd - now()), () => owner.close('window-expired', 'expired'));
+      }
+      if (now() >= owner.windowEnd) return owner.close('window-expired', 'expired');
+      if (owner.attempted || !owner.key || !this.#rangesEnabled()) return;
+      const captured = [...this.links.values()].filter(link => eligible(link, context));
+      if (!captured.length) return;
+      // This is the first peer arm, not a retry or renewal of an old plan.
+      // Reserve it before admission/commitment/worker work can yield.
+      owner.attempted = true;
+      const limit = Math.min(owner.windowEnd, now() + Math.min(2500, this.options.maxPeerWaitMs), input.parentDeadline);
+      owner.armedAt = now(); owner.peerLimit = limit;
+      clearTimer(); owner.timer = this.#after(Math.max(0, limit - now()), () => owner.close('peer-expired', 'expired'));
+      this.cachedRaces.add(owner.controller); this.#latePeerEvent(owner, 'armed', 'accepted-exact-have', captured);
+      void (async () => {
+        const admitted = await Promise.all(captured.map(async link => {
+          if (!this.options.admit) return link;
+          const ticket = this.admissionChecks.get(link.pubkey)?.ticket ?? this.admitted.get(link.pubkey)?.ticket;
+          let accepted = false;
+          try { accepted = await boundedOperation(() => this.#admits(link.pubkey, ticket, 'other'), owner.controller.signal,
+            Math.max(0, Math.min(this.options.admissionTimeoutMs, limit - now()))) === true; } catch {}
+          if (!accepted && !owner.closed) link.close('admission');
+          return accepted ? link : null;
+        }));
+        if (owner.closed) return;
+        const fresh = currentContext();
+        if (!input.current() || !fresh || now() >= limit || owner.generation !== this.latePeerGeneration) return owner.close('inactive-after-admission');
+        const peers = admitted.filter(link => link && eligible(link, fresh));
+        if (!peers.length) return owner.close('admission-or-have-refused', 'refused');
+        owner.validatedPeers = new Map(peers.map(link => [link, this.admitted.get(link.pubkey)?.ticket]));
+        const immutable = warmContext(fresh)?.context;
+        if (!immutable || !owner.valid()) return owner.close('context-after-admission');
+        const plan = { deadline: limit, limit, originReserveMs: 0, expired: false, onDeadline: null,
+          knownKey: owner.key, cachedOnly: new Map(peers.map(link => [link, new Set([owner.key])])),
+          lateHaveRace: false, peerOnly: true, extend: () => false, currentValid: owner.valid, revalidateAuthority: true };
+        const won = await input.arm(immutable, plan);
+        if (!won && !owner.closed) owner.close('peer-no-result', 'refused');
+      })().catch(() => { if (!owner.closed) owner.close('peer-error', 'refused'); });
+    };
+    this.latePeerOwners.set(owner.id, owner);
+    if (warm) warm.onGenuine = owner.refresh;
+    for (const name of ['pause', 'ended', 'emptied']) media?.addEventListener?.(name, () => owner.close(`media-${name}`), { signal: watching.signal });
+    owner.keyPromise = this.#segmentKey(input.context).then(key => {
+      owner.key = key; if (!owner.closed) owner.refresh(); return key;
+    }, error => { owner.close('key-refused', 'refused'); throw error; });
+    owner.keyPromise.catch(() => {});
+    owner.refresh();
+    return owner;
   }
 
   #completePeerLoad(loader, result, context, callbacks, t0) {
@@ -1413,6 +1605,10 @@ class HlsSwarm {
     // Discovery may move into the core only while it holds no state.
     if (this.coreWait) return;
     const rendition = this.#renditionContext(context);
+    if (this.latePeerOwners.size && context.frag.type === 'main') {
+      const scope = warmContext(context)?.scope;
+      if (scope) for (const owner of [...this.latePeerOwners.values()]) if (owner.identity.scope !== scope) owner.close('rendition');
+    }
     this.discovery.context(context.frag.type || "main", rendition);
     this.#expireDiscovery(false);
     const previous = this.renditions.get(rendition);
@@ -1782,8 +1978,8 @@ class HlsSwarm {
     // and statistics; unconfigured live/VOD coordination is unchanged.
     if (this.options.transferWorkerUrl !== undefined && this.transferWorkerState !== "ready") return null;
     const discoveryContext = this.discovery.contexts.get(context.frag.type || "main");
-    const key = await this.#segmentKey(context);
-    if (signal.aborted || this.stopped) {
+    const key = plan.knownKey ?? await this.#segmentKey(context);
+    if (signal.aborted || this.stopped || plan.currentValid && !plan.currentValid()) {
       this.#peerEligibility(context, budgetMs, "aborted-before-eligibility", null, budgetGeometry);
       return null;
     }
@@ -1891,10 +2087,11 @@ class HlsSwarm {
     this.#peerEligibility(context, budgetMs, coordinated || plan.lateHaveMatched ? "have-after-wait" : "have-at-entry", true, budgetGeometry, trial ?? undefined, demand, trial !== null);
     // Holding the key is not a delivery: leave every holder entry alone until a
     // verified segment arrives.
-    let commitment;
+    let commitment, authorityEvent;
     try {
       const result = await commitmentResult;
       if (!result.ok) throw new Error("Commitment unavailable.");
+      authorityEvent = result.event;
       commitment = this.#verifyCommitment(result.event, {
         streamEvent: this.options.streamEvent, swarmId: this.options.swarmId, key, context,
         maxSegmentBytes: this.options.maxSegmentBytes,
@@ -1902,6 +2099,12 @@ class HlsSwarm {
       });
     } catch { if (!this.stopped) this.counters.commitmentUnavailable += 1; return null; }
     if (!commitment) { this.counters.commitmentRejected += 1; return null; }
+    if (plan.currentValid && !plan.currentValid()) return null;
+    if (plan.revalidateAuthority === true) plan.revalidateAuthority = () => Boolean(this.#verifyCommitment(authorityEvent, {
+      streamEvent: this.options.streamEvent, swarmId: this.options.swarmId, key, context,
+      maxSegmentBytes: this.options.maxSegmentBytes, delegation: this.options.delegation,
+      revokedDelegationIds: this.options.revokedDelegationIds, delegationRevocations: this.options.delegationRevocations,
+    }));
     if (signal.aborted || this.stopped) return null;
     if (plan.cachedOnly && commitment.v !== 3) return null;
     if (!this.renditionSizes.has(rendition) && this.renditionSizes.size >= 16) this.renditionSizes.delete(this.renditionSizes.keys().next().value);
@@ -2065,6 +2268,7 @@ class HlsSwarm {
   // the core's Transfer (CORE-SPEC section 6). Undefined when it does not
   // apply, so the single-holder path runs; null sends the load to origin.
   async #multiHolder(context, signal, plan, key, commitment, discoveryContext) {
+    if (plan.currentValid && !plan.currentValid()) return null;
     const worker = this.options.transferWorkerUrl !== undefined;
     // An explicit worker opt-in must never quietly retry a large transfer on
     // the main thread after worker startup, policy, resource or runtime failure.
@@ -2083,7 +2287,8 @@ class HlsSwarm {
       await this.#waitForPeerLease(captured, plan.limit, signal);
       candidates = available();
     }
-    if (this.stopped || signal.aborted || now() >= plan.limit) return null;
+    if (this.stopped || signal.aborted || now() >= plan.limit ||
+        typeof plan.revalidateAuthority === 'function' && !plan.revalidateAuthority()) return null;
     if (!candidates.length) return worker ? null : undefined;
     const models = new Map(candidates.map(link => [link, this.#linkTransferEstimate(link, Math.max(0, plan.limit - now()), commitment.pieceSize)])
       .filter(([, model]) => model !== null));
@@ -2098,6 +2303,7 @@ class HlsSwarm {
       // Let the completed genuine load publish its accepted-link observation
       // before speculative admission re-evaluates that same link's model.
       for (const waiter of [...this.peerLeaseWaiters]) this.#after(0, waiter);
+      if (this.latePeerOwners.size) this.#after(0, () => this.#checkLatePeers());
     };
     signal.addEventListener('abort', release, { once: true });
     try {
@@ -2111,7 +2317,8 @@ class HlsSwarm {
     let transfer;
     try { transfer = worker ? await this.transferWorker.transfer(config, { signal }) : this.core.transfer(config); }
     catch { return null; }
-    if (this.stopped || signal.aborted || (worker && now() >= deadline) ||
+    if (this.stopped || signal.aborted || (worker && now() >= deadline) || plan.currentValid && !plan.currentValid() ||
+        typeof plan.revalidateAuthority === 'function' && !plan.revalidateAuthority() ||
         holders.some(link => !eligible(link) || link.busy || this.peerLeases.get(link) !== lease)) { transfer?.free(); return null; }
     if (!transfer) return worker || plan.peerOnly ? null : undefined;
     this.multiHolder.transfers += 1;
@@ -2170,6 +2377,7 @@ class HlsSwarm {
         if (finished) return;
         const receive = state => {
           if (finished) return;
+          if (plan.currentValid && !plan.currentValid()) return finish(null);
           // A suspended/throttled page may process a worker message before
           // its already-expired timer. Fence all credit and commands using
           // the same absolute origin backstop, not timer task ordering.
@@ -3335,6 +3543,7 @@ class HlsSwarm {
     const knownCredential = !this.#gated() || admitted && admitted.ticket === payload.ticket;
     if (active && knownCredential) {
       if (payload.open !== null) this.#rememberOpen(from, payload.open);
+      this.#checkLatePeers();
       return;
     }
     // An unchanged heartbeat grants no new access. Check authority when using
@@ -3350,6 +3559,7 @@ class HlsSwarm {
     }
     if (!(await this.#admits(from, payload.ticket, "presence")) || this.stopped) return;
     if (payload.open !== null) this.#rememberOpen(from, payload.open);
+    this.#checkLatePeers();
     if (this.links.has(from) || this.dials.has(from) || this.#coolingDown(from) || !this.#hasCapacity()) return;
     // The `open` hint is not a gate. Skipping peers that say they are full cost
     // more than it saved: in a swarm where nearly every peer is full, a viewer
@@ -3733,10 +3943,12 @@ class HlsSwarm {
       onRequest: (from, key, range) => this.#serveRequest(from, key, range),
       onHaveChange: (_link, added) => {
         for (const waiter of [...this.haveWaiters]) waiter(added);
+        this.#checkLatePeers();
       },
       onScheduleChange: () => {
         for (const waiter of [...this.haveWaiters]) waiter();
         for (const waiter of [...this.peerLeaseWaiters]) waiter();
+        this.#checkLatePeers();
       },
       onUploadCancelled: (_link, unsentBytes) => {
         this.counters.uploadsCancelled += 1;
@@ -3763,6 +3975,7 @@ class HlsSwarm {
     });
     this.links.set(dial.pubkey, link);
     this.#assignHolderLabel(dial.pubkey);
+    this.#checkLatePeers();
     if (this.firstLinkAtMs === null) this.firstLinkAtMs = Date.now() - this.startedAt;
     link.sendContribution(this.#servingAllowed(), this.rendition);
     for (const identity of this.renditions.keys()) if (identity !== this.rendition) link.sendContribution(this.#servingAllowed(), identity);

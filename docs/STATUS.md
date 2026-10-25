@@ -59,6 +59,20 @@ default-off `uploadPacing` option defers canonical-piece refill in a bounded
 committed-Core worker/provider contracts and unchanged cancellation framing;
 they do not establish smooth full-track playback or close room synchronisation.
 
+The subsequent 60-second M4 candidate with these retention, admission and
+pacing changes remained RED on continuity and whole-window synchronisation:
+one viewer had two waits totalling 2.49 seconds and seven dropped frames; the
+other had none. Accepted peer shares were approximately 36% and 1.9%.
+Pacing reported no refusal or expiry. The trace instead showed a needed HTTP
+object starting before a peer connected, then continuing through an underflow
+while that peer completed the same object. Its exact HAVE arrival was not
+captured. A newly implemented, default-off `latePeerRace` permits only a first
+peer arm for such genuine demand, with fresh authority and the original HTTP
+left running. Source tests cover late accepted exact-HAVE adoption, bounded
+windows, stale context and cancellation; actual playback and synchronisation
+with this option remain unmeasured. No wire-savings, public-NAT, production or
+physical-device pass is claimed.
+
 Cold-cache physical diagnostics exposed two distinct timing errors: a
 holder's completion rate already included startup, yet the piece planner
 also added a viewer-wide first-byte delay from another connection; HTTP

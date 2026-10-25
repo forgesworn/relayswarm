@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure';
 import Hls, { M3U8Parser, LoaderContextType } from 'hls.js';
 import { warmContext } from '../src/browser/warm-ahead.mjs';
-import { commitmentContent, KIND_SEGMENT_COMMITMENT } from '../src/browser/segment-commitment.mjs';
+import { commitmentContent, commitmentPieceSize, KIND_SEGMENT_COMMITMENT } from '../src/browser/segment-commitment.mjs';
 import { startLocalRelay } from './support/local-relay.mjs';
 import { RelayPool, RelaySwarmSession } from '../src/relay-session.mjs';
 const { createHlsSwarm } = await import(process.env.TEST_SWARM_MODULE ?? '../src/browser/hls-swarm.mjs');
@@ -17,6 +17,7 @@ const until = async predicate => { for (let i = 0; i < 200; i++) { if (predicate
 
 async function fixture(t, options = {}) {
   const relay = await startLocalRelay();
+  const fixtureCore = coreWasm ?? (options.rangePeer ? await WebAssembly.compile(await readFile(new URL('../src/browser/relayswarm-core.wasm', import.meta.url))) : undefined);
   const bytes = Uint8Array.from({ length: options.size ?? 1024 }, (_, i) => i % 251);
   const requests = [], clients = new Set(), sk = generateSecretKey(), swarmId = 'warm-ahead-fixture';
   const streamEvent = finalizeEvent({ kind: 30311, created_at: Math.floor(Date.now() / 1000),
@@ -27,7 +28,7 @@ async function fixture(t, options = {}) {
     Array.from({ length: 12 }, (_, sn) => `#EXTINF:2,\ns${sn}.m4s\n`).join('');
   const fragments = M3U8Parser.parseLevelPlaylist(playlist, 'https://origin.example/media/index.m3u8', 0, 'main', 0, null).fragments;
   const events = new Map();
-  const state = { refuse: false, expired: false, stall: false, blockedChecks: 0, onBlock: null };
+  const state = { refuse: false, expired: false, stall: false, blockedChecks: 0, onBlock: null, admit: true };
   class Loader {
     stats = { loaded: 0, loading: { start: 0, first: 0, end: 0 } };
     load(context, config, callbacks) {
@@ -64,25 +65,33 @@ async function fixture(t, options = {}) {
   const media = Object.assign(new EventTarget(), { paused: false, currentTime: 0,
     buffered: options.buffered === false ? { length: 0 } : { length: 1, start: () => 0, end: () => 20 } });
   const getCommitment = async context => {
+    await options.beforeCommitment?.(context);
     if (state.stall) { state.blockedChecks++; state.onBlock?.(); return new Promise(() => {}); }
     if (state.refuse) return null;
     const seconds = Math.floor(Date.now() / 1000), key = sha(`${swarmId}\n${new URL(context.url).pathname}`);
     const cacheKey = `${key}:${context.frag.sn}:${context.frag.cc}:${state.expired}`;
     if (events.has(cacheKey)) return events.get(cacheKey);
+    const pieceSize = commitmentPieceSize(bytes.length), pieces = [];
+    if (options.rangePeer) for (let at = 0; at < bytes.length; at += pieceSize) pieces.push(sha(bytes.subarray(at, at + pieceSize)));
     const event = finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds, tags: [['x', swarmId], ['e', streamEvent.id]],
-      content: commitmentContent({ v: 2, streamEventId: streamEvent.id, swarmId, key, rendition: '/media/index.m3u8',
+      content: commitmentContent({ v: options.rangePeer ? 3 : 2, streamEventId: streamEvent.id, swarmId, key, rendition: '/media/index.m3u8',
         playlist: '/media/index.m3u8', mediaType: 'main', encryption: null, sequence: context.frag.sn, discontinuity: context.frag.cc,
-        part: null, sha256: options.badHash ? 'f'.repeat(64) : sha(bytes), size: bytes.length, expiresAt: seconds + (state.expired ? -1 : 120) }) }, sk);
+        part: null, sha256: options.badHash ? 'f'.repeat(64) : sha(bytes), size: bytes.length, expiresAt: seconds + (state.expired ? -1 : 120),
+        ...(options.rangePeer ? { pieceSize, pieces } : {}) }) }, sk);
     events.set(cacheKey, event); return event;
   };
   const swarm = createHlsSwarm({ swarmId, mode: 'peer-first', serve: true, warmAhead: options.enabled ?? true,
-    streamEvent, getCommitment, RTCPeerConnectionImpl: PC, relays: [relay.url], ...(coreWasm ? { coreWasm } : {}),
+    streamEvent, getCommitment, RTCPeerConnectionImpl: PC, relays: [relay.url], ...(fixtureCore ? { coreWasm: fixtureCore } : {}),
+    ...(options.rangePeer ? { multiHolder: true, zeroBudgetPeerRace: true, sustainablePeerWait: true, latePeerRace: options.latePeerRace ?? true,
+      maxPeerWaitMs: options.maxPeerWaitMs ?? 2500, lateWindowMs: 4000 } : {}),
+    ...(options.maxRaces ? { maxConcurrentRaces: options.maxRaces } : {}),
+    ...(options.gated ? { ticket: 'fixture-owner', admit: () => state.admit } : {}),
     maxHeldBytes: options.maxHeldBytes ?? 64 * 1024 * 1024, maxHeldSegments: options.maxHeldSegments ?? 12,
     ...(options.allowance === undefined ? {} : { maxUploadBytesPerSession: options.allowance }) });
   const hls = { config: { loader: Loader, progressive: false }, media, levels: [{ details: { live: true, fragments } }] };
   swarm.attach(hls);
   t.after(async () => { for (const loader of clients) loader.destroy(); swarm.stop(); await relay.close(); });
-  if (coreWasm) await until(() => swarm.metrics().core?.state === 'ready');
+  if (fixtureCore) await until(() => swarm.metrics().core?.state === 'ready');
   const load = (sn, existing, hooks = {}) => {
     const loader = existing ?? new hls.config.fLoader(hls.config), context = { url: fragments[sn].url, frag: fragments[sn], responseType: 'arraybuffer',
       type: LoaderContextType.MEDIA_FRAGMENT, headers: {}, part: null, rangeStart: 0, rangeEnd: 0 };
@@ -108,18 +117,33 @@ async function fixture(t, options = {}) {
     const peer = new RelaySwarmSession({ pool, swarmId }); peer.start();
     t.after(() => { peer.close(); pool.close(); });
     await until(() => swarm.metrics().pubkey);
-    peer.sendSignal(swarm.metrics().pubkey, { type: 'offer', transport: 'webrtc', requestId: 'warm-upload-fixture', payload: { sdp: 'fixture-sdp' } });
+    peer.sendSignal(swarm.metrics().pubkey, { type: 'offer', transport: 'webrtc', requestId: 'warm-upload-fixture', payload: { sdp: 'fixture-sdp', ...(options.gated ? { ticket: 'fixture-peer' } : {}) } });
     await until(() => connections.length && swarm.metrics().peers.offersAccepted);
     const sent = [];
     class Channel extends EventTarget {
       readyState = 'open'; bufferedAmount = 0;
-      send(data) { sent.push(typeof data === 'string' ? JSON.parse(data) : new Uint8Array(data.buffer ?? data, data.byteOffset ?? 0, data.byteLength).slice()); }
+      send(data) {
+        const frame = typeof data === 'string' ? JSON.parse(data) : null;
+        sent.push(frame ?? new Uint8Array(data.buffer ?? data, data.byteOffset ?? 0, data.byteLength).slice());
+        if (options.rangePeer && !options.silentPeer && frame?.t === 'want') queueMicrotask(() => {
+          if (this.readyState !== 'open') return;
+          const size = commitmentPieceSize(bytes.length), from = frame.p ? frame.p[0] * size : 0,
+            to = frame.p ? Math.min(bytes.length, frame.p[1] * size) : bytes.length, body = bytes.slice(from, to);
+          this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ t: 'meta', id: frame.id, size: body.length, ...(frame.p ? { p: frame.p } : {}) }) }));
+          this.dispatchEvent(new MessageEvent('message', { data: body.buffer }));
+          this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ t: 'eof', id: frame.id }) }));
+        });
+      }
       close() { this.readyState = 'closed'; this.dispatchEvent(new Event('close')); }
     }
     const channel = new Channel(), event = new Event('datachannel'); event.channel = channel;
     connections[0].dispatchEvent(event);
     await until(() => swarm.metrics().peers.connected === 1);
-    return { sent, want(sn) { channel.dispatchEvent(new MessageEvent('message', {
+    if (options.rangePeer) {
+      peer.announcePresence({ role: 'viewer', open: true, transports: [{ type: 'webrtc', publicKey: peer.pubkey, obj: 2 }], ...(options.gated ? { ticket: 'fixture-peer' } : {}) });
+      await until(() => swarm.metrics().peers.openPeersKnown === 1);
+    }
+    return { sent, channel, have(sn) { channel.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ t: 'have', keys: [sha(`${swarmId}\n/media/s${sn}.m4s`)] }) })); }, want(sn) { channel.dispatchEvent(new MessageEvent('message', {
       data: JSON.stringify({ t: 'want', id: sn + 1, k: sha(`${swarmId}\n/media/s${sn}.m4s`) }),
     })); } };
   };
@@ -140,6 +164,124 @@ test('warm ahead reuses one verified HTTP object locally without duplicate netwo
   assert(after.bytes.held >= f.bytes.length, 'verified cache also remains in the peer-serving held map');
   assert(after.warmAhead.cacheBytes <= after.bytes.held, 'warm cache is a subset of held bytes');
   assert(f.requests.every(row => row.context.type === LoaderContextType.MEDIA_FRAGMENT && row.context.headers), 'speculation preserves the real fragment-loader context kind');
+});
+
+test('latePeerRace joins a newly accepted exact-HAVE peer after genuine promotion and wins the same HTTP owner', async t => {
+  const f = await fixture(t, { held: [1], rangePeer: true });
+  await f.load(0).result;
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const original = f.requests.find(row => row.context.frag.sn === 1), demand = f.load(1);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  const peer = await f.addPeer(); peer.have(1);
+  await until(() => f.swarm.metrics().latePeerRace?.won === 1);
+  assert.deepEqual(await demand.result, f.bytes);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1, 'late adoption never creates another source GET');
+  assert.equal(original.aborted, true); assert.equal(original.completed, false);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length);
+  assert.deepEqual(demand.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
+  assert.equal(peer.sent.filter(frame => frame?.t === 'want').length, 1);
+});
+
+test('latePeerRace cannot arm speculative work and an unrelated HAVE cannot consume its one opportunity', async t => {
+  const f = await fixture(t, { held: [1], rangePeer: true, maxRaces: 1 });
+  await f.load(0).result; await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const peer = await f.addPeer(); peer.have(1); await sleep(10);
+  assert.equal(f.swarm.metrics().latePeerRace.armed, 0);
+  assert.equal(peer.sent.filter(frame => frame?.t === 'want').length, 0);
+  peer.have(9);
+  const demand = f.load(1); await sleep(10);
+  assert.equal(f.swarm.metrics().latePeerRace.armed, 0);
+  peer.have(1); await until(() => f.swarm.metrics().latePeerRace.won === 1);
+  assert.deepEqual(await demand.result, f.bytes);
+  assert.equal(f.swarm.metrics().latePeerRace.armed, 1);
+  assert(f.swarm.metrics().latePeerRace.pending <= 1);
+});
+
+test('latePeerRace remains disabled by default while the original HTTP keeps its completion', async t => {
+  const f = await fixture(t, { held: [1], rangePeer: true, latePeerRace: false });
+  await f.load(0).result; await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const demand = f.load(1), peer = await f.addPeer(); peer.have(1); await sleep(10);
+  assert.equal(f.swarm.metrics().latePeerRace.enabled, false); assert.equal(f.swarm.metrics().latePeerRace.armed, 0);
+  f.requests.find(row => row.context.frag.sn === 1).finish();
+  assert.deepEqual(await demand.result, f.bytes);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  assert.equal(peer.sent.filter(frame => frame?.t === 'want').length, 0);
+});
+
+for (const refusal of ['refuse', 'expired', 'admit']) test(`latePeerRace checks current ${refusal} authority before requesting bytes`, async t => {
+  const f = await fixture(t, { held: [1], rangePeer: true, gated: refusal === 'admit' });
+  await f.load(0).result; await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const demand = f.load(1), peer = await f.addPeer();
+  f.state[refusal] = refusal === 'admit' ? false : true;
+  peer.have(1); await until(() => f.swarm.metrics().latePeerRace.refused === 1);
+  assert.equal(peer.sent.filter(frame => frame?.t === 'want').length, 0);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  const original = f.requests.find(row => row.context.frag.sn === 1);
+  assert.equal(original.aborted, false);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+  f.state[refusal] = refusal === 'admit' ? true : false;
+  original.finish(); assert.deepEqual(await demand.result, f.bytes);
+  assert.deepEqual(demand.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
+});
+
+test('latePeerRace expires at the earliest genuine entry even when the child HTTP starts later', async t => {
+  let clock = 0, release, blocked = false;
+  t.mock.method(performance, 'now', () => clock);
+  const gate = new Promise(resolve => { release = resolve; });
+  const f = await fixture(t, { held: [1], rangePeer: true, beforeCommitment: ctx => {
+    if (ctx.frag.sn === 1 && !blocked) { blocked = true; return gate; }
+  } });
+  await f.load(0).result; await until(() => blocked);
+  const demand = f.load(1);
+  clock = 3000; release(); await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const entered = f.swarm.metrics().latePeerRace.records.find(row => row.sequence === 1 && row.outcome === 'entered');
+  assert.equal(entered.genuineAtMs, 0); assert.equal(entered.windowEndAtMs, 4000);
+  clock = 4500;
+  const peer = await f.addPeer(); peer.have(1); await until(() => f.swarm.metrics().latePeerRace.expired === 1);
+  assert.equal(f.swarm.metrics().latePeerRace.armed, 0); assert.equal(peer.sent.filter(frame => frame?.t === 'want').length, 0);
+  demand.loader.abort(); assert.equal(await demand.result, null);
+  assert.equal(demand.calls.abort, 1); assert.equal(f.swarm.metrics().latePeerRace.pending, 0);
+});
+
+test('latePeerRace keeps the original parent HTTP deadline instead of granting a new four seconds', async t => {
+  let clock = 0; t.mock.method(performance, 'now', () => clock);
+  const f = await fixture(t, { held: [1], rangePeer: true, parentDeadlineMs: 1000 });
+  await f.load(0).result; await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  clock = 500; const demand = f.load(1);
+  const entered = f.swarm.metrics().latePeerRace.records.find(row => row.sequence === 1 && row.outcome === 'entered');
+  assert.equal(entered.genuineAtMs, 500); assert.equal(entered.windowEndAtMs, 1000);
+  demand.loader.abort(); assert.equal(await demand.result, null);
+  assert.equal(f.swarm.metrics().latePeerRace.pending, 0);
+});
+
+for (const ending of ['abort', 'pause', 'scope', 'origin']) test(`latePeerRace ${ending} retires waiting work without a stale callback`, async t => {
+  const f = await fixture(t, { held: [1], rangePeer: true });
+  await f.load(0).result; await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const demand = f.load(1), original = f.requests.find(row => row.context.frag.sn === 1);
+  if (ending === 'abort') { demand.loader.abort(); assert.equal(await demand.result, null); }
+  else if (ending === 'pause') { f.media.paused = true; f.media.dispatchEvent(new Event('pause')); }
+  else if (ending === 'scope') f.fragments[1].cc++;
+  else { original.finish(); assert.deepEqual(await demand.result, f.bytes); }
+  const peer = await f.addPeer(); peer.have(1); await sleep(10);
+  assert.equal(f.swarm.metrics().latePeerRace.armed, 0);
+  assert.equal(peer.sent.filter(frame => frame?.t === 'want').length, 0);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  if (ending === 'pause' || ending === 'scope') demand.loader.abort();
+  assert.equal(f.swarm.metrics().latePeerRace.pending, 0);
+  assert(demand.calls.success + demand.calls.abort <= 1);
+});
+
+test('latePeerRace never renews an already-created cached peer plan after its timeout', async t => {
+  const f = await fixture(t, { held: [1], rangePeer: true, silentPeer: true, maxPeerWaitMs: 100 });
+  const peer = await f.addPeer(); peer.have(1);
+  await f.load(0).result; await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const demand = f.load(1);
+  await until(() => peer.sent.some(frame => frame?.t === 'want'));
+  await sleep(150); peer.have(1); await sleep(10);
+  assert.equal(f.swarm.metrics().latePeerRace.armed, 0);
+  assert.equal(peer.sent.filter(frame => frame?.t === 'want').length, 1);
+  f.requests.find(row => row.context.frag.sn === 1).finish(); assert.deepEqual(await demand.result, f.bytes);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
 });
 
 test('whole-fragment contexts normalise real zero ranges while genuine byte ranges stay outside warm reuse', async t => {
