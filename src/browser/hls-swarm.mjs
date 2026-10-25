@@ -633,6 +633,9 @@ class HlsSwarm {
               const start = media.buffered.start(i), end = media.buffered.end(i);
               if (Number.isFinite(time) && Number.isFinite(start) && Number.isFinite(end) && start <= time && time < end) return;
             }
+            // Initial shared-clock alignment can enter the next fragment before
+            // it is appended. Keep that exact already-tracked work, too.
+            if (this.warmAhead?.contains(time)) return;
           } catch {}
           cancelWarm();
         }, { signal: this.lifecycle.signal });

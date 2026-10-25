@@ -195,6 +195,49 @@ test('an in-buffer seek retains wanted demand and speculation while an outside s
   assert.equal(f.swarm.metrics().warmAhead.reservationBytes, 0);
 });
 
+for (const state of ['verified', 'in-flight']) test(`a forward seek into an exact ${state} warm fragment retains and reuses its original object`, async t => {
+  const f = await fixture(t, { held: [1] });
+  f.media.buffered = { length: 1, start: () => 0, end: () => 2 };
+  await f.load(0).result;
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const original = f.requests.find(row => row.context.frag.sn === 1);
+  if (state === 'verified') { original.finish(); await until(() => f.swarm.metrics().warmAhead.verified >= 2); }
+  assert.equal(f.fragments[1].start, 2); assert.equal(f.fragments[1].duration, 2);
+  f.media.currentTime = 2.25; f.media.dispatchEvent(new Event('seeking'));
+  assert.equal(original.aborted, false, 'a fresh initial alignment must retain the exact next object');
+  const retained = f.swarm.metrics().warmAhead;
+  if (state === 'verified') assert(retained.cacheBytes >= f.bytes.length);
+  else assert.equal(retained.reservationBytes, f.bytes.length);
+  // The target remains unbuffered. Ordinary source recovery must still race
+  // current authorisation; the retained object can win without another body.
+  const demand = f.load(1);
+  if (state === 'in-flight') original.finish();
+  assert.deepEqual(await demand.result, f.bytes);
+  const requests = f.requests.filter(row => row.context.frag.sn === 1);
+  assert.equal(requests.length, 2, 'the unbuffered recovery arm is visible');
+  assert.equal(requests.filter(row => row.completed).length, 1, 'only the retained original body was downloaded');
+  assert.equal(requests[1].aborted, true);
+  assert.equal(f.swarm.metrics().warmAhead.localReuseBytes, f.bytes.length);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+});
+
+for (const invalid of ['outside', 'end-boundary', 'out-of-scope', 'invalid-start', 'invalid-duration', 'invalid-end', 'invalid-target'])
+  test(`a seek with ${invalid} warm metadata still clears unrelated speculative work`, async t => {
+    const f = await fixture(t, { held: [1, 2] });
+    f.media.buffered = { length: 1, start: () => 0, end: () => 2 };
+    if (invalid === 'out-of-scope') f.fragments[1].level = 1;
+    if (invalid === 'invalid-start') f.fragments[1].start = NaN;
+    if (invalid === 'invalid-duration') f.fragments[1].duration = 0;
+    if (invalid === 'invalid-end') { f.fragments[1].start = Number.MAX_VALUE; f.fragments[1].duration = Number.MAX_VALUE; }
+    await f.load(0).result;
+    await until(() => f.requests.some(row => row.context.frag.sn > 0));
+    f.media.currentTime = invalid === 'outside' ? 25 : invalid === 'end-boundary' ? 4 : invalid === 'invalid-target' ? NaN : 2.25;
+    f.media.dispatchEvent(new Event('seeking'));
+    assert(f.requests.filter(row => row.context.frag.sn > 0).every(row => row.aborted));
+    const m = f.swarm.metrics().warmAhead;
+    assert.equal(m.cacheBytes, 0); assert.equal(m.reservationBytes, 0); assert.equal(m.trackedObjects, 0);
+  });
+
 test('a promoted request retains its original parent deadline and timeout result', async t => {
   const f = await fixture(t, { held: [1, 2], parentDeadlineMs: 12_000 });
   t.mock.timers.enable({ apis: ['setTimeout'] });

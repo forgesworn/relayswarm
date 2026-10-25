@@ -2086,15 +2086,19 @@ separate. Speculation expires after eight seconds. Promotion retires that
 speculation-only timer; the already-running parent's timeout still runs from
 its original start. A parent error or timeout settles the genuine demand
 through its original callback, without an implicit fresh request or reset
-deadline. Pause, out-of-buffer seek, ticket change,
+deadline. Pause, unrelated seek, ticket change,
 rendition change and stop clear speculative state; unrelated work yields to a
 new demanded position. Gap, ranged, encrypted and alternate-audio fragments
 retain the ordinary loader path.
 
-Seeks inside the existing appended buffer retain current and future work.
-This includes shared-clock alignment: it must not throw away the very next
-objects still needed after a buffered correction. Normal hls.js abort handling
-and the next actual demand continue to prune unrelated contexts.
+Seeks inside the existing appended buffer retain current and future work,
+including shared-clock alignment.
+An unbuffered target also retains already-tracked work when it falls inside
+an exact warm fragment's finite media interval in the active rendition scope.
+This covers initial alignment into a next object before its append; it creates
+no new request. Targets outside both the playable buffer and tracked warm
+intervals still clear speculative state. Normal hls.js abort handling and the
+next actual demand continue to prune unrelated contexts.
 
 Every demand reuse checks the host's current commitment/delegation/revocation
 view. Only actual buffer beyond the normal origin recovery reserve permits
@@ -2689,8 +2693,18 @@ The subsequent M4 comparison also remained RED. Its trace identified an
 in-buffer clock alignment cancelling needed loads, and promoted current
 requests still using the eight-second speculative cap. Source regressions
 now retain useful work for buffered seeks and preserve the original parent's
-deadline/error callback on promotion. This remains source evidence, pending
-the same browser continuity and contribution gate.
+deadline/error callback on promotion. A subsequent 60.269-second M4 run retained
+both peer-assisted players with no dropped frames, but remained strictly RED:
+buffered shared-clock seeks produced one 13 ms and one 39 ms wait. Accepted
+peer shares were 14.5% and 16.9%. Partial-inclusive HTTP bodies were 5.61% and
+7.27% below accepted media bytes; this is not a matched origin-only comparison,
+wire savings or production/device acceptance. The trace showed initial
+alignment using a manifest-time target about two seconds behind the room clock.
+The SDK now also retains an exact already-tracked, same-scope warm interval
+when a seek enters it before append. Real parsed-fragment regressions cover
+verified/in-flight reuse and invalid or unrelated seek cancellation. This
+paired SDK/site startup-alignment candidate remains unmeasured against the
+same browser continuity and contribution gate.
 
 Cold-cache physical diagnostics exposed two distinct timing errors: a
 holder's completion rate already included startup, yet the piece planner

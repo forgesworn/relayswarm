@@ -29,8 +29,18 @@ The subsequent M4 comparison also remained RED. Its trace identified an
 in-buffer clock alignment cancelling needed loads, and promoted current
 requests still using the eight-second speculative cap. Source regressions
 now retain useful work for buffered seeks and preserve the original parent's
-deadline/error callback on promotion. This remains source evidence, pending
-the same browser continuity and contribution gate.
+deadline/error callback on promotion. A subsequent 60.269-second M4 run retained
+both peer-assisted players with no dropped frames, but remained strictly RED:
+buffered shared-clock seeks produced one 13 ms and one 39 ms wait. Accepted
+peer shares were 14.5% and 16.9%. Partial-inclusive HTTP bodies were 5.61% and
+7.27% below accepted media bytes; this is not a matched origin-only comparison,
+wire savings or production/device acceptance. The trace showed initial
+alignment using a manifest-time target about two seconds behind the room clock.
+The SDK now also retains an exact already-tracked, same-scope warm interval
+when a seek enters it before append. Real parsed-fragment regressions cover
+verified/in-flight reuse and invalid or unrelated seek cancellation. This
+paired SDK/site startup-alignment candidate remains unmeasured against the
+same browser continuity and contribution gate.
 
 Cold-cache physical diagnostics exposed two distinct timing errors: a
 holder's completion rate already included startup, yet the piece planner

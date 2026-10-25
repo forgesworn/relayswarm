@@ -91,7 +91,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         if (data.byteLength !== permit.size) { counters.rejected++; return null; }
         row.reserved = 0;
         if (onVerified?.(permit, data, item.context) === false) return null;
-        const result = { ...response, data, permit, peerBytes: warm.peerBytes, accept: warm.accept };
+        const result = { ...response, context: item.context, scope: item.scope, data, permit, peerBytes: warm.peerBytes, accept: warm.accept };
         cache.set(item.key, result); counters.cacheBytes += data.byteLength; counters.verified++;
         counters.verifiedBytes += data.byteLength; counters.verifiedPeerBytes += warm.peerBytes;
         return result;
@@ -227,7 +227,17 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     getCacheAge() { return this.inner.getCacheAge?.() ?? null; }
     getResponseHeader(name) { return this.inner.getResponseHeader?.(name) ?? null; }
   };
-  return { Loader: Wrapped, clear, pinned: key => pins.has(key), release(key) { for (const [id, row] of cache) if (row.permit.key === key) drop(id); },
+  return { Loader: Wrapped, clear,
+    contains(time) {
+      if (closed || !allowed() || !Number.isFinite(time)) return false;
+      for (const row of [...jobs.values(), ...cache.values()]) {
+        const frag = row.context?.frag, start = frag?.start, duration = frag?.duration, end = start + duration;
+        if (row.scope === scope && Number.isFinite(start) && start >= 0 && Number.isFinite(duration) && duration > 0 &&
+            Number.isFinite(end) && start <= time && time < end) return true;
+      }
+      return false;
+    },
+    pinned: key => pins.has(key), release(key) { for (const [id, row] of cache) if (row.permit.key === key) drop(id); },
     stop() { closed = true; clear(); }, snapshot: () => ({ ...counters,
       reservationBytes: reserved(), active: Number(Boolean(active)), promoted: promoted.size, trackedObjects: tracked(),
       queued: queued.length, cacheObjects: cache.size,

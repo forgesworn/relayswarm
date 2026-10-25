@@ -123,15 +123,19 @@ separate. Speculation expires after eight seconds. Promotion retires that
 speculation-only timer; the already-running parent's timeout still runs from
 its original start. A parent error or timeout settles the genuine demand
 through its original callback, without an implicit fresh request or reset
-deadline. Pause, out-of-buffer seek, ticket change,
+deadline. Pause, unrelated seek, ticket change,
 rendition change and stop clear speculative state; unrelated work yields to a
 new demanded position. Gap, ranged, encrypted and alternate-audio fragments
 retain the ordinary loader path.
 
-Seeks inside the existing appended buffer retain current and future work.
-This includes shared-clock alignment: it must not throw away the very next
-objects still needed after a buffered correction. Normal hls.js abort handling
-and the next actual demand continue to prune unrelated contexts.
+Seeks inside the existing appended buffer retain current and future work,
+including shared-clock alignment.
+An unbuffered target also retains already-tracked work when it falls inside
+an exact warm fragment's finite media interval in the active rendition scope.
+This covers initial alignment into a next object before its append; it creates
+no new request. Targets outside both the playable buffer and tracked warm
+intervals still clear speculative state. Normal hls.js abort handling and the
+next actual demand continue to prune unrelated contexts.
 
 Every demand reuse checks the host's current commitment/delegation/revocation
 view. Only actual buffer beyond the normal origin recovery reserve permits
