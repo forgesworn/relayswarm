@@ -73,13 +73,19 @@ async function fixture(t, options = {}) {
   swarm.attach(hls);
   t.after(async () => { swarm.stop(); await relay.close(); });
   if (coreWasm) await until(() => swarm.metrics().core?.state === 'ready');
-  const load = (sn, existing) => {
+  const load = (sn, existing, hooks = {}) => {
     const loader = existing ?? new hls.config.fLoader(hls.config), context = { url: fragments[sn].url, frag: fragments[sn], responseType: 'arraybuffer',
       type: LoaderContextType.MEDIA_FRAGMENT, headers: {}, part: null, rangeStart: 0, rangeEnd: 0 };
     let done, fail;
+    const calls = { success: 0, abort: 0, error: 0, timeout: 0 };
+    const terminals = [];
     const result = new Promise((resolve, reject) => { done = resolve; fail = reject; });
-    loader.load(context, {}, { onSuccess: response => done(new Uint8Array(response.data)), onError: fail, onTimeout: fail, onAbort: () => done(null) });
-    return { loader, result };
+    loader.load(context, {}, { onSuccess: (response, _stats, delivered) => {
+      calls.success++; terminals.push({ type: 'success', sn: delivered.frag.sn }); hooks.onSuccess?.(loader); done(new Uint8Array(response.data));
+    },
+      onError: error => { calls.error++; fail(error); }, onTimeout: error => { calls.timeout++; fail(error); },
+      onAbort: (stats, aborted) => { calls.abort++; terminals.push({ type: 'abort', sn: aborted.frag.sn, aborted: stats.aborted }); done(null); } });
+    return { loader, result, calls, terminals };
   };
   const addPeer = async () => {
     const pool = new RelayPool([relay.url]); await pool.connect();
@@ -164,6 +170,9 @@ test('a stale completion cannot cancel a newer promoted demand on the same loade
   const first = f.load(1);
   await until(() => f.requests.some(row => row.context.frag.sn === 2));
   const second = f.load(2, first.loader);
+  assert.equal(await first.result, null);
+  assert.equal(first.calls.abort, 1);
+  assert.deepEqual(first.terminals, [{ type: 'abort', sn: 1, aborted: true }]);
   await new Promise(setImmediate);
   const row = f.requests.find(row => row.context.frag.sn === 2);
   assert.equal(row.aborted, false, 'old generation must not release the newer pending record');
@@ -181,11 +190,62 @@ test('pause cancels promoted demand and the speculative successor, releasing the
   const demand = f.load(1);
   await until(() => f.requests.some(row => row.context.frag.sn === 2));
   demand.loader.abort();
+  assert.equal(await demand.result, null);
+  assert.equal(demand.calls.abort, 1);
   f.media.paused = true; f.media.dispatchEvent(new Event('pause'));
   assert(f.requests.filter(row => [1, 2].includes(row.context.frag.sn)).every(row => row.aborted));
   const m = f.swarm.metrics();
   assert.equal(m.warmAhead.promoted, 0); assert.equal(m.warmAhead.active, 0);
   assert.equal(m.warmAhead.reservationBytes, 0); assert.equal(m.warmAhead.trackedObjects, 0);
+});
+
+test('an explicit abort settles a coalesced demand once and fences late data', { timeout: 1000 }, async t => {
+  const f = await fixture(t, { held: [1] });
+  await f.load(0).result;
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const demand = f.load(1);
+  demand.loader.abort();
+  assert.equal(await demand.result, null);
+  assert.equal(demand.calls.abort, 1);
+  demand.loader.abort(); demand.loader.destroy();
+  f.requests.find(row => row.context.frag.sn === 1).finish();
+  await new Promise(setImmediate);
+  assert.deepEqual(demand.calls, { success: 0, abort: 1, error: 0, timeout: 0 });
+});
+
+test('an explicit abort settles cached authority revalidation without waiting for its provider', async t => {
+  const f = await fixture(t);
+  await f.load(0).result;
+  await until(() => f.swarm.metrics().warmAhead.verified >= 2);
+  f.state.stall = true;
+  let demand;
+  f.state.onBlock = () => demand.loader.abort();
+  demand = f.load(1);
+  assert.equal(await demand.result, null);
+  assert.deepEqual(demand.calls, { success: 0, abort: 1, error: 0, timeout: 0 });
+  demand.loader.destroy(); demand.loader.abort();
+  assert.equal(demand.calls.abort, 1);
+});
+
+test('ordinary origin abort and successful normal/cache destruction retain one terminal callback', async t => {
+  const pending = await fixture(t, { held: [0] });
+  const demand = pending.load(0);
+  demand.loader.abort();
+  assert.equal(await demand.result, null);
+  demand.loader.destroy(); demand.loader.abort();
+  assert.deepEqual(demand.calls, { success: 0, abort: 1, error: 0, timeout: 0 });
+
+  const f = await fixture(t);
+  const onSuccess = loader => { loader.destroy(); loader.abort(); };
+  const normal = f.load(0, undefined, { onSuccess });
+  assert.deepEqual(await normal.result, f.bytes);
+  normal.loader.destroy(); normal.loader.abort();
+  assert.deepEqual(normal.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
+  await until(() => f.swarm.metrics().warmAhead.verified >= 2);
+  const cached = f.load(1, undefined, { onSuccess });
+  assert.deepEqual(await cached.result, f.bytes);
+  cached.loader.destroy(); cached.loader.abort();
+  assert.deepEqual(cached.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
 });
 
 test('wrong committed content is rejected and never cached or advertised', async t => {

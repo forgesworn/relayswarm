@@ -111,6 +111,11 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     constructor(cfg) { this.config = cfg; this.inner = new Loader(cfg); this.stats = this.inner.stats; this.context = null; this.token = 0; }
     load(context, policy, callbacks) {
       this.abort(); this.context = context;
+      const terminal = { context, callbacks: { ...callbacks }, settled: false };
+      this.pendingTerminal = terminal;
+      callbacks = { ...callbacks };
+      for (const name of ['onSuccess', 'onError', 'onTimeout', 'onAbort'])
+        callbacks[name] = (...args) => this.complete(terminal, name, args);
       const token = ++this.token, own = noteDemand(context, this.config, policy), cached = own && cache.get(own.key);
       const pending = !cached && own && jobs.get(own.key), existing = cached ?? pending?.promise;
       if (existing) {
@@ -187,8 +192,23 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       const row = this.warmPending; this.warmPending = null;
       if (row) { row.waiters.delete(this); if (promoted.has(row) && !row.waiters.size) cancelJob(row); }
     }
-    abort() { this.token++; this.originStarted = false; this.cancelReuse?.(); this.releasePending(); demand.delete(this); this.inner.abort(); }
-    destroy() { this.token++; this.cancelReuse?.(); this.releasePending(); demand.delete(this); this.inner.destroy(); }
+    complete(terminal, name, args) {
+      if (!terminal || terminal.settled || this.pendingTerminal !== terminal) return;
+      // hls.js resets/destroys the loader synchronously from onSuccess.
+      // Retire ownership first so that cleanup cannot invent an abort.
+      terminal.settled = true; this.pendingTerminal = null;
+      terminal.callbacks[name]?.(...args);
+    }
+    cancel(destroy) {
+      const terminal = this.pendingTerminal;
+      this.token++; this.originStarted = false; this.cancelReuse?.(); this.releasePending(); demand.delete(this);
+      if (terminal) this.stats.aborted = true;
+      if (destroy && terminal) { terminal.settled = true; this.pendingTerminal = null; }
+      try { if (destroy) this.inner.destroy(); else this.inner.abort(); }
+      finally { if (!destroy) this.complete(terminal, 'onAbort', [this.stats, terminal?.context, null]); }
+    }
+    abort() { this.cancel(false); }
+    destroy() { this.cancel(true); }
     getCacheAge() { return this.inner.getCacheAge?.() ?? null; }
     getResponseHeader(name) { return this.inner.getResponseHeader?.(name) ?? null; }
   };
