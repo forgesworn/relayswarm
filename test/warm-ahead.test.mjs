@@ -84,6 +84,7 @@ async function fixture(t, options = {}) {
   const swarm = createHlsSwarm({ swarmId, mode: 'peer-first', serve: true, warmAhead: options.enabled ?? true,
     streamEvent, getCommitment, RTCPeerConnectionImpl: PC, relays: [relay.url], ...(fixtureCore ? { coreWasm: fixtureCore } : {}),
     ...(options.rangePeer ? { multiHolder: true, zeroBudgetPeerRace: true, sustainablePeerWait: true, latePeerRace: options.latePeerRace ?? true,
+      lateHaveRace: options.lateHaveRace ?? false,
       maxPeerWaitMs: options.maxPeerWaitMs ?? 2500, lateWindowMs: 4000 } : {}),
     ...(options.maxRaces ? { maxConcurrentRaces: options.maxRaces } : {}),
     ...(options.gated ? { ticket: 'fixture-owner', admit: () => state.admit } : {}),
@@ -133,7 +134,8 @@ async function fixture(t, options = {}) {
           const size = commitmentPieceSize(bytes.length), from = frame.p ? frame.p[0] * size : 0,
             to = frame.p ? Math.min(bytes.length, frame.p[1] * size) : bytes.length, body = bytes.slice(from, to);
           this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ t: 'meta', id: frame.id, size: body.length, ...(frame.p ? { p: frame.p } : {}) }) }));
-          this.dispatchEvent(new MessageEvent('message', { data: body.buffer }));
+          for (let at = 0; at < body.length; at += 16 * 1024)
+            this.dispatchEvent(new MessageEvent('message', { data: body.slice(at, at + 16 * 1024).buffer }));
           this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ t: 'eof', id: frame.id }) }));
         });
       }
@@ -1060,4 +1062,79 @@ test('startup buffer real SDK peer notification can stop only after matching byt
   assert.ok(warm.consumedPeerBytes <= warm.verifiedPeerBytes);
   assert.deepEqual(first.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
   assert.equal(f.swarm.metrics().startupBuffer.released, 1);
+});
+
+test('startup buffer required future can adopt late exact HAVE without pretending Hls already consumed it', async t => {
+  const f = await fixture(t, { enabled: false, startupTarget: () => 1.3, held: [1], rangePeer: true });
+  const first = f.load(0);
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const original = f.requests.find(row => row.context.frag.sn === 1);
+  const dependency = original.context[STARTUP_MARKER]?.startupDependency?.();
+  assert.equal(first.calls.success, 0); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  const peer = await f.addPeer(); peer.have(1);
+  await until(() => f.swarm.metrics().startupBuffer.state === 'ready');
+  assert.ok(dependency, 'required future had the active first terminal as its dependency');
+  assert.deepEqual(await first.result, f.bytes);
+  const m = f.swarm.metrics(), entered = m.latePeerRace.records.find(row => row.sequence === 1 && row.outcome === 'entered');
+  assert.equal(entered.reason, 'startup-buffer-dependency');
+  assert.equal(entered.genuineAtMs, null, 'a required future is not yet a separate Hls consumer');
+  assert.ok(entered.windowEndAtMs <= entered.startupDeadlineAtMs);
+  assert.ok(entered.windowEndAtMs <= entered.startupDependencyAtMs + 4000);
+  assert.equal(original.aborted, true); assert.equal(original.completed, false);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+  assert.equal(m.warmAhead.verifiedPeerBytes, f.bytes.length);
+  assert.equal(m.warmAhead.consumedPeerBytes, 0); assert.equal(m.bytes.peerFirst, 0);
+  assert.equal(dependency.signal.aborted, true, 'first-terminal release retires the dependency immediately');
+  assert.equal(original.context[STARTUP_MARKER].startupDependency(), null);
+  assert.deepEqual(await f.load(1).result, f.bytes);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length, 'credit begins only at the real future callback');
+});
+
+test('startup buffer fast verified held first peer establishes transport usefulness before consumed credit', async t => {
+  const f = await fixture(t, { enabled: false, startupTarget: () => 1.3, held: [0, 1], rangePeer: true, lateHaveRace: true, size: 128 * 1024 });
+  const peer = await f.addPeer(); peer.have(0);
+  const first = f.load(0);
+  await until(() => f.swarm.metrics().warmAhead.verifiedPeerBytes === f.bytes.length);
+  assert.equal(first.calls.success, 0); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  assert.equal(f.swarm.metrics().warmAhead.consumedPeerBytes, 0);
+  peer.have(1);
+  await until(() => f.swarm.metrics().startupBuffer.state === 'ready').catch(error => {
+    const m = f.swarm.metrics();
+    throw new Error(error.message + JSON.stringify({ startup: m.startupBuffer, peerNoFit: m.segments.peerNoFit,
+      workerTransfers: m.core.multiHolder.transfers, verifiedPeerBytes: m.warmAhead.verifiedPeerBytes, consumedPeerBytes: m.bytes.peerFirst }));
+  });
+  assert.deepEqual(await first.result, f.bytes);
+  const m = f.swarm.metrics();
+  assert.equal(m.core.multiHolder.transfers, 2);
+  assert.equal(m.segments.peerNoFit, 0);
+  assert.equal(m.warmAhead.verifiedPeerBytes, f.bytes.length * 2);
+  assert.equal(m.warmAhead.consumedPeerBytes, f.bytes.length);
+  assert.equal(m.bytes.peerFirst, f.bytes.length, 'held future remains unconsumed');
+  assert.ok(m.peerRequestDiagnostics.records.every(row => row.elapsedMs - row.firstByteMs < 300), 'short flows do not invent a rate');
+  assert.deepEqual(await f.load(1).result, f.bytes);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length * 2);
+});
+
+test('startup buffer future dependency cannot survive pause or changed parsed future identity', async t => {
+  for (const action of ['pause', 'parsed-change']) {
+    const f = await fixture(t, { enabled: false, startupTarget: () => 1.3, held: [1], rangePeer: true });
+    const first = f.load(0);
+    await until(() => f.requests.some(row => row.context.frag.sn === 1));
+    const original = f.requests.find(row => row.context.frag.sn === 1), mark = original.context[STARTUP_MARKER];
+    const dependency = mark.startupDependency(); assert.ok(dependency);
+    if (action === 'pause') { f.media.paused = true; f.media.dispatchEvent(new Event('pause')); }
+    else f.fragments[1].start += 1;
+    assert.equal(mark.startupDependency(), null, action);
+    const peer = await f.addPeer(); peer.have(1); await sleep(20);
+    assert.equal(f.swarm.metrics().latePeerRace.armed, 0, action);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0, action);
+    assert.equal(first.calls.success, 0, action);
+    if (action === 'parsed-change') {
+      original.finish();
+      await until(() => f.swarm.metrics().startupBuffer.state !== 'buffering');
+      assert.equal(first.calls.success, 0, 'a completed old future must not release against changed parsed geometry');
+    }
+    if (action === 'pause') assert.equal(dependency.signal.aborted, true);
+    first.loader.destroy();
+  }
 });

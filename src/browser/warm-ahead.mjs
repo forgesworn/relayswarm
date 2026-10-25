@@ -96,7 +96,14 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         row.reserved = permit.size;
         if (!reserve(reserved())) { row.reserved = 0; counters.rejected++; return null; }
         counters.highWaterBytes = Math.max(counters.highWaterBytes, counters.cacheBytes + reserved());
-        const warm = item.context[WARM_AHEAD] = { peerBytes: 0, genuine: () => row.genuine() };
+        const warm = item.context[WARM_AHEAD] = { peerBytes: 0, genuine: () => row.genuine(),
+          startupDependency: () => {
+            if (!startupCurrent() || !live(row) || !allowed() || !startupFutureCurrent(item)) return null;
+            try {
+              if (readStartupTarget() === null || !startupCurrent()) return null;
+              return { at: startup.entryAt, deadline: startup.deadline, signal: startup.controller.signal, context: item.context };
+            } catch { return null; }
+          } };
         loader = new Loader(cfg); counters.started++;
         const response = await new Promise(resolve => loader.load(item.context, policy, {
           onSuccess: (response, stats, _context, details) => resolve({ response, stats, details }),
@@ -153,6 +160,13 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     return true;
   };
   const startupError = reason => ({ code: 0, text: 'RelaySwarm startup buffer unavailable', startupBufferReason: reason });
+  const startupFutureCurrent = item => {
+    if (!startupCurrent() || latestDemand?.owner !== startup.terminal.id) return false;
+    try {
+      return next(startup.terminal.context).map(warmContext).filter(Boolean).filter(future => future.scope === scope)
+        .slice(0, 2).some(future => samePosition(future, item));
+    } catch { return false; }
+  };
   const endStartup = (state, reason, notify = true) => {
     if (!['idle', 'buffering'].includes(startup.state)) return;
     const owner = startup.owner, terminal = startup.terminal;
@@ -239,6 +253,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       if (resident.some(({ key, row, identity }) => cache.get(key) !== row ||
           !samePosition(warmContext(row.context), identity) || row.data.byteLength !== row.permit.size))
         return endStartup('failed', 'coverage-evicted');
+      if (resident.some(({ key, row }) => !startupFutureCurrent({ key, scope: row.scope, context: row.context })))
+        return endStartup('cancelled', 'context-changed');
       const final = coverage(fresh, covered.rows);
       if (final.end === null || (final.end - fresh) * 1000 < recovery) return;
       // Same pending play and same response/context/stats. Only now can the
@@ -292,7 +308,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     }
     if (startup.state !== 'idle') return true;
     const at = performance.now(), parent = policy?.loadPolicy?.maxLoadTimeMs ?? policy?.timeout;
-    Object.assign(startup, { state: 'buffering', owner, terminal, own, revision: generation, reserved: MAX_BYTES,
+    Object.assign(startup, { state: 'buffering', owner, terminal, own, revision: generation, reserved: MAX_BYTES, entryAt: at,
       identity: { key: own.key, scope: own.scope, context: { frag: { start: own.context.frag.start, duration: own.context.frag.duration } } },
       contextUrl: terminal.context.url, fragUrl: terminal.context.frag.url,
       controller: new AbortController(), deadline: at + Math.min(DEADLINE_MS, Number.isFinite(parent) && parent > 0 ? parent : DEADLINE_MS) });

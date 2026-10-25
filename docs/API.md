@@ -144,8 +144,8 @@ does not establish decoded playback, shared-clock accuracy or device acceptance.
 The separate unreleased `latePeerRace: true` option defaults to false and
 requires peer-first plus `zeroBudgetPeerRace`. When a whole main-fragment
 HTTP request began without any peer plan, its first peer arm may use a newly
-accepted framing-2 connection advertising that exact object. Speculation alone
-cannot arm it: a warm object must first have a genuine hls.js consumer. The
+accepted framing-2 connection advertising that exact object. Ordinary
+speculation cannot arm it: a warm object needs a genuine hls.js consumer. The
 window starts at that earliest genuine demand, including promotion before the
 inner loader is ready. An existing or expired peer plan is never renewed.
 
@@ -164,6 +164,22 @@ termination retire the watcher. `metrics().latePeerRace` exposes entered,
 armed, won, expired, retired and refused counts plus at most 64 numeric timing
 records. Waiting and arming create no peer credit. Existing load-entry
 `lateHaveRace` membership remains unchanged when this separate option is off.
+
+When startup buffering is explicitly enabled, its required parsed future
+fragments may instead carry a `startup-buffer-dependency` role while the real
+first HLS terminal remains owned and pending. This leaves `genuineAt` unset;
+the future object has not been consumed by HLS. Its existing HTTP-entry window,
+peer-arm limit, parent deadline and original first startup deadline all apply.
+The startup abort signal retires the role immediately on release or cancellation.
+Steady speculative work receives no such role, and accepted-byte counters still
+wait for the actual HLS callback.
+
+Verified peer reception updates physical link usefulness independently from
+player consumption. Fast short transfers keep an unknown rate below the
+unchanged 300 ms observation floor; no rate is invented. Discovery delivery,
+consumed bytes and external delivery notifications still require actual player
+acceptance. This avoids using deferred playback credit as a prerequisite for
+the next startup transfer.
 
 Future bytes need a current signed commitment and matching SHA-256 before
 entering the shared held cache. At most three warm references and 24 MiB of

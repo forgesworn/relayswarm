@@ -1416,6 +1416,7 @@ class HlsSwarm {
     this.latePeerRows.push({ id: owner.id, atMs: relative(now()), sequence: frag.sn, cc: frag.cc, level: frag.level,
       genuineAtMs: relative(owner.genuineAt), windowEndAtMs: relative(owner.windowEnd), armedAtMs: relative(owner.armedAt ?? null),
       deadlineAtMs: relative(owner.peerLimit ?? null), outcome, reason,
+      ...(owner.dependencyAt !== null ? { startupDependencyAtMs: relative(owner.dependencyAt), startupDeadlineAtMs: relative(owner.dependencyDeadline) } : {}),
       ...(holders ? { holders: holders.map(link => this.#holderLabel(link.pubkey)) } : {}) });
   }
 
@@ -1432,7 +1433,8 @@ class HlsSwarm {
     if (!identity || !this.#peerRaceCapacity()) return null;
     const warm = input.context[WARM_AHEAD], directAt = input.entryAt, media = this.hls?.media;
     const owner = { ...input, identity, id: this.latePeerNextId++, generation: this.latePeerGeneration,
-      streamId: this.options.streamEvent?.id, genuineAt: null, windowEnd: null, attempted: false, closed: false, key: null, timer: null };
+      streamId: this.options.streamEvent?.id, genuineAt: null, dependencyAt: null, dependencyDeadline: null,
+      windowEnd: null, attempted: false, closed: false, key: null, timer: null };
     const watching = new AbortController();
     const clearTimer = () => { clearTimeout(owner.timer); this.timers.delete(owner.timer); owner.timer = null; };
     owner.close = (reason, outcome = 'retired') => {
@@ -1442,13 +1444,19 @@ class HlsSwarm {
       this.latePeerOwners.delete(owner.id); this.cachedRaces.delete(owner.controller);
       owner.controller.abort(); this.#latePeerEvent(owner, outcome, reason);
     };
-    const genuine = () => warm ? warm.genuine?.() : { at: directAt, context: input.context };
+    const demand = () => {
+      const genuine = warm ? warm.genuine?.() : { at: directAt, context: input.context };
+      if (genuine) return { ...genuine, role: 'genuine' };
+      const dependency = warm?.startupDependency?.();
+      return dependency && Number.isFinite(dependency.at) && Number.isFinite(dependency.deadline) &&
+        dependency.signal?.aborted === false ? { ...dependency, role: 'startup-buffer-dependency' } : null;
+    };
     const eligible = (link, context) => this.links.get(link.pubkey) === link && this.#peerEntryAvailable(link, context) &&
       link.supportsRanges === true && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !this.banned.has(link.pubkey) && link.have.has(owner.key);
     const currentContext = () => {
-      const demand = genuine();
-      if (!demand || !Number.isFinite(demand.at) || warmContext(demand.context)?.key !== identity.key) return null;
-      return warm ? { ...demand.context, [WARM_AHEAD]: warm } : demand.context;
+      const current = demand();
+      if (!current || !Number.isFinite(current.at) || warmContext(current.context)?.key !== identity.key) return null;
+      return warm ? { ...current.context, [WARM_AHEAD]: warm } : current.context;
     };
     owner.valid = () => !owner.closed && input.current() && !this.stopped && owner.generation === this.latePeerGeneration &&
       owner.streamId === this.options.streamEvent?.id && currentContext() !== null && !media?.paused && !media?.ended &&
@@ -1458,15 +1466,22 @@ class HlsSwarm {
     owner.refresh = () => {
       if (owner.closed) return;
       if (!input.current() || this.stopped || owner.generation !== this.latePeerGeneration || owner.streamId !== this.options.streamEvent?.id) return owner.close('inactive');
-      const demand = genuine();
-      if (!demand) { if (owner.genuineAt !== null) owner.close('no-genuine-consumer'); return; }
+      const current = demand();
+      if (!current) { if (owner.windowEnd !== null) owner.close(owner.dependencyAt !== null ? 'startup-buffer-ended' : 'no-genuine-consumer'); return; }
       const context = currentContext();
       if (!context || media?.paused || media?.ended) return owner.close('context-or-playback');
-      if (owner.genuineAt === null) {
-        owner.genuineAt = demand.at;
-        owner.windowEnd = Math.min(input.parentDeadline, demand.at + Math.min(4000, this.options.lateWindowMs));
-        this.#latePeerEvent(owner, 'entered', 'genuine-demand');
+      if (owner.windowEnd === null) {
+        const dependency = current.role === 'startup-buffer-dependency';
+        owner.genuineAt = dependency ? null : current.at;
+        owner.dependencyAt = dependency ? directAt : null;
+        owner.dependencyDeadline = dependency ? current.deadline : null;
+        owner.windowEnd = Math.min(input.parentDeadline, dependency ? current.deadline : Infinity,
+          (dependency ? directAt : current.at) + Math.min(4000, this.options.lateWindowMs));
+        if (dependency) current.signal.addEventListener('abort', () => owner.close('startup-buffer-ended'), { once: true, signal: watching.signal });
+        this.#latePeerEvent(owner, 'entered', dependency ? 'startup-buffer-dependency' : 'genuine-demand');
         owner.timer = this.#after(Math.max(0, owner.windowEnd - now()), () => owner.close('window-expired', 'expired'));
+      } else if (current.role === 'genuine' && owner.genuineAt === null) {
+        owner.genuineAt = current.at; // Promotion never renews the existing dependency window.
       }
       if (now() >= owner.windowEnd) return owner.close('window-expired', 'expired');
       if (owner.attempted || !owner.key || !this.#rangesEnabled()) return;
@@ -1525,20 +1540,31 @@ class HlsSwarm {
     // Network reception is recorded once. Speculation is not a delivery to
     // hls.js until the genuine player later consumes that verified object.
     this.counters.bytesFromPeers += peerBytes;
+    // A complete verified object is physical evidence for its captured link,
+    // even when a startup barrier has not handed it to the player yet. This
+    // changes no consumed bytes or holder/discovery delivery history.
+    if (peerBytes > 0) {
+      if (!result.multi) {
+        const link = this.links.get(result.pubkey);
+        if (link?.pc === result.connection) this.#noteUsefulLink(link, size);
+      } else {
+        const contributed = new Map(result.contributions.filter(row => row.bytes > 0).map(row => [row.connection, row.bytes]));
+        const refreshed = new Map((result.shortRefreshes || []).map(row => [row.connection, row.at]));
+        for (const link of this.links.values()) if (contributed.has(link.pc))
+          this.#noteUsefulLink(link, contributed.get(link.pc), refreshed.get(link.pc));
+      }
+    }
     const commit = acceptedContext => {
       if (peerBytes > 0) this.counters.peerFirstLoaded += 1;
       this.counters.peerFirstBytes += peerBytes;
       if (peerBytes > 0) {
         if (!result.multi) {
           this.discovery.holderDelivered(result.holderContext, result.pubkey);
-          this.#noteUsefulLink(this.links.get(result.pubkey), size);
         }
         else {
           const contributed = new Map(result.contributions.filter(row => row.bytes > 0).map(row => [row.connection, row.bytes]));
-          const refreshed = new Map((result.shortRefreshes || []).map(row => [row.connection, row.at]));
           for (const link of this.links.values()) if (contributed.has(link.pc)) {
             this.discovery.holderDelivered(result.holderContext, link.pubkey);
-            this.#noteUsefulLink(link, contributed.get(link.pc), refreshed.get(link.pc));
           }
         }
         if (this.discovery.verified(result.discoveryContext) && this.discovery.window?.context === result.discoveryContext) this.#endDiscovery();

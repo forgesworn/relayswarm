@@ -24,6 +24,17 @@ recovery headroom, within the existing reservoir and deadlines. This is
 unreleased work; real continuity, shared-clock and physical-device acceptance
 remain pending.
 
+The first startup-buffer M4 run kept one viewer playing for 73 seconds with
+zero waits or dropped frames and at most 0.283 seconds of room drift. The
+other viewer never presented a frame: a required future HTTP request could
+not use a peer accepted after load entry, and its first verified short peer
+transfer did not establish link usefulness until player consumption. That
+formed a startup dependency cycle. The media gate remained RED and overall
+sync was unqualified. The follow-up changes distinguish owned startup-buffer
+dependencies and verified transport usefulness from actual HLS consumption,
+with the original memory, rate and deadline limits. Fresh real playback
+qualification is still required.
+
 The experimental `warmAhead` option is disabled by default. Signed-commitment
 loader tests using actual hls.js 1.7.3 parsed Fragment objects cover future
 object verification, exact-demand reuse/coalescing, current-authority refusal,
