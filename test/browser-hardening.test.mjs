@@ -809,7 +809,12 @@ test("uploads waiting for a ticket refresh refuse rejection, timeout and late ac
       assert.equal(channel.readyState, "open");
       assert.equal(f.swarm.metrics().bytes.uploaded, 0); assert.deepEqual(reservations, []);
       if (ending === "stop") { f.swarm.stop(); finish(true); }
-      else if (ending === "channel-close") { channel.close(); finish(true); }
+      else if (ending === "channel-close") {
+        // Accepted presence can legitimately start a new dial after closure.
+        // Keep that separate admission outside this upload cancellation window.
+        child.mock.method(Math, "random", () => 0.999);
+        channel.close(); finish(true);
+      }
       else if (ending === "rejected") finish(false);
       else await clock.advance(3_000);
       await clock.advanceUntil(() => channel.readyState === "closed", 500);
