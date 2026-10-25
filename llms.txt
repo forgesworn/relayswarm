@@ -57,6 +57,8 @@ readiness error; the v0.4.2 tag's two failed browser attempts remain historical 
 v0.4.3 adds opt-in sustainablePeerWait: serial waits and extensions fit within
 each segment/part duration less measured origin recovery with a 25% and 100 ms
 margin. Independent cached-peer races retain their window beside immediate HTTP.
+Current main requires measured HTTP recovery before allowing a serial wait;
+unknown origin timing keeps HTTP immediate and cached/late-HAVE races parallel.
 Its matching WASM upload ABI copies only the requested range instead of the
 whole held object per request. These are bounded-policy and byte-copy changes;
 physical iPhone/iPad and Pixel/Vanadium continuity remains unverified.
