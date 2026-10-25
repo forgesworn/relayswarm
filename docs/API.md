@@ -86,6 +86,15 @@ Normal HTTP never waits for metadata; stopping the swarm cancels its peer
 arm while that pending HTTP request continues. Progressive hls.js loads skip
 the race. See the [options and lifecycle contract](../INTEGRATION.md#options).
 
+The additional experimental `lateHaveRace: true` observes actual matching
+HAVE on those connections accepted at load entry when no initial cached
+snapshot matches. HTTP starts immediately. At most one later holder snapshot
+starts the existing peer-only arm; hashing, observation, metadata and delivery
+must all fit the original `maxPeerWaitMs`. FETCH, new or replaced connections
+and stale availability cannot supply it. HTTP wins and exposed progressive
+data cancel the arm. The default entry-snapshot behaviour is unchanged;
+verified peer credit alone does not establish network savings or continuity.
+
 The opt-in `sustainablePeerWait: true` additionally bounds serial peer waits
 and multi-holder extensions by each fragment/part's duration minus measured
 whole-origin recovery time with a 25% and 100 ms margin. The ordinary

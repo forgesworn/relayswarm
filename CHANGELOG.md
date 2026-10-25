@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add experimental `lateHaveRace`, disabled by default. With a zero-budget
+  cached race, normal whole HTTP starts immediately while existing accepted
+  connections may advertise an exact HAVE within the original deadline.
+  Freeze one holder snapshot and run at most one existing peer-only arm;
+  FETCH, new connections and withdrawn HAVE do not qualify. HTTP wins,
+  progressive exposure and cancellation retain their existing ownership.
+  No origin range, discovery request, dial or deadline extension is added.
 - Add explicit originless `peerOnly` Rust transfers for the zero-budget cached
   arm. Pending pieces refill after verified calibration; no fast whole-HTTP
   estimate, invented origin lane or ignored origin command can strand them.

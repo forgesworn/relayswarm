@@ -5323,6 +5323,311 @@ test("sustainable peer waits require an explicit boolean option", () => {
   }
 });
 
+const lateRaceKey = createHash("sha256").update(`${base.swarmId}\n/media/seg.ts`).digest("hex");
+
+// Only the small fixture key has a deterministic completion time. Signed
+// commitments, actual object hashes and every Rust range stay real.
+function lateRaceKeyClock(t, delayMs = 0) {
+  const subtle = globalThis.crypto.subtle, digest = subtle.digest.bind(subtle);
+  const known = Buffer.from(`${base.swarmId}\n/media/seg.ts`);
+  t.mock.method(subtle, "digest", (algorithm, input) => {
+    if (algorithm !== "SHA-256" || !(input instanceof Uint8Array) || !Buffer.from(input).equals(known)) return digest(algorithm, input);
+    const bytes = createHash("sha256").update(input).digest();
+    const result = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    return delayMs ? new Promise(resolve => setTimeout(() => resolve(result), delayMs)) : Promise.resolve(result);
+  });
+}
+
+async function lateRaceFixture(t, clock, { swarmOptions = {}, ...options } = {}) {
+  const f = await clock.settle(multiFixture(t, { holders: [{}], wholeOriginDelayMs: 150, ...options,
+    swarmOptions: { zeroBudgetPeerRace: true, lateHaveRace: true, maxPeerWaitMs: 100, ...swarmOptions } }));
+  f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+  for (const channel of f.channels) channel.receive(JSON.stringify({ t: "have", keys: [] }));
+  return f;
+}
+
+test("late-HAVE race requires an explicit boolean and remains disabled by default", () => {
+  for (const lateHaveRace of [1, "true", null]) {
+    const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], lateHaveRace });
+    assert.equal(swarm.metrics().mode, "off");
+    assert.equal(swarm.metrics().disabledReason, "invalid-late-have-race-option");
+    swarm.stop();
+  }
+});
+
+test("late-HAVE race leaves the default entry-snapshot contract unchanged", async t => {
+  lateRaceKeyClock(t);
+  const clock = virtualClock(t);
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { holders: [{}], wholeOriginDelayMs: 100,
+      swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 200 } }));
+    f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    f.channels[0].receive(JSON.stringify({ t: "have", keys: [] }));
+    const pending = beginCountedMultiLoad(f);
+    assert.equal(f.wholeLoads.length, 1);
+    setTimeout(() => f.channels[0].receive(JSON.stringify({ t: "have", keys: [lateRaceKey] })), 20);
+    sameBytes(await clock.settle(pending.response), f.bytes);
+    assert.equal(f.swarm.metrics().config.lateHaveRace, false);
+    assert.equal(f.commitmentCalls, 0); assert.deepEqual(f.channels[0].wants, []);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.equal(f.wholeLoads[0].loader.aborted, false);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test("late-HAVE race starts HTTP first and accepts one exact verified Worker object from the entry connection", async t => {
+  lateRaceKeyClock(t);
+  const { WorkerImpl, workers } = transferWorkerFixture(t), clock = virtualClock(t), observed = [];
+  let f;
+  try {
+    f = await lateRaceFixture(t, clock, { size: 6 * 1024 * 1024, holders: [{ delayMs: 1 }], wholeOriginDelayMs: 600,
+      onPeerDelivery: row => observed.push(row),
+      swarmOptions: { transferWorkerUrl: "https://worker.example/transfer.js", WorkerImpl, maxPeerWaitMs: 500 } });
+    await clock.advanceUntil(() => f.swarm.metrics().core.transferWorker.state === "ready", 500);
+    const before = f.swarm.metrics().peers, pending = beginCountedMultiLoad(f);
+    assert.equal(f.wholeLoads.length, 1); assert.equal(f.commitmentCalls, 0);
+    f.channels[0].receive(JSON.stringify({ t: "fetching", k: lateRaceKey, ms: 2_000 }));
+    await clock.advance(30);
+    assert.equal(f.commitmentCalls, 0); assert.deepEqual(f.channels[0].wants, [], "FETCH is not a cached HAVE");
+    f.channels[0].receive(JSON.stringify({ t: "have", keys: [lateRaceKey] }));
+    sameBytes(await clock.settle(pending.response, 600), f.bytes);
+    const metrics = f.swarm.metrics();
+    assert.equal(metrics.config.lateHaveRace, true);
+    assert.equal(metrics.segments.zeroBudgetPeerRaces, 1); assert.equal(metrics.segments.zeroBudgetPeerRaceWins, 1);
+    assert.equal(metrics.segments.coordinatedWaits, 0, "the origin never waited for this HAVE");
+    assert.equal(metrics.peerEligibilityDiagnostics.counters["have-after-wait"], 1);
+    assert.equal(metrics.bytes.peerFirst, f.bytes.length);
+    assert.equal(observed.reduce((sum, row) => sum + row.bytes, 0), f.bytes.length);
+    assert.ok(observed.every(row => row.connection === f.connections[0]));
+    assert.equal(f.commitmentCalls, 1);
+    assert.ok(f.channels[0].wants.length >= 17 && f.channels[0].wants.every(range => Array.isArray(range) && range[1] - range[0] <= 4));
+    assert.equal(metrics.core.multiHolder.originRanges, 0); assert.deepEqual(f.ranges, []);
+    assert.equal(metrics.peers.dialsStarted, before.dialsStarted, "no neighbour search or new dial supplies the race");
+    assert.equal(f.wholeLoads[0].loader.aborted, true); assert.equal(f.wholeLoads.length, 1);
+    await clock.advance(650);
+    assert.deepEqual([pending.calls.success.length, pending.calls.abort.length, pending.calls.error.length], [1, 0, 0]);
+    assert.equal(f.swarm.metrics().core.transferWorker.transfers, 0);
+    assert.equal(f.swarm.metrics().core.transferWorker.pending, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  assert.equal(workers[0].terminated, true);
+});
+
+test("late-HAVE race rejects wrong, FETCH-only and already-withdrawn availability", async t => {
+  for (const variant of ["wrong-key", "fetch-only", "withdrawn"]) await t.test(variant, async t => {
+    lateRaceKeyClock(t);
+    const clock = virtualClock(t);
+    let f;
+    try {
+      f = await lateRaceFixture(t, clock);
+      const pending = beginCountedMultiLoad(f);
+      await clock.advance(20);
+      if (variant === "fetch-only") f.channels[0].receive(JSON.stringify({ t: "fetching", k: lateRaceKey, ms: 2_000 }));
+      else {
+        f.channels[0].receive(JSON.stringify({ t: "have", keys: [variant === "wrong-key" ? "b".repeat(64) : lateRaceKey] }));
+        if (variant === "withdrawn") f.channels[0].receive(JSON.stringify({ t: "have", keys: [] }));
+      }
+      sameBytes(await clock.settle(pending.response), f.bytes);
+      assert.equal(f.commitmentCalls, 0); assert.deepEqual(f.channels[0].wants, []);
+      assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaces, 0);
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+      assert.equal(f.wholeLoads[0].loader.aborted, false); assert.deepEqual(f.ranges, []);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+test("late-HAVE race excludes new and replaced connections even when they advertise the exact key before the deadline", async t => {
+  for (const replacement of [false, true]) await t.test(replacement ? "same author, new native connection" : "new author", async t => {
+    lateRaceKeyClock(t);
+    const clock = virtualClock(t);
+    let f;
+    try {
+      f = await lateRaceFixture(t, clock, { wholeOriginDelayMs: 800, swarmOptions: { maxPeerWaitMs: 600 } });
+      const pending = beginCountedMultiLoad(f), started = clock.now(), channel = new RangedChannel(f.bytes);
+      await clock.advance(10);
+      if (replacement) {
+        f.channels[0].close();
+        const accepted = f.swarm.metrics().peers.offersAccepted;
+        f.peers[0].sendSignal(f.swarm.metrics().pubkey, { type: "offer", transport: "webrtc", requestId: "late-replacement",
+          payload: { sdp: "fixture-offer" } });
+        await clock.advanceUntil(() => f.connections.length === 2 && f.swarm.metrics().peers.offersAccepted > accepted, 300);
+        const event = new Event("datachannel"); event.channel = channel; f.connections[1].dispatchEvent(event);
+        await clock.advanceUntil(() => f.swarm.metrics().peers.connected === 1, 100);
+      } else {
+        await clock.settle(f.addPeer(channel), 300);
+        f.peers.at(-1).announcePresence({ role: "viewer", open: true,
+          transports: [{ type: "webrtc", publicKey: f.peers.at(-1).pubkey, obj: 2 }] });
+        await clock.advanceUntil(() => f.swarm.metrics().peers.openPeersKnown === 2, 100);
+      }
+      assert.ok(clock.now() - started < 600, "the excluded connection arrived inside the original opportunity");
+      channel.receive(JSON.stringify({ t: "have", keys: [lateRaceKey] }));
+      sameBytes(await clock.settle(pending.response, 1_000), f.bytes);
+      assert.deepEqual(channel.wants, []); assert.equal(f.commitmentCalls, 0);
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.equal(f.wholeLoads[0].loader.aborted, false);
+      assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+test("late-HAVE race freezes one holder snapshot and never retries after corruption", async t => {
+  lateRaceKeyClock(t);
+  const clock = virtualClock(t), observed = [];
+  let f;
+  try {
+    f = await lateRaceFixture(t, clock, { holders: [{ corrupt: true }, {}], onPeerDelivery: row => observed.push(row),
+      beforeCommitment: () => f.channels[1].receive(JSON.stringify({ t: "have", keys: [lateRaceKey] })) });
+    const pending = beginCountedMultiLoad(f);
+    await clock.advance(20); f.channels[0].receive(JSON.stringify({ t: "have", keys: [lateRaceKey] }));
+    sameBytes(await clock.settle(pending.response), f.bytes);
+    assert.equal(f.commitmentCalls, 1);
+    assert.ok(f.channels[0].wants.length > 0); assert.deepEqual(f.channels[1].wants, []);
+    assert.equal(f.swarm.metrics().core.multiHolder.bans, 1);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.deepEqual(observed, []);
+    assert.equal(f.wholeLoads[0].loader.aborted, false);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test("late-HAVE race includes key hashing, waiting, metadata and transfer in one absolute window", async t => {
+  lateRaceKeyClock(t, 40);
+  const clock = virtualClock(t), observed = [];
+  class ReliableDelayedRange extends RangedChannel {
+    ordered = true;
+    maxRetransmits = null;
+    maxPacketLifeTime = null;
+  }
+  let f;
+  try {
+    f = await lateRaceFixture(t, clock, { holders: [{ Channel: ReliableDelayedRange, delayMs: 30 }], traceRequests: 256,
+      beforeCommitment: () => sleep(20), onPeerDelivery: row => observed.push(row) });
+    const pending = beginCountedMultiLoad(f), started = clock.now();
+    await clock.advance(70); f.channels[0].receive(JSON.stringify({ t: "have", keys: [lateRaceKey] }));
+    sameBytes(await clock.settle(pending.response), f.bytes);
+    assert.equal(f.commitmentCalls, 1); assert.ok(f.channels[0].wants.length > 0, "the bounded arm actually began near its deadline");
+    const load = f.swarm.trace().rows.find(row => row.k === "load"), start = f.swarm.trace().rows.find(row => row.k === "xfer" && row.op === "start");
+    assert.equal(load.limitMs, 100); assert.equal(start.deadline - load.at, 100);
+    assert.ok(clock.now() - started >= 150, "only the original normal HTTP response reaches the player");
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.equal(f.swarm.metrics().core.multiHolder.delivered, 0);
+    assert.deepEqual(observed, []); assert.equal(f.wholeLoads[0].loader.aborted, false);
+    assert.ok(f.channels[0].cancels > 0); assert.deepEqual(f.ranges, []);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test("late-HAVE race cannot begin after the original deadline even with delayed key hashing", async t => {
+  lateRaceKeyClock(t, 110);
+  const clock = virtualClock(t);
+  let f;
+  try {
+    f = await lateRaceFixture(t, clock);
+    const pending = beginCountedMultiLoad(f);
+    await clock.advance(20); f.channels[0].receive(JSON.stringify({ t: "have", keys: [lateRaceKey] }));
+    sameBytes(await clock.settle(pending.response), f.bytes);
+    assert.equal(f.commitmentCalls, 0); assert.deepEqual(f.channels[0].wants, []);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.equal(f.wholeLoads[0].loader.aborted, false);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test("late-HAVE race preserves an HTTP winner at every asynchronous boundary", async t => {
+  for (const phase of ["key", "HAVE", "metadata", "transfer", "worker-result"]) await t.test(phase, async t => {
+    lateRaceKeyClock(t, phase === "key" ? 110 : 0);
+    const clock = virtualClock(t), observed = [];
+    const worker = phase === "worker-result" ? transferWorkerFixture(t, { holdFinal: true }) : null;
+    let f, metadataSignal;
+    try {
+      f = await lateRaceFixture(t, clock, { holders: [{ delayMs: phase === "transfer" ? 100 : 0 }], wholeOriginDelayMs: 80,
+        beforeCommitment: phase === "metadata" ? (_context, { signal }) => { metadataSignal = signal; return sleep(100); } : null,
+        onPeerDelivery: row => observed.push(row), swarmOptions: { maxPeerWaitMs: 200,
+          ...(worker ? { transferWorkerUrl: "https://worker.example/transfer.js", WorkerImpl: worker.WorkerImpl } : {}) } });
+      if (worker) await clock.advanceUntil(() => f.swarm.metrics().core.transferWorker.state === "ready", 500);
+      const pending = beginCountedMultiLoad(f);
+      assert.equal(f.wholeLoads.length, 1);
+      setTimeout(() => f.channels[0].receive(JSON.stringify({ t: "have", keys: [lateRaceKey] })), phase === "HAVE" ? 110 : 20);
+      if (worker) await clock.advanceUntil(() => Boolean(worker.workers[0].finalReply), 75);
+      sameBytes(await clock.settle(pending.response), f.bytes);
+      const before = f.swarm.metrics().core.multiHolder.peerBytes;
+      if (worker) worker.workers[0].releaseFinal();
+      await clock.advance(150);
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.deepEqual(observed, []);
+      assert.equal(f.swarm.metrics().core.multiHolder.peerBytes, before, "late replies cannot add piece credit");
+      assert.equal(f.swarm.metrics().core.multiHolder.delivered, 0);
+      assert.deepEqual([pending.calls.success.length, pending.calls.abort.length, pending.calls.error.length], [1, 0, 0]);
+      assert.equal(f.wholeLoads[0].loader.aborted, false); assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
+      if (metadataSignal) assert.equal(metadataSignal.aborted, true);
+      if (phase === "key" || phase === "HAVE") { assert.equal(f.commitmentCalls, 0); assert.deepEqual(f.channels[0].wants, []); }
+      if (worker) assert.equal(f.swarm.metrics().core.transferWorker.transfers, 0);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+test("late-HAVE race cancels its waiting arm on progressive HTTP exposure", async t => {
+  for (const progressive of [false, true]) await t.test(progressive ? "declared progressive loader" : "unexpected exposed chunk", async t => {
+    lateRaceKeyClock(t);
+    const clock = virtualClock(t);
+    let f;
+    try {
+      f = await lateRaceFixture(t, clock);
+      f.hlsConfig.progressive = progressive;
+      const pending = beginCountedMultiLoad(f);
+      if (!progressive) f.wholeLoads[0].callbacks.onProgress({}, multiContext, new Uint8Array([1]).buffer, null);
+      await clock.advance(20); f.channels[0].receive(JSON.stringify({ t: "have", keys: [lateRaceKey] }));
+      sameBytes(await clock.settle(pending.response), f.bytes);
+      assert.equal(f.commitmentCalls, 0); assert.deepEqual(f.channels[0].wants, []);
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.equal(f.wholeLoads[0].loader.aborted, false);
+      assert.equal(pending.calls.progress.length, progressive ? 0 : 1);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+test("late-HAVE race cancels waiting on stop, loader abort and destroy with the original HTTP ownership", async t => {
+  for (const ending of ["stop", "abort", "destroy"]) await t.test(ending, async t => {
+    lateRaceKeyClock(t);
+    const clock = virtualClock(t);
+    let f;
+    try {
+      f = await lateRaceFixture(t, clock);
+      const pending = beginCountedMultiLoad(f);
+      await clock.advance(10);
+      if (ending === "stop") f.swarm.stop(); else pending.loader[ending]();
+      f.channels[0].receive(JSON.stringify({ t: "have", keys: [lateRaceKey] }));
+      if (ending === "stop") sameBytes(await clock.settle(pending.response), f.bytes); else await clock.advance(160);
+      assert.equal(f.commitmentCalls, 0); assert.deepEqual(f.channels[0].wants, []);
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+      assert.equal(f.wholeLoads[0].loader.aborted, ending !== "stop");
+      assert.equal(pending.calls.success.length, ending === "stop" ? 1 : 0);
+      assert.equal(pending.calls.abort.length, ending === "abort" ? 1 : 0);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+test("late-HAVE race leaves HTTP immediate for an unavailable Worker or an older mixed-only module", async t => {
+  for (const oldModule of [false, true]) await t.test(oldModule ? "capability absent" : "Worker warming", async t => {
+    lateRaceKeyClock(t);
+    if (oldModule) {
+      const instantiate = WebAssembly.instantiate;
+      t.mock.method(WebAssembly, "instantiate", async (...args) => {
+        const instance = await instantiate(...args);
+        return args[0] === multiCore ? { exports: { ...instance.exports, rs_xfer_capabilities: () => (instance.exports.rs_xfer_capabilities?.() ?? 0) & ~2 } } : instance;
+      });
+    }
+    const worker = oldModule ? null : transferWorkerFixture(t, { pauseInit: true }), clock = virtualClock(t);
+    let f;
+    try {
+      f = await lateRaceFixture(t, clock, { wholeOriginDelayMs: 150,
+        swarmOptions: worker ? { transferWorkerUrl: "https://worker.example/transfer.js", WorkerImpl: worker.WorkerImpl } : {} });
+      const pending = beginCountedMultiLoad(f);
+      assert.equal(f.wholeLoads.length, 1);
+      await clock.advance(20); f.channels[0].receive(JSON.stringify({ t: "have", keys: [lateRaceKey] }));
+      sameBytes(await clock.settle(pending.response), f.bytes);
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.deepEqual(f.channels[0].wants, []);
+      assert.equal(f.swarm.metrics().core.state, "ready"); assert.equal(f.wholeLoads[0].loader.aborted, false);
+      assert.equal(f.commitmentCalls, oldModule ? 1 : 0);
+      if (oldModule) {
+        f.hls.media = { currentTime: 0, buffered: { length: 1, start: () => 0, end: () => 20 } };
+        sameBytes(await clock.settle(f.load()), f.bytes);
+        assert.ok(f.swarm.metrics().bytes.peerFirst > 0, "the older module still performs its ordinary mixed transfer");
+      }
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
 test("zero-budget cached race starts HTTP first and accepts only a complete verified peer winner", async t => {
   const clock = virtualClock(t), observed = [];
   let f;

@@ -116,6 +116,9 @@ const DEFAULTS = Object.freeze({
   // Opt-in: when no safe wait remains, race a known cached schema 3 object
   // against immediately started HTTP, without any extra origin request.
   zeroBudgetPeerRace: false,
+  // Opt-in with zeroBudgetPeerRace: a load-entry connection may advertise
+  // the exact cached object later, within the same original peer window.
+  lateHaveRace: false,
   // Provisional (CORE-SPEC open question 6): not yet set from a field trace.
   maxHoldersPerObject: 3,
   // Rows kept for trace(): every load, eligibility decision, peer and origin
@@ -552,6 +555,7 @@ class HlsSwarm {
     if (typeof this.options.peerSupplyHint !== "boolean" || (this.options.onPlayerHint !== null && typeof this.options.onPlayerHint !== "function")) return "invalid-player-hint-option";
     if (typeof this.options.abrIgnorePeers !== "boolean") return "invalid-abr-option";
     if (typeof this.options.zeroBudgetPeerRace !== "boolean") return "invalid-cached-race-option";
+    if (typeof this.options.lateHaveRace !== "boolean") return "invalid-late-have-race-option";
     if (typeof this.options.sustainablePeerWait !== "boolean") return "invalid-sustainable-wait-option";
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (this.options.reserveUploadBytes !== undefined && typeof this.options.reserveUploadBytes !== "function") return "invalid-upload-reservation";
@@ -902,6 +906,7 @@ class HlsSwarm {
         originReserveMs: this.options.originReserveMs,
         sustainablePeerWait: this.options.sustainablePeerWait,
         zeroBudgetPeerRace: this.options.zeroBudgetPeerRace,
+        lateHaveRace: this.options.lateHaveRace,
         lateWindowMs: this.options.lateWindowMs,
         maxPeers: this.options.maxPeers,
         maxUploadPeers: this.options.maxUploadPeers,
@@ -995,7 +1000,7 @@ class HlsSwarm {
         if (budgetMs === 0 && swarm.options.zeroBudgetPeerRace && !this.hlsConfig.progressive
           && swarm.#rangesEnabled() && swarm.cachedRaces.size < swarm.options.maxConcurrentRaces) {
           const cached = new Map([...swarm.links.values()].filter(link => !link.closed && !link.busy && link.supportsRanges
-            && (swarm.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !swarm.banned.has(link.pubkey) && link.have.size)
+            && (swarm.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !swarm.banned.has(link.pubkey) && (link.have.size || swarm.options.lateHaveRace))
             .map(link => [link, new Set(link.have)]));
           if (cached.size) return this.loadCachedRace(context, config, callbacks, budgetGeometry, cached);
         }
@@ -1180,7 +1185,8 @@ class HlsSwarm {
           if (originPending && !swarm.stopped) this.releaseFetch = swarm.#claimOrigin(key);
         }).catch(() => {});
         const plan = { deadline: t0 + swarm.options.maxPeerWaitMs, limit: t0 + swarm.options.maxPeerWaitMs,
-          originReserveMs: 0, expired: false, onDeadline: null, cachedOnly: cached, peerOnly: true, extend: () => false };
+          originReserveMs: 0, expired: false, onDeadline: null, cachedOnly: cached, lateHaveRace: swarm.options.lateHaveRace,
+          peerOnly: true, extend: () => false };
         swarm.#traceBegin(context, 0, swarm.options.maxPeerWaitMs, budgetGeometry);
         swarm.#peerFirst(context, controller.signal, plan, 0, budgetGeometry).then(result => {
           if (!result || !originPending || originClaimed || this.active !== token || controller.signal.aborted || swarm.stopped || now() >= plan.limit) return;
@@ -1687,8 +1693,24 @@ class HlsSwarm {
       return null;
     }
     if (plan.cachedOnly) {
-      plan.cachedHolders = new Set([...plan.cachedOnly].filter(([link, have]) => have.has(key) && link.have.has(key)
-        && this.links.get(link.pubkey) === link && !link.closed && !link.busy && !this.banned.has(link.pubkey)).map(([link]) => link));
+      const matching = (atEntry) => [...plan.cachedOnly].filter(([link, have]) => (!atEntry || have.has(key)) && link.have.has(key)
+        && this.links.get(link.pubkey) === link && !link.closed && !link.busy && !this.banned.has(link.pubkey)
+        && link.supportsRanges === true && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2).map(([link]) => link);
+      let holders = matching(true);
+      if (!holders.length && plan.lateHaveRace) {
+        // HTTP is already running. Observe actual HAVE on the accepted
+        // load-entry links, never FETCH, a new neighbour or a replacement.
+        holders = matching(false);
+        while (!holders.length && !signal.aborted && !this.stopped && now() < plan.limit) {
+          await this.#waitForHave(key, plan.limit - now(), signal);
+          holders = matching(false);
+        }
+        plan.lateHaveMatched = holders.length > 0;
+      }
+      if (signal.aborted || this.stopped || now() >= plan.limit) return null;
+      // Freeze once. Failure or corruption does not open another late-HAVE
+      // trial or admit a holder that appeared after this snapshot.
+      plan.cachedHolders = new Set(holders);
       if (!plan.cachedHolders.size || !this.#rangesEnabled()) return null;
       this.counters.zeroBudgetPeerRaces += 1;
     }
@@ -1771,7 +1793,7 @@ class HlsSwarm {
         return null;
       }
     }
-    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry, trial ?? undefined, demand, trial !== null);
+    this.#peerEligibility(context, budgetMs, coordinated || plan.lateHaveMatched ? "have-after-wait" : "have-at-entry", true, budgetGeometry, trial ?? undefined, demand, trial !== null);
     // Holding the key is not a delivery: leave every holder entry alone until a
     // verified segment arrives.
     let commitment;

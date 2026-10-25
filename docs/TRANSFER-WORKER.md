@@ -102,7 +102,7 @@ whole-object HTTP request immediately. The competing Rust transfer is created
 with `peerOnly: true`: there is no origin lane, origin estimate or ignored
 origin command inside it. Fast whole-HTTP history cannot strand ranges behind
 work that performs no I/O. Candidate identity stays inside the initial cached
-snapshot and current HAVE.
+snapshot and current HAVE by default.
 
 Cold holders receive bounded one-piece calibration. Remaining unverified,
 uncovered pieces stay pending until verified progress refills bounded peer
@@ -130,11 +130,30 @@ that failed control is retained. New mode qualification still requires the
 unchanged native three-load win/HTTP-win/win assertion and physical playback
 evidence; the capability alone is not a performance guarantee.
 
+### Optional late HAVE
+
+With `zeroBudgetPeerRace` and the separate experimental `lateHaveRace: true`,
+an already-running whole HTTP load can race an object advertised later on a
+connection accepted at load entry. This uses the existing key-filtered HAVE
+notifications. FETCH is not cached data; no neighbour search or new connection
+is admitted. The first actual matching holder snapshot is frozen once, and
+failure or corruption does not start a second arm.
+
+Key hashing, HAVE observation, commitment verification and peer delivery all
+consume the same original `maxPeerWaitMs` window. HTTP never waits and no
+origin range is created. Its success or exposed progressive chunk cancels
+the observation and worker handle; swarm stop preserves pending normal HTTP,
+while loader abort or destroy cancels both arms. Upload and worker bounds
+remain unchanged. The zero-budget `have-after-wait` diagnostic marks a real
+later HAVE, not deferred HTTP. A peer winner can still leave partial HTTP
+traffic; the host must measure that traffic before claiming network savings.
+
 ## Focused verification
 
 ```sh
 node --test test/core-transfer-worker.test.mjs test/core-transfer.test.mjs
 node --test --test-name-pattern='transfer worker:' test/browser-hardening.test.mjs
+node --test --test-name-pattern='^late-HAVE race' test/browser-hardening-core.mjs
 ```
 
 The bridge fixture uses a real Node worker thread with the committed WASM,

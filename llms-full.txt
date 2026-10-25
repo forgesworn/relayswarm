@@ -391,6 +391,7 @@ decision is not cached as permission for later upload requests.
 | `transferWorkerUrl` | unset | Experimental opt-in with peer-first, `coreWasm` and `multiHolder`. Explicit URL of a separately bundled companion worker from the same SDK revision. It warms asynchronously from the already compiled module and runs the same Rust schema-3 transfer facade off the main thread. While warming, after worker failure or at resource limits, those loads use HTTP; no silent large synchronous transfer retry. Existing absolute deadlines and complete-object credit checks remain. [Packaging, bounds and lifecycle](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/TRANSFER-WORKER.md). |
 | `multiHolder` | `false` | Experimental; needs `coreWasm`. A schema 3 segment (signed with the publisher's `pieceCommitments`) is fetched from several holders at once by piece range, with an HTTP `Range` fetch from origin for any tail the peers are projected to miss; a holder that proves fast once idle takes back pieces origin has not yet sent, and the first verified copy wins; every piece is verified against the commitment before the segment is delivered. A holder that stays silent or whose flow cannot finish its range in time is abandoned early, by the single-holder rules, and its pieces move to the other sources; unlike the single-holder path, a flow that stops after its first byte is also checked every 250 ms rather than left to its timeout. Used only with holders whose presence advertises object framing 2, and the viewer advertises it only while every one of its links runs in the core. Ranged origin requests go through the player's own fragment loader with `rangeStart` and `rangeEnd` set, as for an `EXT-X-BYTERANGE` segment, so headers and credentials from hls.js `xhrSetup`, `fetchSetup` or a custom loader apply. A body that is not exactly the range (a server that ignored `Range` and sent the whole segment) is discarded, and a refused range sends the segment to the whole-segment origin load. After one such answer the origin (scheme, host and port) is not asked for ranges again in that session, and its segments take the single-holder path. A ranged upload is charged by the bytes it sends. |
 | `zeroBudgetPeerRace` | `false` | Experimental opt-in with `coreWasm` and `multiHolder`. When buffered playback leaves no safe peer wait, start normal whole-segment HTTP immediately and race a schema 3 object already advertised in a connected framing 2 holder's HAVE at load entry. The Rust transfer requires the optional peer-only capability: no origin lane or origin estimate exists inside that transfer. Cold holders get bounded calibration; verified progress refills pending ranges, each piece and the whole object hash must match. Candidates remain inside the initial snapshot and current HAVE. Older modules safely decline this arm while HTTP continues. No new neighbour search or ranged HTTP request is added. Key hashing and commitment verification never delay HTTP. The first complete verified peer object or normal HTTP response wins; losing callbacks are suppressed. Peer work stops at `maxPeerWaitMs`. Existing upload rate/session limits apply to each bounded request. Progressive hls.js delivery skips this race; unexpected nonempty HTTP progress locks the load to HTTP. Accepted peer bytes alone do not establish network savings. |
+| `lateHaveRace` | `false` | Experimental opt-in alongside `zeroBudgetPeerRace`. When no entry-snapshot HAVE matches, observe actual matching HAVE only on the accepted, eligible framing 2 connections captured at load entry. Normal whole HTTP already runs. The first qualifying holder snapshot starts at most one existing peer-only arm; key hashing, HAVE observation, metadata and transfer all share the original `maxPeerWaitMs` deadline. FETCH, new or replaced connections and withdrawn HAVE do not qualify. No new discovery, dial, HTTP request, origin range or deadline extension is added. HTTP success, exposed progressive data, abort and stop cancel observation and peer work under the same ownership rules. This can use overlapping source downloads; it does not guarantee throughput, continuity or network savings. |
 | `maxHoldersPerObject` | `3` | Holders per segment under `multiHolder`, 1 to 8. Provisional: not yet set from a replayed field trace. |
 | `abrIgnorePeers` | `false` | Peer-first. Keeps a peer-delivered fragment out of the hls.js bandwidth and first-byte estimates, so automatic quality follows the origin path; otherwise the time a peer delivery took, including any wait for a holder, is sampled as if it were an origin download. The loader skips the estimator's samples only while hls.js dispatches `FRAG_LOADED` and `FRAG_BUFFERED` for that fragment, and puts hls.js back on `stop()`. The one sample it cannot withhold is the first-byte sample hls.js's own timer takes when a load has waited past half a segment with no byte, the check that can switch quality down mid-load. A fragment fetched under `multiHolder` counts as peer-delivered even when origin sent part of it. `metrics().segments.abrPeerSamplesWithheld` counts the skipped samples. Needs the default hls.js ABR controller; with another one it does nothing. |
 | `traceRequests` | `0` | Rows kept for `trace()`, 0 to 32,768, oldest dropped first: loads, eligibility decisions, peer and origin requests and multi-holder scheduler calls, enough to replay a transfer offline. For field runs that need a replayable input; it is not part of `metrics()`, so a receipt must take `trace()` itself. |
@@ -467,7 +468,9 @@ is not an alternative to this callback.
 
 `segments.zeroBudgetPeerRaces` counts matching cached-HAVE race attempts;
 `zeroBudgetPeerRaceWins` counts only complete peer objects accepted by the
-player. Verified pieces of an origin-winning or incomplete object add no
+player. With `lateHaveRace`, the zero-budget `have-after-wait` eligibility
+row records actual later HAVE admission while HTTP runs; it is not a serial
+origin wait. Verified pieces of an origin-winning or incomplete object add no
 accepted peer bytes and emit no delivery callback. `stop()` cancels the peer
 arm while pending normal HTTP continues for playback; loader `abort()` or
 `destroy()` cancels both arms. Run `npm run test:cached-peer-race:browser`
@@ -1159,6 +1162,13 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 ## Unreleased
 
+- Add experimental `lateHaveRace`, disabled by default. With a zero-budget
+  cached race, normal whole HTTP starts immediately while existing accepted
+  connections may advertise an exact HAVE within the original deadline.
+  Freeze one holder snapshot and run at most one existing peer-only arm;
+  FETCH, new connections and withdrawn HAVE do not qualify. HTTP wins,
+  progressive exposure and cancellation retain their existing ownership.
+  No origin range, discovery request, dial or deadline extension is added.
 - Add explicit originless `peerOnly` Rust transfers for the zero-budget cached
   arm. Pending pieces refill after verified calibration; no fast whole-HTTP
   estimate, invented origin lane or ignored origin command can strand them.
@@ -2034,6 +2044,15 @@ only a complete verified peer winner counts as peer media.
 Normal HTTP never waits for metadata; stopping the swarm cancels its peer
 arm while that pending HTTP request continues. Progressive hls.js loads skip
 the race. See the [options and lifecycle contract](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md#options).
+
+The additional experimental `lateHaveRace: true` observes actual matching
+HAVE on those connections accepted at load entry when no initial cached
+snapshot matches. HTTP starts immediately. At most one later holder snapshot
+starts the existing peer-only arm; hashing, observation, metadata and delivery
+must all fit the original `maxPeerWaitMs`. FETCH, new or replaced connections
+and stale availability cannot supply it. HTTP wins and exposed progressive
+data cancel the arm. The default entry-snapshot behaviour is unchanged;
+verified peer credit alone does not establish network savings or continuity.
 
 The opt-in `sustainablePeerWait: true` additionally bounds serial peer waits
 and multi-holder extensions by each fragment/part's duration minus measured
@@ -10915,7 +10934,7 @@ whole-object HTTP request immediately. The competing Rust transfer is created
 with `peerOnly: true`: there is no origin lane, origin estimate or ignored
 origin command inside it. Fast whole-HTTP history cannot strand ranges behind
 work that performs no I/O. Candidate identity stays inside the initial cached
-snapshot and current HAVE.
+snapshot and current HAVE by default.
 
 Cold holders receive bounded one-piece calibration. Remaining unverified,
 uncovered pieces stay pending until verified progress refills bounded peer
@@ -10943,11 +10962,30 @@ that failed control is retained. New mode qualification still requires the
 unchanged native three-load win/HTTP-win/win assertion and physical playback
 evidence; the capability alone is not a performance guarantee.
 
+### Optional late HAVE
+
+With `zeroBudgetPeerRace` and the separate experimental `lateHaveRace: true`,
+an already-running whole HTTP load can race an object advertised later on a
+connection accepted at load entry. This uses the existing key-filtered HAVE
+notifications. FETCH is not cached data; no neighbour search or new connection
+is admitted. The first actual matching holder snapshot is frozen once, and
+failure or corruption does not start a second arm.
+
+Key hashing, HAVE observation, commitment verification and peer delivery all
+consume the same original `maxPeerWaitMs` window. HTTP never waits and no
+origin range is created. Its success or exposed progressive chunk cancels
+the observation and worker handle; swarm stop preserves pending normal HTTP,
+while loader abort or destroy cancels both arms. Upload and worker bounds
+remain unchanged. The zero-budget `have-after-wait` diagnostic marks a real
+later HAVE, not deferred HTTP. A peer winner can still leave partial HTTP
+traffic; the host must measure that traffic before claiming network savings.
+
 ## Focused verification
 
 ```sh
 node --test test/core-transfer-worker.test.mjs test/core-transfer.test.mjs
 node --test --test-name-pattern='transfer worker:' test/browser-hardening.test.mjs
+node --test --test-name-pattern='^late-HAVE race' test/browser-hardening-core.mjs
 ```
 
 The bridge fixture uses a real Node worker thread with the committed WASM,
