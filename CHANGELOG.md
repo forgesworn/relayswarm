@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add opt-in `transferWorkerUrl`: warm one explicitly packaged worker from
+  the already compiled core, then run the shared Rust schema-3 transfer
+  facade off the main thread. Startup, resource limits and genuine worker
+  failure retain HTTP; late/cancelled replies cannot credit peer delivery.
+  Existing synchronous/native APIs remain compatible. The companion is a
+  separate release asset and `relayswarm/transfer-worker` bundler entry.
 - Keep multi-holder first-byte and post-first-byte flow measurements per
   connection, separately from HTTP service timing. Substantial ranged HTTP
   loads refresh byte-scaled, rendition-specific origin recovery estimates.

@@ -388,13 +388,14 @@ decision is not cached as permission for later upload requests.
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
 | `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The relay session starts once the module has loaded or failed, after at most 2 seconds; fragments loaded meanwhile go to origin. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
+| `transferWorkerUrl` | unset | Experimental opt-in with peer-first, `coreWasm` and `multiHolder`. Explicit URL of a separately bundled companion worker from the same SDK revision. It warms asynchronously from the already compiled module and runs the same Rust schema-3 transfer facade off the main thread. While warming, after worker failure or at resource limits, those loads use HTTP; no silent large synchronous transfer retry. Existing absolute deadlines and complete-object credit checks remain. [Packaging, bounds and lifecycle](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/TRANSFER-WORKER.md). |
 | `multiHolder` | `false` | Experimental; needs `coreWasm`. A schema 3 segment (signed with the publisher's `pieceCommitments`) is fetched from several holders at once by piece range, with an HTTP `Range` fetch from origin for any tail the peers are projected to miss; a holder that proves fast once idle takes back pieces origin has not yet sent, and the first verified copy wins; every piece is verified against the commitment before the segment is delivered. A holder that stays silent or whose flow cannot finish its range in time is abandoned early, by the single-holder rules, and its pieces move to the other sources; unlike the single-holder path, a flow that stops after its first byte is also checked every 250 ms rather than left to its timeout. Used only with holders whose presence advertises object framing 2, and the viewer advertises it only while every one of its links runs in the core. Ranged origin requests go through the player's own fragment loader with `rangeStart` and `rangeEnd` set, as for an `EXT-X-BYTERANGE` segment, so headers and credentials from hls.js `xhrSetup`, `fetchSetup` or a custom loader apply. A body that is not exactly the range (a server that ignored `Range` and sent the whole segment) is discarded, and a refused range sends the segment to the whole-segment origin load. After one such answer the origin (scheme, host and port) is not asked for ranges again in that session, and its segments take the single-holder path. A ranged upload is charged by the bytes it sends. |
 | `zeroBudgetPeerRace` | `false` | Experimental opt-in with `coreWasm` and `multiHolder`. When buffered playback leaves no safe peer wait, start normal whole-segment HTTP immediately and race only a schema 3 object already advertised in a connected framing 2 holder's HAVE at load entry. No new neighbour search or ranged HTTP request is added. Key hashing and commitment verification never delay HTTP. The first complete verified peer object or normal HTTP response wins; losing callbacks are suppressed. Peer work stops at `maxPeerWaitMs`. Progressive hls.js delivery skips this race; unexpected nonempty HTTP progress locks the load to HTTP before forwarding those bytes. Some HTTP and peer bytes may both transfer before the winner, so accepted peer bytes alone do not establish network savings. |
 | `maxHoldersPerObject` | `3` | Holders per segment under `multiHolder`, 1 to 8. Provisional: not yet set from a replayed field trace. |
 | `abrIgnorePeers` | `false` | Peer-first. Keeps a peer-delivered fragment out of the hls.js bandwidth and first-byte estimates, so automatic quality follows the origin path; otherwise the time a peer delivery took, including any wait for a holder, is sampled as if it were an origin download. The loader skips the estimator's samples only while hls.js dispatches `FRAG_LOADED` and `FRAG_BUFFERED` for that fragment, and puts hls.js back on `stop()`. The one sample it cannot withhold is the first-byte sample hls.js's own timer takes when a load has waited past half a segment with no byte, the check that can switch quality down mid-load. A fragment fetched under `multiHolder` counts as peer-delivered even when origin sent part of it. `metrics().segments.abrPeerSamplesWithheld` counts the skipped samples. Needs the default hls.js ABR controller; with another one it does nothing. |
 | `traceRequests` | `0` | Rows kept for `trace()`, 0 to 32,768, oldest dropped first: loads, eligibility decisions, peer and origin requests and multi-holder scheduler calls, enough to replay a transfer offline. For field runs that need a replayable input; it is not part of `metrics()`, so a receipt must take `trace()` itself. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
-| `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
+| `RTCPeerConnectionImpl` / `WebSocketImpl` / `WorkerImpl` | globals | Constructor injection points for tests; the worker remains explicitly configured through `transferWorkerUrl`. |
 
 The pending glare-reuse correction keeps the existing lower-public-key offer
 when both peers dial simultaneously. The yielding peer may adopt only its
@@ -1158,6 +1159,12 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 ## Unreleased
 
+- Add opt-in `transferWorkerUrl`: warm one explicitly packaged worker from
+  the already compiled core, then run the shared Rust schema-3 transfer
+  facade off the main thread. Startup, resource limits and genuine worker
+  failure retain HTTP; late/cancelled replies cannot credit peer delivery.
+  Existing synchronous/native APIs remain compatible. The companion is a
+  separate release asset and `relayswarm/transfer-worker` bundler entry.
 - Keep multi-holder first-byte and post-first-byte flow measurements per
   connection, separately from HTTP service timing. Substantial ranged HTTP
   loads refresh byte-scaled, rendition-specific origin recovery estimates.
@@ -1713,6 +1720,7 @@ its measured scope and acceptance gaps in [Status](https://raw.githubusercontent
 | Understand the project and transport choices | [Project overview](https://raw.githubusercontent.com/forgesworn/relayswarm/main/README.md) |
 | Install the package, browser bundle or source demo | [Getting started](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) |
 | Attach the loader, configure consent/admission, read metrics | [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md) |
+| Move schema-3 Rust transfer work into an explicitly packaged worker | [Transfer worker](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/TRANSFER-WORKER.md) |
 | Find module exports and publisher/session methods | [API reference](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) |
 | Review current production implementation and acceptance | [Production features](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-FEATURES.md), [delivery checklist](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PRODUCTION-READINESS.md) |
 | Continue the agreed production work as another agent | [Goals and agent handover](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/AGENT-GOALS.md) |
@@ -1939,6 +1947,7 @@ the API they were built with.
 |---|---|---|
 | `relayswarm` | Node or a browser bundler | `RelayPool`, `RelaySwarmSession`, `validTicket`, `RELAYSWARM_VERSION`, `KIND_PRESENCE`, `KIND_SIGNAL`, `SWARM_TAG` |
 | `relayswarm/hls-swarm` | Browser with hls.js | `createHlsSwarm`, `HLS_SWARM_METRICS_VERSION`, `rotationCandidate`, `retryAfterFor`, `readRefusal` |
+| `relayswarm/transfer-worker` | Dedicated module-worker or bundler entry | `createCoreTransferWorkerRuntime`; installs the companion handler when loaded in a dedicated worker. See [packaging and lifecycle](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/TRANSFER-WORKER.md). |
 | `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `commitmentPieceSize`, `delegationContent`, `revocationContent`, `validStreamAuthorisation`, `verifyCommitmentDelegation`, `segmentMediaContext`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT`, `KIND_COMMITMENT_DELEGATION`, `KIND_COMMITMENT_REVOCATION` |
 | `relayswarm/hls-publisher` | Node only | `createHlsPublisher`, `PublisherError` |
 | `relayswarm/publisher-state` | Node only | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent`, `createCommitmentDelegation`, `createCommitmentRevocation` |
@@ -2009,6 +2018,16 @@ whole-origin recovery time with a 25% and 100 ms margin. The ordinary
 buffer reserve remains in force. Unknown duration or no spare duration starts
 HTTP immediately; an enabled cached-peer race retains its independent
 window. This is an admission bound, not a smooth-playback guarantee.
+
+The unreleased opt-in `transferWorkerUrl` warms one explicitly packaged
+companion worker asynchronously after `coreWasm` loads. With `multiHolder`,
+schema-3 verification and planning use the same Rust transfer facade in that
+worker. Configured loads use HTTP during warm-up or after failure, without a
+large synchronous transfer retry. Queue/object limits and late-reply fences
+preserve the ordinary origin path and accepted-only peer observations.
+`loadCore(...).module` exposes the already compiled module for this use;
+the worker fetches no second copy. See the [worker integration guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/TRANSFER-WORKER.md)
+for the companion bundle, resource bounds, metrics and asynchronous low-level API.
 
 For eligible already-HAVE framing-2 holders, a verified schema-3 commitment
 can enter mixed piece planning without passing a whole-object peer forecast.
@@ -10727,3 +10746,116 @@ E2E_REALTIME_BACKEND_MODULE=/path/to/corrected-backend.mjs E2E_REALTIME_LIFETIME
 That path is a mandatory explicit selection when qualifying finite-lifetime
 native forwarding. An omitted backend path retains the historical direct
 upstream diagnostic; it does not establish corrected loss/expiry behaviour.
+
+---
+
+Source: [docs/TRANSFER-WORKER.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/TRANSFER-WORKER.md)
+
+# Dedicated transfer worker
+
+This unreleased experimental opt-in moves schema-3 piece verification and
+transfer scheduling into one dedicated worker per swarm. Both execution paths
+share the same small transfer facade and compiled Rust module. Piece hashes,
+the whole-object hash, planner, probe caps and returned commands remain Rust's
+decisions; there is no additional JavaScript verifier.
+
+## Host integration and packaging
+
+Bundle the companion entry from the same SDK revision as the main adapter and
+reviewed WASM module. From this repository, using its installed dependencies:
+
+```sh
+npx --no-install esbuild src/browser/core-transfer-worker-runtime.mjs --bundle --platform=browser --format=esm --outfile=public/relayswarm-transfer-worker.mjs
+```
+
+Serve that generated file and configure its URL explicitly:
+
+```js
+const swarm = createHlsSwarm({
+  ...approvedStreamOptions,
+  mode: "peer-first",
+  coreWasm: "/vendor/relayswarm-core.wasm",
+  multiHolder: true,
+  transferWorkerUrl: "/relayswarm-transfer-worker.mjs",
+});
+swarm.attach(hls);
+```
+
+`transferWorkerUrl` requires peer-first mode, `coreWasm` and `multiHolder`.
+The host's normal explicit peer/upload consent still applies. A relative
+`import.meta.url` inside a bundled main library does not guess an adjacent
+asset. Existing browser worker/module capabilities and the host's content
+policy must permit the supplied URL; refusal goes to HTTP. Installed-package
+bundlers can resolve the entry as `relayswarm/transfer-worker`, for example
+from a companion entry containing `import "relayswarm/transfer-worker"`.
+The SDK release build emits `relayswarm-transfer-worker-VERSION.mjs` with
+metadata and a checksum alongside the browser bundle. Existing
+immutable release downloads do not contain this unreleased feature.
+
+`loadCore(...)` exposes its already compiled `module`, a
+`WebAssembly.Module`. The swarm warms the worker asynchronously from that
+module, without a second WASM fetch or holding session/player startup. While
+the worker is warming or after a worker failure, configured schema-3 loads
+use ordinary HTTP. They do not quietly retry a large Rust transfer on the
+main thread. The synchronous/native transfer API and unconfigured swarms
+retain their existing path; schemas 1/2 retain their existing behaviour.
+
+The companion imports only the shared transfer facade. It receives a cloned
+compiled module, numeric scheduler inputs, commitment digests and media bytes.
+Native peer connections and signalling keys remain in the main host. It
+performs no media fetch, creates no peer connection and selects no player.
+
+## Bounds, cancellation and observations
+
+The default bridge permits two active objects, 16 MiB per object, 32 MiB of
+active object sizes, 32 pending calls and 32 MiB of pending media payload.
+The loader respects its configured segment limit up to the bridge's 32 MiB
+per-object maximum. Initialisation and every call have a five-second safety
+deadline; the existing HLS peer floor and absolute origin backstop remain in
+force independently. Queue or handle exhaustion sends that load to HTTP.
+There is no automatic worker retry or unbounded queue.
+
+Media input is copied into an owned transferable buffer so the caller retains
+its original bytes for caching, accounting and tracing. Verified output is
+transferred back. This moves CPU work and retains an input-copy cost; it does
+not prove lower total CPU time or network use.
+
+Per-transfer free/cancel immediately fences its replies, rejects pending
+calls and queues Rust handle cleanup; other active transfers continue.
+Acknowledgements or operation deadlines still own that queued work, because
+only terminating the worker can interrupt a synchronous WASM call. Swarm
+stop, worker failure, malformed results or a genuine operation deadline
+terminate the worker and reject pending work. The normal pending HTTP arm of
+a cached-peer race remains owned by its loader.
+
+The loader keeps generation/abort guards and complete-object acceptance.
+Late worker replies cannot credit peer bytes or call the player. Only
+first-verified-copy contributions in an accepted complete object reach
+`onPeerDelivery`. `metrics().core.transferWorker` reports state/reason and,
+once available, active objects, pending calls and pending media bytes. It
+contains no native connection references.
+
+The low-level [`createCoreTransferWorker`](https://raw.githubusercontent.com/forgesworn/relayswarm/main/src/browser/core-transfer-worker.mjs)
+bridge also accepts a compiled `module` and explicit `workerUrl`, with bounded
+limits, a lifecycle `signal` and `onFailure`. Its `transfer(config, { signal })`
+returns asynchronous `start`, `progress`, `delivered`, `failed` and `tick`
+methods with the synchronous core's arguments and frames. `free`/`cancel`
+release one handle; `stop` terminates the worker. `WorkerImpl` on the HLS
+options is a constructor injection point for tests or an equivalent host
+worker transport.
+
+## Focused verification
+
+```sh
+node --test test/core-transfer-worker.test.mjs test/core-transfer.test.mjs
+node --test --test-name-pattern='transfer worker:' test/browser-hardening.test.mjs
+```
+
+The bridge fixture uses a real Node worker thread with the committed WASM,
+comparing every six-MiB mixed/corrupt transfer frame and final bytes against
+the synchronous core. It covers independent cleanup, limits, stale replies,
+deadlines, worker errors and stop. Loader checks cover a six-MiB verified
+contribution with exact observations, HTTP during held worker initialisation,
+and genuine worker failure with no peer credit or synchronous retry. These
+are protocol/lifecycle checks; physical HLS continuity and net network benefit
+remain separate acceptance gates.

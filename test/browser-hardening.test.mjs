@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { Readable } from "node:stream";
 import { readFile } from "node:fs/promises";
+import { Worker as WorkerThread } from "node:worker_threads";
 import { generateSecretKey, finalizeEvent, getPublicKey } from "nostr-tools/pure";
 import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
 import { loadCore } from "../src/browser/core-wasm.mjs";
@@ -1278,7 +1279,7 @@ test("the Rust core verifies peer-first commitments, and its rejection stands", 
     const metrics = fixture.swarm.metrics();
     assert.equal(metrics.segments.commitmentRejected, 1);
     assert.equal(metrics.segments.peerFirstLoaded, 1);
-    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", discovery: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", discovery: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 }, transferWorker: { state: "off", reason: null }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
   } finally { await fixture.close(); }
 });
 
@@ -1294,7 +1295,7 @@ test("a trapping or unloadable core hands its links and verification to JavaScri
       const metrics = fixture.swarm.metrics();
       assert.equal(metrics.segments.peerFirstLoaded, 1);
       // The trapping core fails on the first link it opens, which then runs in JavaScript.
-      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 }, transferWorker: { state: "off", reason: null }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
       assert.equal(metrics.errors.byStage.core, 1);
     } finally { await fixture.close(); }
   }
@@ -1310,7 +1311,7 @@ test("a core that answers malformed results retires and the loader carries on in
     const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder")).catch(() => null);
     await until(() => fixture.swarm.metrics().core.state === "failed");
     const { core, errors } = fixture.swarm.metrics();
-    assert.deepEqual({ ...core, links: core.links.wasm + core.links.js }, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: 1, fallbacks: 1, decided: { wasm: 0, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+    assert.deepEqual({ ...core, links: core.links.wasm + core.links.js }, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: 1, fallbacks: 1, decided: { wasm: 0, js: 0 }, transferWorker: { state: "off", reason: null }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
     assert.equal(errors.byStage.core, 1);
     if (channel && core.links.js === 1) {
       channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
@@ -1353,7 +1354,7 @@ test("the core option is checked and ignored outside peer-first", () => {
     assert.equal(createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm }).metrics().disabledReason, "invalid-core-wasm");
   }
   const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm });
-  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 }, transferWorker: { state: "off", reason: null }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
   swarm.stop();
 });
 
@@ -4609,6 +4610,32 @@ test("a caller abort during the wait is not a miss", async t => {
 // --- multi-holder transfer (schema 3, framing 2) -----------------------------
 
 const multiCore = await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url)));
+
+function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false } = {}) {
+  const workers = [];
+  class WorkerImpl extends EventTarget {
+    constructor() {
+      super(); workers.push(this);
+      this.thread = new WorkerThread(new URL("./support/core-transfer-worker-thread.mjs", import.meta.url));
+      this.exit = new Promise(resolve => this.thread.once("exit", resolve));
+      this.thread.on("message", data => {
+        if (holdFinal && data.result?.commands?.some(command => command.t === "deliver")) { this.finalReply = data; return; }
+        this.dispatchEvent(new MessageEvent("message", { data }));
+      });
+      this.thread.on("error", () => this.dispatchEvent(new Event("error")));
+    }
+    postMessage(data, transfer) {
+      if (pauseInit && data.op === "init") { this.init = data; return; }
+      if (failDelivery && data.op === "delivered") { queueMicrotask(() => this.dispatchEvent(new Event("error"))); return; }
+      this.thread.postMessage(data, transfer);
+    }
+    releaseInit() { this.thread.postMessage(this.init); }
+    releaseFinal() { this.dispatchEvent(new MessageEvent("message", { data: this.finalReply })); }
+    terminate() { this.terminated = true; return this.thread.terminate(); }
+  }
+  t.after(async () => { await Promise.all(workers.map(worker => worker.terminate())); await Promise.all(workers.map(worker => worker.exit)); });
+  return { WorkerImpl, workers };
+}
 const multiContext = { url: "https://origin.example/media/seg.ts",
   frag: { sn: 1, level: 0, cc: 0, type: "main", baseurl: "https://origin.example/media/index.m3u8" } };
 
@@ -4715,6 +4742,129 @@ function beginCountedMultiLoad(f) {
   });
   return { loader, response, calls };
 }
+
+test("transfer worker: six-MiB verified contribution uses the shared Rust facade and exact observations", async t => {
+  const { WorkerImpl, workers } = transferWorkerFixture(t), observed = [];
+  const f = await multiFixture(t, { size: 6 * 1024 * 1024, holders: [{}, {}], originFallbackMs: 5_000, originDelayMs: 1_000,
+    traceRequests: 4_096, onPeerDelivery: value => observed.push(value),
+    swarmOptions: { transferWorkerUrl: "https://worker.example/transfer.js", WorkerImpl } });
+  try {
+    await until(() => f.swarm.metrics().core.transferWorker.state === "ready");
+    sameBytes(await f.load(), f.bytes);
+    const metrics = f.swarm.metrics();
+    assert.equal(workers.length, 1, "one warmed worker belongs to this swarm");
+    assert.equal(metrics.core.multiHolder.delivered, 1);
+    assert.ok(metrics.bytes.peerFirst > 0);
+    assert.equal(observed.reduce((sum, row) => sum + row.bytes, 0), metrics.bytes.peerFirst);
+    assert.ok(observed.every(row => f.connections.includes(row.connection)));
+    assert.ok(f.swarm.trace().rows.some(row => row.k === "xfer" && row.op === "delivered" && row.out.c.some(command => command.t === "deliver")));
+    await until(() => f.swarm.metrics().core.transferWorker.transfers === 0);
+    assert.equal(f.swarm.metrics().core.transferWorker.pending, 0);
+  } finally { await f.close(); }
+  assert.equal(workers[0].terminated, true);
+});
+
+test("transfer worker: warming never delays ordinary HTTP or silently uses the main-thread transfer", async t => {
+  const { WorkerImpl, workers } = transferWorkerFixture(t, { pauseInit: true });
+  const f = await multiFixture(t, { holders: [{}], wholeOriginDelayMs: 5,
+    swarmOptions: { transferWorkerUrl: "https://worker.example/transfer.js", WorkerImpl } });
+  try {
+    assert.equal(f.swarm.metrics().core.transferWorker.state, "loading");
+    const key = createHash("sha256").update(`${base.swarmId}\n/media/seg.ts`).digest("hex");
+    f.channels[0].receive(JSON.stringify({ t: "have", keys: [] }));
+    f.channels[0].receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:0" }));
+    f.channels[0].receive(JSON.stringify({ t: "fetching", k: key, ms: 2_000 }));
+    sameBytes(await f.load(), f.bytes);
+    assert.equal(f.wholeLoads.length, 1);
+    assert.equal(f.channels[0].wants.length, 0, "no hidden synchronous peer transfer fills the startup gap");
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.equal(f.swarm.metrics().segments.coordinatedWaits, 0, "a real FETCH with no HAVE cannot wait for an unavailable worker");
+    assert.equal(f.commitmentCalls, 0);
+    workers[0].releaseInit();
+    await until(() => f.swarm.metrics().core.transferWorker.state === "ready");
+    f.channels[0].receive(JSON.stringify({ t: "have", keys: [key] }));
+    sameBytes(await f.load(), f.bytes);
+    assert.ok(f.swarm.metrics().bytes.peerFirst > 0);
+  } finally { await f.close(); }
+});
+
+test("transfer worker: late replies obey the absolute origin backstop before timers run", async t => {
+  for (const late of [false, true]) await t.test(late ? "past hard backstop" : "within origin reserve", async t => {
+    const { WorkerImpl, workers } = transferWorkerFixture(t, { holdFinal: true }), observed = [];
+    const f = await multiFixture(t, { holders: [{}], originFallbackMs: 500, originDelayMs: 1_000, wholeOriginDelayMs: 5,
+      onPeerDelivery: row => observed.push(row),
+      swarmOptions: { transferWorkerUrl: "https://worker.example/transfer.js", WorkerImpl, maxPeerWaitMs: 500 } });
+    let shift = 0;
+    try {
+      await until(() => f.swarm.metrics().core.transferWorker.state === "ready");
+      const actualNow = performance.now.bind(performance);
+      t.mock.method(performance, "now", () => actualNow() + shift);
+      const pending = f.load();
+      await until(() => workers[0].finalReply);
+      const before = f.swarm.metrics();
+      assert.equal(f.wholeLoads.length, 0, "no fallback timer has run before the held worker reply");
+      shift = late ? 10_000 : 600;
+      workers[0].releaseFinal();
+      sameBytes(await pending, f.bytes);
+      const after = f.swarm.metrics();
+      if (late) {
+        assert.equal(after.bytes.peerFirst, 0);
+        assert.equal(after.core.multiHolder.peerBytes, before.core.multiHolder.peerBytes, "late state cannot add diagnostic verified-piece credit");
+        assert.equal(after.core.multiHolder.delivered, 0);
+        assert.deepEqual(observed, []);
+        assert.equal(f.wholeLoads.length, 1);
+      } else {
+        assert.ok(after.bytes.peerFirst > 0, "the measured origin reserve remains available to mixed delivery");
+        assert.equal(after.core.multiHolder.delivered, 1);
+        assert.equal(f.wholeLoads.length, 0);
+      }
+    } finally { shift = 0; await f.close(); }
+  });
+});
+
+test("transfer worker: genuine failure recovers through HTTP with no false verified delivery", async t => {
+  const { WorkerImpl, workers } = transferWorkerFixture(t, { failDelivery: true }), observed = [];
+  const f = await multiFixture(t, { holders: [{}], wholeOriginDelayMs: 5, onPeerDelivery: row => observed.push(row),
+    swarmOptions: { transferWorkerUrl: "https://worker.example/transfer.js", WorkerImpl } });
+  try {
+    await until(() => f.swarm.metrics().core.transferWorker.state === "ready");
+    sameBytes(await f.load(), f.bytes);
+    const metrics = f.swarm.metrics();
+    assert.equal(metrics.core.transferWorker.state, "failed");
+    assert.equal(metrics.core.transferWorker.reason, "worker-error");
+    assert.equal(metrics.core.state, "ready", "a worker failure does not retire healthy main-thread peer links");
+    assert.equal(metrics.bytes.peerFirst, 0);
+    assert.deepEqual(observed, []);
+    assert.equal(workers[0].terminated, true);
+    const requests = f.channels[0].wants.length;
+    sameBytes(await f.load(), f.bytes);
+    assert.equal(f.channels[0].wants.length, requests, "future fragments retain HTTP rather than retrying on the main thread");
+  } finally { await f.close(); }
+});
+
+test("transfer worker: stopping a cached race terminates peer work while its original HTTP continues", async t => {
+  const { WorkerImpl, workers } = transferWorkerFixture(t), observed = [];
+  const f = await multiFixture(t, { holders: [{ delayMs: 200 }], wholeOriginDelayMs: 400,
+    onPeerDelivery: row => observed.push(row),
+    swarmOptions: { transferWorkerUrl: "https://worker.example/transfer.js", WorkerImpl, zeroBudgetPeerRace: true } });
+  try {
+    await until(() => f.swarm.metrics().core.transferWorker.state === "ready");
+    f.hls.media = { currentTime: 10, buffered: { length: 0 } };
+    const pending = beginCountedMultiLoad(f);
+    assert.equal(f.wholeLoads.length, 1, "the ordinary HTTP request starts synchronously");
+    await until(() => f.channels[0].wants.length > 0);
+    f.swarm.stop();
+    sameBytes(await pending.response, f.bytes);
+    assert.equal(pending.calls.success.length, 1);
+    assert.equal(pending.calls.abort.length, 0);
+    assert.equal(pending.calls.error.length, 0);
+    assert.equal(f.wholeLoads[0].loader.aborted, false);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.deepEqual(observed, []);
+    assert.equal(f.swarm.metrics().core.transferWorker.state, "stopped");
+    assert.equal(workers[0].terminated, true);
+  } finally { await f.close(); }
+});
 
 // A real partial payload establishes a fresh slow estimate. Later requests
 // arrive in short bursts, too short to replace that estimate's 300ms flow

@@ -71,6 +71,11 @@ original-4K candidate passed a bounded 45.5-second window: 6,553,600 verified
 peer bytes, zero reported post-first-frame stalls and zero dropped frames.
 Earlier longer-window interruptions remain recorded; sustained continuity
 and net benefit remain open. Browser-cache bytes are separate from wire traffic.
+Unreleased source adds transferWorkerUrl: an explicitly packaged companion
+warms asynchronously from the already compiled module and runs the same Rust
+schema-3 transfer facade off the main thread. Worker warm-up, limits and failure
+retain HTTP; cancelled/late results cannot credit peer media. Sync/native APIs
+remain compatible. Physical streaming continuity is a separate acceptance gate.
 Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The example origin adds bounded blocking reload for compatible complete live
 playlists across all renditions, with 24 waiters inside 32 media requests.
@@ -127,6 +132,7 @@ fixtures use temporary loopback servers, not a public pilot deployment.
 - [Documentation index](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md): Routes for installation, integration, security and evidence.
 - [Getting started](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md): Exact tarball, pinned Git, bundle, checksums and source-demo instructions.
 - [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md): Options, verified peer delivery callback, accepted peer connection snapshots, consent, admission, metrics, commitments and stop semantics.
+- [Transfer worker](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/TRANSFER-WORKER.md): Explicit companion packaging, shared Rust verification/scheduling, bounded queues and cancellation; unreleased source with separate field gates.
 - [API reference](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md): Module exports; browser, publisher, relay/session and native primitives. Experimental opt-in peer supply hints allow origin-sustainable ABR ties only.
 - [Publisher/player field test](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/FIELD-TEST.md): Supported HLS subset, HTTPS trials, local receipts and device/network gates.
 - [Spry TURN interoperability](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/interop/spry-turn.md): Forced relay-only HLS tests with the public v0.2.1 binary and separate viewer credentials. UDP passed; TCP/TLS carried verified media but missed the timing gate; TLS also lacked an active selected path at the final sample. Earlier shared-principal quota errors are documented; loopback only.

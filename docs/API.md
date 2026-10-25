@@ -16,6 +16,7 @@ the API they were built with.
 |---|---|---|
 | `relayswarm` | Node or a browser bundler | `RelayPool`, `RelaySwarmSession`, `validTicket`, `RELAYSWARM_VERSION`, `KIND_PRESENCE`, `KIND_SIGNAL`, `SWARM_TAG` |
 | `relayswarm/hls-swarm` | Browser with hls.js | `createHlsSwarm`, `HLS_SWARM_METRICS_VERSION`, `rotationCandidate`, `retryAfterFor`, `readRefusal` |
+| `relayswarm/transfer-worker` | Dedicated module-worker or bundler entry | `createCoreTransferWorkerRuntime`; installs the companion handler when loaded in a dedicated worker. See [packaging and lifecycle](TRANSFER-WORKER.md). |
 | `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `commitmentPieceSize`, `delegationContent`, `revocationContent`, `validStreamAuthorisation`, `verifyCommitmentDelegation`, `segmentMediaContext`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT`, `KIND_COMMITMENT_DELEGATION`, `KIND_COMMITMENT_REVOCATION` |
 | `relayswarm/hls-publisher` | Node only | `createHlsPublisher`, `PublisherError` |
 | `relayswarm/publisher-state` | Node only | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent`, `createCommitmentDelegation`, `createCommitmentRevocation` |
@@ -86,6 +87,16 @@ whole-origin recovery time with a 25% and 100 ms margin. The ordinary
 buffer reserve remains in force. Unknown duration or no spare duration starts
 HTTP immediately; an enabled cached-peer race retains its independent
 window. This is an admission bound, not a smooth-playback guarantee.
+
+The unreleased opt-in `transferWorkerUrl` warms one explicitly packaged
+companion worker asynchronously after `coreWasm` loads. With `multiHolder`,
+schema-3 verification and planning use the same Rust transfer facade in that
+worker. Configured loads use HTTP during warm-up or after failure, without a
+large synchronous transfer retry. Queue/object limits and late-reply fences
+preserve the ordinary origin path and accepted-only peer observations.
+`loadCore(...).module` exposes the already compiled module for this use;
+the worker fetches no second copy. See the [worker integration guide](TRANSFER-WORKER.md)
+for the companion bundle, resource bounds, metrics and asynchronous low-level API.
 
 For eligible already-HAVE framing-2 holders, a verified schema-3 commitment
 can enter mixed piece planning without passing a whole-object peer forecast.

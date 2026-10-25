@@ -32,18 +32,25 @@ for (const { path } of preview.files) {
   assert.ok(!/\.(?:key|pem)$/u.test(path), `Private key in package: ${path}`);
 }
 assert.ok(preview.files.some(({ path }) => path === "src/browser/relayswarm-core.wasm"));
+assert.ok(preview.files.some(({ path }) => path === "src/browser/core-transfer-worker-runtime.mjs"));
 const [packed] = JSON.parse(run("npm", ["pack", "--json", "--pack-destination", out]));
 assert.deepEqual(packed.files, preview.files, "Package changed during the build");
 const browser = `relayswarm-hls-swarm-${version}.mjs`, wasm = `relayswarm-core-${version}.wasm`;
+const transferWorker = `relayswarm-transfer-worker-${version}.mjs`;
 const result = await build({ entryPoints: [join(root, "src/browser/hls-swarm.mjs")], bundle: true,
   platform: "browser", format: "esm", target: "es2022", minify: true, metafile: true,
   outfile: join(out, browser) });
 assert.ok(Object.values(result.metafile.outputs).every(({ imports }) => imports.length === 0), "Browser bundle has external runtime imports");
+const workerResult = await build({ entryPoints: [join(root, "src/browser/core-transfer-worker-runtime.mjs")], bundle: true,
+  platform: "browser", format: "esm", target: "es2022", minify: true, metafile: true,
+  outfile: join(out, transferWorker) });
+assert.ok(Object.values(workerResult.metafile.outputs).every(({ imports }) => imports.length === 0), "Transfer worker has external runtime imports");
 copyFileSync(join(root, "src/browser/relayswarm-core.wasm"), join(out, wasm));
 const metadata = "BUILD-METADATA-javascript.json";
 writeFileSync(join(out, metadata), JSON.stringify({ sourceCommit, packageVersion: version, node: process.version,
-  packageMembers: packed.files.length, wasmSourceHash: coreSourceHash(root) }, null, 2) + "\n");
-const assets = [packed.filename, browser, wasm, metadata];
+  packageMembers: packed.files.length, wasmSourceHash: coreSourceHash(root),
+  transferWorker: { file: transferWorker, source: "src/browser/core-transfer-worker-runtime.mjs" } }, null, 2) + "\n");
+const assets = [packed.filename, browser, transferWorker, wasm, metadata];
 writeFileSync(join(out, "SHA256SUMS"), assets.map((file) =>
   `${createHash("sha256").update(readFileSync(join(out, file))).digest("hex")}  ${file}`).join("\n") + "\n");
 console.log(JSON.stringify({ sourceCommit, version, packageMembers: packed.files.length, assets: [...assets, "SHA256SUMS"] }, null, 2));
