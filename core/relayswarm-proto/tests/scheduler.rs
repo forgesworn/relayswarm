@@ -248,6 +248,102 @@ fn delivered(commands: &[Command]) -> Option<&Vec<u8>> {
     })
 }
 
+#[test]
+fn a_refresh_is_one_piece_even_when_another_route_has_a_fast_shared_rate() {
+    let bytes = object_sized(6 * 1024 * 1024);
+    let mut probe = transfer(&bytes, NOW + 2_800);
+    probe.start_with_probe_peers(
+        NOW,
+        &[peer(1, Some(100.0), None)],
+        origin(0.0, 20_000.0),
+        Some(100.0),
+        Some(20_000.0),
+        &[1],
+    );
+    let asked = requests(&probe.drain_commands());
+    assert_eq!(
+        asked,
+        vec![
+            (Source::Peer(1), PieceRange { start: 0, end: 1 }),
+            (Source::Origin, PieceRange { start: 1, end: 64 }),
+        ]
+    );
+    // The same ordinary start still uses the existing planner, without a
+    // one-piece limit silently becoming a new default.
+    let mut ordinary = transfer(&bytes, NOW + 2_800);
+    ordinary.start(
+        NOW,
+        &[peer(1, Some(100.0), None)],
+        origin(0.0, 20_000.0),
+        Some(100.0),
+        Some(20_000.0),
+    );
+    assert_eq!(
+        requests(&ordinary.drain_commands()),
+        vec![(Source::Peer(1), PieceRange { start: 0, end: 4 })]
+    );
+}
+
+#[test]
+fn only_a_fresh_verified_probe_unlocks_ordinary_peer_work() {
+    let bytes = object_sized(6 * 1024 * 1024);
+    let mut transfer = transfer(&bytes, NOW + 10_000);
+    transfer.start_with_probe_peers(
+        NOW,
+        &[peer(1, Some(100.0), None), peer(2, Some(100.0), None)],
+        origin(0.0, 20_000.0),
+        None,
+        Some(20_000.0),
+        &[1, 2],
+    );
+    transfer.drain_commands();
+    // Neither progress, an unsolicited range nor reassigning failed origin
+    // work replenishes the one-piece allowance.
+    transfer.progress(NOW + 100, Source::Peer(1), 1);
+    let unsolicited = PieceRange { start: 1, end: 2 };
+    transfer.delivered(NOW + 110, Source::Peer(1), unsolicited, slice(&bytes, unsolicited));
+    transfer.failed(NOW + 115, Source::Peer(2));
+    assert!(requests(&transfer.drain_commands())
+        .iter()
+        .all(|(source, _)| *source == Source::Origin));
+    let first = PieceRange { start: 0, end: 1 };
+    transfer.delivered(NOW + 120, Source::Peer(1), first, slice(&bytes, first));
+    let next = requests(&transfer.drain_commands());
+    assert!(next
+        .iter()
+        .any(|(source, range)| *source == Source::Peer(1) && range.start >= 1 && range.end - range.start <= MAX_PEER_REQUEST_PIECES));
+}
+
+#[test]
+fn a_bad_or_late_probe_cannot_unlock_more_peer_work() {
+    let bytes = object_sized(6 * 1024 * 1024);
+    for corrupt in [false, true] {
+        let mut transfer = transfer(&bytes, NOW + 10_000);
+        transfer.start_with_probe_peers(
+            NOW,
+            &[peer(1, Some(100.0), None)],
+            origin(0.0, 20_000.0),
+            None,
+            Some(20_000.0),
+            &[1],
+        );
+        transfer.drain_commands();
+        let range = PieceRange { start: 0, end: 1 };
+        let mut answer = slice(&bytes, range).to_vec();
+        if corrupt {
+            answer[0] ^= 1;
+        } else {
+            transfer.failed(NOW + 100, Source::Peer(1));
+        }
+        transfer.delivered(NOW + 120, Source::Peer(1), range, &answer);
+        let commands = transfer.drain_commands();
+        assert!(!requests(&commands).iter().any(|(source, _)| *source == Source::Peer(1)));
+        if corrupt {
+            assert!(commands.iter().any(|command| matches!(command, Command::Ban { peer: 1 })));
+        }
+    }
+}
+
 /// Answer every request honestly, except from `bad` (one flipped byte) and
 /// from `silent` (never answers), until nothing more is asked.
 fn run(transfer: &mut Transfer, bytes: &[u8], bad: Option<u64>, silent: Option<u64>) -> Vec<Command> {
@@ -369,7 +465,7 @@ fn the_origin_floor_takes_over_outstanding_pieces() {
     let mut transfer = transfer(&bytes, deadline);
     transfer.start(
         NOW,
-        &[peer(1, Some(50.0), Some(200.0)), peer(2, Some(50.0), Some(200.0))],
+        &[peer(1, Some(50.0), Some(200.0)), peer(2, None, Some(200.0))],
         origin(100.0, 500.0),
         None,
         None,
@@ -397,12 +493,13 @@ fn the_origin_floor_takes_over_outstanding_pieces() {
 #[test]
 fn the_endgame_duplicates_a_lagging_last_piece_and_the_first_copy_wins() {
     let bytes = object();
-    // Peers 1 and 3 hold four and two pieces; peer 3 goes quiet with the
-    // tail. Peer 2 is never chosen. Peer 1, once done, is the fastest idle.
+    // Peers 1 and 3 hold four and two pieces; peer 3's startup is unknown
+    // and it goes quiet with the tail. Peer 2 is never chosen. Peer 1,
+    // once done, is the fastest idle.
     let peers = [
         peer(1, Some(10.0), Some(300.0)),
         peer(2, Some(10.0), Some(100.0)),
-        peer(3, Some(10.0), Some(120.0)),
+        peer(3, None, Some(120.0)),
     ];
     let config = TransferConfig {
         max_holders: 2,
@@ -545,6 +642,36 @@ fn without_a_shared_first_byte_time_silence_waits_for_the_floor() {
     let bytes = object();
     let (transfer, _) = two_peers(&bytes, NOW + 10_000, None);
     assert_eq!(transfer.next_deadline(), Some(NOW + 8_000));
+}
+
+#[test]
+fn a_measured_slow_lane_does_not_borrow_another_lanes_fast_startup() {
+    let bytes = object();
+    for shared in [Some(20.0), None] {
+        let mut transfer = transfer(&bytes, NOW + 10_000);
+        transfer.start(NOW, &[peer(1, Some(1_400.0), Some(200.0))], origin(100.0, 500.0), shared, None);
+        transfer.drain_commands();
+        assert_eq!(transfer.next_deadline(), Some(NOW + 4_200));
+        transfer.tick(NOW + 250);
+        assert!(!transfer.drain_commands().contains(&Command::Abandon { peer: 1 }));
+        transfer.tick(NOW + 4_199);
+        assert!(!transfer.drain_commands().contains(&Command::Abandon { peer: 1 }));
+        transfer.tick(NOW + 4_200);
+        assert!(transfer.drain_commands().contains(&Command::Abandon { peer: 1 }));
+    }
+}
+
+#[test]
+fn a_measured_fast_lane_does_not_borrow_another_lanes_slow_startup() {
+    let bytes = object();
+    let mut transfer = transfer(&bytes, NOW + 10_000);
+    transfer.start(NOW, &[peer(1, Some(20.0), Some(200.0))], origin(100.0, 500.0), Some(1_400.0), None);
+    transfer.drain_commands();
+    assert_eq!(transfer.next_deadline(), Some(NOW + 250));
+    transfer.tick(NOW + 249);
+    assert!(!transfer.drain_commands().contains(&Command::Abandon { peer: 1 }));
+    transfer.tick(NOW + 250);
+    assert!(transfer.drain_commands().contains(&Command::Abandon { peer: 1 }));
 }
 
 #[test]
@@ -846,4 +973,356 @@ fn whole_origin_ranges_are_not_split_into_peer_sized_batches() {
     assert!(slice(&bytes, asked[0].1).len() as u64 > MAX_PEER_REQUEST_BYTES);
     transfer.delivered(NOW + 10, Source::Origin, asked[0].1, &bytes);
     assert_eq!(delivered(&transfer.drain_commands()), Some(&bytes));
+}
+
+// --- Independent peer-only arm ---------------------------------------------
+
+fn peer_only_transfer(bytes: &[u8], deadline: u64, max_holders: usize) -> Transfer {
+    let hashes: Vec<String> = bytes.chunks(commitment_piece_size(bytes.len() as i64) as usize).map(hex).collect();
+    let refs: Vec<&str> = hashes.iter().map(String::as_str).collect();
+    Transfer::new_peer_only(
+        TransferConfig {
+            max_holders,
+            origin_reserve_ms: 0.0,
+        },
+        bytes.len() as u64,
+        &hex(bytes),
+        &refs,
+        deadline,
+    )
+    .unwrap()
+}
+
+fn peer_only_bounds(commands: &[Command], bytes: &[u8]) {
+    for command in commands {
+        assert!(
+            !matches!(command, Command::FetchOrigin { .. } | Command::Abandon { .. }),
+            "{commands:?}"
+        );
+        if let Command::Request { range, .. } = command {
+            assert!(range.start < range.end);
+            assert!(range.end - range.start <= MAX_PEER_REQUEST_PIECES);
+            assert!(slice(bytes, *range).len() as u64 <= MAX_PEER_REQUEST_BYTES);
+        }
+    }
+}
+
+fn run_peer_only(transfer: &mut Transfer, bytes: &[u8], mut commands: Vec<Command>, mut at: u64) -> Vec<Command> {
+    let mut log = Vec::new();
+    for _ in 0..128 {
+        peer_only_bounds(&commands, bytes);
+        let asked = requests(&commands);
+        log.extend(commands);
+        if transfer.finished() || asked.is_empty() {
+            break;
+        }
+        for (source, range) in asked {
+            at += 10;
+            transfer.delivered(at, source, range, slice(bytes, range));
+        }
+        commands = transfer.drain_commands();
+    }
+    assert!(transfer.finished(), "pending pieces must continue without an origin event");
+    assert_eq!(delivered(&log).map(Vec::as_slice), Some(bytes));
+    log
+}
+
+#[test]
+fn peer_only_six_mib_unknown_probe_refills_every_piece_without_origin() {
+    let bytes = object_sized(6 * 1024 * 1024);
+    let mut transfer = peer_only_transfer(&bytes, NOW + 5_000, 3);
+    assert!(transfer.peer_only());
+    // Unknown means one probe even if the caller omits probe_peers and has
+    // a very optimistic shared rate. No HTTP model is an input to this API.
+    transfer.start_peer_only_with_probe_peers(NOW, &[peer(1, None, None)], Some(1.0), Some(1_000_000.0), &[]);
+    let initial = transfer.drain_commands();
+    assert_eq!(requests(&initial), vec![(Source::Peer(1), PieceRange { start: 0, end: 1 })]);
+    let log = run_peer_only(&mut transfer, &bytes, initial, NOW);
+    let covered: Vec<u32> = requests(&log).iter().flat_map(|(_, range)| range.start..range.end).collect();
+    assert_eq!(covered, all(bytes.len() as u64), "no overlapping or lost pending pieces");
+    assert_eq!(transfer.verified_bytes(), bytes.len() as u64);
+    assert_eq!(transfer.next_deadline(), None);
+}
+
+#[test]
+fn peer_only_a_slow_verified_probe_still_unlocks_work_before_the_floor() {
+    let bytes = object_sized(1024 * 1024);
+    let mut transfer = peer_only_transfer(&bytes, NOW + 1_000, 1);
+    transfer.start_peer_only_with_probe_peers(NOW, &[peer(1, Some(1.0), None)], Some(1.0), None, &[1]);
+    let initial = transfer.drain_commands();
+    let (_, probe) = requests(&initial)[0];
+    transfer.progress(NOW + 1, Source::Peer(1), 1);
+    transfer.tick(NOW + 600);
+    assert!(
+        transfer.drain_commands().is_empty(),
+        "parallel HTTP owns recovery; no serial flow abandonment"
+    );
+    transfer.delivered(NOW + 700, Source::Peer(1), probe, slice(&bytes, probe));
+    let next = transfer.drain_commands();
+    assert!(!requests(&next).is_empty(), "an adverse forecast must not strand pending work");
+    let log = run_peer_only(&mut transfer, &bytes, next, NOW + 700);
+    peer_only_bounds(&initial, &bytes);
+    assert_eq!(delivered(&log), Some(&bytes));
+}
+
+#[test]
+fn peer_only_ignores_an_accidental_origin_estimate_and_origin_callbacks() {
+    let bytes = object();
+    let mut transfer = peer_only_transfer(&bytes, NOW + 5_000, 1);
+    transfer.start(
+        NOW,
+        &[peer(1, None, None), origin(0.0, 1_000_000.0)],
+        origin(0.0, 1_000_000.0),
+        None,
+        None,
+    );
+    let first = transfer.drain_commands();
+    assert_eq!(requests(&first), vec![(Source::Peer(1), PieceRange { start: 0, end: 1 })]);
+    let range = PieceRange { start: 0, end: 1 };
+    transfer.delivered(NOW + 1, Source::Origin, range, slice(&bytes, range));
+    transfer.progress(NOW + 1, Source::Origin, 1);
+    transfer.failed(NOW + 1, Source::Origin);
+    assert_eq!(transfer.verified_bytes(), 0);
+    assert!(!transfer.finished());
+    assert!(transfer.drain_commands().is_empty());
+    run_peer_only(&mut transfer, &bytes, first, NOW + 1);
+}
+
+#[test]
+fn peer_only_silence_and_stalled_progress_wait_for_floor_then_cancel_and_fail() {
+    let bytes = object();
+    let deadline = NOW + 1_000;
+    for flowing in [false, true] {
+        let mut transfer = peer_only_transfer(&bytes, deadline, 1);
+        transfer.start_peer_only_with_probe_peers(NOW, &[peer(1, Some(1.0), None)], Some(1.0), Some(1_000_000.0), &[1]);
+        let initial = transfer.drain_commands();
+        let (_, range) = requests(&initial)[0];
+        if flowing {
+            transfer.progress(NOW + 1, Source::Peer(1), 1);
+            transfer.progress(NOW + 600, Source::Peer(1), 2);
+        }
+        transfer.tick(deadline - 1);
+        assert!(!transfer.finished());
+        assert_eq!(transfer.next_deadline(), Some(deadline));
+        assert!(transfer.drain_commands().is_empty());
+        transfer.tick(deadline);
+        let stopped = transfer.drain_commands();
+        assert_eq!(stopped, vec![Command::Cancel { peer: 1 }, Command::Fail]);
+        peer_only_bounds(&stopped, &bytes);
+        assert_eq!(transfer.next_deadline(), None);
+        transfer.delivered(deadline + 1, Source::Peer(1), range, slice(&bytes, range));
+        transfer.tick(deadline + 2);
+        assert_eq!(transfer.verified_bytes(), 0);
+        assert!(transfer.drain_commands().is_empty(), "late data cannot revive the arm");
+    }
+}
+
+#[test]
+fn peer_only_delivery_at_the_floor_cannot_unlock_or_credit_a_probe() {
+    let bytes = object();
+    let mut transfer = peer_only_transfer(&bytes, NOW + 1_000, 1);
+    transfer.start_peer_only_with_probe_peers(NOW, &[peer(1, None, None)], None, None, &[1]);
+    let (_, range) = requests(&transfer.drain_commands())[0];
+    transfer.delivered(NOW + 1_000, Source::Peer(1), range, slice(&bytes, range));
+    assert_eq!(transfer.verified_bytes(), 0);
+    assert_eq!(transfer.drain_commands(), vec![Command::Cancel { peer: 1 }, Command::Fail]);
+}
+
+#[test]
+fn peer_only_failed_holder_reassigns_queued_and_pending_work_without_losing_verified_pieces() {
+    let bytes = object_sized(13 * 65_536 + 17);
+    let mut transfer = peer_only_transfer(&bytes, NOW + 10_000, 1);
+    transfer.start_peer_only_with_probe_peers(NOW, &[peer(1, None, None), peer(2, None, None)], None, None, &[]);
+    let (_, first) = requests(&transfer.drain_commands())[0];
+    transfer.delivered(NOW + 10, Source::Peer(1), first, slice(&bytes, first));
+    let (_, old_batch) = requests(&transfer.drain_commands())[0];
+    transfer.failed(NOW + 20, Source::Peer(1));
+    let retry = transfer.drain_commands();
+    assert_eq!(requests(&retry), vec![(Source::Peer(2), PieceRange { start: 1, end: 2 })]);
+    transfer.delivered(NOW + 30, Source::Peer(1), old_batch, slice(&bytes, old_batch));
+    assert_eq!(transfer.verified_bytes(), 65_536);
+    assert!(
+        transfer.drain_commands().is_empty(),
+        "the retired source cannot verify its late batch"
+    );
+    run_peer_only(&mut transfer, &bytes, retry, NOW + 30);
+}
+
+#[test]
+fn peer_only_corrupt_batch_preserves_its_good_pieces_and_reassigns_the_rest() {
+    let bytes = object_sized(13 * 65_536 + 17);
+    let mut transfer = peer_only_transfer(&bytes, NOW + 10_000, 2);
+    transfer.start_peer_only_with_probe_peers(
+        NOW,
+        &[peer(1, Some(1.0), Some(1_000.0)), peer(2, Some(1.0), Some(1_000.0))],
+        None,
+        None,
+        &[],
+    );
+    let initial = transfer.drain_commands();
+    let first = range_of(&initial, Source::Peer(1));
+    let second = range_of(&initial, Source::Peer(2));
+    let mut bad = slice(&bytes, first).to_vec();
+    bad[65_536] ^= 1;
+    transfer.delivered(NOW + 10, Source::Peer(1), first, &bad);
+    let banned = transfer.drain_commands();
+    assert!(banned.contains(&Command::Ban { peer: 1 }));
+    assert_eq!(transfer.verified_bytes(), 3 * 65_536);
+    peer_only_bounds(&banned, &bytes);
+    transfer.delivered(NOW + 20, Source::Peer(2), second, slice(&bytes, second));
+    let next = transfer.drain_commands();
+    let log = run_peer_only(&mut transfer, &bytes, next, NOW + 20);
+    assert!(!requests(&log).iter().any(|(source, _)| *source == Source::Peer(1)));
+}
+
+#[test]
+fn peer_only_duplicate_and_unsolicited_ranges_never_unlock_or_double_credit() {
+    let bytes = object();
+    let mut transfer = peer_only_transfer(&bytes, NOW + 5_000, 1);
+    transfer.start_peer_only_with_probe_peers(NOW, &[peer(1, None, None)], None, None, &[]);
+    let (_, first) = requests(&transfer.drain_commands())[0];
+    let unsolicited = PieceRange { start: 1, end: 2 };
+    transfer.delivered(NOW + 1, Source::Peer(1), unsolicited, slice(&bytes, unsolicited));
+    transfer.start_peer_only_with_probe_peers(NOW + 1, &[peer(2, None, None)], None, None, &[]);
+    assert_eq!(transfer.verified_bytes(), 0);
+    assert!(transfer.drain_commands().is_empty());
+    transfer.delivered(NOW + 2, Source::Peer(1), first, slice(&bytes, first));
+    let next = transfer.drain_commands();
+    transfer.delivered(NOW + 3, Source::Peer(1), first, slice(&bytes, first));
+    assert_eq!(transfer.verified_bytes(), 65_536);
+    assert!(transfer.drain_commands().is_empty());
+    run_peer_only(&mut transfer, &bytes, next, NOW + 3);
+}
+
+#[test]
+fn peer_only_max_holders_caps_initial_probes_and_failure_replacement() {
+    let bytes = object_sized(13 * 65_536 + 17);
+    let mut transfer = peer_only_transfer(&bytes, NOW + 10_000, 2);
+    let peers: Vec<Estimate> = (1..=4).map(|id| peer(id, None, None)).collect();
+    transfer.start_peer_only_with_probe_peers(NOW, &peers, None, Some(1_000_000.0), &[]);
+    let initial = transfer.drain_commands();
+    assert_eq!(
+        requests(&initial),
+        vec![
+            (Source::Peer(1), PieceRange { start: 0, end: 1 }),
+            (Source::Peer(2), PieceRange { start: 1, end: 2 })
+        ]
+    );
+    transfer.failed(NOW + 10, Source::Peer(1));
+    let replacement = transfer.drain_commands();
+    assert_eq!(requests(&replacement), vec![(Source::Peer(3), PieceRange { start: 0, end: 1 })]);
+    transfer.delivered(
+        NOW + 20,
+        Source::Peer(2),
+        PieceRange { start: 1, end: 2 },
+        slice(&bytes, PieceRange { start: 1, end: 2 }),
+    );
+    let mut seed = transfer.drain_commands();
+    seed.extend(replacement);
+    let log = run_peer_only(&mut transfer, &bytes, seed, NOW + 20);
+    assert!(
+        !requests(&log).iter().any(|(source, _)| *source == Source::Peer(4)),
+        "a measured holder refills before opening extra probes"
+    );
+    peer_only_bounds(&initial, &bytes);
+}
+
+#[test]
+fn peer_only_all_sources_gone_and_empty_roster_fail_without_origin() {
+    let bytes = object();
+    let mut empty = peer_only_transfer(&bytes, NOW + 5_000, 2);
+    empty.start_peer_only_with_probe_peers(NOW, &[], None, None, &[]);
+    assert_eq!(empty.drain_commands(), vec![Command::Fail]);
+    let mut transfer = peer_only_transfer(&bytes, NOW + 5_000, 2);
+    transfer.start_peer_only_with_probe_peers(NOW, &[peer(1, None, None), peer(2, None, None)], None, None, &[]);
+    transfer.drain_commands();
+    transfer.failed(NOW + 1, Source::Peer(1));
+    assert!(transfer.drain_commands().is_empty());
+    transfer.failed(NOW + 2, Source::Peer(2));
+    assert_eq!(transfer.drain_commands(), vec![Command::Fail]);
+    assert!(transfer.finished());
+    transfer.failed(NOW + 3, Source::Peer(1));
+    assert!(transfer.drain_commands().is_empty());
+}
+
+#[test]
+fn peer_only_wrong_length_or_wrong_whole_hash_never_delivers() {
+    let bytes = object();
+    let mut wrong_length = peer_only_transfer(&bytes, NOW + 5_000, 1);
+    wrong_length.start_peer_only_with_probe_peers(NOW, &[peer(1, None, None)], None, None, &[]);
+    let (_, first) = requests(&wrong_length.drain_commands())[0];
+    wrong_length.delivered(NOW + 1, Source::Peer(1), first, &[1]);
+    assert_eq!(wrong_length.drain_commands(), vec![Command::Fail]);
+    let hashes: Vec<String> = bytes.chunks(65_536).map(hex).collect();
+    let refs: Vec<&str> = hashes.iter().map(String::as_str).collect();
+    let mut wrong_whole = Transfer::new_peer_only(
+        TransferConfig {
+            max_holders: 1,
+            origin_reserve_ms: 0.0,
+        },
+        bytes.len() as u64,
+        &hex(b"different object"),
+        &refs,
+        NOW + 5_000,
+    )
+    .unwrap();
+    wrong_whole.start_peer_only_with_probe_peers(NOW, &[peer(1, Some(0.0), Some(1_000.0))], None, None, &[]);
+    let mut commands = wrong_whole.drain_commands();
+    for _ in 0..64 {
+        peer_only_bounds(&commands, &bytes);
+        let asked = requests(&commands);
+        if asked.is_empty() {
+            break;
+        }
+        for (source, range) in asked {
+            wrong_whole.delivered(NOW + 10, source, range, slice(&bytes, range));
+        }
+        commands = wrong_whole.drain_commands();
+    }
+    assert_eq!(commands, vec![Command::Fail]);
+    assert!(wrong_whole.finished());
+}
+
+#[test]
+fn peer_only_small_and_short_final_objects_keep_existing_integrity() {
+    for size in [1, 65_536, 65_537, 3 * 65_536 + 17] {
+        let bytes = object_sized(size);
+        let mut transfer = peer_only_transfer(&bytes, NOW + 5_000, 1);
+        transfer.start_peer_only_with_probe_peers(NOW, &[peer(1, None, None)], None, None, &[]);
+        let initial = transfer.drain_commands();
+        run_peer_only(&mut transfer, &bytes, initial, NOW);
+    }
+}
+
+#[test]
+fn peer_only_endgame_uses_an_idle_peer_within_cap_and_first_copy_wins() {
+    let bytes = object_sized(3 * 65_536);
+    let mut transfer = peer_only_transfer(&bytes, NOW + 5_000, 2);
+    transfer.start_peer_only_with_probe_peers(
+        NOW,
+        &[peer(1, Some(0.0), Some(1_000.0)), peer(2, Some(0.0), Some(1_000.0))],
+        None,
+        None,
+        &[],
+    );
+    let initial = transfer.drain_commands();
+    let first = range_of(&initial, Source::Peer(1));
+    let slow = range_of(&initial, Source::Peer(2));
+    assert_eq!(first.end - first.start, 2);
+    assert_eq!(slow.end - slow.start, 1);
+    transfer.delivered(NOW + 100, Source::Peer(1), first, slice(&bytes, first));
+    assert!(transfer.drain_commands().is_empty());
+    transfer.tick(NOW + 101);
+    let duplicate = transfer.drain_commands();
+    assert_eq!(requests(&duplicate), vec![(Source::Peer(1), slow)]);
+    peer_only_bounds(&duplicate, &bytes);
+    transfer.tick(NOW + 102);
+    assert!(transfer.drain_commands().is_empty(), "endgame work and deadlines must not repeat");
+    transfer.delivered(NOW + 110, Source::Peer(1), slow, slice(&bytes, slow));
+    let done = transfer.drain_commands();
+    assert!(done.contains(&Command::Cancel { peer: 2 }));
+    assert_eq!(delivered(&done), Some(&bytes));
+    transfer.delivered(NOW + 120, Source::Peer(2), slow, slice(&bytes, slow));
+    assert_eq!(transfer.verified_bytes(), bytes.len() as u64);
+    assert!(transfer.drain_commands().is_empty());
 }

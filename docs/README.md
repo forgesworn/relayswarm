@@ -13,6 +13,7 @@ its measured scope and acceptance gaps in [Status](STATUS.md).
 | Understand the project and transport choices | [Project overview](../README.md) |
 | Install the package, browser bundle or source demo | [Getting started](GETTING-STARTED.md) |
 | Attach the loader, configure consent/admission, read metrics | [hls.js integration](../INTEGRATION.md) |
+| Move schema-3 Rust transfer work into an explicitly packaged worker | [Transfer worker](TRANSFER-WORKER.md) |
 | Find module exports and publisher/session methods | [API reference](API.md) |
 | Review current production implementation and acceptance | [Production features](PRODUCTION-FEATURES.md), [delivery checklist](PRODUCTION-READINESS.md) |
 | Continue the agreed production work as another agent | [Goals and agent handover](AGENT-GOALS.md) |

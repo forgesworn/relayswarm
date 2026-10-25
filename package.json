@@ -91,6 +91,7 @@
   "exports": {
     ".": "./src/relay-session.mjs",
     "./hls-swarm": "./src/browser/hls-swarm.mjs",
+    "./transfer-worker": "./src/browser/core-transfer-worker-runtime.mjs",
     "./package.json": "./package.json",
     "./*": "./*",
     "./segment-commitment": "./src/browser/segment-commitment.mjs",

@@ -88,7 +88,7 @@ decision is not cached as permission for later upload requests.
 | `originFallbackMs` | `1500` | The in-time budget a peer delivery is measured against, and peer-first's ordinary wait. |
 | `maxPeerWaitMs` | `5000` | Peer-first may wait past `originFallbackMs`, up to this, only while recent peer timing projects the segment needs it and the playback buffer covers the wait with `originReserveMs` to spare. |
 | `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
-| `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-origin time with a 25% and 100 ms recovery margin. Before measurement, use `originReserveMs`; unknown duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. The independent `zeroBudgetPeerRace` window stays unchanged. |
+| `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-object origin time with a 25% and 100 ms recovery margin. Substantial origin ranges update this estimate after scaling by their actual byte count. Before measurement, use `originReserveMs`; unknown duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. The independent `zeroBudgetPeerRace` window stays unchanged. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
 | `maxPeers` | `6` | Connections in and out. The demo selects four explicitly. |
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
@@ -118,13 +118,15 @@ decision is not cached as permission for later upload requests.
 | `iceServers` | one public STUN | Host-provided STUN/TURN configuration captured at swarm creation. Browser TURN credentials are disclosed to the client; no managed TURN deployment is supplied. The demo/broadcaster accepts a private `--ice-config FILE` or a separate optional [renewal adapter](docs/FIELD-TEST.md#optional-turn-credential-renewal) that replaces demo swarms. |
 | `iceTransportPolicy` | `"all"` | `"all"` or `"relay"`, captured at creation and passed to every native connection. `"relay"` restricts peer ICE to relayed candidates; it never retries with `"all"`. Usable TURN configuration is required for peer connectivity. This does not select TLS, change consent or extend a peer deadline; origin fallback remains available. |
 | `coreWasm` | unset | Experimental and opt-in. Peer-first only: the Rust core's commitment verifier, peer selection, neighbour discovery and peer link protocol, `src/browser/relayswarm-core.wasm`, as a URL, its bytes or a compiled `WebAssembly.Module`. Serve the file as `application/wasm`; a page with a Content Security Policy needs `'wasm-unsafe-eval'` in `script-src`. The relay session starts once the module has loaded or failed, after at most 2 seconds; fragments loaded meanwhile go to origin. JavaScript decides until the module loads, and for the rest of the session if it fails to load or traps; a trap closes the links the module ran, and later links are JavaScript. A rejection from the module stands. See `core` in the metrics. |
+| `transferWorkerUrl` | unset | Experimental opt-in with peer-first, `coreWasm` and `multiHolder`. Explicit URL of a separately bundled companion worker from the same SDK revision. It warms asynchronously from the already compiled module and runs the same Rust schema-3 transfer facade off the main thread. While warming, after worker failure or at resource limits, those loads use HTTP; no silent large synchronous transfer retry. Existing absolute deadlines and complete-object credit checks remain. [Packaging, bounds and lifecycle](docs/TRANSFER-WORKER.md). |
 | `multiHolder` | `false` | Experimental; needs `coreWasm`. A schema 3 segment (signed with the publisher's `pieceCommitments`) is fetched from several holders at once by piece range, with an HTTP `Range` fetch from origin for any tail the peers are projected to miss; a holder that proves fast once idle takes back pieces origin has not yet sent, and the first verified copy wins; every piece is verified against the commitment before the segment is delivered. A holder that stays silent or whose flow cannot finish its range in time is abandoned early, by the single-holder rules, and its pieces move to the other sources; unlike the single-holder path, a flow that stops after its first byte is also checked every 250 ms rather than left to its timeout. Used only with holders whose presence advertises object framing 2, and the viewer advertises it only while every one of its links runs in the core. Ranged origin requests go through the player's own fragment loader with `rangeStart` and `rangeEnd` set, as for an `EXT-X-BYTERANGE` segment, so headers and credentials from hls.js `xhrSetup`, `fetchSetup` or a custom loader apply. A body that is not exactly the range (a server that ignored `Range` and sent the whole segment) is discarded, and a refused range sends the segment to the whole-segment origin load. After one such answer the origin (scheme, host and port) is not asked for ranges again in that session, and its segments take the single-holder path. A ranged upload is charged by the bytes it sends. |
-| `zeroBudgetPeerRace` | `false` | Experimental opt-in with `coreWasm` and `multiHolder`. When buffered playback leaves no safe peer wait, start normal whole-segment HTTP immediately and race only a schema 3 object already advertised in a connected framing 2 holder's HAVE at load entry. No new neighbour search or ranged HTTP request is added. Key hashing and commitment verification never delay HTTP. The first complete verified peer object or normal HTTP response wins; losing callbacks are suppressed. Peer work stops at `maxPeerWaitMs`. Progressive hls.js delivery skips this race; unexpected nonempty HTTP progress locks the load to HTTP before forwarding those bytes. Some HTTP and peer bytes may both transfer before the winner, so accepted peer bytes alone do not establish network savings. |
+| `zeroBudgetPeerRace` | `false` | Experimental opt-in with `coreWasm` and `multiHolder`. When buffered playback leaves no safe peer wait, start normal whole-segment HTTP immediately and race a schema 3 object already advertised in a connected framing 2 holder's HAVE at load entry. The Rust transfer requires the optional peer-only capability: no origin lane or origin estimate exists inside that transfer. Cold holders get bounded calibration; verified progress refills pending ranges, each piece and the whole object hash must match. Candidates remain inside the initial snapshot and current HAVE. Older modules safely decline this arm while HTTP continues. No new neighbour search or ranged HTTP request is added. Key hashing and commitment verification never delay HTTP. The first complete verified peer object or normal HTTP response wins; losing callbacks are suppressed. Peer work stops at `maxPeerWaitMs`. Existing upload rate/session limits apply to each bounded request. Progressive hls.js delivery skips this race; unexpected nonempty HTTP progress locks the load to HTTP. Accepted peer bytes alone do not establish network savings. |
+| `lateHaveRace` | `false` | Experimental opt-in alongside `zeroBudgetPeerRace`. When no entry-snapshot HAVE matches, observe actual matching HAVE only on the accepted, eligible framing 2 connections captured at load entry. Normal whole HTTP already runs. The first qualifying holder snapshot starts at most one existing peer-only arm; key hashing, HAVE observation, metadata and transfer all share the original `maxPeerWaitMs` deadline. FETCH, new or replaced connections and withdrawn HAVE do not qualify. No new discovery, dial, HTTP request, origin range or deadline extension is added. HTTP success, exposed progressive data, abort and stop cancel observation and peer work under the same ownership rules. This can use overlapping source downloads; it does not guarantee throughput, continuity or network savings. |
 | `maxHoldersPerObject` | `3` | Holders per segment under `multiHolder`, 1 to 8. Provisional: not yet set from a replayed field trace. |
 | `abrIgnorePeers` | `false` | Peer-first. Keeps a peer-delivered fragment out of the hls.js bandwidth and first-byte estimates, so automatic quality follows the origin path; otherwise the time a peer delivery took, including any wait for a holder, is sampled as if it were an origin download. The loader skips the estimator's samples only while hls.js dispatches `FRAG_LOADED` and `FRAG_BUFFERED` for that fragment, and puts hls.js back on `stop()`. The one sample it cannot withhold is the first-byte sample hls.js's own timer takes when a load has waited past half a segment with no byte, the check that can switch quality down mid-load. A fragment fetched under `multiHolder` counts as peer-delivered even when origin sent part of it. `metrics().segments.abrPeerSamplesWithheld` counts the skipped samples. Needs the default hls.js ABR controller; with another one it does nothing. |
 | `traceRequests` | `0` | Rows kept for `trace()`, 0 to 32,768, oldest dropped first: loads, eligibility decisions, peer and origin requests and multi-holder scheduler calls, enough to replay a transfer offline. For field runs that need a replayable input; it is not part of `metrics()`, so a receipt must take `trace()` itself. |
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
-| `RTCPeerConnectionImpl` / `WebSocketImpl` | globals | Injection points for tests. |
+| `RTCPeerConnectionImpl` / `WebSocketImpl` / `WorkerImpl` | globals | Constructor injection points for tests; the worker remains explicitly configured through `transferWorkerUrl`. |
 
 The pending glare-reuse correction keeps the existing lower-public-key offer
 when both peers dial simultaneously. The yielding peer may adopt only its
@@ -196,7 +198,9 @@ is not an alternative to this callback.
 
 `segments.zeroBudgetPeerRaces` counts matching cached-HAVE race attempts;
 `zeroBudgetPeerRaceWins` counts only complete peer objects accepted by the
-player. Verified pieces of an origin-winning or incomplete object add no
+player. With `lateHaveRace`, the zero-budget `have-after-wait` eligibility
+row records actual later HAVE admission while HTTP runs; it is not a serial
+origin wait. Verified pieces of an origin-winning or incomplete object add no
 accepted peer bytes and emit no delivery callback. `stop()` cancels the peer
 arm while pending normal HTTP continues for playback; loader `abort()` or
 `destroy()` cancels both arms. Run `npm run test:cached-peer-race:browser`
@@ -472,7 +476,27 @@ Schema 3 multi-holder peer requests verify progress in batches of at most four
 canonical pieces and 512 KiB; a canonical piece larger than that is requested
 alone. The remaining pieces stay queued for that holder, so a later abandoned
 request preserves earlier verified pieces. Origin keeps its contiguous HTTP
-ranges. Run `npm run test:core-link:browser` for native Chrome loopback coverage
+ranges. Multi-holder planning keeps each connection's first-byte delay separate
+from its payload flow and from HTTP service time. The model retained between
+objects keeps up to 16 samples per connection for 30 seconds; its rate needs
+at least 32 KiB and 300 ms after the first byte. Substantial HTTP ranges (at least half the object and 32 KiB)
+refresh the rendition's whole-object recovery estimate, scaled by bytes; tiny
+tails do not become whole-object latency samples.
+
+A stale or pessimistic multi-holder estimate can receive one demand-bound
+refresh per connection every ten seconds, only when that connection already
+advertises the requested object. The first request is explicitly limited to
+one canonical piece, independently of another connection's fast rate, while
+origin starts the remainder. Fresh verified probe data can unlock ordinary
+bounded requests within the existing deadline. An accepted short-flow refresh
+can discard an older pessimistic rate without creating a rate below the
+300 ms floor; subsequent unknown-rate demands keep the one-piece initial
+limit. A newer unsuccessful attempt removes that useful-delivery allowance.
+Older WASM modules without the optional bounded-probe capability skip these
+probe sources safely and retain origin and ordinary measured holders. No
+background media fetch or additional timer is added.
+
+Run `npm run test:core-link:browser` for native Chrome loopback coverage
 of a cancelled six-MiB ranged response and a subsequent hash-checked range on
 the same reliable connection.
 Fresh-origin coordination is bounded by safe buffered playback and measured
@@ -704,7 +728,7 @@ extension, including multi-holder transfers, to
 `max(0, duration * 1000 - (p90OriginMs * 1.25 + 100))`.
 For a two-second segment and 1,300 ms measured HTTP, that cap is 275 ms.
 The existing buffer-safe reserve and configured caps still apply. Until an
-ordinary whole-origin load has been measured, `originReserveMs` supplies the
+whole-object origin service has been measured, `originReserveMs` supplies the
 recovery estimate; missing or invalid duration permits no serial wait.
 Parts use their own duration. This admission rule cannot guarantee smooth
 playback when later origin, peer or decoder performance changes. A zero

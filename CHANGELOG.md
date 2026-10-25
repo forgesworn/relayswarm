@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+- Add experimental `lateHaveRace`, disabled by default. With a zero-budget
+  cached race, normal whole HTTP starts immediately while existing accepted
+  connections may advertise an exact HAVE within the original deadline.
+  Freeze one holder snapshot and run at most one existing peer-only arm;
+  FETCH, new connections and withdrawn HAVE do not qualify. HTTP wins,
+  progressive exposure and cancellation retain their existing ownership.
+  No origin range, discovery request, dial or deadline extension is added.
+- Add explicit originless `peerOnly` Rust transfers for the zero-budget cached
+  arm. Pending pieces refill after verified calibration; no fast whole-HTTP
+  estimate, invented origin lane or ignored origin command can strand them.
+  The independent HTTP arm, initial cached identity, hashes, hard deadline and
+  existing per-range upload limits remain. Older modules safely decline the
+  optional mode without retiring healthy mixed transfers. The failed native
+  whole-object fallback control remains recorded; final performance and
+  playback qualification use the unchanged acceptance gates.
+- Add opt-in `transferWorkerUrl`: warm one explicitly packaged worker from
+  the already compiled core, then run the shared Rust schema-3 transfer
+  facade off the main thread. Startup, resource limits and genuine worker
+  failure retain HTTP; late/cancelled replies cannot credit peer delivery.
+  Existing synchronous/native APIs remain compatible. The companion is a
+  separate release asset and `relayswarm/transfer-worker` bundler entry.
+- Keep multi-holder first-byte and post-first-byte flow measurements per
+  connection, separately from HTTP service timing. Substantial ranged HTTP
+  loads refresh byte-scaled, rendition-specific origin recovery estimates.
+- Allow demand-bound recovery of a pessimistic or stale holder estimate with
+  an explicit one-piece probe, at most once per connection every ten seconds.
+  Other routes' bandwidth cannot expand that probe. Fresh verified data can
+  unlock ordinary bounded requests; unsuccessful later attempts remove the
+  allowance to continue useful short-flow delivery. The retained rate still
+  needs at least 300 ms and 32 KiB of flow evidence.
+- Use a measured lane's own first-byte time before the shared silence fallback.
+  Preserve existing native transfer signatures; older WASM modules skip sources
+  requiring the optional bounded-probe capability safely.
+- Retain the speed-optimised SHA-256 path while keeping the remaining module
+  size-optimised. Device playback and net network benefit remain separate
+  acceptance gates.
 - Republish broadcast rendition playlists when a directory watch reports the
   encoder's playlist rename, keeping the 250 ms interval as the fallback.
   Measured publication delay fell from a 135 ms mean to 6 ms. Closing the

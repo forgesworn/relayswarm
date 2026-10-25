@@ -16,6 +16,7 @@ the API they were built with.
 |---|---|---|
 | `relayswarm` | Node or a browser bundler | `RelayPool`, `RelaySwarmSession`, `validTicket`, `RELAYSWARM_VERSION`, `KIND_PRESENCE`, `KIND_SIGNAL`, `SWARM_TAG` |
 | `relayswarm/hls-swarm` | Browser with hls.js | `createHlsSwarm`, `HLS_SWARM_METRICS_VERSION`, `rotationCandidate`, `retryAfterFor`, `readRefusal` |
+| `relayswarm/transfer-worker` | Dedicated module-worker or bundler entry | `createCoreTransferWorkerRuntime`; installs the companion handler when loaded in a dedicated worker. See [packaging and lifecycle](TRANSFER-WORKER.md). |
 | `relayswarm/segment-commitment` | Browser or Node | `commitmentContent`, `commitmentPieceSize`, `delegationContent`, `revocationContent`, `validStreamAuthorisation`, `verifyCommitmentDelegation`, `segmentMediaContext`, `verifySegmentCommitment`, `KIND_SEGMENT_COMMITMENT`, `KIND_COMMITMENT_DELEGATION`, `KIND_COMMITMENT_REVOCATION` |
 | `relayswarm/hls-publisher` | Node only | `createHlsPublisher`, `PublisherError` |
 | `relayswarm/publisher-state` | Node only | `loadPublisherState`, `publisherManifestPath`, `publisherSwarmId`, `publisherStreamEvent`, `validatePublisherStreamEvent`, `createCommitmentDelegation`, `createCommitmentRevocation` |
@@ -74,11 +75,25 @@ link closes or the swarm stops. It creates no new network messages.
 
 The opt-in `zeroBudgetPeerRace: true` races an already advertised cached
 schema 3 object against immediately started normal HTTP when no safe peer
-wait remains. It requires the WASM multi-holder engine and adds no ranged
-origin fetch. Only a complete verified peer winner counts as peer media.
+wait remains. It requires `coreWasm`/`multiHolder` framing eligibility and the
+optional peer-only transfer capability. The Rust piece planner has no origin
+lane in this mode, adding no ranged HTTP or invented origin estimate; only
+eligible cached peers can refill its pending ranges. Candidates stay inside
+the initial cached snapshot and current HAVE. Existing rate and session limits
+apply to every bounded request. Older modules decline the peer arm safely;
+only a complete verified peer winner counts as peer media.
 Normal HTTP never waits for metadata; stopping the swarm cancels its peer
 arm while that pending HTTP request continues. Progressive hls.js loads skip
 the race. See the [options and lifecycle contract](../INTEGRATION.md#options).
+
+The additional experimental `lateHaveRace: true` observes actual matching
+HAVE on those connections accepted at load entry when no initial cached
+snapshot matches. HTTP starts immediately. At most one later holder snapshot
+starts the existing peer-only arm; hashing, observation, metadata and delivery
+must all fit the original `maxPeerWaitMs`. FETCH, new or replaced connections
+and stale availability cannot supply it. HTTP wins and exposed progressive
+data cancel the arm. The default entry-snapshot behaviour is unchanged;
+verified peer credit alone does not establish network savings or continuity.
 
 The opt-in `sustainablePeerWait: true` additionally bounds serial peer waits
 and multi-holder extensions by each fragment/part's duration minus measured
@@ -86,6 +101,16 @@ whole-origin recovery time with a 25% and 100 ms margin. The ordinary
 buffer reserve remains in force. Unknown duration or no spare duration starts
 HTTP immediately; an enabled cached-peer race retains its independent
 window. This is an admission bound, not a smooth-playback guarantee.
+
+The unreleased opt-in `transferWorkerUrl` warms one explicitly packaged
+companion worker asynchronously after `coreWasm` loads. With `multiHolder`,
+schema-3 verification and planning use the same Rust transfer facade in that
+worker. Configured loads use HTTP during warm-up or after failure, without a
+large synchronous transfer retry. Queue/object limits and late-reply fences
+preserve the ordinary origin path and accepted-only peer observations.
+`loadCore(...).module` exposes the already compiled module for this use;
+the worker fetches no second copy. See the [worker integration guide](TRANSFER-WORKER.md)
+for the companion bundle, resource bounds, metrics and asynchronous low-level API.
 
 For eligible already-HAVE framing-2 holders, a verified schema-3 commitment
 can enter mixed piece planning without passing a whole-object peer forecast.

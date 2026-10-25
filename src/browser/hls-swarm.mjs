@@ -35,11 +35,17 @@ import { NeighbourDiscovery } from "./neighbour-discovery.mjs";
 import { boundedOperation } from "./bounded-operation.mjs";
 import { commitmentPieceSize, validStreamAuthorisation, verifySegmentCommitment, segmentMediaContext } from "./segment-commitment.mjs";
 import { loadCore } from "./core-wasm.mjs";
+import { createCoreTransferWorker } from "./core-transfer-worker.mjs";
 import { fetchOriginRange, loadOriginRange } from "./origin-range.mjs";
 
 export const HLS_SWARM_METRICS_VERSION = 2;
 
 const TRANSPORT = "webrtc";
+const LINK_TIMING_SAMPLES = 16;
+const LINK_TIMING_TTL_MS = 30_000;
+const LINK_REFRESH_MS = 10_000;
+const MIN_LINK_FLOW_MS = 300;
+const MIN_LINK_FLOW_BYTES = 32 * 1024;
 const DEFAULTS = Object.freeze({
   mode: "shadow",
   originFallbackMs: 1_500,
@@ -101,12 +107,18 @@ const DEFAULTS = Object.freeze({
   // or a compiled WebAssembly.Module. Peer-first only. Until it loads, or if
   // it fails to load or traps, the JavaScript verifier decides.
   coreWasm: undefined,
+  // Opt-in companion URL, packaged explicitly by the host. Warm asynchronously
+  // from the compiled module; schema-3 loads use HTTP until it is ready.
+  transferWorkerUrl: undefined,
   // Experimental, with coreWasm: fetch a schema 3 segment from several
   // framing 2 holders at once, with origin taking a late tail.
   multiHolder: false,
   // Opt-in: when no safe wait remains, race a known cached schema 3 object
   // against immediately started HTTP, without any extra origin request.
   zeroBudgetPeerRace: false,
+  // Opt-in with zeroBudgetPeerRace: a load-entry connection may advertise
+  // the exact cached object later, within the same original peer window.
+  lateHaveRace: false,
   // Provisional (CORE-SPEC open question 6): not yet set from a field trace.
   maxHoldersPerObject: 3,
   // Rows kept for trace(): every load, eligibility decision, peer and origin
@@ -156,6 +168,12 @@ function percentile(values, fraction) {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
   return Math.round(sorted[Math.min(sorted.length - 1, Math.floor(fraction * sorted.length))]);
+}
+
+function measuredQuantile(values, fraction) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(fraction * sorted.length))];
 }
 
 /** p50 and p90 of a sample list, or nulls when it is empty. */
@@ -378,9 +396,13 @@ class HlsSwarm {
     this.timers = new Set();
     this.links = new Map();
     this.peerSelection = new PeerSelection();
+    this.linkTimings = new WeakMap();
     this.core = null;
     this.coreVerifier = null;
     this.coreState = "off";
+    this.transferWorker = null;
+    this.transferWorkerState = this.options.transferWorkerUrl === undefined ? "off" : "waiting-core";
+    this.transferWorkerReason = null;
     // Settles when the session may start: the core has loaded or failed, or
     // CORE_WAIT_MS has passed. Null when no core was requested.
     this.coreWait = null;
@@ -525,10 +547,15 @@ class HlsSwarm {
       || (typeof WebAssembly === "object" && core instanceof WebAssembly.Module))) return "invalid-core-wasm";
     if (typeof this.options.multiHolder !== "boolean" || !Number.isSafeInteger(this.options.maxHoldersPerObject)
       || this.options.maxHoldersPerObject < 1 || this.options.maxHoldersPerObject > 8) return "invalid-multi-holder";
+    const workerUrl = this.options.transferWorkerUrl;
+    if (workerUrl !== undefined && (mode !== "peer-first" || !this.options.multiHolder || core === undefined
+      || !(workerUrl instanceof URL || (typeof workerUrl === "string" && workerUrl.length > 0 && workerUrl.length <= 2_048)))) return "invalid-transfer-worker";
+    if (this.options.WorkerImpl !== undefined && typeof this.options.WorkerImpl !== "function") return "invalid-transfer-worker";
     if (!Number.isSafeInteger(this.options.traceRequests) || this.options.traceRequests < 0 || this.options.traceRequests > TRACE_LIMIT) return "invalid-trace";
     if (typeof this.options.peerSupplyHint !== "boolean" || (this.options.onPlayerHint !== null && typeof this.options.onPlayerHint !== "function")) return "invalid-player-hint-option";
     if (typeof this.options.abrIgnorePeers !== "boolean") return "invalid-abr-option";
     if (typeof this.options.zeroBudgetPeerRace !== "boolean") return "invalid-cached-race-option";
+    if (typeof this.options.lateHaveRace !== "boolean") return "invalid-late-have-race-option";
     if (typeof this.options.sustainablePeerWait !== "boolean") return "invalid-sustainable-wait-option";
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (this.options.reserveUploadBytes !== undefined && typeof this.options.reserveUploadBytes !== "function") return "invalid-upload-reservation";
@@ -616,6 +643,8 @@ class HlsSwarm {
     this.#endDiscovery();
     this.discovery.clear();
     this.lifecycle.abort();
+    this.transferWorker?.stop();
+    if (this.options.transferWorkerUrl !== undefined) this.transferWorkerState = "stopped";
     this.cachedRaces.clear();
     this.admissionChecks.clear();
     this.admitted.clear();
@@ -867,6 +896,7 @@ class HlsSwarm {
       errors: { total: c.errors, byStage: { ...this.errorsByStage } },
       // Additive metrics-v2 field: which commitment verifier and peer selection run.
       core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", selection: this.peerSelection.kind ?? "js", discovery: this.discovery.kind ?? "js", links: { ...this.coreLinks }, fallbacks: this.coreFallbacks, decided: { ...this.coreDecided },
+        transferWorker: { ...(this.transferWorker?.snapshot() ?? {}), state: this.transferWorkerState, reason: this.transferWorkerReason },
         multiHolder: { enabled: this.#rangesEnabled(), ...this.multiHolder, originRangeOutcomes: { ...this.originRangeOutcomes },
           timings: { durationMs: percentiles(this.multiHolderTimings.map((row) => row[0])), slowestRequestMs: percentiles(this.multiHolderTimings.map((row) => row[1])),
             requests: percentiles(this.multiHolderTimings.map((row) => row[2])) } } },
@@ -876,6 +906,7 @@ class HlsSwarm {
         originReserveMs: this.options.originReserveMs,
         sustainablePeerWait: this.options.sustainablePeerWait,
         zeroBudgetPeerRace: this.options.zeroBudgetPeerRace,
+        lateHaveRace: this.options.lateHaveRace,
         lateWindowMs: this.options.lateWindowMs,
         maxPeers: this.options.maxPeers,
         maxUploadPeers: this.options.maxUploadPeers,
@@ -969,7 +1000,7 @@ class HlsSwarm {
         if (budgetMs === 0 && swarm.options.zeroBudgetPeerRace && !this.hlsConfig.progressive
           && swarm.#rangesEnabled() && swarm.cachedRaces.size < swarm.options.maxConcurrentRaces) {
           const cached = new Map([...swarm.links.values()].filter(link => !link.closed && !link.busy && link.supportsRanges
-            && (swarm.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !swarm.banned.has(link.pubkey) && link.have.size)
+            && (swarm.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !swarm.banned.has(link.pubkey) && (link.have.size || swarm.options.lateHaveRace))
             .map(link => [link, new Set(link.have)]));
           if (cached.size) return this.loadCachedRace(context, config, callbacks, budgetGeometry, cached);
         }
@@ -1154,7 +1185,8 @@ class HlsSwarm {
           if (originPending && !swarm.stopped) this.releaseFetch = swarm.#claimOrigin(key);
         }).catch(() => {});
         const plan = { deadline: t0 + swarm.options.maxPeerWaitMs, limit: t0 + swarm.options.maxPeerWaitMs,
-          originReserveMs: 0, expired: false, onDeadline: null, cachedOnly: cached, peerOnly: true, extend: () => false };
+          originReserveMs: 0, expired: false, onDeadline: null, cachedOnly: cached, lateHaveRace: swarm.options.lateHaveRace,
+          peerOnly: true, extend: () => false };
         swarm.#traceBegin(context, 0, swarm.options.maxPeerWaitMs, budgetGeometry);
         swarm.#peerFirst(context, controller.signal, plan, 0, budgetGeometry).then(result => {
           if (!result || !originPending || originClaimed || this.active !== token || controller.signal.aborted || swarm.stopped || now() >= plan.limit) return;
@@ -1206,11 +1238,16 @@ class HlsSwarm {
     if (peerBytes > 0) this.counters.peerFirstLoaded += 1;
     this.counters.peerFirstBytes += peerBytes; this.counters.bytesFromPeers += peerBytes;
     if (peerBytes > 0) {
-      if (!result.multi) this.discovery.holderDelivered(result.holderContext, result.pubkey);
+      if (!result.multi) {
+        this.discovery.holderDelivered(result.holderContext, result.pubkey);
+        this.#noteUsefulLink(this.links.get(result.pubkey), size);
+      }
       else {
-        const contributed = new Set(result.contributions.filter(row => row.bytes > 0).map(row => row.connection));
+        const contributed = new Map(result.contributions.filter(row => row.bytes > 0).map(row => [row.connection, row.bytes]));
+        const refreshed = new Map((result.shortRefreshes || []).map(row => [row.connection, row.at]));
         for (const link of this.links.values()) if (contributed.has(link.pc)) {
           this.discovery.holderDelivered(result.holderContext, link.pubkey);
+          this.#noteUsefulLink(link, contributed.get(link.pc), refreshed.get(link.pc));
         }
       }
       if (this.discovery.verified(result.discoveryContext) && this.discovery.window?.context === result.discoveryContext) this.#endDiscovery();
@@ -1341,7 +1378,7 @@ class HlsSwarm {
         const part = context?.part, duration = part ? part.duration : context?.frag?.duration;
         if (Number.isFinite(duration) && duration > 0 && Number.isFinite(duration * 1_000)) durationMs = duration * 1_000;
       } catch {}
-      const originP90 = percentile(this.originLatencySamples, 0.9);
+      const originP90 = percentile(this.#originSamples(context), 0.9);
       const originRecoveryMs = originP90 === null ? this.options.originReserveMs : originP90 * 1.25 + 100;
       // Missing geometry or no spare duration means immediate HTTP. The
       // separate cached-peer race may still run alongside that HTTP load.
@@ -1355,7 +1392,7 @@ class HlsSwarm {
           // Leave measured origin recovery time and a reserve for appending.
           // A newly selected ABR rendition uses its fragment's actual playback
           // position, rather than borrowing an unrelated long buffer tail.
-          const originReserve = Math.max(this.options.originReserveMs, (percentile(this.originLatencySamples, 0.9) || 0) * 1.25 + 100);
+          const originReserve = Math.max(this.options.originReserveMs, (percentile(this.#originSamples(context), 0.9) || 0) * 1.25 + 100);
           // A later LL-HLS part has its own playback position. Using the
           // parent's start discards already buffered earlier parts and can
           // reduce every safe peer opportunity to a zero-length budget.
@@ -1499,6 +1536,82 @@ class HlsSwarm {
     map.set(rendition, list);
   }
 
+  #originSamples(context) {
+    try {
+      const own = context?.frag && this.renditionOriginSamples.get(this.#renditionContext(context));
+      return own?.length ? own : this.originLatencySamples;
+    } catch { return this.originLatencySamples; }
+  }
+
+  #observeOriginRange(context, elapsedMs, bytes, objectSize) {
+    // A substantial range measures HTTP service for this rendition. Scale by
+    // its actual byte count: a short tail is not a whole-object latency sample.
+    // Ignore tiny endgame ranges, whose startup cost would be amplified.
+    if (!(elapsedMs > 0) || !Number.isFinite(elapsedMs) || bytes < Math.max(MIN_LINK_FLOW_BYTES, objectSize / 2)) return;
+    const equivalentMs = Math.min(60_000, elapsedMs * objectSize / bytes);
+    pushSample(this.originLatencySamples, equivalentMs);
+    this.#renditionSample(this.renditionOriginSamples, context, equivalentMs);
+  }
+
+  #linkTimingState(link) {
+    let state = this.linkTimings.get(link);
+    if (!state) {
+      state = { firstBytes: [], flows: [], probeAt: -Infinity, usefulAt: -Infinity };
+      this.linkTimings.set(link, state);
+    }
+    return state;
+  }
+
+  #observeLinkTiming(link, result) {
+    if (this.stopped || link.closed) return;
+    if (["abort", "timeout", "abandoned", "none", "send-error"].includes(result.outcome)) {
+      const prior = this.linkTimings.get(link);
+      if (prior) { prior.usefulAt = -Infinity; prior.probeAt = now(); }
+    }
+    if (!["payload", "timeout", "abandoned"].includes(result.outcome)) return;
+    const first = result.firstByteMs, elapsed = result.elapsedMs, bytes = result.receivedBytes;
+    if (!Number.isFinite(first) || first < 0 || !Number.isFinite(elapsed) || elapsed < first || !Number.isSafeInteger(bytes) || bytes <= 0) return;
+    const state = this.#linkTimingState(link), at = now();
+    state.firstBytes.push({ value: Math.min(60_000, first), at });
+    if (state.firstBytes.length > LINK_TIMING_SAMPLES) state.firstBytes.shift();
+    const flowMs = elapsed - first;
+    if (flowMs >= MIN_LINK_FLOW_MS && bytes >= MIN_LINK_FLOW_BYTES) {
+      state.flows.push({ value: Math.min(1_000_000, bytes / flowMs), flowMs, at });
+      if (state.flows.length > LINK_TIMING_SAMPLES) state.flows.shift();
+    }
+  }
+
+  #noteUsefulLink(link, bytes, refreshedAt = null) {
+    if (!link || link.closed || !Number.isSafeInteger(bytes) || bytes <= 0) return;
+    const state = this.#linkTimingState(link);
+    // A refresh that actually contributes fast short-flow media disproves the
+    // old pessimistic rate. Return to unknown, rather than inventing a rate
+    // below the flow floor; retain any later qualifying observations.
+    if (Number.isFinite(refreshedAt)) state.flows = state.flows.filter(row => row.at >= refreshedAt);
+    state.usefulAt = now();
+  }
+
+  #linkTransferEstimate(link, availableMs, pieceSize) {
+    const state = this.#linkTimingState(link), at = now();
+    state.firstBytes = state.firstBytes.filter(row => at - row.at <= LINK_TIMING_TTL_MS);
+    state.flows = state.flows.filter(row => at - row.at <= LINK_TIMING_TTL_MS);
+    // Another link's startup latency must never become this link's latency.
+    const firstByteMs = state.firstBytes.reduce((estimate, row) => estimate === null ? row.value : (estimate + row.value) / 2, null);
+    const long = state.flows.filter(row => row.flowMs >= (firstByteMs ?? 0) * 3);
+    const rate = measuredQuantile((long.length >= 2 ? long : state.flows).map(row => row.value), 0.75);
+    const fits = rate !== null && (firstByteMs ?? 0) + pieceSize / rate <= availableMs;
+    // Verified useful short flows may continue without inventing a rate below
+    // the 300ms floor. Otherwise a stale or pessimistic model gets at most one
+    // demand-bound refresh per link per ten seconds, with an explicit one-piece
+    // core allowance. No timer or speculative media fetch is added.
+    const usefulUnknown = rate === null && (firstByteMs ?? 0) < availableMs && at - state.usefulAt <= LINK_TIMING_TTL_MS;
+    if (!fits && !usefulUnknown) {
+      if (at - state.probeAt >= LINK_REFRESH_MS) return { state, firstByteMs: null, rate: null, refresh: true };
+      if (rate === null) return null;
+    }
+    return { state, firstByteMs, rate, refresh: false };
+  }
+
   // Expected time until a same-rendition contributor announces this segment:
   // this viewer's own median origin time for the rendition, less however long
   // an announced origin fetch has already run. Null without a measurement.
@@ -1569,6 +1682,10 @@ class HlsSwarm {
     // instrumentation (test/support/broadcast-availability-transform.mjs)
     // reads this binding by name.
     const deadline = plan.deadline;
+    // Worker opt-in cannot wait for future supply while its chosen transfer
+    // engine is unavailable. The ordinary origin wrapper still owns caching
+    // and statistics; unconfigured live/VOD coordination is unchanged.
+    if (this.options.transferWorkerUrl !== undefined && this.transferWorkerState !== "ready") return null;
     const discoveryContext = this.discovery.contexts.get(context.frag.type || "main");
     const key = await this.#segmentKey(context);
     if (signal.aborted || this.stopped) {
@@ -1576,8 +1693,24 @@ class HlsSwarm {
       return null;
     }
     if (plan.cachedOnly) {
-      plan.cachedHolders = new Set([...plan.cachedOnly].filter(([link, have]) => have.has(key) && link.have.has(key)
-        && this.links.get(link.pubkey) === link && !link.closed && !link.busy && !this.banned.has(link.pubkey)).map(([link]) => link));
+      const matching = (atEntry) => [...plan.cachedOnly].filter(([link, have]) => (!atEntry || have.has(key)) && link.have.has(key)
+        && this.links.get(link.pubkey) === link && !link.closed && !link.busy && !this.banned.has(link.pubkey)
+        && link.supportsRanges === true && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2).map(([link]) => link);
+      let holders = matching(true);
+      if (!holders.length && plan.lateHaveRace) {
+        // HTTP is already running. Observe actual HAVE on the accepted
+        // load-entry links, never FETCH, a new neighbour or a replacement.
+        holders = matching(false);
+        while (!holders.length && !signal.aborted && !this.stopped && now() < plan.limit) {
+          await this.#waitForHave(key, plan.limit - now(), signal);
+          holders = matching(false);
+        }
+        plan.lateHaveMatched = holders.length > 0;
+      }
+      if (signal.aborted || this.stopped || now() >= plan.limit) return null;
+      // Freeze once. Failure or corruption does not open another late-HAVE
+      // trial or admit a holder that appeared after this snapshot.
+      plan.cachedHolders = new Set(holders);
       if (!plan.cachedHolders.size || !this.#rangesEnabled()) return null;
       this.counters.zeroBudgetPeerRaces += 1;
     }
@@ -1660,7 +1793,7 @@ class HlsSwarm {
         return null;
       }
     }
-    this.#peerEligibility(context, budgetMs, coordinated ? "have-after-wait" : "have-at-entry", true, budgetGeometry, trial ?? undefined, demand, trial !== null);
+    this.#peerEligibility(context, budgetMs, coordinated || plan.lateHaveMatched ? "have-after-wait" : "have-at-entry", true, budgetGeometry, trial ?? undefined, demand, trial !== null);
     // Holding the key is not a delivery: leave every holder entry alone until a
     // verified segment arrives.
     let commitment;
@@ -1807,43 +1940,59 @@ class HlsSwarm {
   // the core's Transfer (CORE-SPEC section 6). Undefined when it does not
   // apply, so the single-holder path runs; null sends the load to origin.
   async #multiHolder(context, signal, plan, key, commitment, discoveryContext) {
+    const worker = this.options.transferWorkerUrl !== undefined;
+    // An explicit worker opt-in must never quietly retry a large transfer on
+    // the main thread after worker startup, policy, resource or runtime failure.
+    if (worker && (!this.#rangesEnabled() || this.transferWorkerState !== "ready")) return null;
     if (!this.#rangesEnabled() || !Array.isArray(commitment.pieces)) return undefined;
     // An origin that once ignored a range sends whole segments, so a piece
     // from it would cost a full download and then fail the transfer.
     const originHost = urlOrigin(context.url);
-    if (!plan.peerOnly && this.originsWithoutRanges.has(originHost)) return undefined;
-    const holders = [...this.links.values()].filter((link) => !link.closed && link.supportsRanges === true && link.have.has(key)
+    if (!plan.peerOnly && this.originsWithoutRanges.has(originHost)) return worker ? null : undefined;
+    const candidates = [...this.links.values()].filter((link) => !link.closed && !link.busy && link.supportsRanges === true && link.have.has(key)
       && !this.banned.has(link.pubkey) && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 && (!plan.cachedHolders || plan.cachedHolders.has(link)));
-    if (!holders.length) return undefined;
+    if (!candidates.length) return worker ? null : undefined;
+    const models = new Map(candidates.map(link => [link, this.#linkTransferEstimate(link, Math.max(0, plan.limit - now()), commitment.pieceSize)])
+      .filter(([, model]) => model !== null));
+    if (!models.size) { this.counters.peerNoFit += 1; return null; }
+    const holders = [...models.keys()];
     const ids = new Map(holders.map((link) => [this.#transferId(link), link]));
     // Peers may hold pieces until the buffer-safe limit; what is left then
     // goes to origin by range, within the origin reserve the limit keeps.
     const deadline = Math.floor(plan.limit);
-    const transfer = this.core.transfer({ size: commitment.size, sha256: commitment.sha256, pieces: commitment.pieces,
-      deadline, maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0 });
-    if (!transfer) return undefined;
+    const hardDeadline = plan.peerOnly ? plan.limit : plan.limit + plan.originReserveMs;
+    const config = { size: commitment.size, sha256: commitment.sha256, pieces: commitment.pieces,
+      deadline, maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...(plan.peerOnly ? { peerOnly: true } : {}) };
+    let transfer;
+    try { transfer = worker ? await this.transferWorker.transfer(config, { signal }) : this.core.transfer(config); }
+    catch { return null; }
+    if (this.stopped || signal.aborted || (worker && now() >= deadline)) { transfer?.free(); return null; }
+    if (!transfer) return worker || plan.peerOnly ? null : undefined;
     this.multiHolder.transfers += 1;
     // Each scheduler call, with its time, inputs and returned commands, so
     // the trace replays it (times relative to the trace base).
     const load = this.#traceLoad(context), base = this.traceBase;
     const xfer = (op, input, call) => {
-      const at = Math.floor(now()), state = call(at);
+      const at = Math.floor(now());
+      const record = state => {
       if (this.options.traceRequests) this.#trace({ k: "xfer", load, op, at: at - base, ...input, out: state && {
         c: state.commands.map(({ t, peer, p }) => ({ t, ...(peer !== undefined ? { peer } : {}), ...(p ? { p: [...p] } : {}) })),
         next: state.next === null ? null : state.next - base, late: state.late, finished: state.finished } });
       return state;
+      };
+      const state = call(at);
+      return state?.then ? state.then(record) : record(state);
     };
     plan.extend(plan.limit);
     const pieceSize = commitment.pieceSize;
     const bytesOf = ({ start, end }) => [start * pieceSize, Math.min(end * pieceSize, commitment.size)];
-    const peers = [...ids].map(([id, link]) => {
-      const { throughputBytesPerSecond } = this.peerSelection.summary(link);
-      return [id, null, throughputBytesPerSecond ? throughputBytesPerSecond / 1000 : null];
-    });
-    const originMs = percentile(this.originLatencySamples, 0.5);
-    const origin = [null, originMs ? commitment.size / originMs : null];
+    const peers = [...ids].map(([id, link]) => [id, models.get(link).firstByteMs, models.get(link).rate]);
+    const originMs = plan.peerOnly ? null : percentile(this.#originSamples(context), 0.5);
+    // This is a whole HTTP service rate, already including HTTP startup.
+    // A null first-byte value would borrow the unrelated peer median again.
+    const origin = plan.peerOnly ? null : [0, originMs ? commitment.size / originMs : null];
     return new Promise((resolve) => {
-      const requests = new Map(), originRequests = new Set(), abandoned = new WeakSet(), contributions = new Map();
+      const requests = new Map(), originRequests = new Set(), abandoned = new WeakSet(), contributions = new Map(), shortRefreshes = new Map();
       let finished = false, tickTimer = null, backstop = null, releaseOrigin = null, originShare = 0, verified = 0;
       // A source is credited only with the bytes its delivery newly
       // verified: a holder and origin can both send a piece, and the first
@@ -1871,6 +2020,21 @@ class HlsSwarm {
       };
       const onAbort = () => finish(null);
       signal.addEventListener("abort", onAbort, { once: true });
+      const submit = (op, input, call, accept = apply) => {
+        if (finished) return;
+        const receive = state => {
+          if (finished) return;
+          // A suspended/throttled page may process a worker message before
+          // its already-expired timer. Fence all credit and commands using
+          // the same absolute origin backstop, not timer task ordering.
+          if ((worker || plan.peerOnly) && now() >= hardDeadline) return finish(null);
+          if (!state) finish(null); else accept(state);
+        };
+        try {
+          const result = xfer(op, input, call);
+          if (result?.then) result.then(receive, () => finish(null)); else receive(result);
+        } catch { finish(null); }
+      };
       const run = (command, state) => {
         if (command.t === "request") {
           const link = ids.get(command.peer), controller = new AbortController();
@@ -1878,13 +2042,17 @@ class HlsSwarm {
           const [from, to] = bytesOf(command.range), startedAt = now(), remainingMs = Math.max(1, deadline - startedAt);
           let report = null, reportedAt = -Infinity;
           requestCount += 1;
+          if (models.get(link).refresh) {
+            models.get(link).refreshStartedAt ??= now();
+            models.get(link).state.probeAt = now();
+          }
           // The transfer judges the flow, as the single-holder path does, so
           // a hopeless request is abandoned before the floor.
           const onProgress = (received) => {
             const at = now();
             if (finished || requests.get(command.peer) !== controller || at - reportedAt < PROGRESS_REPORT_MS) return;
             reportedAt = at;
-            apply(xfer("progress", { source: command.peer, received }, (floored) => transfer.progress(floored, command.peer, received)));
+            submit("progress", { source: command.peer, received }, (floored) => transfer.progress(floored, command.peer, received));
           };
           link.request(key, remainingMs, { signal: controller.signal, expectedSize: to - from, onProgress,
             range: { start: command.range.start, end: command.range.end, objectSize: commitment.size },
@@ -1897,19 +2065,27 @@ class HlsSwarm {
             }
             if (bytes) {
               this.#recordSelection(link, now() - startedAt, bytes.byteLength);
-              const state = xfer("delivered", { source: command.peer, p: [command.range.start, command.range.end], bytes: bytes.byteLength },
-                (at) => transfer.delivered(at, command.peer, command.range, bytes));
+              submit("delivered", { source: command.peer, p: [command.range.start, command.range.end], bytes: bytes.byteLength },
+                (at) => transfer.delivered(at, command.peer, command.range, bytes), state => {
               const fresh = credit(state, bytes.byteLength);
               this.multiHolder.peerBytes += fresh;
               if (fresh > 0) contributions.set(link.pc, (contributions.get(link.pc) ?? 0) + fresh);
+              const flowMs = report?.elapsedMs - report?.firstByteMs;
+              if (fresh > 0 && models.get(link).refresh && report?.receivedBytes >= MIN_LINK_FLOW_BYTES
+                && Number.isFinite(flowMs) && flowMs >= 0 && flowMs < MIN_LINK_FLOW_MS) {
+                shortRefreshes.set(link.pc, models.get(link).refreshStartedAt);
+              }
               apply(state);
+              });
             } else {
               if (!controller.signal.aborted || abandoned.has(controller)) this.#recordSelection(link, now() - startedAt);
-              apply(xfer("failed", { source: command.peer }, (at) => transfer.failed(at, command.peer)));
+              submit("failed", { source: command.peer }, (at) => transfer.failed(at, command.peer));
             }
-          }, () => { if (!finished) apply(xfer("failed", { source: command.peer }, (at) => transfer.failed(at, command.peer))); });
+          }, () => { if (!finished) submit("failed", { source: command.peer }, (at) => transfer.failed(at, command.peer)); });
         } else if (command.t === "origin") {
-          if (plan.peerOnly) return;
+          // The explicit mode must never emit an origin command. Fail closed
+          // if an incompatible module violates it; never ignore fake work.
+          if (plan.peerOnly) { this.multiHolder.failed += 1; finish(null); return; }
           releaseOrigin ??= this.#claimOrigin(key);
           const controller = new AbortController(), [from, to] = bytesOf(command.range), originAt = now();
           let rangeResult = null;
@@ -1932,13 +2108,15 @@ class HlsSwarm {
               httpStatus: rangeResult?.httpStatus ?? null, bytes: bytes?.byteLength ?? null });
             if (finished) return;
             const p = [command.range.start, command.range.end];
-            if (!bytes) return apply(xfer("failed", { source: "origin" }, (at) => transfer.failed(at, "origin")));
+            if (!bytes) return submit("failed", { source: "origin" }, (at) => transfer.failed(at, "origin"));
+            this.#observeOriginRange(context, now() - originAt, bytes.byteLength, commitment.size);
             this.counters.bytesFromOrigin += bytes.byteLength;
-            const state = xfer("delivered", { source: "origin", p, bytes: bytes.byteLength }, (at) => transfer.delivered(at, "origin", command.range, bytes));
+            submit("delivered", { source: "origin", p, bytes: bytes.byteLength }, (at) => transfer.delivered(at, "origin", command.range, bytes), state => {
             const fresh = credit(state, bytes.byteLength);
             this.multiHolder.originBytes += fresh;
             originShare += fresh;
             apply(state);
+            });
           });
         } else if (command.t === "cancel" || command.t === "abandon") {
           const controller = requests.get(command.peer);
@@ -1962,6 +2140,7 @@ class HlsSwarm {
           finish(commitment.expiresAt <= Math.floor(Date.now() / 1000) ? null : {
             key, bytes, discoveryContext, multi: true, peerBytes: Math.max(0, commitment.size - originShare),
             contributions: [...contributions].map(([connection, bytes]) => ({ connection, bytes })),
+            shortRefreshes: [...shortRefreshes].map(([connection, at]) => ({ connection, at })),
           });
         } else if (command.t === "fail") {
           this.multiHolder.failed += 1;
@@ -1973,25 +2152,31 @@ class HlsSwarm {
         if (!state) return finish(null); // the module failed
         for (const command of state.commands) { run(command, state); if (finished) return; }
         tickTimer = clear(tickTimer);
-        if (state.next !== null) tickTimer = this.#after(Math.max(0, state.next - now()), () => { tickTimer = null; apply(xfer("tick", {}, (at) => transfer.tick(at))); });
+        if (state.next !== null) tickTimer = this.#after(Math.max(0, state.next - now()), () => { tickTimer = null; submit("tick", {}, (at) => transfer.tick(at)); });
       };
       // At the loader's deadline the transfer hands its pieces to origin and
       // has the origin reserve to finish before the whole-segment fallback.
       plan.onDeadline = () => {
         if (finished) return false;
-        apply(xfer("tick", {}, (at) => transfer.tick(at)));
+        submit("tick", {}, (at) => transfer.tick(at));
         // Keep the measured reserve captured by this load, without moving its
         // absolute recovery deadline if the peer-floor timer itself ran late.
         if (!finished && backstop === null) backstop = this.#after(Math.max(0, plan.limit + plan.originReserveMs - now()), () => { backstop = null; finish(null); });
         return true;
       };
-      const estimates = { peers, origin, sharedFirstByteMs: this.peerSelection.firstByteMs(), sharedRate: this.peerSelection.rate() };
+      // Refreshing an unknown/stale path must not be cancelled using another
+      // link's startup time. Its ordinary fixed floor still bounds the trial.
+      const sharedFirstByteMs = [...models.values()].some(model => model.refresh || model.firstByteMs === null)
+        ? null : this.peerSelection.firstByteMs();
+      const probePeers = [...ids].filter(([, link]) => models.get(link).rate === null).map(([id]) => id);
+      const estimates = { peers, origin, sharedFirstByteMs, sharedRate: this.peerSelection.rate(), probePeers };
       // The input is for the trace only.
-      const started = xfer("start", this.options.traceRequests ? { size: commitment.size, pieces: commitment.pieces.length, pieceSize, deadline: deadline - base,
-        maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...structuredClone(estimates),
-        holders: [...ids].map(([id, link]) => [id, this.#holderLabel(link.pubkey)]) } : null, (at) => transfer.start(at, estimates));
+      submit("start", this.options.traceRequests ? { size: commitment.size, pieces: commitment.pieces.length, pieceSize, deadline: deadline - base,
+        maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...(plan.peerOnly ? { peerOnly: true } : {}), ...structuredClone(estimates),
+        holders: [...ids].map(([id, link]) => [id, this.#holderLabel(link.pubkey)]) } : null, (at) => transfer.start(at, estimates), started => {
       if (started?.late) this.multiHolder.late += 1;
       apply(started);
+      });
     });
   }
 
@@ -2060,6 +2245,7 @@ class HlsSwarm {
   #peerRequestResult(context, link, remainingMs, result, range = null) {
     try {
       if (!PEER_REQUEST_OUTCOMES.includes(result.outcome)) return;
+      this.#observeLinkTiming(link, result);
       const numeric = (value) => Number.isFinite(value) && value >= 0 ? value : null;
       const integer = (value) => Number.isSafeInteger(value) && value >= 0 ? value : null;
       let cc = null, level = null;
@@ -2461,10 +2647,33 @@ class HlsSwarm {
         Object.assign(this.discovery.counters, discovery.counters);
       }
       this.coreState = "ready";
+      if (this.options.transferWorkerUrl !== undefined) void this.#warmTransferWorker(core);
     } catch (error) {
       this.coreState = "failed";
+      if (this.options.transferWorkerUrl !== undefined) { this.transferWorkerState = "failed"; this.transferWorkerReason = "core-failed"; }
       this.#noteError("core", error);
     }
+  }
+
+  async #warmTransferWorker(core) {
+    this.transferWorkerState = "loading";
+    try {
+      const WorkerImpl = this.options.WorkerImpl;
+      const worker = await createCoreTransferWorker({ module: core.module, workerUrl: this.options.transferWorkerUrl,
+        workerFactory: WorkerImpl ? (url, options) => new WorkerImpl(url, options) : undefined,
+        signal: this.lifecycle.signal, maxSegmentBytes: Math.min(32 * 1024 * 1024, this.options.maxSegmentBytes),
+        onFailure: error => this.#transferWorkerFailed(error) });
+      if (this.stopped || this.core !== core || core.retired) { worker.stop(); return; }
+      this.transferWorker = worker;
+      this.transferWorkerState = "ready";
+    } catch (error) { if (!this.stopped) this.#transferWorkerFailed(error); }
+  }
+
+  #transferWorkerFailed(error) {
+    if (this.stopped || this.transferWorkerState === "failed") return;
+    this.transferWorkerState = "failed";
+    this.transferWorkerReason = typeof error?.code === "string" ? error.code : "worker-failed";
+    this.#noteError("transfer-worker", error);
   }
 
   // A trap anywhere in the module retires it for the rest of the session:
@@ -2473,6 +2682,8 @@ class HlsSwarm {
   #coreTrapped(error) {
     const ranged = this.#rangesEnabled();
     this.core?.retire();
+    this.transferWorker?.stop();
+    if (this.options.transferWorkerUrl !== undefined) { this.transferWorkerState = "failed"; this.transferWorkerReason = "core-failed"; }
     this.coreVerifier = null;
     this.coreState = "failed";
     this.coreFallbacks += 1;

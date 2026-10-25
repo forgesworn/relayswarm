@@ -140,12 +140,13 @@ export function replay(core, calls) {
   const [start] = calls;
   if (start.pieces !== Math.ceil(start.size / start.pieceSize)) return "piece count does not match the size";
   const { object, pieces, sha256 } = objectFor(start);
-  const transfer = core.transfer({ size: start.size, sha256, pieces, deadline: start.deadline, maxHolders: start.maxHolders, originReserveMs: start.originReserveMs });
+  const transfer = core.transfer({ size: start.size, sha256, pieces, deadline: start.deadline, maxHolders: start.maxHolders, originReserveMs: start.originReserveMs,
+    ...(start.peerOnly ? { peerOnly: true } : {}) });
   if (!transfer) return "the module refused the transfer";
   try {
     for (const row of calls) {
       let state;
-      if (row.op === "start") state = transfer.start(row.at, { peers: row.peers, origin: row.origin, sharedFirstByteMs: row.sharedFirstByteMs, sharedRate: row.sharedRate });
+      if (row.op === "start") state = transfer.start(row.at, { peers: row.peers, origin: row.origin, sharedFirstByteMs: row.sharedFirstByteMs, sharedRate: row.sharedRate, probePeers: row.probePeers });
       else if (row.op === "delivered") {
         const bytes = object.slice(row.p[0] * start.pieceSize, Math.min(row.p[1] * start.pieceSize, start.size));
         if (row.out?.c.some((command) => command.t === "ban" && command.peer === row.source)) bytes[0] ^= 0xff;
@@ -247,8 +248,10 @@ function fit(calls, measured) {
     model.set(id, { firstByte: quantile(list.map((s) => s.firstByte), 0.5), rate: list.reduce((a, s) => a + s.bytes, 0) / list.reduce((a, s) => a + s.ms, 0) });
   }
   const originRows = calls.filter((row) => row.op === "delivered" && row.source === "origin");
-  const [originFirstByte, originRate] = start.origin;
-  model.set("origin", { firstByte: originFirstByte ?? 0, rate: originRate ?? (originRows.length ? measured.size / Math.max(1, measured.durationMs ?? 1) : 1) });
+  if (!start.peerOnly) {
+    const [originFirstByte, originRate] = start.origin;
+    model.set("origin", { firstByte: originFirstByte ?? 0, rate: originRate ?? (originRows.length ? measured.size / Math.max(1, measured.durationMs ?? 1) : 1) });
+  }
   return model;
 }
 
@@ -256,7 +259,8 @@ function fit(calls, measured) {
 export function simulate(core, calls, model, maxHolders) {
   const [start] = calls;
   const { object, pieces, sha256 } = objectFor(start);
-  const transfer = core.transfer({ size: start.size, sha256, pieces, deadline: start.deadline, maxHolders, originReserveMs: start.originReserveMs });
+  const transfer = core.transfer({ size: start.size, sha256, pieces, deadline: start.deadline, maxHolders, originReserveMs: start.originReserveMs,
+    ...(start.peerOnly ? { peerOnly: true } : {}) });
   const events = [];
   let clock = start.at, done = null, originBytes = 0, peerBytes = 0, guard = 0;
   const schedule = (at, run, peer = null) => events.push({ at, run, peer });
@@ -284,7 +288,7 @@ export function simulate(core, calls, model, maxHolders) {
     timer = state.next === null ? null : { at: state.next, run: (now) => transfer.tick(now), peer: null, tick: true };
     if (timer) events.push(timer);
   };
-  apply(transfer.start(start.at, { peers: start.peers, origin: start.origin, sharedFirstByteMs: start.sharedFirstByteMs, sharedRate: start.sharedRate }), start.at);
+  apply(transfer.start(start.at, { peers: start.peers, origin: start.origin, sharedFirstByteMs: start.sharedFirstByteMs, sharedRate: start.sharedRate, probePeers: start.probePeers }), start.at);
   while (!done && events.length && guard++ < 100_000) {
     events.sort((a, b) => a.at - b.at);
     const event = events.shift();
