@@ -38,6 +38,7 @@ import { loadCore } from "./core-wasm.mjs";
 import { createCoreTransferWorker } from "./core-transfer-worker.mjs";
 import { fetchOriginRange, loadOriginRange } from "./origin-range.mjs";
 import { createWarmAhead, WARM_AHEAD } from "./warm-ahead.mjs";
+import { createUploadPacer } from "./upload-pacing.mjs";
 
 export const HLS_SWARM_METRICS_VERSION = 2;
 
@@ -65,6 +66,7 @@ const DEFAULTS = Object.freeze({
   maxPeers: 6,
   maxUploadPeers: 4,
   maxUploadBytesPerSecond: 1_250_000,
+  uploadPacing: false,
   maxUploadBytesPerSession: undefined,
   maxDialsInFlight: 2,
   dialTimeoutMs: 12_000,
@@ -399,6 +401,9 @@ class HlsSwarm {
     this.session = null;
     this.timers = new Set();
     this.links = new Map();
+    this.peerLeases = new Map();
+    this.peerLeaseWaiters = new Set();
+    this.peerAdmission = { claims: 0, waited: 0, granted: 0, expired: 0, cancelled: 0 };
     this.peerSelection = new PeerSelection();
     this.linkTimings = new WeakMap();
     this.core = null;
@@ -448,6 +453,14 @@ class HlsSwarm {
     this.uploadQuotaBytes = 0;
     this.uploadTokens = this.options.maxUploadBytesPerSecond;
     this.uploadRefilledAt = now();
+    this.uploadPacer = this.options.uploadPacing ? createUploadPacer({ now,
+      maxWaiters: Math.min(this.options.maxUploadPeers, this.options.maxPeers),
+      take: charge => { this.#refillUploadRate(); if (this.uploadTokens < charge) return false; this.uploadTokens -= charge; return true; },
+      give: charge => { this.uploadTokens = Math.min(this.options.maxUploadBytesPerSecond * 2, this.uploadTokens + charge); },
+      delay: charge => { this.#refillUploadRate(); return Math.max(0, (charge - this.uploadTokens) * 1000 / this.options.maxUploadBytesPerSecond); },
+      validate: row => this.#pacedUploadAllowed(row),
+      refuse: reason => this.#refuseUpload(reason === 'cancelled' ? 'not-serving' : 'rate-limit'),
+    }) : null;
     this.playerHints = [];
     this.hintSizes = new Map();
     this.hintOriginRates = [];
@@ -565,6 +578,7 @@ class HlsSwarm {
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (this.options.reserveUploadBytes !== undefined && typeof this.options.reserveUploadBytes !== "function") return "invalid-upload-reservation";
     if (typeof this.options.serve !== "boolean" || typeof this.options.serveOnCellular !== "boolean") return "invalid-serve-option";
+    if (typeof this.options.uploadPacing !== 'boolean') return 'invalid-upload-pacing';
     if (this.options.ticket !== undefined && !validTicket(this.options.ticket)) return "invalid-ticket";
     if (this.options.maxUploadBytesPerSession !== undefined && (!Number.isSafeInteger(this.options.maxUploadBytesPerSession) || this.options.maxUploadBytesPerSession < 0)) return "invalid-upload-session-limit";
     for (const key of ["originFallbackMs", "maxPeerWaitMs", "originReserveMs", "lateWindowMs", "maxPeers", "maxUploadPeers", "maxUploadBytesPerSecond", "maxDialsInFlight", "dialTimeoutMs", "presenceIntervalMs", "metricsIntervalMs", "maxHeldSegments", "maxHeldBytes", "maxSegmentBytes", "maxConcurrentRaces", "admissionTimeoutMs"]) {
@@ -702,10 +716,13 @@ class HlsSwarm {
   stop() {
     if (this.stopped) return;
     this.stopped = true;
+    this.uploadPacer?.stop();
     this.warmAhead?.stop();
     this.#endDiscovery();
     this.discovery.clear();
     this.lifecycle.abort();
+    for (const waiter of [...this.peerLeaseWaiters]) waiter();
+    this.peerLeases.clear();
     this.transferWorker?.stop();
     if (this.options.transferWorkerUrl !== undefined) this.transferWorkerState = "stopped";
     this.cachedRaces.clear();
@@ -820,6 +837,8 @@ class HlsSwarm {
       disabledReason: this.disabledReason || null,
       stopped: this.stopped,
       warmAhead: this.warmAhead?.snapshot() ?? null,
+      peerAdmission: { ...this.peerAdmission, claimedLinks: this.peerLeases.size, waiting: this.peerLeaseWaiters.size },
+      uploadPacing: this.uploadPacer?.snapshot() ?? null,
       pubkey: this.session?.pubkey || null,
       uptimeMs: Date.now() - this.startedAt,
       serving: this.#servingAllowed(),
@@ -1063,7 +1082,7 @@ class HlsSwarm {
           || (!swarm.options.serveOnCellular && onCellular())) return this.inner.load(context, config, callbacks);
         if (budgetMs === 0 && swarm.options.zeroBudgetPeerRace && !this.hlsConfig.progressive
           && swarm.#rangesEnabled() && swarm.cachedRaces.size < swarm.options.maxConcurrentRaces) {
-          const cached = new Map([...swarm.links.values()].filter(link => !link.closed && !link.busy && link.supportsRanges
+          const cached = new Map([...swarm.links.values()].filter(link => swarm.#peerEntryAvailable(link, context) && link.supportsRanges
             && (swarm.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !swarm.banned.has(link.pubkey) && (link.have.size || swarm.options.lateHaveRace))
             .map(link => [link, new Set(link.have)]));
           if (cached.size) return this.loadCachedRace(context, config, callbacks, budgetGeometry, cached);
@@ -1358,7 +1377,7 @@ class HlsSwarm {
       const key = candidate ? await this.#segmentKey(candidate) : null;
       if (this.stopped || generation !== this.hintGeneration) return null;
       const discovery = candidate && this.discovery.contexts.get(candidate.frag.type || "main");
-      const peers = key ? [...this.links.values()].filter((link) => !link.closed && !link.busy && link.have.has(key)
+      const peers = key ? [...this.links.values()].filter((link) => this.#peerFree(link) && link.have.has(key)
         && link.supportsRanges === true && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !this.banned.has(link.pubkey)
         && !(discovery?.rendition === rendition && this.discovery.stale(discovery, link.pubkey))).map((link, index) => {
         const rate = this.peerSelection.summary(link).throughputBytesPerSecond;
@@ -1740,7 +1759,7 @@ class HlsSwarm {
   // link order: an untested link has no observation to order by.
   #untestedHolder(key, context) {
     for (const link of this.links.values()) {
-      if (link.closed || link.busy || this.banned.has(link.pubkey) || !link.have.has(key)) continue;
+      if (!this.#peerFree(link) || this.banned.has(link.pubkey) || !link.have.has(key)) continue;
       if (this.peerSelection.summary(link).attempts !== 0) continue;
       if (context && this.discovery.stale(context, link.pubkey)) continue;
       return link;
@@ -1770,7 +1789,7 @@ class HlsSwarm {
     }
     if (plan.cachedOnly) {
       const matching = (atEntry) => [...plan.cachedOnly].filter(([link, have]) => (!atEntry || have.has(key)) && link.have.has(key)
-        && this.links.get(link.pubkey) === link && !link.closed && !link.busy && !this.banned.has(link.pubkey)
+        && this.links.get(link.pubkey) === link && this.#peerEntryAvailable(link, context) && !this.banned.has(link.pubkey)
         && link.supportsRanges === true && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2).map(([link]) => link);
       let holders = matching(true);
       if (!holders.length && plan.lateHaveRace) {
@@ -1817,7 +1836,7 @@ class HlsSwarm {
     // schema is known; v1/v2 and unavailable range paths retain the whole-
     // object projection below. No HAVE means no such exception.
     const mixedCandidate = !coordinated && this.#rangesEnabled() && [...this.links.values()].some((link) =>
-      !link.closed && !link.busy && link.supportsRanges === true && link.have.has(key) && !this.banned.has(link.pubkey)
+      this.#peerEntryAvailable(link, context) && link.supportsRanges === true && link.have.has(key) && !this.banned.has(link.pubkey)
       && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !(holderContext && this.discovery.stale(holderContext, link.pubkey)));
     let entry = plan.cachedOnly || mixedCandidate ? "unknown" : this.#projection(entryTransfer, holderWait, plan);
     // One try for a holder that has never been asked (see #untestedHolder). The
@@ -1930,7 +1949,7 @@ class HlsSwarm {
       // The first request of a load granted a trial goes to an untested holder.
       const trialLink = trial && tried.size === 0 ? this.#untestedHolder(key, demand.context) : null;
       if (trialLink) this.peerSelection.markSelected(trialLink);
-      const link = trialLink ?? this.peerSelection.select(this.links.values(), key, tried, commitment.size, room);
+      const link = trialLink ?? this.peerSelection.select([...this.links.values()].filter(peer => this.#peerFree(peer)), key, tried, commitment.size, room);
       if (!link) {
         if (![...this.links.values()].some((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, room))) {
           this.counters.peerNoFit += 1;
@@ -1947,7 +1966,7 @@ class HlsSwarm {
       if (estimateMs !== null && plan.extend(now() + estimateMs * 1.25 + 25)) this.counters.peerWaitExtended += 1;
       const requestedAt = now();
       const remainingMs = plan.deadline - now();
-      const alternatives = [...this.links.values()].filter((peer) => !peer.closed && !peer.busy && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, remainingMs)).length;
+      const alternatives = [...this.links.values()].filter((peer) => this.#peerFree(peer) && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, remainingMs)).length;
       // Give an unmeasured route time to complete, retaining the existing
       // 25ms minimum opportunity for up to two quick alternative attempts.
       // Equal slices can time out every cold route before any can be measured.
@@ -2012,6 +2031,36 @@ class HlsSwarm {
     return id;
   }
 
+  #peerFree(link) { return !link.closed && !link.busy && !this.peerLeases.has(link); }
+
+  #peerEntryAvailable(link, context) {
+    return this.#peerFree(link) || Boolean(context?.[WARM_AHEAD] && !link.closed && this.peerLeases.has(link));
+  }
+
+  #waitForPeerLease(candidates, deadline, signal) {
+    this.peerAdmission.waited++;
+    return new Promise(resolve => {
+      let timer;
+      const finish = reason => {
+        if (!this.peerLeaseWaiters.delete(check)) return;
+        clearTimeout(timer); this.timers.delete(timer);
+        signal.removeEventListener('abort', cancel);
+        this.peerAdmission[reason]++;
+        resolve(reason === 'granted');
+      };
+      const cancel = () => finish('cancelled');
+      const check = () => {
+        if (this.stopped || signal.aborted) return cancel();
+        if (now() >= deadline) return finish('expired');
+        if (candidates.some(link => this.links.get(link.pubkey) === link && this.#peerFree(link))) finish('granted');
+      };
+      this.peerLeaseWaiters.add(check);
+      signal.addEventListener('abort', cancel, { once: true });
+      timer = setTimeout(() => finish('expired'), Math.max(0, deadline - now())); this.timers.add(timer);
+      check();
+    });
+  }
+
   // Schema 3 across framing 2 holders, with origin for a late tail, run by
   // the core's Transfer (CORE-SPEC section 6). Undefined when it does not
   // apply, so the single-holder path runs; null sends the load to origin.
@@ -2025,13 +2074,33 @@ class HlsSwarm {
     // from it would cost a full download and then fail the transfer.
     const originHost = urlOrigin(context.url);
     if (!plan.peerOnly && this.originsWithoutRanges.has(originHost)) return worker ? null : undefined;
-    const candidates = [...this.links.values()].filter((link) => !link.closed && !link.busy && link.supportsRanges === true && link.have.has(key)
-      && !this.banned.has(link.pubkey) && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 && (!plan.cachedHolders || plan.cachedHolders.has(link)));
+    const eligible = link => this.links.get(link.pubkey) === link && !link.closed && link.supportsRanges === true && link.have.has(key)
+      && !this.banned.has(link.pubkey) && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 && (!plan.cachedHolders || plan.cachedHolders.has(link));
+    const captured = [...this.links.values()].filter(link => eligible(link) && this.#peerEntryAvailable(link, context));
+    const available = () => captured.filter(link => eligible(link) && this.#peerFree(link));
+    let candidates = available();
+    if (!candidates.length && context?.[WARM_AHEAD] && captured.some(link => this.peerLeases.has(link))) {
+      await this.#waitForPeerLease(captured, plan.limit, signal);
+      candidates = available();
+    }
+    if (this.stopped || signal.aborted || now() >= plan.limit) return null;
     if (!candidates.length) return worker ? null : undefined;
     const models = new Map(candidates.map(link => [link, this.#linkTransferEstimate(link, Math.max(0, plan.limit - now()), commitment.pieceSize)])
       .filter(([, model]) => model !== null));
     if (!models.size) { this.counters.peerNoFit += 1; return null; }
     const holders = [...models.keys()];
+    const lease = {};
+    for (const link of holders) this.peerLeases.set(link, lease);
+    this.peerAdmission.claims += holders.length;
+    const release = () => {
+      signal.removeEventListener('abort', release);
+      for (const link of holders) if (this.peerLeases.get(link) === lease) this.peerLeases.delete(link);
+      // Let the completed genuine load publish its accepted-link observation
+      // before speculative admission re-evaluates that same link's model.
+      for (const waiter of [...this.peerLeaseWaiters]) this.#after(0, waiter);
+    };
+    signal.addEventListener('abort', release, { once: true });
+    try {
     const ids = new Map(holders.map((link) => [this.#transferId(link), link]));
     // Peers may hold pieces until the buffer-safe limit; what is left then
     // goes to origin by range, within the origin reserve the limit keeps.
@@ -2042,7 +2111,8 @@ class HlsSwarm {
     let transfer;
     try { transfer = worker ? await this.transferWorker.transfer(config, { signal }) : this.core.transfer(config); }
     catch { return null; }
-    if (this.stopped || signal.aborted || (worker && now() >= deadline)) { transfer?.free(); return null; }
+    if (this.stopped || signal.aborted || (worker && now() >= deadline) ||
+        holders.some(link => !eligible(link) || link.busy || this.peerLeases.get(link) !== lease)) { transfer?.free(); return null; }
     if (!transfer) return worker || plan.peerOnly ? null : undefined;
     this.multiHolder.transfers += 1;
     // Each scheduler call, with its time, inputs and returned commands, so
@@ -2067,7 +2137,7 @@ class HlsSwarm {
     // This is a whole HTTP service rate, already including HTTP startup.
     // A null first-byte value would borrow the unrelated peer median again.
     const origin = plan.peerOnly ? null : [0, originMs ? commitment.size / originMs : null];
-    return new Promise((resolve) => {
+    return await new Promise((resolve) => {
       const requests = new Map(), originRequests = new Set(), abandoned = new WeakSet(), contributions = new Map(), shortRefreshes = new Map();
       let finished = false, tickTimer = null, backstop = null, releaseOrigin = null, originShare = 0, verified = 0;
       // A source is credited only with the bytes its delivery newly
@@ -2254,6 +2324,7 @@ class HlsSwarm {
       apply(started);
       });
     });
+    } finally { release(); }
   }
 
   // A request that gives up early, so its failure costs little buffer, but
@@ -2644,6 +2715,7 @@ class HlsSwarm {
     for (const controller of this.cachedRaces) controller.abort();
     this.held.clear();
     this.heldBytes = 0;
+    this.uploadPacer?.recheck();
     for (const link of this.links.values()) { link.sendHave([]); link.sendContribution(false, this.rendition); }
     this.#announce();
   }
@@ -2651,6 +2723,7 @@ class HlsSwarm {
   // `range` (framing 2) asks for pieces of the held object: the link sends
   // only those, so only their bytes are charged.
   async #serveRequest(link, key, range = null) {
+    if (this.uploadPacer) return this.#servePacedRequest(link, key, range);
     // A changed-ticket presence can already own this peer's bounded online
     // check. Join that decision instead of refusing the previously admitted
     // ticket merely because a different credential is being checked. No bytes
@@ -2718,6 +2791,79 @@ class HlsSwarm {
   #refuseUpload(reason) {
     this.counters.uploadsRefused += 1;
     this.uploadRefusalCounters[reason] = increment(this.uploadRefusalCounters[reason]);
+  }
+
+  #refillUploadRate() {
+    const at = now(), elapsed = Math.max(0, at - this.uploadRefilledAt) / 1000;
+    this.uploadRefilledAt = at;
+    this.uploadTokens = Math.min(this.options.maxUploadBytesPerSecond * 2, this.uploadTokens + elapsed * this.options.maxUploadBytesPerSecond);
+  }
+
+  #uploadGeometry(key, range) {
+    const size = this.held.get(key)?.byteLength;
+    if (!Number.isSafeInteger(size) || size < 1) return null;
+    if (!range) return { key, size, charge: size, range: null };
+    const pieceSize = commitmentPieceSize(size);
+    if (!Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || range.start < 0 || range.end <= range.start || range.end > Math.ceil(size / pieceSize)) return null;
+    const charge = Math.min(range.end * pieceSize, size) - range.start * pieceSize;
+    return { key, size, charge, range: { start: range.start, end: range.end } };
+  }
+
+  #pacedUploadAllowed(row, ownQuota = false) {
+    if (this.stopped || this.disabledReason || !this.options.serve || row.link.closed || this.links.get(row.link.pubkey) !== row.link ||
+        (!this.options.serveOnCellular && onCellular()) || this.banned.has(row.link.pubkey)) return false;
+    const geometry = this.#uploadGeometry(row.key, row.range);
+    if (!geometry || geometry.size !== row.size || geometry.charge !== row.charge) return false;
+    const remaining = this.#uploadRemaining();
+    if (!ownQuota && remaining !== null && row.charge > remaining) return false;
+    const recent = [...this.links.values()].filter(peer => peer !== row.link && (peer.outboundInFlight > 0 || Date.now() - peer.lastServedAt < 30_000)).length;
+    return Date.now() - row.link.lastServedAt < 30_000 || recent < this.options.maxUploadPeers;
+  }
+
+  async #servePacedRequest(link, key, range) {
+    const geometry = this.#uploadGeometry(key, range);
+    if (!geometry) { this.#refuseUpload('not-held'); return null; }
+    const reservation = await this.uploadPacer.acquire(link, geometry);
+    if (!reservation) return null;
+    let quota = false, hostAccepted = null, sent = false;
+    const signal = reservation.controller.signal;
+    const current = () => reservation.active && !signal.aborted && this.#pacedUploadAllowed(reservation, quota);
+    try {
+      if (!current()) return null;
+      // No held buffer survives refill or host-policy waits. Remote CANCEL
+      // has no provider signal in the existing wire; its shell suppresses the
+      // eventual response and returns unsent rate capacity as before.
+      const ticket = this.admissionChecks.get(link.pubkey)?.ticket ?? this.admitted.get(link.pubkey)?.ticket;
+      if (this.options.admit && !await boundedOperation(() => this.#admits(link.pubkey, ticket, 'upload'), signal, this.options.admissionTimeoutMs)) {
+        this.#refuseUpload('admission'); link.close('admission'); return null;
+      }
+      if (!current()) return null;
+      this.uploadQuotaBytes += reservation.charge; quota = true;
+      if (this.options.reserveUploadBytes) {
+        try { hostAccepted = await boundedOperation(operationSignal => this.options.reserveUploadBytes(reservation.charge, { signal: operationSignal }), signal, this.options.admissionTimeoutMs) === true; }
+        catch { this.#noteError('upload-reservation'); }
+        if (hostAccepted !== true) { this.#refuseUpload('reservation-refused'); return null; }
+      } else hostAccepted = true;
+      if (!current() || this.options.admit && this.admitted.get(link.pubkey)?.ticket !== ticket) {
+        this.#refuseUpload('reservation-inactive'); return null;
+      }
+      // The final lookup follows every await. Quota zero already prevents new
+      // admissions; withdraw only now so its reserved final object can return
+      // synchronously without retaining bulk bytes across a policy wait.
+      const bytes = this.held.get(key);
+      if (!bytes || bytes.byteLength !== reservation.size) { this.#refuseUpload('not-held'); return null; }
+      this.counters.bytesUploaded += reservation.charge; this.counters.uploadsServed++;
+      sent = true;
+      if (this.options.testHooks?.corruptUploads) { const tampered = bytes.slice(); tampered[tampered.length >> 1] ^= 0xff; return tampered; }
+      return bytes;
+    } catch { return null; }
+    finally {
+      // An explicit refusal releases its own session reservation exactly once.
+      // Accepted or unknown host outcomes keep conservative session billing.
+      if (quota && hostAccepted === false) this.uploadQuotaBytes -= reservation.charge;
+      if (quota && this.#uploadRemaining() === 0) this.#withdrawContribution();
+      this.uploadPacer.finish(reservation, sent);
+    }
   }
 
   // --- the Rust core ---------------------------------------------------------
@@ -3588,15 +3734,22 @@ class HlsSwarm {
       onHaveChange: (_link, added) => {
         for (const waiter of [...this.haveWaiters]) waiter(added);
       },
-      onScheduleChange: () => { for (const waiter of [...this.haveWaiters]) waiter(); },
+      onScheduleChange: () => {
+        for (const waiter of [...this.haveWaiters]) waiter();
+        for (const waiter of [...this.peerLeaseWaiters]) waiter();
+      },
       onUploadCancelled: (_link, unsentBytes) => {
         this.counters.uploadsCancelled += 1;
         this.counters.uploadCancelledBytes += unsentBytes;
         // Bytes never sent return to the per-second rate. The session
         // allowance and any host reservation stay charged.
         this.uploadTokens = Math.min(this.options.maxUploadBytesPerSecond * 2, this.uploadTokens + unsentBytes);
+        this.uploadPacer?.recheck();
       },
       onClose: (closed) => {
+        this.uploadPacer?.cancel(closed);
+        this.peerLeases.delete(closed);
+        for (const waiter of [...this.peerLeaseWaiters]) waiter();
         dial.pc.removeEventListener("datachannel", rejectExtraChannel);
         this.#endTransport(dial.pc, "link-close", closed.closeReason);
         this.peerSelection.forget(closed);

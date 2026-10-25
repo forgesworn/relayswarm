@@ -64,6 +64,10 @@ loads share the existing held cache and coalesce with genuine player demand.
 Current signed authority and content hashes gate cache reuse; local reuse,
 raw verified peer reception and consumed peer payload remain distinct.
 Source tests do not qualify cold-cache 4K or physical devices.
+Unreleased uploadPacing also defaults off: canonical pieces may wait in a
+bounded 250 ms refill FIFO without increasing upload rate, burst or quota.
+High-level multi-holder link leases precede asynchronous worker creation;
+queue time and reservation counts never imply accepted peer delivery.
 Its matching WASM upload ABI copies only the requested range instead of the
 whole held object per request. These are bounded-policy and byte-copy changes;
 physical iPhone/iPad and Pixel/Vanadium continuity remains unverified.

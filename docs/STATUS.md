@@ -50,6 +50,15 @@ Source regressions now retain only that last genuine fragment's unchanged
 parsed next window, retiring it on incompatible metadata, unsuccessful
 termination or lifecycle changes. This additional fix remains unmeasured.
 
+The longer trace also exposed concurrent asynchronous worker admissions
+selecting the same free-looking link, followed by token-bucket refusal during
+piece upload. High-level source regressions now reserve link ownership before
+the worker await and permit only bounded warm contention waiting. The new
+default-off `uploadPacing` option defers canonical-piece refill in a bounded
+250 ms FIFO without increasing rate, burst or quota. Tests exercise actual
+committed-Core worker/provider contracts and unchanged cancellation framing;
+they do not establish smooth full-track playback or close room synchronisation.
+
 Cold-cache physical diagnostics exposed two distinct timing errors: a
 holder's completion rate already included startup, yet the piece planner
 also added a viewer-wide first-byte delay from another connection; HTTP

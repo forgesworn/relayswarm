@@ -164,6 +164,37 @@ peer credit only when real hls.js demand consumes it. Local reuse does not
 create network bytes. These source tests do not establish sustained cold-cache
 4K, a public TURN route, network savings or physical-device continuity.
 
+Multi-holder admission reserves its candidate links synchronously before
+asynchronous worker creation. Other download selectors respect those leases.
+Only warm work may wait once for an already-captured candidate to become free,
+within its original peer window and speculation lifetime; its existing HTTP
+arm continues. Abort, failure and settlement release ownership. This does not
+add a request, admit another peer or extend a playback recovery deadline.
+
+The unreleased `uploadPacing: true` option is disabled by default. Canonical
+piece ranges can wait in one global FIFO for the existing token bucket to
+refill: at most one waiter per link, `min(maxUploadPeers, maxPeers)` waiters
+overall, and a fixed 250 ms absolute queue deadline. A delayed event loop
+expires overdue work instead of granting it. Rate and twice-rate burst caps
+stay unchanged; unsupported whole-object requests still refuse immediately.
+Queue rows retain no bulk media buffer. Current held data, host admission,
+serving policy and allowance are rechecked before delivery; the final lookup
+follows every host await. An owned rate reservation is refunded once when
+nothing is submitted. Explicit host refusal releases its session reservation;
+accepted or unknown host outcomes retain conservative session billing.
+
+The existing provider callback exposes no remote request cancellation signal.
+Remote CANCEL therefore cannot immediately end this short refill wait: the
+unchanged Core/JavaScript framing suppresses late output and returns unsent
+rate capacity, while accepted session/host reservations stay charged. Local
+stop or link closure cancels immediately. `metrics().uploadPacing` reports
+queued work, reserved rate bytes, grants/refusals/expiry/cancellation and total
+and maximum deferred queue milliseconds (including time behind the head).
+Observed expiry can exceed 250 ms when the event loop is delayed; the grant
+deadline stays fixed. Host-policy time and payload time are not queue time.
+`metrics().peerAdmission` reports held link leases and bounded waiter outcomes.
+Neither waiting nor reservation creates peer delivery credit or rate evidence.
+
 The unreleased opt-in `transferWorkerUrl` warms one explicitly packaged
 companion worker asynchronously after `coreWasm` loads. With `multiHolder`,
 schema-3 verification and planning use the same Rust transfer facade in that

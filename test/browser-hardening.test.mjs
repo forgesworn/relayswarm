@@ -8,7 +8,7 @@ import { Readable } from "node:stream";
 import { readFile } from "node:fs/promises";
 import { Worker as WorkerThread } from "node:worker_threads";
 import { generateSecretKey, finalizeEvent, getPublicKey } from "nostr-tools/pure";
-import { createHlsSwarm } from "../src/browser/hls-swarm.mjs";
+const { createHlsSwarm } = await import(process.env.TEST_SWARM_MODULE ?? "../src/browser/hls-swarm.mjs");
 import { loadCore } from "../src/browser/core-wasm.mjs";
 import { originClockOffsetMs, originClockSummary } from "../src/browser/origin-clock.mjs";
 import { PeerLink } from "../src/browser/peer-link.mjs";
@@ -16,6 +16,7 @@ import { RelayPool, RelaySwarmSession } from "../src/relay-session.mjs";
 import { commitmentContent, commitmentPieceSize, KIND_SEGMENT_COMMITMENT, verifySegmentCommitment } from "../src/browser/segment-commitment.mjs";
 import { startLocalRelay } from "./support/local-relay.mjs";
 import { boundedOperation } from "../src/browser/bounded-operation.mjs";
+import { WARM_AHEAD } from "../src/browser/warm-ahead.mjs";
 import { NeighbourDiscovery } from "../src/browser/neighbour-discovery.mjs";
 import { CoreNeighbourDiscovery } from "../src/browser/core-discovery.mjs";
 import { PeerSelection } from "../src/browser/peer-selection.mjs";
@@ -4628,7 +4629,7 @@ test("a caller abort during the wait is not a miss", async t => {
 
 const multiCore = await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url)));
 
-function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false } = {}) {
+function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false, holdNew = false } = {}) {
   const workers = [];
   class WorkerImpl extends EventTarget {
     constructor() {
@@ -4636,6 +4637,7 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
       this.thread = new WorkerThread(new URL("./support/core-transfer-worker-thread.mjs", import.meta.url));
       this.exit = new Promise(resolve => this.thread.once("exit", resolve));
       this.thread.on("message", data => {
+        if (holdNew && this.newIds?.delete(data.id)) { (this.newRequests ??= []).push({ data }); return; }
         if (holdFinal && data.result?.commands?.some(command => command.t === "deliver")) { this.finalReply = data; return; }
         this.dispatchEvent(new MessageEvent("message", { data }));
       });
@@ -4643,10 +4645,12 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
     }
     postMessage(data, transfer) {
       if (pauseInit && data.op === "init") { this.init = data; return; }
+      if (holdNew && data.op === "new") (this.newIds ??= new Set()).add(data.id);
       if (failDelivery && data.op === "delivered") { queueMicrotask(() => this.dispatchEvent(new Event("error"))); return; }
       this.thread.postMessage(data, transfer);
     }
     releaseInit() { this.thread.postMessage(this.init); }
+    releaseNew() { const { data } = this.newRequests.shift(); this.dispatchEvent(new MessageEvent('message', { data })); }
     releaseFinal() { this.dispatchEvent(new MessageEvent("message", { data: this.finalReply })); }
     terminate() { this.terminated = true; return this.thread.terminate(); }
   }
@@ -4779,6 +4783,76 @@ test("transfer worker: six-MiB verified contribution uses the shared Rust facade
     assert.equal(f.swarm.metrics().core.transferWorker.pending, 0);
   } finally { await f.close(); }
   assert.equal(workers[0].terminated, true);
+});
+
+test("transfer worker: current demand leases a link before async creation and warmed work waits without another HTTP arm", async t => {
+  const { WorkerImpl, workers } = transferWorkerFixture(t, { holdNew: true });
+  const f = await multiFixture(t, { holders: [{}], wholeOriginDelayMs: 1500,
+    swarmOptions: { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl, zeroBudgetPeerRace: true, sustainablePeerWait: true, maxPeerWaitMs: 2500 } });
+  try {
+    await until(() => f.swarm.metrics().core.transferWorker.state === 'ready');
+    const current = f.load();
+    await until(() => workers[0].newRequests?.length === 1);
+    const warm = f.load({ ...multiContext, [WARM_AHEAD]: { peerBytes: 0 } });
+    await sleep(30);
+    assert.equal(workers[0].newRequests.length, 1, 'the warm arm cannot select the same free-looking link during worker creation');
+    assert.equal(f.swarm.metrics().peerAdmission.waiting, 1);
+    workers[0].releaseNew(); sameBytes(await current, f.bytes);
+    const currentMetrics = f.swarm.metrics();
+    assert.equal(currentMetrics.bytes.peerFirst, f.bytes.length, 'the genuine current object must have verified peer credit before testing peer handover');
+    assert.equal(f.ranges.length, 0, 'the actual-site zero-headroom path is a peer-only race against whole HTTP');
+    t.diagnostic(JSON.stringify({ currentAcceptedPeerBytes: currentMetrics.bytes.peerFirst, originRanges: f.ranges.length,
+      admission: currentMetrics.peerAdmission, peerNoFit: currentMetrics.segments.peerNoFit }));
+    try { await until(() => workers[0].newRequests.length === 1); }
+    catch (error) {
+      const m = f.swarm.metrics();
+      t.diagnostic(JSON.stringify({ admission: m.peerAdmission, peerNoFit: m.segments.peerNoFit,
+        peerOutcomes: m.peerRequestDiagnostics.counters, acceptedPeerBytes: m.bytes.peerFirst, originRanges: f.ranges.length }));
+      throw error;
+    }
+    workers[0].releaseNew(); sameBytes(await warm, f.bytes);
+    assert.equal(f.swarm.metrics().peerRequestDiagnostics.counters.busy, 0);
+    assert.equal(f.wholeLoads.length, 2, 'only the already-running current and speculative source arms were started');
+    assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 0);
+  } finally { await f.close(); }
+});
+
+for (const ending of ['abort', 'failure']) test(`transfer worker: ${ending} during creation releases the link lease and fences a late acknowledgement`, async t => {
+  const { WorkerImpl, workers } = transferWorkerFixture(t, { holdNew: true });
+  const f = await multiFixture(t, { holders: [{}], swarmOptions: { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl } });
+  try {
+    await until(() => f.swarm.metrics().core.transferWorker.state === 'ready');
+    const pending = beginCountedMultiLoad(f);
+    await until(() => workers[0].newRequests?.length === 1);
+    assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 1);
+    if (ending === 'abort') pending.loader.abort(); else workers[0].dispatchEvent(new Event('error'));
+    await until(() => f.swarm.metrics().peerAdmission.claimedLinks === 0);
+    workers[0].releaseNew(); await sleep(20);
+    assert.equal(f.channels[0].wants.length, 0);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    if (ending === 'abort') assert.equal(f.wholeLoads.length, 0, 'caller abort cannot start hidden recovery');
+    else { assert.equal((await pending.response).length, 32); assert.equal(f.wholeLoads.length, 1); }
+  } finally { await f.close(); }
+});
+
+test('transfer worker: a warm lease waiter expires inside its original peer window while its existing source continues', async t => {
+  const { WorkerImpl, workers } = transferWorkerFixture(t, { holdNew: true });
+  const f = await multiFixture(t, { holders: [{}], wholeOriginDelayMs: 1100,
+    swarmOptions: { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl, zeroBudgetPeerRace: true, maxPeerWaitMs: 1000 } });
+  try {
+    await until(() => f.swarm.metrics().core.transferWorker.state === 'ready');
+    const current = beginCountedMultiLoad(f);
+    await until(() => workers[0].newRequests?.length === 1);
+    const warm = f.load({ ...multiContext, [WARM_AHEAD]: { peerBytes: 0 } });
+    await until(() => f.swarm.metrics().peerAdmission.waiting === 1);
+    await until(() => f.swarm.metrics().peerAdmission.waiting === 0);
+    assert.equal(f.swarm.metrics().peerAdmission.granted, 0);
+    assert.equal(workers[0].newRequests.length, 1);
+    sameBytes(await warm, f.bytes);
+    current.loader.abort();
+    assert.equal(f.wholeLoads.length, 1);
+    assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 0);
+  } finally { await f.close(); }
 });
 
 test("transfer worker: warming never delays ordinary HTTP or silently uses the main-thread transfer", async t => {
@@ -6316,6 +6390,120 @@ test("multi-holder: a ranged serve sends and charges only the requested pieces",
     assert.deepEqual(reserved, [131_072]);
     assert.equal(f.swarm.metrics().bytes.uploaded, 131_072);
   } finally { await f.close(); }
+});
+
+async function pacedUploadFixture(t, options = {}) {
+  let clock = 0;
+  t.mock.method(performance, 'now', () => clock);
+  const object = new Uint8Array(6 * 1024 * 1024).fill(23), playback = peerPlaybackOptions(300);
+  class BigLoader extends Loader { load(ctx, _config, cb) { cb.onSuccess({ data: object.slice().buffer }, this.stats, ctx, null); } }
+  const f = await linkedFixture({ ...playback.options, serve: true, coreWasm: multiCore, multiHolder: true,
+    uploadPacing: true, maxUploadBytesPerSecond: 4 * 1024 * 1024, WebSocketImpl: memoryRelaySocket(), ...options }, BigLoader);
+  t.after(() => f.close());
+  await until(() => f.swarm.metrics().core.state === 'ready');
+  const first = await f.addPeer(), second = await f.addPeer();
+  await f.load(); await until(() => f.swarm.metrics().bytes.held === object.length);
+  const piece = commitmentPieceSize(object.length), request = (channel, id, end = 4) => channel.receive(JSON.stringify({ t: 'want', id, k: playback.key, p: [0, end] }));
+  request(first, 1, 42);
+  await until(() => first.sent.some(frame => frame.t === 'eof' && frame.id === 1));
+  return { ...f, first, second, piece, request, setClock: at => { clock = at; } };
+}
+
+test('upload pacing: two real Core links refill canonical pieces fairly without raising the rate cap', async t => {
+  const f = await pacedUploadFixture(t);
+  f.request(f.first, 2); f.request(f.second, 3);
+  await sleep(20);
+  assert(!f.first.sent.some(frame => frame.t === 'none' && frame.id === 2), 'pacing must not turn a temporary refill deficit into NONE');
+  assert.equal(f.swarm.metrics().uploadPacing.queued, 2);
+  f.setClock(100); await until(() => f.first.sent.some(frame => frame.t === 'eof' && frame.id === 2));
+  assert(!f.second.sent.some(frame => frame.t === 'eof' && frame.id === 3));
+  f.setClock(200); await until(() => f.second.sent.some(frame => frame.t === 'eof' && frame.id === 3));
+  const m = f.swarm.metrics();
+  assert.equal(m.bytes.uploaded, 50 * f.piece);
+  assert(m.bytes.uploaded <= 4 * 1024 * 1024 * 1.2, 'initial capacity plus actual refill bounds submitted media');
+  assert.equal(m.uploadPacing.waited, 2); assert.equal(m.uploadPacing.waitTotalMs, 300); assert.equal(m.uploadPacing.waitMaxMs, 200);
+  assert.equal(m.uploadPacing.queued, 0); assert.equal(m.uploadPacing.reservedBytes, 0);
+  assert.equal(m.bytes.peerFirst, 0);
+});
+
+test('upload pacing: the default-off provider retains immediate rate refusal', async t => {
+  const f = await pacedUploadFixture(t, { uploadPacing: false });
+  f.request(f.first, 2);
+  await until(() => f.first.sent.some(frame => frame.t === 'none' && frame.id === 2));
+  assert.equal(f.swarm.metrics().uploadPacing, null);
+  assert.equal(f.swarm.metrics().bytes.uploaded, 42 * f.piece);
+});
+
+test('upload pacing: real Core CANCEL during refill suppresses payload and refunds only unsent rate', async t => {
+  const f = await pacedUploadFixture(t, { maxUploadBytesPerSession: 46 * 98_304 });
+  const before = f.first.sent.length;
+  f.request(f.first, 2); await until(() => f.swarm.metrics().uploadPacing.queued === 1);
+  f.first.receive(JSON.stringify({ t: 'cancel', id: 2 }));
+  f.setClock(100);
+  await until(() => f.first.sent.some(frame => frame.t === 'none' && frame.id === 2));
+  assert(!f.first.sent.slice(before).some(frame => frame instanceof ArrayBuffer || ArrayBuffer.isView(frame)));
+  const m = f.swarm.metrics();
+  assert.equal(m.bytes.uploadCancelledBytes, 4 * f.piece);
+  assert.equal(m.bytes.uploadRemaining, 0, 'accepted session billing stays charged despite remote cancellation');
+  assert.equal(m.uploadPacing.reservedBytes, 0);
+});
+
+for (const ending of ['stop', 'close', 'revoke']) test(`upload pacing: local ${ending} cancels refill without a late payload`, async t => {
+  let allowed = true;
+  const f = await pacedUploadFixture(t, ending === 'revoke' ? { admit: () => allowed, ticket: 'fixture-owner' } : {});
+  const before = f.first.sent.length;
+  f.request(f.first, 2); await until(() => f.swarm.metrics().uploadPacing.queued === 1);
+  if (ending === 'stop') f.swarm.stop();
+  else if (ending === 'close') f.first.close();
+  else allowed = false;
+  f.setClock(ending === 'revoke' ? 100 : 500); await sleep(120);
+  assert(!f.first.sent.slice(before).some(frame => frame instanceof ArrayBuffer || ArrayBuffer.isView(frame)));
+  assert.equal(f.swarm.metrics().uploadPacing.queued, 0);
+  assert.equal(f.swarm.metrics().uploadPacing.reservedBytes, 0);
+  assert.equal(f.swarm.metrics().bytes.uploaded, 42 * f.piece);
+});
+
+for (const ending of ['last-allowance', 'evicted', 'cancel']) test(`upload pacing: ${ending} across a real JS host reservation preserves lookup and billing ownership`, async t => {
+  let settle;
+  const f = await linkedFixture({ serve: true, uploadPacing: true, maxHeldSegments: 1,
+    maxUploadBytesPerSession: ending === 'last-allowance' ? 32 : 64,
+    WebSocketImpl: memoryRelaySocket(), reserveUploadBytes: () => new Promise(resolve => { settle = resolve; }) });
+  t.after(() => f.close());
+  const channel = await f.addPeer(); await f.load(); await until(() => f.swarm.metrics().bytes.held === 32);
+  const key = channel.sent.find(frame => frame.t === 'have' && frame.add?.length).add[0];
+  channel.receive(JSON.stringify({ t: 'want', id: 1, k: key })); await until(() => settle);
+  if (ending === 'evicted') {
+    await new Promise(resolve => new f.hls.config.fLoader({}).load({ ...context, url: 'https://origin.example/replacement.ts' }, {}, { onSuccess: resolve }));
+    await until(() => channel.sent.some(frame => frame.t === 'have' && frame.del?.includes(key)));
+  }
+  if (ending === 'cancel') channel.receive(JSON.stringify({ t: 'cancel', id: 1 }));
+  settle(true);
+  await until(() => channel.sent.some(frame => (frame.t === 'eof' || frame.t === 'none') && frame.id === 1));
+  const m = f.swarm.metrics(), binary = channel.sent.filter(frame => frame instanceof ArrayBuffer || ArrayBuffer.isView(frame));
+  assert.equal(m.uploadPacing.reservedBytes, 0);
+  if (ending === 'last-allowance') { assert.equal(m.bytes.uploaded, 32); assert.equal(m.bytes.held, 0); assert(binary.length); }
+  else assert.equal(binary.length, 0);
+  if (ending === 'evicted') assert.equal(m.bytes.uploaded, 0);
+  if (ending === 'cancel') assert.equal(m.bytes.uploadCancelledBytes, 32);
+  assert.equal(m.bytes.uploadRemaining, ending === 'last-allowance' ? 0 : 32);
+});
+
+test('upload pacing: explicit host refusal releases only its own session and rate reservation', async t => {
+  t.mock.method(performance, 'now', () => 0);
+  let calls = 0, settle;
+  const f = await linkedFixture({ serve: true, uploadPacing: true, maxUploadBytesPerSession: 64, maxUploadBytesPerSecond: 32,
+    WebSocketImpl: memoryRelaySocket(), reserveUploadBytes: () => { calls++; return new Promise(resolve => { settle = resolve; }); } });
+  t.after(() => f.close());
+  const channel = await f.addPeer(); await f.load(); await until(() => f.swarm.metrics().bytes.held === 32);
+  const key = channel.sent.find(frame => frame.t === 'have' && frame.add?.length).add[0];
+  for (const id of [1, 2]) {
+    channel.receive(JSON.stringify({ t: 'want', id, k: key })); await until(() => calls === id);
+    assert.equal(f.swarm.metrics().bytes.uploadRemaining, 32);
+    settle(false); await until(() => channel.sent.some(frame => frame.t === 'none' && frame.id === id));
+    assert.equal(f.swarm.metrics().bytes.uploadRemaining, 64);
+  }
+  assert.equal(f.swarm.metrics().bytes.uploaded, 0);
+  assert.equal(f.swarm.metrics().uploadPacing.reservedBytes, 0);
 });
 
 
