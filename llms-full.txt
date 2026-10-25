@@ -360,6 +360,7 @@ decision is not cached as permission for later upload requests.
 | `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
 | `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-object origin time with a 25% and 100 ms recovery margin. Substantial origin ranges update this estimate after scaling by their actual byte count. Unknown origin timing or duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. Independent cached/late-HAVE races keep their window beside immediate HTTP. |
 | `warmAhead` | `false` | Experimental peer-first option, requiring `serve: true`: use the same player's next two parsed, unencrypted, whole main-media fragments for bounded speculative loading. A warmed object promoted to genuine demand frees the sole speculative slot. Existing demand/range limits are unchanged. Verified future objects share the held cache; at most three distinct cached/in-flight objects and 24 MiB of warm data plus all reservations fit within `maxHeldBytes`. Fresh cache permission may wait only within actual buffer headroom, up to 25 ms, before ordinary source recovery proceeds independently. |
+| `startupBufferTarget` | `null` | Experimental one-shot startup buffer for peer-first serving: a synchronous function returns the current player's fresh raw HLS target time in seconds, or `null` when its ownership/epoch is invalid. Hold the first main-fragment callback until verified contiguous upcoming media covers that target and measured origin-recovery headroom. The first held body shares the existing three-object/24 MiB budget and original eight-second/parent deadline. Works with `warmAhead: false` to stop speculative fetching after startup. It never pauses, plays, seeks or changes the room clock; bounded failure reports a loader error instead of releasing unsafe media. |
 | `uploadPacing` | `false` | Experimental canonical-piece upload refill deferral: one FIFO waiter per link, at most `min(maxUploadPeers, maxPeers)` waiters, and a fixed 250 ms queue deadline. The existing per-second rate, twice-rate burst, session allowance and wire remain unchanged. Whole-object deficits still refuse immediately. Queue rows contain identity and numeric geometry; held bytes and current host permission are checked after waiting. |
 | `latePeerRace` | `false` | Experimental peer-first option requiring `zeroBudgetPeerRace`: permit the first peer arm of still-running whole-main-fragment HTTP with no prior peer plan to use a newly accepted, current exact-HAVE holder. Warm work must have a genuine consumer first. Bound by the earliest genuine demand plus `min(lateWindowMs, 4000)`, arming plus `min(maxPeerWaitMs, 2500)`, and the known original HTTP load deadline. Same HTTP request/timers, fresh authority and current immutable identity; no retries or extra GET. Dormant watchers share `maxConcurrentRaces`; lifecycle changes retire them. Numeric `latePeerRace` metrics do not create delivery credit. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
@@ -2077,7 +2078,34 @@ That work becomes genuine demand and frees the single speculative slot, so
 the following object can load concurrently. The combined cache and in-flight
 set remains bounded to three distinct objects and 24 MiB; all in-flight
 reservations reduce the existing held-cache budget together.
-There is no startup gate, pause, hidden player, clock offset or automatic seek.
+This option alone adds no startup gate, pause, hidden player, clock offset or automatic seek.
+
+The separate unreleased `startupBufferTarget` option defaults to `null`. A host
+may supply a synchronous function returning its fresh raw HLS target time in
+seconds. Return `null` when the player, room epoch or playback intent is no
+longer current. This enables a one-shot buffer before the first genuine main
+fragment reaches HLS demuxing. The original attached media element and pending
+trusted play request remain owned by the host.
+
+The first held body and verified upcoming fragments share the same three-object,
+24 MiB reservoir. Before first HTTP, the host must admit the worst-case 24 MiB
+reservation against its existing held budget; a smaller available budget fails
+explicitly. The original first response is handed to HLS unchanged and
+is not retained as an extra shared-cache seed; its reservation is released.
+Release requires a contiguous verified interval covering the
+fresh target plus at least the origin reserve or measured p90 whole-origin
+recovery with its 25% and 100 ms margin, whichever is greater. The original
+eight-second and parent load deadlines remain upper bounds. Invalid ownership,
+insufficient capacity or expiration fails the loader explicitly; it does not
+release stale media or renew the deadline on automatic HLS retries. A separate
+new adapter may start again after an explicit user retry.
+
+With `warmAhead: false`, startup may preload the parsed upcoming fragments and
+retain them for genuine consumption, then stops speculative fetching. Peer
+consumption credit is deferred until the corresponding genuine callback is
+released. `metrics().startupBuffer` distinguishes buffering, release, failure
+and cancellation and reports reservoir use, target and recovery headroom. It
+does not establish decoded playback, shared-clock accuracy or device acceptance.
 
 The separate unreleased `latePeerRace: true` option defaults to false and
 requires peer-first plus `zeroBudgetPeerRace`. When a whole main-fragment
@@ -2739,6 +2767,18 @@ native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
 ## Unreleased per-connection timing and bounded recovery (25 October 2026)
+
+An M4 comparison with steady speculation disabled still had one 0.88-second
+startup interruption; its other viewer had none. Both received useful peer
+media, but the interrupted viewer failed the shared-clock audit. Its first
+freshly aligned position left 0.68 seconds of buffered media while the next
+whole-fragment source request took 1.73 seconds. No peer wait or subsequent
+clock seek caused that underflow. The experimental, default-null
+`startupBufferTarget` contract therefore holds the first encoded callback
+until verified upcoming media covers a fresh host target plus measured
+recovery headroom, within the existing reservoir and deadlines. This is
+unreleased work; real continuity, shared-clock and physical-device acceptance
+remain pending.
 
 The experimental `warmAhead` option is disabled by default. Signed-commitment
 loader tests using actual hls.js 1.7.3 parsed Fragment objects cover future

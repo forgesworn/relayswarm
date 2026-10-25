@@ -62,6 +62,7 @@ const DEFAULTS = Object.freeze({
   // Opt-in: one speculative whole-fragment load for this player's next two
   // parsed fragments. Verified bytes share the existing bounded held cache.
   warmAhead: false,
+  startupBufferTarget: null,
   lateWindowMs: 6_000,
   maxPeers: 6,
   maxUploadPeers: 4,
@@ -583,6 +584,8 @@ class HlsSwarm {
     if (typeof this.options.latePeerRace !== 'boolean' || this.options.latePeerRace && (mode !== 'peer-first' || !this.options.zeroBudgetPeerRace)) return 'invalid-late-peer-race-option';
     if (typeof this.options.sustainablePeerWait !== "boolean") return "invalid-sustainable-wait-option";
     if (typeof this.options.warmAhead !== "boolean" || this.options.warmAhead && (mode !== "peer-first" || this.options.serve !== true)) return "invalid-warm-ahead-option";
+    if (this.options.startupBufferTarget !== null && (typeof this.options.startupBufferTarget !== 'function' ||
+        mode !== 'peer-first' || this.options.serve !== true)) return 'invalid-startup-buffer-target';
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (this.options.reserveUploadBytes !== undefined && typeof this.options.reserveUploadBytes !== "function") return "invalid-upload-reservation";
     if (typeof this.options.serve !== "boolean" || typeof this.options.serveOnCellular !== "boolean") return "invalid-serve-option";
@@ -606,8 +609,11 @@ class HlsSwarm {
       this.originalFragmentLoader = hls.config.fLoader;
       const BaseLoader = hls.config.fLoader || hls.config.loader;
       hls.config.fLoader = this.options.mode === "peer-first" ? this.#peerFirstLoader(BaseLoader) : this.#shadowLoader(BaseLoader);
-      if (this.options.warmAhead) {
+      if (this.options.warmAhead || this.options.startupBufferTarget) {
         this.warmAhead = createWarmAhead({ Loader: hls.config.fLoader,
+          steady: this.options.warmAhead, startupTarget: this.options.startupBufferTarget,
+          startupRecovery: context => Math.max(this.options.originReserveMs,
+            (percentile(this.#originSamples(context), 0.9) || 0) * 1.25 + 100),
           allowed: () => this.#servingAllowed() && hls.media?.paused !== true && !onCellular(),
           next: context => {
             const fragments = hls.levels?.[context.frag?.level]?.details?.fragments;
@@ -621,10 +627,15 @@ class HlsSwarm {
             const key = await this.#segmentKey(context);
             const event = await boundedOperation(operationSignal => this.options.getCommitment(context, { signal: operationSignal }), signal, 1_000);
             if (signal.aborted || this.stopped) return null;
-            const commitment = this.#verifyCommitment(event, { streamEvent: this.options.streamEvent, swarmId: this.options.swarmId,
+            const current = context => !this.stopped && this.#verifyCommitment(event, { streamEvent: this.options.streamEvent, swarmId: this.options.swarmId,
               key, context, maxSegmentBytes: this.options.maxSegmentBytes, delegation: this.options.delegation,
               revokedDelegationIds: this.options.revokedDelegationIds, delegationRevocations: this.options.delegationRevocations });
-            return commitment && commitment.size <= this.options.maxHeldBytes ? { ...commitment, key } : null;
+            const commitment = current(context);
+            return commitment && commitment.size <= this.options.maxHeldBytes
+              ? { ...commitment, key, current: context => {
+                const fresh = current(context);
+                return Boolean(fresh && fresh.size === commitment.size && fresh.sha256 === commitment.sha256);
+              } } : null;
           },
           verify: async (permit, data, _context, signal) => data instanceof ArrayBuffer && data.byteLength === permit.size &&
             !signal.aborted && await sha256Hex(data) === permit.sha256,
@@ -848,6 +859,7 @@ class HlsSwarm {
       disabledReason: this.disabledReason || null,
       stopped: this.stopped,
       warmAhead: this.warmAhead?.snapshot() ?? null,
+      startupBuffer: this.warmAhead?.startupSnapshot() ?? null,
       peerAdmission: { ...this.peerAdmission, claimedLinks: this.peerLeases.size, waiting: this.peerLeaseWaiters.size },
       uploadPacing: this.uploadPacer?.snapshot() ?? null,
       latePeerRace: { enabled: this.options.latePeerRace, ...this.latePeerCounts, pending: this.latePeerOwners.size,
@@ -1513,7 +1525,7 @@ class HlsSwarm {
     // Network reception is recorded once. Speculation is not a delivery to
     // hls.js until the genuine player later consumes that verified object.
     this.counters.bytesFromPeers += peerBytes;
-    const accept = acceptedContext => {
+    const commit = acceptedContext => {
       if (peerBytes > 0) this.counters.peerFirstLoaded += 1;
       this.counters.peerFirstBytes += peerBytes;
       if (peerBytes > 0) {
@@ -1534,6 +1546,8 @@ class HlsSwarm {
         pushSample(this.peerLatencySamples, end - t0);
         if (acceptedContext.frag) this.peerFragments.add(acceptedContext.frag);
       }
+    };
+    const notify = () => {
       if (typeof this.options.onPeerDelivery === "function") {
         const contributions = result.multi ? result.contributions : [{ connection: result.connection, bytes: size }];
         for (const { connection, bytes } of contributions) {
@@ -1545,7 +1559,8 @@ class HlsSwarm {
         }
       }
     };
-    if (context[WARM_AHEAD]) Object.assign(context[WARM_AHEAD], { peerBytes, accept });
+    const accept = acceptedContext => { commit(acceptedContext); notify(); };
+    if (context[WARM_AHEAD]) Object.assign(context[WARM_AHEAD], { peerBytes, accept, commit, notify });
     else accept(context);
     // #hold keeps nothing while serving is off or the key is already held.
     if (!context[WARM_AHEAD] && this.#servingAllowed() && !this.held.has(result.key)) this.#hold(result.key, result.bytes.slice());

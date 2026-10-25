@@ -64,6 +64,12 @@ loads share the existing held cache and coalesce with genuine player demand.
 Current signed authority and content hashes gate cache reuse; local reuse,
 raw verified peer reception and consumed peer payload remain distinct.
 Source tests do not qualify cold-cache 4K or physical devices.
+Unreleased startupBufferTarget is null by default. A host-provided fresh raw
+HLS target enables one-shot verified startup buffering within the existing
+three-object/24 MiB and eight-second/parent limits. With warmAhead false,
+speculation stops after startup. It preserves the pending trusted play and
+never changes the player, rate or room clock; failure is explicit. Source
+and fixture checks do not prove decoded playback or device acceptance.
 Unreleased uploadPacing also defaults off: canonical pieces may wait in a
 bounded 250 ms refill FIFO without increasing upload rate, burst or quota.
 High-level multi-holder link leases precede asynchronous worker creation;

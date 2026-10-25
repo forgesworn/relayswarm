@@ -12,6 +12,18 @@ Earlier release and pilot evidence below retains its date and source.
 
 ## Unreleased per-connection timing and bounded recovery (25 October 2026)
 
+An M4 comparison with steady speculation disabled still had one 0.88-second
+startup interruption; its other viewer had none. Both received useful peer
+media, but the interrupted viewer failed the shared-clock audit. Its first
+freshly aligned position left 0.68 seconds of buffered media while the next
+whole-fragment source request took 1.73 seconds. No peer wait or subsequent
+clock seek caused that underflow. The experimental, default-null
+`startupBufferTarget` contract therefore holds the first encoded callback
+until verified upcoming media covers a fresh host target plus measured
+recovery headroom, within the existing reservoir and deadlines. This is
+unreleased work; real continuity, shared-clock and physical-device acceptance
+remain pending.
+
 The experimental `warmAhead` option is disabled by default. Signed-commitment
 loader tests using actual hls.js 1.7.3 parsed Fragment objects cover future
 object verification, exact-demand reuse/coalescing, current-authority refusal,

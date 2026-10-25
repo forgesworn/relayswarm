@@ -112,7 +112,34 @@ That work becomes genuine demand and frees the single speculative slot, so
 the following object can load concurrently. The combined cache and in-flight
 set remains bounded to three distinct objects and 24 MiB; all in-flight
 reservations reduce the existing held-cache budget together.
-There is no startup gate, pause, hidden player, clock offset or automatic seek.
+This option alone adds no startup gate, pause, hidden player, clock offset or automatic seek.
+
+The separate unreleased `startupBufferTarget` option defaults to `null`. A host
+may supply a synchronous function returning its fresh raw HLS target time in
+seconds. Return `null` when the player, room epoch or playback intent is no
+longer current. This enables a one-shot buffer before the first genuine main
+fragment reaches HLS demuxing. The original attached media element and pending
+trusted play request remain owned by the host.
+
+The first held body and verified upcoming fragments share the same three-object,
+24 MiB reservoir. Before first HTTP, the host must admit the worst-case 24 MiB
+reservation against its existing held budget; a smaller available budget fails
+explicitly. The original first response is handed to HLS unchanged and
+is not retained as an extra shared-cache seed; its reservation is released.
+Release requires a contiguous verified interval covering the
+fresh target plus at least the origin reserve or measured p90 whole-origin
+recovery with its 25% and 100 ms margin, whichever is greater. The original
+eight-second and parent load deadlines remain upper bounds. Invalid ownership,
+insufficient capacity or expiration fails the loader explicitly; it does not
+release stale media or renew the deadline on automatic HLS retries. A separate
+new adapter may start again after an explicit user retry.
+
+With `warmAhead: false`, startup may preload the parsed upcoming fragments and
+retain them for genuine consumption, then stops speculative fetching. Peer
+consumption credit is deferred until the corresponding genuine callback is
+released. `metrics().startupBuffer` distinguishes buffering, release, failure
+and cancellation and reports reservoir use, target and recovery headroom. It
+does not establish decoded playback, shared-clock accuracy or device acceptance.
 
 The separate unreleased `latePeerRace: true` option defaults to false and
 requires peer-first plus `zeroBudgetPeerRace`. When a whole main-fragment
