@@ -137,6 +137,13 @@ no new request. Targets outside both the playable buffer and tracked warm
 intervals still clear speculative state. Normal hls.js abort handling and the
 next actual demand continue to prune unrelated contexts.
 
+Before the first append, the last genuine parsed-demand interval can also
+retain its unchanged same-scope next window after HTTP has already completed.
+Its normalised identity and finite interval are snapshots, distinct from an
+active request. Changed parsed next metadata, invalid/new demand, unsuccessful
+termination, clear and stop retire that record. This creates no work, extends
+no deadline and does not change permission or byte accounting.
+
 Every demand reuse checks the host's current commitment/delegation/revocation
 view. Only actual buffer beyond the normal origin recovery reserve permits
 waiting for that check, capped at 25 ms. Unknown/empty headroom starts the

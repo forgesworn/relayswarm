@@ -39,8 +39,16 @@ alignment using a manifest-time target about two seconds behind the room clock.
 The SDK now also retains an exact already-tracked, same-scope warm interval
 when a seek enters it before append. Real parsed-fragment regressions cover
 verified/in-flight reuse and invalid or unrelated seek cancellation. This
-paired SDK/site startup-alignment candidate remains unmeasured against the
-same browser continuity and contribution gate.
+paired SDK/site startup-alignment candidate subsequently passed a 60-second
+continuity gate with no stalls/drops and 16.1% receiver peer contribution.
+The unchanged 330-second gate remained RED with early interruptions, despite
+82.2% receiver peer contribution. The short pass does not establish close
+room synchronisation or physical-phone acceptance. Its startup trace also
+showed a seek inside the completed genuine first fragment, before append,
+discarding a verified next object and downloading its full body again.
+Source regressions now retain only that last genuine fragment's unchanged
+parsed next window, retiring it on incompatible metadata, unsuccessful
+termination or lifecycle changes. This additional fix remains unmeasured.
 
 Cold-cache physical diagnostics exposed two distinct timing errors: a
 holder's completion rate already included startup, yet the piece planner

@@ -2100,6 +2100,13 @@ no new request. Targets outside both the playable buffer and tracked warm
 intervals still clear speculative state. Normal hls.js abort handling and the
 next actual demand continue to prune unrelated contexts.
 
+Before the first append, the last genuine parsed-demand interval can also
+retain its unchanged same-scope next window after HTTP has already completed.
+Its normalised identity and finite interval are snapshots, distinct from an
+active request. Changed parsed next metadata, invalid/new demand, unsuccessful
+termination, clear and stop retire that record. This creates no work, extends
+no deadline and does not change permission or byte accounting.
+
 Every demand reuse checks the host's current commitment/delegation/revocation
 view. Only actual buffer beyond the normal origin recovery reserve permits
 waiting for that check, capped at 25 ms. Unknown/empty headroom starts the
@@ -2703,8 +2710,16 @@ alignment using a manifest-time target about two seconds behind the room clock.
 The SDK now also retains an exact already-tracked, same-scope warm interval
 when a seek enters it before append. Real parsed-fragment regressions cover
 verified/in-flight reuse and invalid or unrelated seek cancellation. This
-paired SDK/site startup-alignment candidate remains unmeasured against the
-same browser continuity and contribution gate.
+paired SDK/site startup-alignment candidate subsequently passed a 60-second
+continuity gate with no stalls/drops and 16.1% receiver peer contribution.
+The unchanged 330-second gate remained RED with early interruptions, despite
+82.2% receiver peer contribution. The short pass does not establish close
+room synchronisation or physical-phone acceptance. Its startup trace also
+showed a seek inside the completed genuine first fragment, before append,
+discarding a verified next object and downloading its full body again.
+Source regressions now retain only that last genuine fragment's unchanged
+parsed next window, retiring it on incompatible metadata, unsuccessful
+termination or lifecycle changes. This additional fix remains unmeasured.
 
 Cold-cache physical diagnostics exposed two distinct timing errors: a
 holder's completion rate already included startup, yet the piece planner

@@ -3,6 +3,13 @@
 // rendition is created here. The supplied loader remains the SDK's loader.
 export const WARM_AHEAD = Symbol('relayswarm-warm-ahead');
 const MAX_BYTES = 24 * 1024 * 1024, MAX_OBJECTS = 3, DEADLINE_MS = 8_000;
+const validInterval = item => {
+  const { start, duration } = item?.context?.frag ?? {};
+  return Number.isFinite(start) && start >= 0 && Number.isFinite(duration) && duration > 0 && Number.isFinite(start + duration);
+};
+const inside = (item, time) => validInterval(item) && item.context.frag.start <= time && time < item.context.frag.start + item.context.frag.duration;
+const samePosition = (a, b) => a?.key === b?.key && a?.scope === b?.scope && validInterval(a) && validInterval(b) &&
+  a.context.frag.start === b.context.frag.start && a.context.frag.duration === b.context.frag.duration;
 
 export function warmContext(context) {
   try {
@@ -24,7 +31,7 @@ export function warmContext(context) {
 
 export function createWarmAhead({ Loader, next, authorise, verify, reserve = () => true, onVerified, onReuse,
   reuseBudget = () => 0, allowed = () => true }) {
-  let closed = false, generation = 0, active = null, scope = null, queued = [], config, loaderConfig;
+  let closed = false, generation = 0, active = null, scope = null, queued = [], config, loaderConfig, latestDemand = null, loadId = 0;
   const cache = new Map(), demand = new Set(), jobs = new Map(), promoted = new Set(), reuseWaiters = new Set(), pins = new Map();
   const counters = { started: 0, verified: 0, rejected: 0, cancelled: 0, coalesced: 0, promotions: 0, localReuseBytes: 0,
     verifiedBytes: 0, verifiedPeerBytes: 0, consumedPeerBytes: 0, cacheBytes: 0, highWaterBytes: 0 };
@@ -41,7 +48,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
   };
   const cancelJob = row => { if (live(row)) { counters.cancelled++; row.cancel(); finishJob(row, null); } };
   const clear = () => {
-    generation++; queued = [];
+    generation++; queued = []; latestDemand = null;
     for (const row of [...jobs.values()]) cancelJob(row);
     for (const key of cache.keys()) drop(key);
     for (const resume of [...reuseWaiters]) resume(true);
@@ -99,7 +106,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       finally { clearTimeout(timer); try { loader?.destroy(); } catch {} }
     })().then(result => finishJob(row, result));
   };
-  const noteDemand = (context, cfg, policy) => {
+  const noteDemand = (context, cfg, policy, owner) => {
+    latestDemand = null;
     const own = warmContext(context);
     if (!own || closed) return null;
     if (scope !== own.scope) { clear(); scope = own.scope; }
@@ -111,6 +119,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     for (const key of cache.keys()) if (!keep.has(key)) drop(key);
     for (const row of [...jobs.values()]) if (!keep.has(row.key)) cancelJob(row);
     queued = upcoming;
+    if (validInterval(own) && upcoming.every(validInterval)) latestDemand = { own, upcoming: [...upcoming], owner };
     return own;
   };
   const Wrapped = class WarmAheadLoader {
@@ -118,12 +127,12 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     constructor(cfg) { this.config = cfg; this.inner = new Loader(cfg); this.stats = this.inner.stats; this.context = null; this.token = 0; }
     load(context, policy, callbacks) {
       this.abort(); this.context = context;
-      const terminal = { context, callbacks: { ...callbacks }, settled: false };
+      const terminal = { id: ++loadId, context, callbacks: { ...callbacks }, settled: false };
       this.pendingTerminal = terminal;
       callbacks = { ...callbacks };
       for (const name of ['onSuccess', 'onError', 'onTimeout', 'onAbort'])
         callbacks[name] = (...args) => this.complete(terminal, name, args);
-      const token = ++this.token, own = noteDemand(context, this.config, policy), cached = own && cache.get(own.key);
+      const token = ++this.token, own = noteDemand(context, this.config, policy, terminal.id), cached = own && cache.get(own.key);
       const pending = !cached && own && jobs.get(own.key), existing = cached ?? pending?.promise;
       if (existing) {
         if (pending) {
@@ -209,6 +218,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     }
     complete(terminal, name, args) {
       if (!terminal || terminal.settled || this.pendingTerminal !== terminal) return;
+      if (name !== 'onSuccess' && latestDemand?.owner === terminal.id) latestDemand = null;
       // hls.js resets/destroys the loader synchronously from onSuccess.
       // Retire ownership first so that cleanup cannot invent an abort.
       terminal.settled = true; this.pendingTerminal = null;
@@ -216,6 +226,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     }
     cancel(destroy) {
       const terminal = this.pendingTerminal;
+      if (terminal && latestDemand?.owner === terminal.id) latestDemand = null;
       this.token++; this.originStarted = false; this.cancelReuse?.(); this.releasePending(); demand.delete(this);
       if (terminal) this.stats.aborted = true;
       if (destroy && terminal) { terminal.settled = true; this.pendingTerminal = null; }
@@ -231,10 +242,21 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     contains(time) {
       if (closed || !allowed() || !Number.isFinite(time)) return false;
       for (const row of [...jobs.values(), ...cache.values()]) {
-        const frag = row.context?.frag, start = frag?.start, duration = frag?.duration, end = start + duration;
-        if (row.scope === scope && Number.isFinite(start) && start >= 0 && Number.isFinite(duration) && duration > 0 &&
-            Number.isFinite(end) && start <= time && time < end) return true;
+        if (row.scope === scope && inside(row, time)) return true;
       }
+      const latest = latestDemand;
+      if (!latest || latest.own.scope !== scope || !inside(latest.own, time)) return false;
+      try {
+        const upcoming = next(latest.own.context).map(warmContext).filter(Boolean).filter(item => item.scope === scope).slice(0, 2);
+        const planned = new Map([latest.own, ...latest.upcoming].map(item => [item.key, item]));
+        if (upcoming.length !== latest.upcoming.length || upcoming.some((item, i) => !samePosition(item, latest.upcoming[i])) ||
+            [...jobs, ...cache].some(([key, row]) => !samePosition({ ...row, key }, planned.get(key)))) {
+          latestDemand = null; return false;
+        }
+        // Successful HTTP can precede the first append. Retain only that last
+        // genuine demand's unchanged parsed next window, without new work.
+        return true;
+      } catch { latestDemand = null; }
       return false;
     },
     pinned: key => pins.has(key), release(key) { for (const [id, row] of cache) if (row.permit.key === key) drop(id); },

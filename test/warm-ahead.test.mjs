@@ -221,6 +221,61 @@ for (const state of ['verified', 'in-flight']) test(`a forward seek into an exac
   assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
 });
 
+test('a completed genuine fragment retains its planned warm successor before the first append', async t => {
+  const f = await fixture(t, { held: [1, 2], buffered: false });
+  const first = f.load(0, undefined, { onSuccess: loader => loader.destroy() });
+  assert.deepEqual(await first.result, f.bytes);
+  assert.deepEqual(first.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const successor = f.requests.find(row => row.context.frag.sn === 1); successor.finish();
+  await until(() => f.requests.some(row => row.context.frag.sn === 2));
+  f.media.currentTime = 1.895; f.media.dispatchEvent(new Event('seeking'));
+  assert.equal(f.swarm.metrics().warmAhead.cacheBytes, f.bytes.length);
+  assert.equal(f.requests.find(row => row.context.frag.sn === 2).aborted, false);
+  assert.deepEqual(await f.load(1).result, f.bytes);
+  const bodies = f.requests.filter(row => row.context.frag.sn === 1);
+  assert.equal(bodies.length, 2, 'empty-buffer source recovery remains visible');
+  assert.equal(bodies.filter(row => row.completed).length, 1, 'the verified original is the only downloaded body');
+  assert.equal(bodies[1].aborted, true);
+  assert.equal(f.swarm.metrics().warmAhead.localReuseBytes, f.bytes.length);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+});
+
+for (const change of ['outside', 'invalid-start', 'invalid-duration', 'changed-next-key', 'changed-next-interval', 'invalid-demand', 'new-demand', 'clear', 'stop'])
+  test(`latest genuine interval retention retires on ${change}`, async t => {
+    const f = await fixture(t, { held: [1, 2, 9, 10], buffered: false });
+    if (change === 'invalid-start') f.fragments[0].start = NaN;
+    if (change === 'invalid-duration') f.fragments[0].duration = 0;
+    await f.load(0).result;
+    await until(() => f.requests.some(row => row.context.frag.sn === 1));
+    f.requests.find(row => row.context.frag.sn === 1).finish();
+    await until(() => f.requests.some(row => row.context.frag.sn === 2));
+    if (change === 'changed-next-key') f.fragments[1].url = 'https://origin.example/media/replacement.m4s';
+    if (change === 'changed-next-interval') f.fragments[1].start += 0.5;
+    if (change === 'invalid-demand') { f.fragments[8].gap = true; await f.load(8).result; }
+    if (change === 'new-demand') { await f.load(8).result; await until(() => f.requests.some(row => row.context.frag.sn === 9)); }
+    if (change === 'clear') f.media.dispatchEvent(new Event('pause'));
+    if (change === 'stop') f.swarm.stop();
+    f.media.currentTime = change === 'outside' ? 1.895 + 10 : 1.895;
+    f.media.dispatchEvent(new Event('seeking'));
+    assert(f.requests.filter(row => !row.completed).every(row => row.aborted));
+    const m = f.swarm.metrics().warmAhead;
+    assert.equal(m.cacheBytes, 0); assert.equal(m.reservationBytes, 0); assert.equal(m.trackedObjects, 0);
+  });
+
+for (const outcome of ['abort', 'error']) test(`${outcome} of the current genuine load retires its unappended interval`, async t => {
+  const f = await fixture(t, { held: [0, 1, 2], buffered: false });
+  const current = f.load(0), result = current.result.then(value => ({ value }), error => ({ error }));
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  f.requests.find(row => row.context.frag.sn === 1).finish();
+  await until(() => f.requests.some(row => row.context.frag.sn === 2));
+  if (outcome === 'abort') { current.loader.abort(); assert.equal((await result).value, null); }
+  else { f.requests.find(row => row.context.frag.sn === 0).fail({ code: 503 }); assert.equal((await result).error.code, 503); }
+  f.media.currentTime = 1.895; f.media.dispatchEvent(new Event('seeking'));
+  assert.equal(f.swarm.metrics().warmAhead.cacheBytes, 0);
+  assert.equal(f.requests.find(row => row.context.frag.sn === 2).aborted, true);
+});
+
 for (const invalid of ['outside', 'end-boundary', 'out-of-scope', 'invalid-start', 'invalid-duration', 'invalid-end', 'invalid-target'])
   test(`a seek with ${invalid} warm metadata still clears unrelated speculative work`, async t => {
     const f = await fixture(t, { held: [1, 2] });
