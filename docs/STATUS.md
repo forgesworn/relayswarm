@@ -10,6 +10,43 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased per-connection timing and bounded recovery (25 October 2026)
+
+Cold-cache physical diagnostics exposed two distinct timing errors: a
+holder's completion rate already included startup, yet the piece planner
+also added a viewer-wide first-byte delay from another connection; HTTP
+service timing could borrow that peer delay too. Large ranged origin loads
+did not refresh the earlier whole-origin estimate. The working source now
+keeps per-connection startup and qualifying payload flow separately, uses
+HTTP service timing independently, and scales substantial HTTP ranges by
+their actual bytes for rendition-specific recovery estimates.
+
+A pessimistic or stale connection may get one explicit canonical-piece
+probe per ten seconds on a real matching HAVE demand. Origin starts the
+remainder immediately. Another route's fast rate cannot enlarge the probe;
+only fresh verified data can unlock ordinary bounded requests. Accepted
+short-flow recovery can discard an older pessimistic rate without creating
+a retained rate below the 300 ms/32 KiB observation floor. A newer
+unsuccessful request invalidates that useful-delivery allowance. The
+optional WASM capability is additive, with safe origin/known-holder fallback
+for older modules and unchanged existing native start signatures.
+
+The release profile now favours throughput over minimum module size. These
+source changes are unreleased. Focused tests cover actual verified small
+fractions, origin-winning cancellation, corrupt and late probes, old-module
+compatibility, per-lane silence and replay of the bounded-probe inputs.
+The matching Rust workspace passes. The complete real-WASM loader sweep
+passes 315 tests with one expected JavaScript-prototype-only skip; the
+protocol/ABI/source-stamp suite passes all 46 checks. Initial fixture failures
+are retained: two quiet-peer controls needed explicitly unknown startup,
+one new test accidentally terminated its transfer through an origin failure,
+and the loader replay needed the new start input. The repeated-contribution
+fixture now verifies a 65,536-byte piece in 750 ms against its unchanged
+800 ms deadline before testing later useful fractions; its whole-object
+projection remains late. Its integrity and byte-accounting assertions remain.
+Cold-cache sustained contribution, complete device playback continuity and
+net network benefit remain open field gates.
+
 ## Cached mixed admission and fetch-backed waits (24 October 2026)
 
 A fresh slow partial-flow estimate could reject an entire large object before

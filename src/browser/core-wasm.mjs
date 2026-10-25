@@ -315,8 +315,15 @@ const XFER = { start: 0, delivered: 1, failed: 2, tick: 3, state: 4, progress: 5
 class CoreTransfer {
   #exports; #handle; #retired; #fail;
   constructor(exports, handle, retired, fail) { this.#exports = exports; this.#handle = handle; this.#retired = retired; this.#fail = fail; }
-  start(now, { peers, origin, sharedFirstByteMs = null, sharedRate = null }) {
-    return this.#call(XFER.start, now, -1, 0, 0, encoder.encode(JSON.stringify({ peers, origin, sharedFirstByteMs, sharedRate })));
+  start(now, { peers, origin, sharedFirstByteMs = null, sharedRate = null, probePeers = [] }) {
+    let boundedProbes = false;
+    try { boundedProbes = typeof this.#exports.rs_xfer_capabilities === "function" && Boolean(this.#exports.rs_xfer_capabilities() & 1); } catch {}
+    // Old modules cannot express this cap. Drop those sources rather than
+    // silently turning a calibration request into a whole-object assignment.
+    const probes = new Set(probePeers);
+    const eligible = boundedProbes ? peers : peers.filter(([id]) => !probes.has(id));
+    return this.#call(XFER.start, now, -1, 0, 0, encoder.encode(JSON.stringify({ peers: eligible, origin, sharedFirstByteMs, sharedRate,
+      ...(boundedProbes ? { probePeers } : {}) })));
   }
   delivered(now, source, range, bytes) { return this.#call(XFER.delivered, now, source, range.start, range.end, bytes); }
   failed(now, source) { return this.#call(XFER.failed, now, source, 0, 0, EMPTY_BYTES); }

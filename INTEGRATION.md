@@ -88,7 +88,7 @@ decision is not cached as permission for later upload requests.
 | `originFallbackMs` | `1500` | The in-time budget a peer delivery is measured against, and peer-first's ordinary wait. |
 | `maxPeerWaitMs` | `5000` | Peer-first may wait past `originFallbackMs`, up to this, only while recent peer timing projects the segment needs it and the playback buffer covers the wait with `originReserveMs` to spare. |
 | `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
-| `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-origin time with a 25% and 100 ms recovery margin. Before measurement, use `originReserveMs`; unknown duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. The independent `zeroBudgetPeerRace` window stays unchanged. |
+| `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-object origin time with a 25% and 100 ms recovery margin. Substantial origin ranges update this estimate after scaling by their actual byte count. Before measurement, use `originReserveMs`; unknown duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. The independent `zeroBudgetPeerRace` window stays unchanged. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
 | `maxPeers` | `6` | Connections in and out. The demo selects four explicitly. |
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
@@ -472,7 +472,27 @@ Schema 3 multi-holder peer requests verify progress in batches of at most four
 canonical pieces and 512 KiB; a canonical piece larger than that is requested
 alone. The remaining pieces stay queued for that holder, so a later abandoned
 request preserves earlier verified pieces. Origin keeps its contiguous HTTP
-ranges. Run `npm run test:core-link:browser` for native Chrome loopback coverage
+ranges. Multi-holder planning keeps each connection's first-byte delay separate
+from its payload flow and from HTTP service time. The model retained between
+objects keeps up to 16 samples per connection for 30 seconds; its rate needs
+at least 32 KiB and 300 ms after the first byte. Substantial HTTP ranges (at least half the object and 32 KiB)
+refresh the rendition's whole-object recovery estimate, scaled by bytes; tiny
+tails do not become whole-object latency samples.
+
+A stale or pessimistic multi-holder estimate can receive one demand-bound
+refresh per connection every ten seconds, only when that connection already
+advertises the requested object. The first request is explicitly limited to
+one canonical piece, independently of another connection's fast rate, while
+origin starts the remainder. Fresh verified probe data can unlock ordinary
+bounded requests within the existing deadline. An accepted short-flow refresh
+can discard an older pessimistic rate without creating a rate below the
+300 ms floor; subsequent unknown-rate demands keep the one-piece initial
+limit. A newer unsuccessful attempt removes that useful-delivery allowance.
+Older WASM modules without the optional bounded-probe capability skip these
+probe sources safely and retain origin and ordinary measured holders. No
+background media fetch or additional timer is added.
+
+Run `npm run test:core-link:browser` for native Chrome loopback coverage
 of a cancelled six-MiB ranged response and a subsequent hash-checked range on
 the same reliable connection.
 Fresh-origin coordination is bounded by safe buffered playback and measured
@@ -704,7 +724,7 @@ extension, including multi-holder transfers, to
 `max(0, duration * 1000 - (p90OriginMs * 1.25 + 100))`.
 For a two-second segment and 1,300 ms measured HTTP, that cap is 275 ms.
 The existing buffer-safe reserve and configured caps still apply. Until an
-ordinary whole-origin load has been measured, `originReserveMs` supplies the
+whole-object origin service has been measured, `originReserveMs` supplies the
 recovery estimate; missing or invalid duration permits no serial wait.
 Parts use their own duration. This admission rule cannot guarantee smooth
 playback when later origin, peer or decoder performance changes. A zero

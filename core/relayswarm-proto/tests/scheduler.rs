@@ -248,6 +248,102 @@ fn delivered(commands: &[Command]) -> Option<&Vec<u8>> {
     })
 }
 
+#[test]
+fn a_refresh_is_one_piece_even_when_another_route_has_a_fast_shared_rate() {
+    let bytes = object_sized(6 * 1024 * 1024);
+    let mut probe = transfer(&bytes, NOW + 2_800);
+    probe.start_with_probe_peers(
+        NOW,
+        &[peer(1, Some(100.0), None)],
+        origin(0.0, 20_000.0),
+        Some(100.0),
+        Some(20_000.0),
+        &[1],
+    );
+    let asked = requests(&probe.drain_commands());
+    assert_eq!(
+        asked,
+        vec![
+            (Source::Peer(1), PieceRange { start: 0, end: 1 }),
+            (Source::Origin, PieceRange { start: 1, end: 64 }),
+        ]
+    );
+    // The same ordinary start still uses the existing planner, without a
+    // one-piece limit silently becoming a new default.
+    let mut ordinary = transfer(&bytes, NOW + 2_800);
+    ordinary.start(
+        NOW,
+        &[peer(1, Some(100.0), None)],
+        origin(0.0, 20_000.0),
+        Some(100.0),
+        Some(20_000.0),
+    );
+    assert_eq!(
+        requests(&ordinary.drain_commands()),
+        vec![(Source::Peer(1), PieceRange { start: 0, end: 4 })]
+    );
+}
+
+#[test]
+fn only_a_fresh_verified_probe_unlocks_ordinary_peer_work() {
+    let bytes = object_sized(6 * 1024 * 1024);
+    let mut transfer = transfer(&bytes, NOW + 10_000);
+    transfer.start_with_probe_peers(
+        NOW,
+        &[peer(1, Some(100.0), None), peer(2, Some(100.0), None)],
+        origin(0.0, 20_000.0),
+        None,
+        Some(20_000.0),
+        &[1, 2],
+    );
+    transfer.drain_commands();
+    // Neither progress, an unsolicited range nor reassigning failed origin
+    // work replenishes the one-piece allowance.
+    transfer.progress(NOW + 100, Source::Peer(1), 1);
+    let unsolicited = PieceRange { start: 1, end: 2 };
+    transfer.delivered(NOW + 110, Source::Peer(1), unsolicited, slice(&bytes, unsolicited));
+    transfer.failed(NOW + 115, Source::Peer(2));
+    assert!(requests(&transfer.drain_commands())
+        .iter()
+        .all(|(source, _)| *source == Source::Origin));
+    let first = PieceRange { start: 0, end: 1 };
+    transfer.delivered(NOW + 120, Source::Peer(1), first, slice(&bytes, first));
+    let next = requests(&transfer.drain_commands());
+    assert!(next
+        .iter()
+        .any(|(source, range)| *source == Source::Peer(1) && range.start >= 1 && range.end - range.start <= MAX_PEER_REQUEST_PIECES));
+}
+
+#[test]
+fn a_bad_or_late_probe_cannot_unlock_more_peer_work() {
+    let bytes = object_sized(6 * 1024 * 1024);
+    for corrupt in [false, true] {
+        let mut transfer = transfer(&bytes, NOW + 10_000);
+        transfer.start_with_probe_peers(
+            NOW,
+            &[peer(1, Some(100.0), None)],
+            origin(0.0, 20_000.0),
+            None,
+            Some(20_000.0),
+            &[1],
+        );
+        transfer.drain_commands();
+        let range = PieceRange { start: 0, end: 1 };
+        let mut answer = slice(&bytes, range).to_vec();
+        if corrupt {
+            answer[0] ^= 1;
+        } else {
+            transfer.failed(NOW + 100, Source::Peer(1));
+        }
+        transfer.delivered(NOW + 120, Source::Peer(1), range, &answer);
+        let commands = transfer.drain_commands();
+        assert!(!requests(&commands).iter().any(|(source, _)| *source == Source::Peer(1)));
+        if corrupt {
+            assert!(commands.iter().any(|command| matches!(command, Command::Ban { peer: 1 })));
+        }
+    }
+}
+
 /// Answer every request honestly, except from `bad` (one flipped byte) and
 /// from `silent` (never answers), until nothing more is asked.
 fn run(transfer: &mut Transfer, bytes: &[u8], bad: Option<u64>, silent: Option<u64>) -> Vec<Command> {
@@ -369,7 +465,7 @@ fn the_origin_floor_takes_over_outstanding_pieces() {
     let mut transfer = transfer(&bytes, deadline);
     transfer.start(
         NOW,
-        &[peer(1, Some(50.0), Some(200.0)), peer(2, Some(50.0), Some(200.0))],
+        &[peer(1, Some(50.0), Some(200.0)), peer(2, None, Some(200.0))],
         origin(100.0, 500.0),
         None,
         None,
@@ -397,12 +493,13 @@ fn the_origin_floor_takes_over_outstanding_pieces() {
 #[test]
 fn the_endgame_duplicates_a_lagging_last_piece_and_the_first_copy_wins() {
     let bytes = object();
-    // Peers 1 and 3 hold four and two pieces; peer 3 goes quiet with the
-    // tail. Peer 2 is never chosen. Peer 1, once done, is the fastest idle.
+    // Peers 1 and 3 hold four and two pieces; peer 3's startup is unknown
+    // and it goes quiet with the tail. Peer 2 is never chosen. Peer 1,
+    // once done, is the fastest idle.
     let peers = [
         peer(1, Some(10.0), Some(300.0)),
         peer(2, Some(10.0), Some(100.0)),
-        peer(3, Some(10.0), Some(120.0)),
+        peer(3, None, Some(120.0)),
     ];
     let config = TransferConfig {
         max_holders: 2,
@@ -545,6 +642,36 @@ fn without_a_shared_first_byte_time_silence_waits_for_the_floor() {
     let bytes = object();
     let (transfer, _) = two_peers(&bytes, NOW + 10_000, None);
     assert_eq!(transfer.next_deadline(), Some(NOW + 8_000));
+}
+
+#[test]
+fn a_measured_slow_lane_does_not_borrow_another_lanes_fast_startup() {
+    let bytes = object();
+    for shared in [Some(20.0), None] {
+        let mut transfer = transfer(&bytes, NOW + 10_000);
+        transfer.start(NOW, &[peer(1, Some(1_400.0), Some(200.0))], origin(100.0, 500.0), shared, None);
+        transfer.drain_commands();
+        assert_eq!(transfer.next_deadline(), Some(NOW + 4_200));
+        transfer.tick(NOW + 250);
+        assert!(!transfer.drain_commands().contains(&Command::Abandon { peer: 1 }));
+        transfer.tick(NOW + 4_199);
+        assert!(!transfer.drain_commands().contains(&Command::Abandon { peer: 1 }));
+        transfer.tick(NOW + 4_200);
+        assert!(transfer.drain_commands().contains(&Command::Abandon { peer: 1 }));
+    }
+}
+
+#[test]
+fn a_measured_fast_lane_does_not_borrow_another_lanes_slow_startup() {
+    let bytes = object();
+    let mut transfer = transfer(&bytes, NOW + 10_000);
+    transfer.start(NOW, &[peer(1, Some(20.0), Some(200.0))], origin(100.0, 500.0), Some(1_400.0), None);
+    transfer.drain_commands();
+    assert_eq!(transfer.next_deadline(), Some(NOW + 250));
+    transfer.tick(NOW + 249);
+    assert!(!transfer.drain_commands().contains(&Command::Abandon { peer: 1 }));
+    transfer.tick(NOW + 250);
+    assert!(transfer.drain_commands().contains(&Command::Abandon { peer: 1 }));
 }
 
 #[test]

@@ -741,6 +741,12 @@ pub const XFER_TICK: u32 = 3;
 pub const XFER_STATE: u32 = 4;
 pub const XFER_PROGRESS: u32 = 5;
 
+/// Bit 0: an explicit probePeers start input reserves one piece per source.
+#[no_mangle]
+pub extern "C" fn rs_xfer_capabilities() -> u32 {
+    1
+}
+
 fn number(value: Option<&Value>) -> Option<f64> {
     value.and_then(Value::as_f64)
 }
@@ -861,8 +867,13 @@ pub unsafe extern "C" fn rs_xfer_call(handle: u32, op: u32, now: f64, source: f6
         let transfer = transfers.get_mut(&handle)?;
         match op {
             XFER_START => {
-                let (peers, origin, first_byte, rate) = estimates(&serde_json::from_slice::<Value>(input).ok()?)?;
-                transfer.start(now, &peers, origin, first_byte, rate);
+                let args = serde_json::from_slice::<Value>(input).ok()?;
+                let (peers, origin, first_byte, rate) = estimates(&args)?;
+                let probes = args
+                    .get("probePeers")
+                    .map(|value| value.as_array()?.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
+                    .unwrap_or(Some(Vec::new()))?;
+                transfer.start_with_probe_peers(now, &peers, origin, first_byte, rate, &probes);
             }
             XFER_DELIVERED => transfer.delivered(now, source, range, input),
             XFER_FAILED => transfer.failed(now, source),

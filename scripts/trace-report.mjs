@@ -145,7 +145,7 @@ export function replay(core, calls) {
   try {
     for (const row of calls) {
       let state;
-      if (row.op === "start") state = transfer.start(row.at, { peers: row.peers, origin: row.origin, sharedFirstByteMs: row.sharedFirstByteMs, sharedRate: row.sharedRate });
+      if (row.op === "start") state = transfer.start(row.at, { peers: row.peers, origin: row.origin, sharedFirstByteMs: row.sharedFirstByteMs, sharedRate: row.sharedRate, probePeers: row.probePeers });
       else if (row.op === "delivered") {
         const bytes = object.slice(row.p[0] * start.pieceSize, Math.min(row.p[1] * start.pieceSize, start.size));
         if (row.out?.c.some((command) => command.t === "ban" && command.peer === row.source)) bytes[0] ^= 0xff;
@@ -284,7 +284,7 @@ export function simulate(core, calls, model, maxHolders) {
     timer = state.next === null ? null : { at: state.next, run: (now) => transfer.tick(now), peer: null, tick: true };
     if (timer) events.push(timer);
   };
-  apply(transfer.start(start.at, { peers: start.peers, origin: start.origin, sharedFirstByteMs: start.sharedFirstByteMs, sharedRate: start.sharedRate }), start.at);
+  apply(transfer.start(start.at, { peers: start.peers, origin: start.origin, sharedFirstByteMs: start.sharedFirstByteMs, sharedRate: start.sharedRate, probePeers: start.probePeers }), start.at);
   while (!done && events.length && guard++ < 100_000) {
     events.sort((a, b) => a.at - b.at);
     const event = events.shift();

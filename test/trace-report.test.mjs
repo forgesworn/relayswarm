@@ -12,7 +12,7 @@ const PIECE = 65_536, SIZE = 6 * PIECE + 1_000;
 
 // One transfer, two holders and origin, answered at fixed delays. Rows are
 // written exactly as the loader writes them.
-function recordTrace() {
+function recordTrace({ probePeers } = {}) {
   const object = Uint8Array.from({ length: SIZE }, (_, i) => (i * 7 + 1) & 255);
   const pieces = [];
   for (let at = 0; at < SIZE; at += PIECE) pieces.push(createHash("sha256").update(object.subarray(at, at + PIECE)).digest("hex"));
@@ -28,7 +28,8 @@ function recordTrace() {
       if (command.t === "request" || command.t === "origin") queue.push({ at: at + delay[command.peer ?? "origin"], source: command.peer ?? "origin", p: command.p });
     }
   };
-  const estimates = { peers: [[1, null, 1_000], [2, null, null]], origin: [null, 500], sharedFirstByteMs: 20, sharedRate: 1_000 };
+  const estimates = { peers: [[1, null, 1_000], [2, null, null]], origin: [null, 500], sharedFirstByteMs: 20, sharedRate: 1_000,
+    ...(probePeers ? { probePeers } : {}) };
   record("start", 10, { size: SIZE, pieces: pieces.length, pieceSize: PIECE, deadline, maxHolders: 3, originReserveMs: 0, ...estimates, holders: [[1, 5], [2, 6]] },
     transfer.start(10, estimates));
   while (queue.length) {
@@ -61,6 +62,17 @@ test("a recorded transfer replays to its commands, and a changed row is caught",
   assert.equal(replay(core, calls), null);
   const changed = structuredClone(calls);
   changed[0].peers[0][2] = 1;
+  assert.match(replay(core, changed), /start at 10 gave different commands/);
+});
+
+test("bounded probe start inputs replay without borrowing a full shared-rate assignment", () => {
+  const [calls] = transfers(recordTrace({ probePeers: [1, 2] }).rows);
+  const initial = calls[0].out.c;
+  assert.ok(initial.some(command => command.t === "origin"), "the uncalibrated tail starts at origin immediately");
+  assert.ok(initial.filter(command => command.t === "request").every(command => command.p[1] - command.p[0] === 1));
+  assert.equal(replay(core, calls), null);
+  const changed = structuredClone(calls);
+  delete changed[0].probePeers;
   assert.match(replay(core, changed), /start at 10 gave different commands/);
 });
 

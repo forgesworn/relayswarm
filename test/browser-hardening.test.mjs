@@ -4639,22 +4639,185 @@ class PartialThenBurstChannel extends RangedChannel {
   }
 }
 
+// Trace-shaped service: startup is distinct from the time carrying bytes.
+// The real core sees native ordered framing and reports both timings itself.
+class PhasedFlowChannel extends RangedChannel {
+  ordered = true;
+  maxRetransmits = null;
+  maxPacketLifeTime = null;
+  constructor(bytes, options = {}) {
+    super(bytes, options);
+    this.firstByteMs = options.firstByteMs ?? 625;
+    this.flowMs = options.flowMs ?? 619;
+  }
+  send(data) {
+    const frame = typeof data === "string" ? JSON.parse(data) : null;
+    if (frame?.t === "cancel") {
+      RecordedChannel.prototype.send.call(this, data); this.cancels++;
+      setTimeout(() => this.receive(JSON.stringify({ t: "eof", id: frame.id })), 1);
+      return;
+    }
+    if (frame?.t !== "want") return super.send(data);
+    RecordedChannel.prototype.send.call(this, data);
+    this.wants.push(frame.p ?? null);
+    const size = commitmentPieceSize(this.bytes.length);
+    const from = frame.p ? frame.p[0] * size : 0;
+    const to = frame.p ? Math.min(this.bytes.length, frame.p[1] * size) : this.bytes.length;
+    const body = this.bytes.slice(from, to), cancelled = this.cancels;
+    const chunks = Math.ceil(body.length / 16_384);
+    setTimeout(() => {
+      if (this.readyState === "open") this.receive(JSON.stringify({ t: "meta", id: frame.id, size: body.length, ...(frame.p ? { p: frame.p } : {}) }));
+    }, 0);
+    setTimeout(() => {
+      if (this.readyState !== "open" || this.cancels !== cancelled) return;
+      this.receive(body.slice(0, Math.min(16_384, body.length)).buffer);
+    }, this.firstByteMs);
+    for (let chunk = 1; chunk < Math.max(2, chunks); chunk++) setTimeout(() => {
+      if (this.readyState !== "open" || this.cancels !== cancelled) return;
+      if (chunk < chunks) this.receive(body.slice(chunk * 16_384, (chunk + 1) * 16_384).buffer);
+      if (chunk === Math.max(1, chunks - 1)) this.receive(JSON.stringify({ t: "eof", id: frame.id }));
+    }, this.firstByteMs + this.flowMs * chunk / Math.max(1, chunks - 1));
+  }
+}
+
+test("mixed planning keeps each holder's first byte and payload flow separate after cold startup", async t => {
+  const clock = virtualClock(t);
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { size: 6 * 1024 * 1024, holders: [
+      { Channel: PhasedFlowChannel, firstByteMs: 625, flowMs: 619 },
+      { Channel: PhasedFlowChannel, firstByteMs: 1400, flowMs: 173 },
+    ], originFallbackMs: 1800, wholeOriginDelayMs: 386, originDelayMs: 400, traceRequests: 4096,
+    swarmOptions: { maxPeerWaitMs: 1800 } }));
+    f.hls.media = { currentTime: 10, buffered: { length: 0 } };
+    sameBytes(await clock.settle(f.load()), f.bytes);
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+    sameBytes(await clock.settle(f.load(), 3000), f.bytes);
+    const training = f.swarm.metrics();
+    assert.equal(training.peerRequestDiagnostics.counters.payload, 2);
+    assert.ok(training.peers.deliveryMeasurements.every(row => row.throughputBytesPerSecond > 0));
+    f.hls.media.buffered.end = () => 13.393;
+    for (let repeat = 0; repeat < 3; repeat++) {
+      const before = f.swarm.metrics(), count = f.channels[0].wants.length;
+      sameBytes(await clock.settle(f.load(), 3000), f.bytes);
+      const after = f.swarm.metrics();
+      assert.ok(after.bytes.peerFirst > before.bytes.peerFirst, "a slow different holder cannot make the useful holder disappear");
+      assert.ok(f.channels[0].wants.length > count, "fresh HAVE still produces an actual peer request after the first two payloads");
+      const start = f.swarm.trace().rows.filter(row => row.k === "xfer" && row.op === "start").at(-1);
+      assert.ok(start.peers.some(([, first, rate]) => first === 625 && rate > 150 && rate < 170),
+        `the model uses post-first-byte flow, not completion throughput: ${JSON.stringify(start.peers)}`);
+      assert.equal(start.origin[0], 0, "HTTP service timing never borrows a peer's first byte");
+    }
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test("short or stale holder evidence receives bounded demand-bound refresh and can recover", async t => {
+  const clock = virtualClock(t);
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { size: 6 * 1024 * 1024,
+      holders: [{ Channel: PhasedFlowChannel, firstByteMs: 625, flowMs: 619 }],
+      originFallbackMs: 1800, wholeOriginDelayMs: 20, originDelayMs: 20, traceRequests: 4096,
+      swarmOptions: { maxPeerWaitMs: 1800 } }));
+    sameBytes(await clock.settle(f.load(), 3000), f.bytes);
+    const initial = f.swarm.metrics().peerRequestDiagnostics.records[0];
+    assert.ok(initial.receivedBytes >= 32_768 && initial.elapsedMs - initial.firstByteMs >= 300,
+      "a real qualifying slow flow must precede the short recovery");
+    const requested = f.channels[0].wants.length;
+    f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 12.8 } };
+    for (let repeat = 0; repeat < 3; repeat++) sameBytes(await clock.settle(f.load()), f.bytes);
+    assert.equal(f.channels[0].wants.length, requested, "short evidence cannot cause a blind probe on every segment");
+    f.channels[0].firstByteMs = 100; f.channels[0].flowMs = 20;
+    const before = f.swarm.metrics().bytes.peerFirst;
+    await clock.advance(10_001);
+    sameBytes(await clock.settle(f.load(), 3000), f.bytes);
+    assert.ok(f.channels[0].wants.length > requested, "a later real HAVE demand can refresh the conservative estimate");
+    assert.ok(f.swarm.metrics().bytes.peerFirst > before);
+    const refreshed = f.channels[0].wants.length;
+    sameBytes(await clock.settle(f.load(), 3000), f.bytes);
+    assert.ok(f.channels[0].wants.length > refreshed, "verified short recovery remains useful despite the previous slow estimate");
+    const start = f.swarm.trace().rows.filter(row => row.k === "xfer" && row.op === "start").at(-1);
+    assert.equal(start.peers[0][2], null, "short flow does not manufacture a rate below the 300ms observation floor");
+    assert.deepEqual(start.probePeers, [start.peers[0][0]], "unknown-rate continuation keeps the explicit one-piece initial bound");
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test("large ranged HTTP deliveries refresh byte-scaled origin recovery and sustainable admission", async t => {
+  const clock = virtualClock(t);
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { size: 6 * 1024 * 1024,
+      holders: [{ Channel: PhasedFlowChannel, firstByteMs: 100, flowMs: 400 }],
+      originFallbackMs: 1400, wholeOriginDelayMs: 386, originDelayMs: 1800, traceRequests: 4096,
+      swarmOptions: { maxPeerWaitMs: 1400, sustainablePeerWait: true, zeroBudgetPeerRace: false } }));
+    const ctx = { ...multiContext, frag: { ...multiContext.frag, duration: 2 } };
+    f.hls.media = { currentTime: 10, buffered: { length: 0 } };
+    sameBytes(await clock.settle(f.load(ctx)), f.bytes);
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 30 };
+    sameBytes(await clock.settle(f.load(ctx), 5000), f.bytes);
+    assert.ok(f.swarm.metrics().segments.originLatencyMedianMs >= 1800,
+      "a near-whole 1.8s origin range replaces the stale 386ms startup picture");
+    const requests = f.channels[0].wants.length;
+    sameBytes(await clock.settle(f.load(ctx), 2000), f.bytes);
+    const row = f.swarm.metrics().peerEligibilityDiagnostics.records.at(-1);
+    assert.equal(row.reason, "no-budget");
+    assert.equal(row.budgetGeometry.sustainableMs, 0);
+    assert.equal(f.channels[0].wants.length, requests, "the next segment starts ordinary HTTP without another serial peer wait");
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test("an origin-winning abort invalidates unknown-flow continuation without charging a holder failure", async t => {
+  const clock = virtualClock(t);
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { size: 6 * 1024 * 1024,
+      holders: [{ Channel: PhasedFlowChannel, firstByteMs: 20, flowMs: 20 }],
+      originFallbackMs: 1800, wholeOriginDelayMs: 100, originDelayMs: 400,
+      swarmOptions: { maxPeerWaitMs: 1800, zeroBudgetPeerRace: true } }));
+    sameBytes(await clock.settle(f.load(), 3000), f.bytes);
+    assert.ok(f.swarm.metrics().bytes.peerFirst > 0, "the short-flow link first proves useful with verified media");
+    f.channels[0].firstByteMs = 1000;
+    f.hls.media = { currentTime: 10, buffered: { length: 0 } };
+    const beforeAbort = f.channels[0].wants.length;
+    sameBytes(await clock.settle(f.load(), 1000), f.bytes);
+    assert.ok(f.channels[0].wants.length > beforeAbort, "the cancelled request must actually have reached the native channel");
+    assert.equal(f.swarm.metrics().peerRequestDiagnostics.records.at(-1).outcome, "abort");
+    assert.equal(f.swarm.metrics().peers.deliveryMeasurements[0].consecutiveFailures, 0,
+      "a faster HTTP winner is not a delivery failure charged to the holder");
+    await clock.advance(2);
+    f.channels[0].firstByteMs = 20;
+    const cancelled = f.channels[0].wants.length;
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+    sameBytes(await clock.settle(f.load(), 1500), f.bytes);
+    assert.equal(f.channels[0].wants.length, cancelled,
+      "unknown-rate usefulness cannot keep bypassing the refresh bound after a newer cancelled attempt");
+    await clock.advance(10_001);
+    sameBytes(await clock.settle(f.load(), 3000), f.bytes);
+    assert.ok(f.channels[0].wants.length > cancelled, "a later real HAVE demand can still re-probe after the bound");
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
 test("mixed admission retains repeated verified peer fractions despite a fresh late whole-object estimate", async t => {
   const clock = virtualClock(t), observed = [];
   let f;
   try {
-    f = await clock.settle(multiFixture(t, { holders: [{ Channel: PartialThenBurstChannel, delayMs: 50 }], size: 12 * 65_536,
+    f = await clock.settle(multiFixture(t, { holders: [{ Channel: PhasedFlowChannel, firstByteMs: 400, flowMs: 350 }], size: 12 * 65_536,
       originFallbackMs: 800, originDelayMs: 50, wholeOriginDelayMs: 50, traceRequests: 4096,
       onPeerDelivery: value => observed.push(value), swarmOptions: { maxPeerWaitMs: 800, sustainablePeerWait: true } }));
     const context = { ...multiContext, frag: { ...multiContext.frag, duration: 2 } };
     f.hls.media = { currentTime: 10, buffered: { length: 0 } };
     sameBytes(await clock.settle(f.load(context)), f.bytes);
     f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
-    sameBytes(await clock.settle(f.load(context)), f.bytes, "the stalled training range still recovers through verified origin pieces");
+    sameBytes(await clock.settle(f.load(context)), f.bytes, "a slow one-piece contribution and origin tail must both really verify");
     await clock.advance(2);
     const training = f.swarm.metrics().peerRequestDiagnostics.records[0];
     assert.ok(training.receivedBytes >= 32_768 && training.elapsedMs - training.firstByteMs >= 300,
       `actual slow partial flow, rather than a mocked estimate, trained selection: ${JSON.stringify(training)}`);
+    assert.equal(training.outcome, "payload");
+    assert.ok(training.elapsedMs < 800, "the actual verified piece fits the unchanged deadline");
+    assert.ok(training.firstByteMs + f.bytes.length / (training.receivedBytes / (training.elapsedMs - training.firstByteMs)) > 800,
+      "the same measured flow cannot deliver the whole object within that deadline");
+    f.channels[0].firstByteMs = 50; f.channels[0].flowMs = 20;
     const transferCount = f.swarm.metrics().core.multiHolder.transfers;
     for (let repeat = 0; repeat < 3; repeat++) {
       // Let any reliable-channel EOF from a losing speculative range drain
@@ -5373,7 +5536,7 @@ test("trace: a multi-holder transfer replays from its rows alone to the same com
     next: state.next, late: state.late, finished: state.finished });
   for (const row of calls) {
     let state;
-    if (row.op === "start") state = transfer.start(row.at, { peers: row.peers, origin: row.origin, sharedFirstByteMs: row.sharedFirstByteMs, sharedRate: row.sharedRate });
+    if (row.op === "start") state = transfer.start(row.at, { peers: row.peers, origin: row.origin, sharedFirstByteMs: row.sharedFirstByteMs, sharedRate: row.sharedRate, probePeers: row.probePeers });
     else if (row.op === "delivered") {
       const range = { start: row.p[0], end: row.p[1] };
       const bytes = object.slice(range.start * start.pieceSize, Math.min(range.end * start.pieceSize, start.size));

@@ -149,3 +149,81 @@ test("pieces that do not fit the size are refused", async () => {
   const core = await loadCore(compiled);
   assert.equal(core.transfer({ size: 200_000, sha256: "a".repeat(64), pieces: ["a".repeat(64)], deadline: 1, maxHolders: 3, originReserveMs: 0 }), null);
 });
+
+async function probeCore({ legacy = false } = {}) {
+  const instantiate = WebAssembly.instantiate, failures = [];
+  let supported = false;
+  WebAssembly.instantiate = async (...args) => {
+    const instance = await instantiate(...args);
+    if (args[0] !== compiled) return instance;
+    supported = Boolean(instance.exports.rs_xfer_capabilities?.() & 1);
+    const exports = { ...instance.exports };
+    if (legacy) delete exports.rs_xfer_capabilities;
+    return { exports };
+  };
+  try {
+    return { core: await loadCore(compiled, { onFailure: error => failures.push(error) }), failures, supported };
+  } finally { WebAssembly.instantiate = instantiate; }
+}
+
+test("a shared fast rate cannot enlarge a bounded refresh before its own verified piece", async () => {
+  const { core, failures, supported } = await probeCore();
+  assert.equal(supported, true, "rebuild the committed WASM for explicitly bounded probes");
+  const bytes = object(6 * 1024 * 1024);
+  const { transfer, slice } = setup(core, bytes, { deadline: 1_800, originReserveMs: 0 });
+  try {
+    const initial = transfer.core.start(1_000, { peers: [[1, 100, null]], origin: [0, 20_000],
+      sharedFirstByteMs: 100, sharedRate: 20_000, probePeers: [1] });
+    assert.deepEqual(initial.commands.filter(command => command.t === "request").map(command => command.p), [[0, 1]]);
+    assert.deepEqual(initial.commands.filter(command => command.t === "origin").map(command => command.p), [[1, 64]],
+      "the remaining 6MiB object is not queued behind the uncalibrated route");
+    const progress = transfer.core.progress(1_100, 1, 1);
+    assert.ok(!progress.commands.some(command => command.t === "request"));
+    const unsolicited = transfer.core.delivered(1_110, 1, { start: 1, end: 2 }, slice({ start: 1, end: 2 }));
+    assert.ok(!unsolicited.commands.some(command => command.t === "request"));
+    const accepted = transfer.core.delivered(1_120, 1, { start: 0, end: 1 }, slice({ start: 0, end: 1 }));
+    assert.ok(accepted.commands.some(command => command.t === "request" && command.peer === 1),
+      "freshly verified data can unlock the existing measured rebalance");
+    assert.ok(accepted.commands.filter(command => command.t === "request").every(command => command.p[1] - command.p[0] <= 4));
+    assert.deepEqual(failures, []);
+  } finally { transfer.core.free(); core.retire(); }
+});
+
+test("a corrupt or cancelled probe never unlocks further work through the real module", async () => {
+  const core = await loadCore(compiled), bytes = object(6 * 1024 * 1024);
+  try {
+    for (const corrupt of [false, true]) {
+      const { transfer, slice } = setup(core, bytes, { deadline: 10_000, originReserveMs: 0 });
+      try {
+        const initial = transfer.core.start(1_000, { peers: [[1, 100, null]], origin: [0, 20_000], sharedRate: 20_000, probePeers: [1] });
+        assert.deepEqual(initial.commands.filter(command => command.t === "request").map(command => command.p), [[0, 1]]);
+        if (!corrupt) transfer.core.failed(1_100, 1);
+        const response = slice({ start: 0, end: 1 });
+        if (corrupt) response[0] ^= 1;
+        const state = transfer.core.delivered(1_120, 1, { start: 0, end: 1 }, response);
+        assert.ok(!state.commands.some(command => command.t === "request" && command.peer === 1));
+        if (corrupt) assert.ok(state.commands.some(command => command.t === "ban" && command.peer === 1));
+      } finally { transfer.core.free(); }
+    }
+  } finally { core.retire(); }
+});
+
+test("an older module safely skips bounded probes while retaining origin and ordinary holders", async () => {
+  const { core, failures, supported } = await probeCore({ legacy: true });
+  assert.equal(supported, true, "the compatibility test hides only the optional capability from the current module");
+  const bytes = object(6 * 1024 * 1024);
+  try {
+    for (const ordinary of [false, true]) {
+      const { transfer } = setup(core, bytes, { deadline: 1_800, originReserveMs: 0 });
+      try {
+        const state = transfer.core.start(1_000, { peers: [[1, 100, null], ...(ordinary ? [[2, 100, 20_000]] : [])],
+          origin: [0, 20_000], sharedRate: 20_000, probePeers: [1] });
+        assert.ok(state, "absence of an optional cap does not retire the module");
+        assert.ok(!state.commands.some(command => command.t === "request" && command.peer === 1));
+        if (ordinary) assert.ok(state.commands.some(command => command.t === "request" && command.peer === 2));
+        else assert.deepEqual(state.commands.filter(command => command.t === "origin").map(command => command.p), [[0, 64]]);
+        assert.deepEqual(failures, []);
+      } finally { transfer.core.free(); }
+    }
+  } finally { core.retire(); }
+});

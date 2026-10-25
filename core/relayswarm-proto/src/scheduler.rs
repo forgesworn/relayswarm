@@ -409,6 +409,8 @@ pub struct Transfer {
     data: Vec<u8>,
     verified: Vec<bool>,
     lanes: BTreeMap<Source, Lane>,
+    probe_peers: BTreeSet<Source>,
+    probe_available: BTreeSet<Source>,
     shared_first_byte_ms: Option<f64>,
     shared_rate: Option<f64>,
     /// Pieces already duplicated by the endgame.
@@ -446,6 +448,8 @@ impl Transfer {
             data: vec![0; size as usize],
             verified: vec![false; count],
             lanes: BTreeMap::new(),
+            probe_peers: BTreeSet::new(),
+            probe_available: BTreeSet::new(),
             shared_first_byte_ms: None,
             shared_rate: None,
             duplicated: BTreeSet::new(),
@@ -483,8 +487,29 @@ impl Transfer {
     /// Plan and issue the first requests. `peers` are the eligible holders;
     /// origin is always a source.
     pub fn start(&mut self, now: u64, peers: &[Estimate], origin: Estimate, shared_first_byte_ms: Option<f64>, shared_rate: Option<f64>) {
+        self.start_with_probe_peers(now, peers, origin, shared_first_byte_ms, shared_rate, &[]);
+    }
+
+    /// Start with explicit one-piece calibration allowances. Other sources
+    /// immediately take the remainder; shared bandwidth cannot enlarge a probe.
+    pub fn start_with_probe_peers(
+        &mut self,
+        now: u64,
+        peers: &[Estimate],
+        origin: Estimate,
+        shared_first_byte_ms: Option<f64>,
+        shared_rate: Option<f64>,
+        probe_peers: &[u64],
+    ) {
         self.shared_first_byte_ms = shared_first_byte_ms;
         self.shared_rate = shared_rate;
+        self.probe_peers = probe_peers
+            .iter()
+            .copied()
+            .map(Source::Peer)
+            .filter(|source| peers.iter().any(|peer| peer.source == *source))
+            .collect();
+        self.probe_available = self.probe_peers.clone();
         for estimate in peers.iter().chain(std::iter::once(&origin)) {
             self.lanes.entry(estimate.source).or_insert_with(|| Lane::new(*estimate, now));
         }
@@ -518,7 +543,7 @@ impl Transfer {
         }
         let &(range, sent) = lane.in_flight.first()?;
         match lane.first_byte_at {
-            None => Some(self.silence_at(sent, range)?.ceil() as u64),
+            None => Some(self.silence_at(source, sent, range)?.ceil() as u64),
             Some(_) => {
                 let last = lane.flow.back().map_or(sent, |(at, _)| *at);
                 Some(last.max(lane.checked_at) + STALL_CHECK_MS)
@@ -529,9 +554,13 @@ impl Transfer {
     /// No first byte by then abandons the request: three recent first-byte
     /// times and at least `SILENCE_FLOOR_MS`, or later while the range could
     /// still finish by the floor at the best recent rate. Unknown without a
-    /// shared first-byte time, as in the loader.
-    fn silence_at(&self, sent: u64, range: PieceRange) -> Option<f64> {
-        let first_byte = non_negative(self.shared_first_byte_ms)?;
+    /// first-byte time on this lane or the shared fallback, as in the loader.
+    fn silence_at(&self, source: Source, sent: u64, range: PieceRange) -> Option<f64> {
+        let first_byte = self
+            .lanes
+            .get(&source)
+            .and_then(|lane| non_negative(lane.estimate.first_byte_ms))
+            .or(non_negative(self.shared_first_byte_ms))?;
         let (from, to) = self.piece_range_bytes(range);
         let hopeless = positive(self.shared_rate).map_or(f64::NEG_INFINITY, |best| self.floor_at() as f64 - (to - from) as f64 / best);
         Some(sent as f64 + SILENCE_FLOOR_MS.max(first_byte * 3.0).max(hopeless - sent as f64))
@@ -550,7 +579,7 @@ impl Transfer {
             return false;
         }
         let Some(first) = lane.first_byte_at else {
-            return self.silence_at(sent, range).is_some_and(|at| now as f64 >= at);
+            return self.silence_at(source, sent, range).is_some_and(|at| now as f64 >= at);
         };
         if now.saturating_sub(sent) < 2 * first.saturating_sub(sent) {
             return false;
@@ -664,7 +693,56 @@ impl Transfer {
             available_ms,
             max_holders: self.config.max_holders,
         };
-        let mut planned = plan(&input);
+        let mut planned = if self.probe_peers.is_empty() {
+            plan(&input)
+        } else {
+            let mut at = 0;
+            let mut assignments = Vec::new();
+            let holder_limit = input.max_holders.max(1);
+            for estimate in &peers {
+                if at >= needed.len() || assignments.len() >= holder_limit {
+                    break;
+                }
+                if self.probe_peers.contains(&estimate.source) && self.probe_available.remove(&estimate.source) {
+                    let index = needed[at];
+                    let bytes = piece_bytes(self.size, self.piece_size, index);
+                    let (_, first_byte, rate) = resolve(&[*estimate], &input)[0];
+                    assignments.push(Assignment {
+                        source: estimate.source,
+                        ranges: vec![PieceRange {
+                            start: index,
+                            end: index + 1,
+                        }],
+                        bytes,
+                        projected_ms: first_byte + bytes as f64 / rate,
+                    });
+                    at += 1;
+                }
+            }
+            let slots = holder_limit.saturating_sub(assignments.len());
+            let normal: Vec<Estimate> = if slots == 0 {
+                Vec::new()
+            } else {
+                peers
+                    .iter()
+                    .filter(|estimate| !self.probe_peers.contains(&estimate.source))
+                    .copied()
+                    .collect()
+            };
+            let tail = plan(&PlanInput {
+                needed: &needed[at..],
+                peers: &normal,
+                max_holders: slots,
+                ..input.clone()
+            });
+            assignments.extend(tail.assignments);
+            let projected_ms = assignments.iter().map(|assignment| assignment.projected_ms).fold(0.0, f64::max);
+            Plan {
+                assignments,
+                projected_ms,
+                late: projected_ms > input.available_ms,
+            }
+        };
         self.late = planned.late;
         if planned.assignments.is_empty() {
             // No peer can take it: origin always can.
@@ -771,6 +849,7 @@ impl Transfer {
             lane.in_flight.remove(position);
         }
         let mut bad = false;
+        let mut fresh = false;
         for index in range.start..range.end {
             let (start, end) = self.piece_range_bytes(PieceRange {
                 start: index,
@@ -783,12 +862,17 @@ impl Transfer {
             if <[u8; 32]>::from(Sha256::digest(piece)) == self.hashes[index as usize] {
                 self.data[start..end].copy_from_slice(piece);
                 self.verified[index as usize] = true;
+                fresh = true;
             } else {
                 bad = true;
             }
         }
         if bad {
             return self.bad_piece(now, source);
+        }
+        if fresh {
+            self.probe_peers.remove(&source);
+            self.probe_available.remove(&source);
         }
         self.measure(now, source, sent, first_byte_at, (to - from) as u64);
         self.drop_redundant(now, source);
@@ -844,7 +928,12 @@ impl Transfer {
             .copied()
             .filter(|&index| !peers().any(|lane| lane.holds(index)))
             .collect();
-        let is_idle = |lane: &Lane| lane.in_flight.is_empty() && lane.queue.is_empty() && positive(lane.estimate.rate).is_some();
+        let is_idle = |lane: &Lane| {
+            !self.probe_peers.contains(&lane.estimate.source)
+                && lane.in_flight.is_empty()
+                && lane.queue.is_empty()
+                && positive(lane.estimate.rate).is_some()
+        };
         let idle: Vec<Estimate> = peers().filter(|lane| is_idle(lane)).map(|lane| lane.estimate).collect();
         if pending.is_empty() || idle.is_empty() {
             return;

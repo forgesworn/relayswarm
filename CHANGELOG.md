@@ -1,5 +1,23 @@
 # RelaySwarm changelog
 
+## Unreleased
+
+- Keep multi-holder first-byte and post-first-byte flow measurements per
+  connection, separately from HTTP service timing. Substantial ranged HTTP
+  loads refresh byte-scaled, rendition-specific origin recovery estimates.
+- Allow demand-bound recovery of a pessimistic or stale holder estimate with
+  an explicit one-piece probe, at most once per connection every ten seconds.
+  Other routes' bandwidth cannot expand that probe. Fresh verified data can
+  unlock ordinary bounded requests; unsuccessful later attempts remove the
+  allowance to continue useful short-flow delivery. The retained rate still
+  needs at least 300 ms and 32 KiB of flow evidence.
+- Use a measured lane's own first-byte time before the shared silence fallback.
+  Preserve existing native transfer signatures; older WASM modules skip sources
+  requiring the optional bounded-probe capability safely.
+- Build the shared core with the throughput-oriented release optimisation
+  profile. This trades a larger module for less synchronous verification work;
+  device playback and net network benefit remain separate acceptance gates.
+
 ## v0.4.4 (24 October 2026)
 
 Prepared experimental library prerelease following

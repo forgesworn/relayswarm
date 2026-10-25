@@ -358,7 +358,7 @@ decision is not cached as permission for later upload requests.
 | `originFallbackMs` | `1500` | The in-time budget a peer delivery is measured against, and peer-first's ordinary wait. |
 | `maxPeerWaitMs` | `5000` | Peer-first may wait past `originFallbackMs`, up to this, only while recent peer timing projects the segment needs it and the playback buffer covers the wait with `originReserveMs` to spare. |
 | `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
-| `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-origin time with a 25% and 100 ms recovery margin. Before measurement, use `originReserveMs`; unknown duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. The independent `zeroBudgetPeerRace` window stays unchanged. |
+| `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-object origin time with a 25% and 100 ms recovery margin. Substantial origin ranges update this estimate after scaling by their actual byte count. Before measurement, use `originReserveMs`; unknown duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. The independent `zeroBudgetPeerRace` window stays unchanged. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
 | `maxPeers` | `6` | Connections in and out. The demo selects four explicitly. |
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
@@ -742,7 +742,27 @@ Schema 3 multi-holder peer requests verify progress in batches of at most four
 canonical pieces and 512 KiB; a canonical piece larger than that is requested
 alone. The remaining pieces stay queued for that holder, so a later abandoned
 request preserves earlier verified pieces. Origin keeps its contiguous HTTP
-ranges. Run `npm run test:core-link:browser` for native Chrome loopback coverage
+ranges. Multi-holder planning keeps each connection's first-byte delay separate
+from its payload flow and from HTTP service time. The model retained between
+objects keeps up to 16 samples per connection for 30 seconds; its rate needs
+at least 32 KiB and 300 ms after the first byte. Substantial HTTP ranges (at least half the object and 32 KiB)
+refresh the rendition's whole-object recovery estimate, scaled by bytes; tiny
+tails do not become whole-object latency samples.
+
+A stale or pessimistic multi-holder estimate can receive one demand-bound
+refresh per connection every ten seconds, only when that connection already
+advertises the requested object. The first request is explicitly limited to
+one canonical piece, independently of another connection's fast rate, while
+origin starts the remainder. Fresh verified probe data can unlock ordinary
+bounded requests within the existing deadline. An accepted short-flow refresh
+can discard an older pessimistic rate without creating a rate below the
+300 ms floor; subsequent unknown-rate demands keep the one-piece initial
+limit. A newer unsuccessful attempt removes that useful-delivery allowance.
+Older WASM modules without the optional bounded-probe capability skip these
+probe sources safely and retain origin and ordinary measured holders. No
+background media fetch or additional timer is added.
+
+Run `npm run test:core-link:browser` for native Chrome loopback coverage
 of a cancelled six-MiB ranged response and a subsequent hash-checked range on
 the same reliable connection.
 Fresh-origin coordination is bounded by safe buffered playback and measured
@@ -974,7 +994,7 @@ extension, including multi-holder transfers, to
 `max(0, duration * 1000 - (p90OriginMs * 1.25 + 100))`.
 For a two-second segment and 1,300 ms measured HTTP, that cap is 275 ms.
 The existing buffer-safe reserve and configured caps still apply. Until an
-ordinary whole-origin load has been measured, `originReserveMs` supplies the
+whole-object origin service has been measured, `originReserveMs` supplies the
 recovery estimate; missing or invalid duration permits no serial wait.
 Parts use their own duration. This admission rule cannot guarantee smooth
 playback when later origin, peer or decoder performance changes. A zero
@@ -1135,6 +1155,24 @@ loopback behaviour, with no field or physical-device acceptance yet.
 Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHANGELOG.md)
 
 # RelaySwarm changelog
+
+## Unreleased
+
+- Keep multi-holder first-byte and post-first-byte flow measurements per
+  connection, separately from HTTP service timing. Substantial ranged HTTP
+  loads refresh byte-scaled, rendition-specific origin recovery estimates.
+- Allow demand-bound recovery of a pessimistic or stale holder estimate with
+  an explicit one-piece probe, at most once per connection every ten seconds.
+  Other routes' bandwidth cannot expand that probe. Fresh verified data can
+  unlock ordinary bounded requests; unsuccessful later attempts remove the
+  allowance to continue useful short-flow delivery. The retained rate still
+  needs at least 300 ms and 32 KiB of flow evidence.
+- Use a measured lane's own first-byte time before the shared silence fallback.
+  Preserve existing native transfer signatures; older WASM modules skip sources
+  requiring the optional bounded-probe capability safely.
+- Build the shared core with the throughput-oriented release optimisation
+  profile. This trades a larger module for less synchronous verification work;
+  device playback and net network benefit remain separate acceptance gates.
 
 ## v0.4.4 (24 October 2026)
 
@@ -2475,6 +2513,43 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased per-connection timing and bounded recovery (25 October 2026)
+
+Cold-cache physical diagnostics exposed two distinct timing errors: a
+holder's completion rate already included startup, yet the piece planner
+also added a viewer-wide first-byte delay from another connection; HTTP
+service timing could borrow that peer delay too. Large ranged origin loads
+did not refresh the earlier whole-origin estimate. The working source now
+keeps per-connection startup and qualifying payload flow separately, uses
+HTTP service timing independently, and scales substantial HTTP ranges by
+their actual bytes for rendition-specific recovery estimates.
+
+A pessimistic or stale connection may get one explicit canonical-piece
+probe per ten seconds on a real matching HAVE demand. Origin starts the
+remainder immediately. Another route's fast rate cannot enlarge the probe;
+only fresh verified data can unlock ordinary bounded requests. Accepted
+short-flow recovery can discard an older pessimistic rate without creating
+a retained rate below the 300 ms/32 KiB observation floor. A newer
+unsuccessful request invalidates that useful-delivery allowance. The
+optional WASM capability is additive, with safe origin/known-holder fallback
+for older modules and unchanged existing native start signatures.
+
+The release profile now favours throughput over minimum module size. These
+source changes are unreleased. Focused tests cover actual verified small
+fractions, origin-winning cancellation, corrupt and late probes, old-module
+compatibility, per-lane silence and replay of the bounded-probe inputs.
+The matching Rust workspace passes. The complete real-WASM loader sweep
+passes 315 tests with one expected JavaScript-prototype-only skip; the
+protocol/ABI/source-stamp suite passes all 46 checks. Initial fixture failures
+are retained: two quiet-peer controls needed explicitly unknown startup,
+one new test accidentally terminated its transfer through an origin failure,
+and the loader replay needed the new start input. The repeated-contribution
+fixture now verifies a 65,536-byte piece in 750 ms against its unchanged
+800 ms deadline before testing later useful fractions; its whole-object
+projection remains late. Its integrity and byte-accounting assertions remain.
+Cold-cache sustained contribution, complete device playback continuity and
+net network benefit remain open field gates.
 
 ## Cached mixed admission and fetch-backed waits (24 October 2026)
 
