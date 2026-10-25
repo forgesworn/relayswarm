@@ -328,7 +328,7 @@ export async function startBroadcastPipeline({ input = "rtsp://127.0.0.1:8554/li
         catch { counters.hls.state = "publication-error"; }
         watchGeneration();
         // A playlist renamed during this publication is read on the next pass.
-        if (!publicationRequested) await publicationPause(publicationIntervalMs);
+        if (!stopped && !publicationRequested) await publicationPause(publicationIntervalMs);
       }
     } finally { closeWatchers(); }
   })();

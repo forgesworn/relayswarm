@@ -115,9 +115,11 @@ export function createAccountUploadBudget({ statePath, defaultLimit = 100000000,
   }
   // Operations run one at a time in arrival order, each on its own copy of
   // the state, so a refused operation leaves no trace. Those that queue while
-  // a write is in flight share the next durable write. No result is released
-  // before the write that contains it, and cancellation is checked as each
-  // operation is applied, as before.
+  // a write is in flight share the next durable write. Once an operation in a
+  // batch has changed the state, every later outcome, refusals included, may
+  // depend on that change, so all are held until the write completes and are
+  // then released in arrival order. Cancellation is checked as each operation
+  // is applied, as before.
   async function drain() {
     try { await readyPromise; }
     catch (error) { for (const entry of waiting.splice(0)) entry.reject(error); return; }
@@ -133,9 +135,9 @@ export function createAccountUploadBudget({ statePath, defaultLimit = 100000000,
           const result = entry.operation(candidate);
           if (entry.signal?.aborted) refuse("account-operation-cancelled", 503);
           if (entry.write) { candidate.lastWall = time(); validate(candidate); working = candidate; writes = true; }
-          // A read that follows no unpersisted write needs no wait.
+          // An outcome that follows no unpersisted write needs no wait.
           if (writes) held.push({ entry, result }); else entry.resolve(result);
-        } catch (error) { entry.reject(error); }
+        } catch (error) { if (writes) held.push({ entry, error }); else entry.reject(error); }
         // A long batch still lets the event loop run.
         if (performance.now() - slice > 10) { await new Promise((resume) => setImmediate(resume)); slice = performance.now(); }
       }
@@ -148,7 +150,7 @@ export function createAccountUploadBudget({ statePath, defaultLimit = 100000000,
         }
       }
       // Once persisted, cancellation cannot refund or undo these decisions.
-      for (const { entry, result } of held) entry.resolve(result);
+      for (const outcome of held) if ("error" in outcome) outcome.entry.reject(outcome.error); else outcome.entry.resolve(outcome.result);
     }
   }
   function transact(operation, { signal, write = true } = {}) {

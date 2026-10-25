@@ -424,7 +424,7 @@ publicationIntervalMs?, retainGenerations?, generationGraceMs? })` returns
 Rendition playlists are republished when a directory watch on the current
 generation reports the encoder's playlist rename; `publicationIntervalMs`
 (250) is the fallback interval where watching is unavailable or an event is
-missed. Default input is the local RTSP live path; `mediaDir` is required and must be a
+missed, and `close()` does not wait for it. Default input is the local RTSP live path; `mediaDir` is required and must be a
 dedicated owner-controlled directory. The pipeline holds an exclusive lock
 until close. Unclean process termination needs operator lock recovery.
 Supported inputs are RTSP, RTMP, RTMPS and SRT. Use plaintext inputs on a private

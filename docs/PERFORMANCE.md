@@ -172,13 +172,16 @@ browser.
   most every 10 ms, and the 250 ms interval remains the fallback. Blocking
   playlist reloads already watch the published playlists, so they release
   correspondingly sooner. The figures include the harness's own writes.
+  `close()` during a publication no longer waits for another interval.
 - The allowance ledger still applies operations one at a time in arrival
   order, each on its own copy of the state and checked for cancellation
   before and after it applies. Operations that queue while a write is in
-  flight now share the next durable write and its two fsyncs. A decision is
-  released only after the write containing it completes; if that write fails,
-  every operation in it is refused and none is kept. This host's fsync is
-  fast, so slower storage gains more. A single reservation is unchanged.
+  flight now share the next durable write and its two fsyncs. Once one of
+  them has changed the state, every later outcome in the batch, refusals and
+  reads included, is held until the write completes and released in arrival
+  order; if that write fails, every operation in it is refused and none is
+  kept. This host's fsync is fast, so slower storage gains more. A single
+  reservation is unchanged.
 
 ## Follow-ups
 

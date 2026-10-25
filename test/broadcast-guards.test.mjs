@@ -166,6 +166,35 @@ test("only playlist events wake publication, the interval still publishes when w
   const fallbackRun = await currentRun(fallback);
   for (const level of ["low", "high"]) await encoderPlaylist(fallback, fallbackRun, level, 21);
   await until(() => polled.metrics().publications === 2);
+
+  const errored = await fixture(t), erroredWatches = [];
+  const failing = await pipeline(t, errored, { publicationIntervalMs: 20, watchDirectory: () => {
+    const watcher = Object.assign(new EventEmitter(), { closed: false, close() { this.closed = true; } });
+    erroredWatches.push(watcher); return watcher;
+  } });
+  await until(() => failing.metrics().hls.state === "failed" && erroredWatches.length === 2);
+  for (const watcher of erroredWatches) watcher.emit("error", Object.assign(new Error("watch failed"), { code: "EPERM" }));
+  assert.ok(erroredWatches.every((watcher) => watcher.closed), "a watcher error closes that watch");
+  const erroredRun = await currentRun(errored);
+  for (const level of ["low", "high"]) await encoderPlaylist(errored, erroredRun, level, 21);
+  await until(() => failing.metrics().publications === 2);
+});
+
+test("closing during a publication does not wait for the fallback interval", { timeout: 5000 }, async (t) => {
+  const watches = [];
+  const directory = await fixture(t);
+  const value = await pipeline(t, directory, { publicationIntervalMs: 3000, watchDirectory: (_path, _options, listener) => {
+    const watcher = Object.assign(new EventEmitter(), { listener, close() {} }); watches.push(watcher); return watcher;
+  } });
+  await until(() => value.metrics().hls.state === "failed" && watches.length === 2);
+  const run = await currentRun(directory);
+  for (const level of ["low", "high"]) await encoderPlaylist(directory, run, level, 21);
+  watches[0].listener("rename", "index.m3u8");
+  // One rendition is published and the pass is still running.
+  while (value.metrics().publications < 1) await new Promise((resume) => setImmediate(resume));
+  const started = performance.now();
+  await value.close();
+  assert.ok(performance.now() - started < 1000, "close does not start another interval after stopping");
 });
 
 test("empty retry generations cannot prune published media while unreferenced old generations are removed", { timeout: 5000 }, async (t) => {
