@@ -145,8 +145,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         this.cancelReuse = () => { cleanup(); this.reuseAbort.abort(); };
         reuseWaiters.add(startOrigin);
         Promise.resolve(existing).then(async row => {
-          this.releasePending();
           if (!current()) return;
+          this.releasePending();
           if (closed || !row || revision !== generation) return startOrigin(true);
           pinned = row.permit.key; pins.set(pinned, (pins.get(pinned) ?? 0) + 1);
           const budget = Math.max(0, Math.min(25, reuseBudget(context) || 0));

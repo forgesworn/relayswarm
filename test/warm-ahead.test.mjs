@@ -73,8 +73,8 @@ async function fixture(t, options = {}) {
   swarm.attach(hls);
   t.after(async () => { swarm.stop(); await relay.close(); });
   if (coreWasm) await until(() => swarm.metrics().core?.state === 'ready');
-  const load = sn => {
-    const loader = new hls.config.fLoader(hls.config), context = { url: fragments[sn].url, frag: fragments[sn], responseType: 'arraybuffer',
+  const load = (sn, existing) => {
+    const loader = existing ?? new hls.config.fLoader(hls.config), context = { url: fragments[sn].url, frag: fragments[sn], responseType: 'arraybuffer',
       type: LoaderContextType.MEDIA_FRAGMENT, headers: {}, part: null, rangeStart: 0, rangeEnd: 0 };
     let done, fail;
     const result = new Promise((resolve, reject) => { done = resolve; fail = reject; });
@@ -155,6 +155,23 @@ test('promoting warmed work to genuine demand permits the next future load befor
   assert(m.bytes.held + m.warmAhead.reservationBytes <= 4096);
   f.requests.find(row => row.context.frag.sn === 1).finish();
   assert.deepEqual(await demand.result, f.bytes);
+});
+
+test('a stale completion cannot cancel a newer promoted demand on the same loader instance', async t => {
+  const f = await fixture(t, { held: [1, 2, 3] });
+  await f.load(0).result;
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const first = f.load(1);
+  await until(() => f.requests.some(row => row.context.frag.sn === 2));
+  const second = f.load(2, first.loader);
+  await new Promise(setImmediate);
+  const row = f.requests.find(row => row.context.frag.sn === 2);
+  assert.equal(row.aborted, false, 'old generation must not release the newer pending record');
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 2).length, 1);
+  assert.equal(f.swarm.metrics().warmAhead.promoted, 1);
+  row.finish();
+  assert.deepEqual(await second.result, f.bytes);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 2).length, 1);
 });
 
 test('pause cancels promoted demand and the speculative successor, releasing their combined reservation', async t => {
