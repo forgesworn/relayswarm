@@ -1379,10 +1379,11 @@ class HlsSwarm {
         if (Number.isFinite(duration) && duration > 0 && Number.isFinite(duration * 1_000)) durationMs = duration * 1_000;
       } catch {}
       const originP90 = percentile(this.#originSamples(context), 0.9);
-      const originRecoveryMs = originP90 === null ? this.options.originReserveMs : originP90 * 1.25 + 100;
-      // Missing geometry or no spare duration means immediate HTTP. The
-      // separate cached-peer race may still run alongside that HTTP load.
-      sustainableMs = durationMs === null ? 0 : Math.max(0, durationMs - originRecoveryMs);
+      const originRecoveryMs = originP90 === null ? null : originP90 * 1.25 + 100;
+      // An assumed reserve cannot calibrate cold HTTP recovery. Missing
+      // timing/geometry or no spare duration starts HTTP immediately; the
+      // separate cached/late-HAVE peer race retains its parallel window.
+      sustainableMs = durationMs === null || originRecoveryMs === null ? 0 : Math.max(0, durationMs - originRecoveryMs);
       Object.assign(geometry, { durationMs, originRecoveryMs, sustainableMs });
     }
     if (!media) { geometry.source = "no-media"; return Math.min(this.options.originFallbackMs, sustainableMs); }

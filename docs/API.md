@@ -98,8 +98,8 @@ verified peer credit alone does not establish network savings or continuity.
 The opt-in `sustainablePeerWait: true` additionally bounds serial peer waits
 and multi-holder extensions by each fragment/part's duration minus measured
 whole-origin recovery time with a 25% and 100 ms margin. The ordinary
-buffer reserve remains in force. Unknown duration or no spare duration starts
-HTTP immediately; an enabled cached-peer race retains its independent
+buffer reserve remains in force. Unknown origin recovery, unknown duration or
+no spare duration starts HTTP immediately; an enabled cached/late-HAVE race retains its independent
 window. This is an admission bound, not a smooth-playback guarantee.
 
 The unreleased opt-in `transferWorkerUrl` warms one explicitly packaged

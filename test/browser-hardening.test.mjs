@@ -5223,6 +5223,35 @@ test("mixed admission retains whole-object projection for valid v1 and v2 commit
   });
 });
 
+test("sustainable peer waits start one cold long HTTP load without borrowing for a delayed Worker", async t => {
+  const { WorkerImpl, workers } = transferWorkerFixture(t, { holdFinal: true }), clock = virtualClock(t), observed = [];
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { holders: [{ delayMs: 1 }], size: 8_604_060,
+      originFallbackMs: 1_200, originDelayMs: 2_500, wholeOriginDelayMs: 3_000, traceRequests: 256,
+      onPeerDelivery: row => observed.push(row), swarmOptions: { sustainablePeerWait: true,
+        transferWorkerUrl: "https://worker.example/transfer.js", WorkerImpl, maxPeerWaitMs: 2_500 } }));
+    await clock.advanceUntil(() => f.swarm.metrics().core.transferWorker.state === "ready", 500);
+    f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 30 } };
+    const context = { ...multiContext, frag: { ...multiContext.frag, duration: 2.64 } }, started = clock.now();
+    assert.equal(f.swarm.metrics().segments.originLatencyMedianMs, null);
+    const pending = f.load(context);
+    assert.equal(f.wholeLoads.length, 1, "unknown HTTP recovery must start the original whole load synchronously");
+    sameBytes(await clock.settle(pending, 3_100), f.bytes);
+    assert.ok(clock.now() - started >= 3_000 && clock.now() - started <= 3_001,
+      "the first load pays only its real HTTP time plus at most one virtual-clock promise-settlement step");
+    const metrics = f.swarm.metrics(), row = f.swarm.trace().rows.find(row => row.k === "eligibility");
+    assert.equal(row.budgetMs, 0); assert.equal(row.budgetGeometry.durationMs, 2_640);
+    assert.equal(row.budgetGeometry.originRecoveryMs, null); assert.equal(row.budgetGeometry.sustainableMs, 0);
+    assert.equal(metrics.segments.originLatencyMedianMs, 3_000, "the ordinary completion calibrates subsequent recovery");
+    assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
+    assert.equal(metrics.core.multiHolder.transfers, 0, "an uncalibrated load cannot create a mixed Worker transfer");
+    assert.equal(metrics.core.transferWorker.transfers, 0); assert.equal(metrics.core.transferWorker.pending, 0);
+    assert.equal(workers[0].finalReply, undefined, "there is no late mixed frame to discard and refetch");
+    assert.deepEqual(f.channels[0].wants, []); assert.deepEqual(observed, []); assert.equal(metrics.bytes.peerFirst, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
 test("sustainable peer waits bound multi-holder extensions by measured recovery and segment duration", async t => {
   const clock = virtualClock(t);
   let f;
@@ -5233,10 +5262,10 @@ test("sustainable peer waits bound multi-holder extensions by measured recovery 
     const context = { ...multiContext, frag: { ...multiContext.frag, duration: 2 } };
     f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 30 } };
     sameBytes(await clock.settle(f.load(context)), f.bytes);
-    assert.equal(f.channels[0].wants.length, 0, "a cold two-second segment reserves two seconds for origin");
+    assert.equal(f.channels[0].wants.length, 0, "a cold segment cannot borrow an unmeasured HTTP recovery interval");
     const cold = f.swarm.trace().rows.find(row => row.k === "eligibility");
     assert.equal(cold.budgetGeometry.sustainableMs, 0);
-    assert.equal(cold.budgetGeometry.originRecoveryMs, 2_000);
+    assert.equal(cold.budgetGeometry.originRecoveryMs, null);
 
     const started = clock.now();
     sameBytes(await clock.settle(f.load(context)), f.bytes);
@@ -5262,29 +5291,35 @@ test("sustainable peer waits bound multi-holder extensions by measured recovery 
   }
 });
 
-test("sustainable peer waits preserve the independent cached-race window and verified contribution", async t => {
-  const clock = virtualClock(t);
-  let f;
-  try {
-    f = await clock.settle(multiFixture(t, { holders: [{ delayMs: 80 }], size: 12 * 65_536,
-      wholeOriginDelayMs: 2_000, traceRequests: 256,
-      swarmOptions: { sustainablePeerWait: true, zeroBudgetPeerRace: true, maxPeerWaitMs: 500 } }));
-    f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 30 } };
-    const context = { ...multiContext, frag: { ...multiContext.frag, duration: 2 } };
-    const pending = f.load(context);
-    assert.equal(f.wholeLoads.length, 1, "zero sustainable wait starts ordinary HTTP synchronously despite a full buffer");
-    sameBytes(await clock.settle(pending), f.bytes);
-    const load = f.swarm.trace().rows.find(row => row.k === "load");
-    assert.equal(load.budgetMs, 0); assert.equal(load.budgetGeometry.sustainableMs, 0);
-    assert.equal(load.limitMs, 500, "cached peer work retains its own window while HTTP runs");
-    assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaceWins, 1);
-    assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length);
-    assert.equal(f.wholeLoads[0].loader.aborted, true);
-    assert.deepEqual(f.ranges, [], "cached races add no second origin download");
-  } finally {
-    if (f) await clock.settle(f.close());
-    clock.restore();
-  }
+test("sustainable peer waits preserve independent cached and late-HAVE races before origin calibration", async t => {
+  for (const late of [false, true]) await t.test(late ? "late HAVE" : "cached HAVE", async t => {
+    const clock = virtualClock(t);
+    let f;
+    try {
+      f = await clock.settle(multiFixture(t, { holders: [{ delayMs: 80 }], size: 12 * 65_536,
+        wholeOriginDelayMs: 2_000, traceRequests: 256,
+        swarmOptions: { sustainablePeerWait: true, zeroBudgetPeerRace: true, lateHaveRace: late, maxPeerWaitMs: 500 } }));
+      f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 30 } };
+      const context = { ...multiContext, frag: { ...multiContext.frag, duration: 2.64 } };
+      if (late) f.channels[0].receive(JSON.stringify({ t: "have", keys: [] }));
+      const pending = f.load(context);
+      assert.equal(f.wholeLoads.length, 1, "unknown recovery starts ordinary HTTP synchronously despite a full buffer");
+      if (late) {
+        await clock.advance(30); assert.deepEqual(f.channels[0].wants, [], "no object is requested before actual HAVE");
+        const key = createHash("sha256").update(`${base.swarmId}\n/media/seg.ts`).digest("hex");
+        f.channels[0].receive(JSON.stringify({ t: "have", keys: [key] }));
+      }
+      sameBytes(await clock.settle(pending), f.bytes);
+      const load = f.swarm.trace().rows.find(row => row.k === "load"), metrics = f.swarm.metrics();
+      assert.equal(load.budgetMs, 0); assert.equal(load.budgetGeometry.sustainableMs, 0);
+      assert.equal(load.budgetGeometry.originRecoveryMs, null);
+      assert.equal(load.limitMs, 500, "parallel peer work retains its own window while HTTP runs");
+      assert.equal(metrics.segments.zeroBudgetPeerRaceWins, 1); assert.equal(metrics.bytes.peerFirst, f.bytes.length);
+      assert.equal(metrics.peerEligibilityDiagnostics.counters[late ? "have-after-wait" : "have-at-entry"], 1);
+      assert.equal(f.wholeLoads[0].loader.aborted, true); assert.equal(f.wholeLoads.length, 1);
+      assert.deepEqual(f.ranges, [], "parallel races add no second origin download");
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
 });
 
 test("sustainable peer waits use part duration, reject unknown duration and preserve the default policy", async t => {
