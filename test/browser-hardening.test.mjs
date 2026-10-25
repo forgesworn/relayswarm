@@ -3871,12 +3871,12 @@ test("a holder that is ahead but never delivers goes stale and lets discovery st
   const f = await staleHolderFixture(t, { serve: { bytes: bytes32, delayMs: null } });
   try {
     const via = f.candidate(), label = f.label(f.holderKey);
-    for (let i = 0; i < 3; i++) await f.fail(via);
-    assert.equal(f.discovery().heldMiss, 3, "one held miss per demanded key");
-    assert.equal(f.counters()["have-at-entry"], 3);
+    await f.failUntil(via, 3);
+    assert.equal(f.discovery().heldMiss, 3, "one held miss per asked, undelivered key");
+    assert.equal(f.requests.length, 3, 'entry decisions that ask nobody do not count as a held miss');
     assert.ok(f.rows().filter(row => row.reason === "have-at-entry").every(row => row.matchingHave === true && row.staleHolders.length === 0));
     assert.deepEqual(f.rows().filter(row => row.heldMissHolders?.length).map(row => row.heldMissHolders), [[label], [label], [label]]);
-    await f.fail(via);
+    await f.failUntil(via, 4);
     assert.equal(f.discovery().heldMiss, 4);
     assert.equal(f.requests.length, 4, "the holder was asked each time and never delivered");
     assert.equal(f.swarm.metrics().segments.peerFirstLoaded, 0);
@@ -3891,6 +3891,45 @@ test("a holder that is ahead but never delivers goes stale and lets discovery st
     const wait = f.rows().filter(row => row.reason === "no-have-wait").at(-1);
     assert.deepEqual(wait.holders, [label]); assert.deepEqual(wait.staleHolders, [label], "the undelivering holder is labelled stale");
     assert.equal(f.discovery().heldMiss, 4, "the final load held nothing and charged no held miss");
+  } finally { await f.close(); }
+});
+
+test('an unasked commitment timeout does not satisfy the stale-holder decline threshold', async t => {
+  const signed = keyedCommitments(bytes32);
+  let calls = 0, delayNext = false, forcedAtMs;
+  const f = await staleHolderFixture(t, { serve: { bytes: bytes32, delayMs: null }, streamEvent: signed.streamEvent,
+    getCommitment: async ctx => {
+      calls++;
+      if (delayNext) {
+        delayNext = false; forcedAtMs = f.rows().filter(row => row.reason === 'have-at-entry').at(-1)?.atMs;
+        await sleep(200);
+      }
+      return signed.getCommitment(ctx);
+    } });
+  try {
+    const via = f.candidate(), label = f.label(f.holderKey);
+    await f.failUntil(via, 3);
+    const beforeCalls = calls;
+    delayNext = true;
+    for (let i = 0; i < 12 && calls === beforeCalls; i++) await f.fail(via);
+    assert.equal(calls, beforeCalls + 1);
+    assert.equal(delayNext, false, 'the bounded fixture reached the forced publisher callback');
+    assert.equal(f.discovery().heldMiss, 3);
+    assert.equal(f.requests.length, 3);
+    assert.deepEqual(f.rows().find(row => row.reason === 'have-at-entry' && row.atMs === forcedAtMs).heldMissHolders, []);
+    assert.equal(f.discovery().checks, 0); assert.equal(via.offers.length, 0);
+    await f.failUntil(via, 4);
+    assert.equal(f.discovery().heldMiss, 4); assert.equal(f.requests.length, 4);
+    assert.equal(f.swarm.metrics().segments.peerFirstLoaded, 0);
+    f.shift.ms += 10_001; f.touch();
+    const segment = f.next(); via.announce(segment.key); await sleep(30);
+    const pending = f.load(segment.name);
+    await until(() => via.offers.length === 1);
+    assert.equal(via.offers[0].payload.requestedKey, segment.key);
+    assert.equal(f.discovery().checks, 1); assert.equal(f.discovery().staleHolder, 1);
+    await pending;
+    assert.deepEqual(f.rows().filter(row => row.reason === 'no-have-wait').at(-1).staleHolders, [label]);
+    assert.equal(f.discovery().heldMiss, 4);
   } finally { await f.close(); }
 });
 
