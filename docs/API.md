@@ -75,12 +75,13 @@ link closes or the swarm stops. It creates no new network messages.
 
 The opt-in `zeroBudgetPeerRace: true` races an already advertised cached
 schema 3 object against immediately started normal HTTP when no safe peer
-wait remains. It requires `coreWasm`/`multiHolder` framing eligibility but uses
-the existing whole-object request and asynchronous WebCrypto hash, with no
-ranged origin fetch or unavailable internal origin lane. Candidates stay
-inside the initial cached snapshot and current HAVE. Whole uploads must fit
-the unchanged two-second rate bucket and remaining allowance. Only a complete
-verified peer winner counts as peer media.
+wait remains. It requires `coreWasm`/`multiHolder` framing eligibility and the
+optional peer-only transfer capability. The Rust piece planner has no origin
+lane in this mode, adding no ranged HTTP or invented origin estimate; only
+eligible cached peers can refill its pending ranges. Candidates stay inside
+the initial cached snapshot and current HAVE. Existing rate and session limits
+apply to every bounded request. Older modules decline the peer arm safely;
+only a complete verified peer winner counts as peer media.
 Normal HTTP never waits for metadata; stopping the swarm cancels its peer
 arm while that pending HTTP request continues. Progressive hls.js loads skip
 the race. See the [options and lifecycle contract](../INTEGRATION.md#options).

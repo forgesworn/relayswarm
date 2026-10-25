@@ -6,6 +6,7 @@ import { Worker as Thread } from "node:worker_threads";
 import { createCoreTransferWorker } from "../src/browser/core-transfer-worker.mjs";
 import { loadCore } from "../src/browser/core-wasm.mjs";
 import { commitmentPieceSize } from "../src/browser/segment-commitment.mjs";
+import { CORE_FUNCTIONS, stubCore } from "./core-stub.mjs";
 
 const module = await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url)));
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -107,6 +108,58 @@ test("freeing one real Rust handle preserves a second active transfer and its by
   assert.deepEqual(complete.bytes, bytes);
   assert.equal(workers[0].terminated, undefined, "ordinary cancellation does not terminate the swarm's worker");
   await second.free();
+});
+
+test("peer-only worker frames preserve exact Rust range verification with no origin source", async t => {
+  const { client } = await real(t), core = await loadCore(module), bytes = object(6 * 1024 * 1024);
+  const options = config(bytes, { peerOnly: true, originReserveMs: 0 }), direct = core.transfer(options), remote = await client.transfer(options);
+  assert.ok(direct, "rebuild the committed WASM for explicit peer-only transfer capability");
+  const pieceSize = commitmentPieceSize(bytes.length), input = { peers: [[1, 10, null], [2, 10, null]], origin: null, sharedRate: null, probePeers: [1, 2] };
+  let at = 1_000, delivered = null, count = 0;
+  const same = async (op, args) => {
+    const expected = direct[op](...args), actual = await remote[op](...args);
+    assert.deepEqual(actual, expected);
+    assert.ok(!actual.commands.some(command => command.t === "origin"), "no ignored or invented origin command crosses the worker boundary");
+    return actual;
+  };
+  try {
+    let state = await same("start", [at, input]), queue = [...state.commands];
+    while (queue.length && !state.finished && count++ < 128) {
+      const command = queue.shift();
+      if (command.t !== "request") continue;
+      assert.ok(command.range.end - command.range.start <= 4);
+      state = await same("progress", [at += 5, command.peer, 1]); queue.push(...state.commands);
+      const body = bytes.slice(command.range.start * pieceSize, Math.min(command.range.end * pieceSize, bytes.length));
+      state = await same("delivered", [at += 10, command.peer, command.range, body]); queue.push(...state.commands);
+      if (state.commands.some(command => command.t === "deliver")) delivered = state.bytes;
+    }
+    assert.deepEqual(delivered, bytes);
+    assert.equal(digest(delivered), options.sha256);
+    assert.ok(count >= 17, "the full six-MiB object really traversed bounded native ranges");
+  } finally { await remote.free(); direct.free(); core.retire(); }
+});
+
+test("unsupported peer-only mode preserves a real worker and its ordinary mixed handles", async t => {
+  const additions = {
+    rs_xfer_new: [[0x7c, 0x7c, 0x7c, 0x7c, 0x7f, 0x7f], [0x7f]],
+    rs_xfer_call: [[0x7f, 0x7f, 0x7c, 0x7c, 0x7c, 0x7c, 0x7f, 0x7f], [0x7f]],
+    rs_xfer_free: [[0x7f], []],
+  };
+  const previous = new Map(Object.keys(additions).map(key => [key, CORE_FUNCTIONS[key]]));
+  let legacy;
+  try {
+    Object.assign(CORE_FUNCTIONS, additions);
+    legacy = await WebAssembly.compile(stubCore([], { rs_xfer_new: 1 }));
+  } finally { for (const [key, value] of previous) { if (value === undefined) delete CORE_FUNCTIONS[key]; else CORE_FUNCTIONS[key] = value; } }
+  const failures = [], { client, workers } = await real(t, { module: legacy, onFailure: error => failures.push(error) });
+  const options = config(object(1_024));
+  await assert.rejects(client.transfer({ ...options, peerOnly: true }), { code: "invalid-transfer" });
+  assert.equal(client.snapshot().state, "ready");
+  assert.equal(client.snapshot().transfers, 0);
+  const mixed = await client.transfer(options);
+  assert.equal(await mixed.free(), true, "the pre-existing mixed constructor/free ABI remains usable");
+  assert.equal(workers[0].terminated, undefined);
+  assert.deepEqual(failures, []);
 });
 
 test("transfers and cumulative active bytes have independent finite limits", async t => {

@@ -27,7 +27,7 @@ export function createCoreTransferWorkerRuntime(send) {
         if (handles.has(handle) || handles.size >= limits.maxTransfers || activeBytes + config.size > limits.maxActiveBytes) return error(id, "transfer-limit");
         const transfer = core.transfer(config);
         if (!transfer) return error(id, failed || core.retired ? "core-failed" : "invalid-transfer", failed || core.retired);
-        handles.set(handle, { transfer, size: config.size }); activeBytes += config.size;
+        handles.set(handle, { transfer, size: config.size, peerOnly: config.peerOnly === true }); activeBytes += config.size;
         return respond(id, true);
       }
       const record = handles.get(handle);
@@ -37,7 +37,7 @@ export function createCoreTransferWorkerRuntime(send) {
       }
       if (!record) return error(id, "unknown-transfer");
       if (!["start", "delivered", "failed", "progress", "tick"].includes(op) || !Array.isArray(input)) return error(id, "invalid-operation");
-      const args = coreTransferWorkerArguments(op, input, limits.maxSegmentBytes);
+      const args = coreTransferWorkerArguments(op, input, limits.maxSegmentBytes, record.peerOnly);
       const result = record.transfer[op](...args);
       if (!result || failed || core.retired) return error(id, "core-failed", true);
       respond(id, result);

@@ -731,7 +731,7 @@ pub unsafe extern "C" fn rs_disc_call(op: u32, now: f64, pointer: *const u8, len
 // --- multi-holder transfer ---------------------------------------------------
 //
 // `rs_xfer_new(size, deadline, max_holders, origin_reserve_ms, pointer, len)`
-// takes `{"sha256": hex, "pieces": [hex]}` and returns a handle, or 0 when
+// takes `{"sha256": hex, "pieces": [hex], "peerOnly"?: bool}` and returns a handle, or 0 when
 // the pieces do not fit the size. `rs_xfer_call(handle, op, now, source, a,
 // b, pointer, len)` returns the length at `rs_result_ptr` of a u32 JSON
 // length, the JSON `{"c": commands, "next": ms|null, "late", "finished"}` and
@@ -754,9 +754,10 @@ pub const XFER_STATE: u32 = 4;
 pub const XFER_PROGRESS: u32 = 5;
 
 /// Bit 0: an explicit probePeers start input reserves one piece per source.
+/// Bit 1: peerOnly creation supports a transfer with no origin source.
 #[no_mangle]
 pub extern "C" fn rs_xfer_capabilities() -> u32 {
-    1
+    3
 }
 
 fn number(value: Option<&Value>) -> Option<f64> {
@@ -767,9 +768,9 @@ fn number(value: Option<&Value>) -> Option<f64> {
 /// Peers, origin, then the shared first byte and rate.
 type Estimates = (Vec<Estimate>, Estimate, Option<f64>, Option<f64>);
 
-fn estimates(args: &Value) -> Option<Estimates> {
+fn peer_estimates(args: &Value) -> Option<Vec<Estimate>> {
     let peers = args.get("peers")?.as_array()?;
-    let peers = peers
+    peers
         .iter()
         .map(|entry| {
             Some(Estimate {
@@ -778,7 +779,13 @@ fn estimates(args: &Value) -> Option<Estimates> {
                 rate: number(entry.get(2)),
             })
         })
-        .collect::<Option<Vec<_>>>()?;
+        .collect::<Option<Vec<_>>>()
+}
+
+// Retain the legacy mixed/planner null-origin interpretation (an unknown
+// origin estimate). Only an explicitly peer-only handle omits the source.
+fn estimates(args: &Value) -> Option<Estimates> {
+    let peers = peer_estimates(args)?;
     let origin = args.get("origin")?;
     let origin = Estimate {
         source: Source::Origin,
@@ -841,7 +848,15 @@ pub unsafe extern "C" fn rs_xfer_new(
             max_holders: (ms(max_holders) as usize).max(1),
             origin_reserve_ms: origin_reserve_ms.max(0.0),
         };
-        Transfer::new(config, ms(size), sha256, &pieces, ms(deadline))
+        let peer_only = match args.get("peerOnly") {
+            Some(value) => value.as_bool()?,
+            None => false,
+        };
+        if peer_only {
+            Transfer::new_peer_only(config, ms(size), sha256, &pieces, ms(deadline))
+        } else {
+            Transfer::new(config, ms(size), sha256, &pieces, ms(deadline))
+        }
     });
     let Some(transfer) = made else { return 0 };
     let handle = NEXT_TRANSFER.with(|next| {
@@ -881,12 +896,26 @@ pub unsafe extern "C" fn rs_xfer_call(handle: u32, op: u32, now: f64, source: f6
         match op {
             XFER_START => {
                 let args = serde_json::from_slice::<Value>(input).ok()?;
-                let (peers, origin, first_byte, rate) = estimates(&args)?;
                 let probes = args
                     .get("probePeers")
                     .map(|value| value.as_array()?.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
                     .unwrap_or(Some(Vec::new()))?;
-                transfer.start_with_probe_peers(now, &peers, origin, first_byte, rate, &probes);
+                if transfer.peer_only() {
+                    if args.get("origin").is_some_and(|origin| !origin.is_null()) {
+                        return None;
+                    }
+                    let peers = peer_estimates(&args)?;
+                    transfer.start_peer_only_with_probe_peers(
+                        now,
+                        &peers,
+                        number(args.get("sharedFirstByteMs")),
+                        number(args.get("sharedRate")),
+                        &probes,
+                    );
+                } else {
+                    let (peers, origin, first_byte, rate) = estimates(&args)?;
+                    transfer.start_with_probe_peers(now, &peers, origin, first_byte, rate, &probes);
+                }
             }
             XFER_DELIVERED => transfer.delivered(now, source, range, input),
             XFER_FAILED => transfer.failed(now, source),

@@ -12,12 +12,13 @@ const PIECE = 65_536, SIZE = 6 * PIECE + 1_000;
 
 // One transfer, two holders and origin, answered at fixed delays. Rows are
 // written exactly as the loader writes them.
-function recordTrace({ probePeers } = {}) {
+function recordTrace({ probePeers, peerOnly = false } = {}) {
   const object = Uint8Array.from({ length: SIZE }, (_, i) => (i * 7 + 1) & 255);
   const pieces = [];
   for (let at = 0; at < SIZE; at += PIECE) pieces.push(createHash("sha256").update(object.subarray(at, at + PIECE)).digest("hex"));
   const deadline = 4_000;
-  const transfer = core.transfer({ size: SIZE, sha256: createHash("sha256").update(object).digest("hex"), pieces, deadline, maxHolders: 3, originReserveMs: 0 });
+  const transfer = core.transfer({ size: SIZE, sha256: createHash("sha256").update(object).digest("hex"), pieces, deadline, maxHolders: 3, originReserveMs: 0,
+    ...(peerOnly ? { peerOnly: true } : {}) });
   const rows = [{ k: "load", load: 1, at: 0, budgetMs: 1_500, budgetGeometry: { currentTime: 8, bufferedEnd: 12 } }];
   const queue = [];
   const delay = { 1: 40, 2: 90, origin: 30 };
@@ -28,9 +29,10 @@ function recordTrace({ probePeers } = {}) {
       if (command.t === "request" || command.t === "origin") queue.push({ at: at + delay[command.peer ?? "origin"], source: command.peer ?? "origin", p: command.p });
     }
   };
-  const estimates = { peers: [[1, null, 1_000], [2, null, null]], origin: [null, 500], sharedFirstByteMs: 20, sharedRate: 1_000,
+  const estimates = { peers: [[1, null, 1_000], [2, null, null]], origin: peerOnly ? null : [null, 500], sharedFirstByteMs: 20, sharedRate: 1_000,
     ...(probePeers ? { probePeers } : {}) };
-  record("start", 10, { size: SIZE, pieces: pieces.length, pieceSize: PIECE, deadline, maxHolders: 3, originReserveMs: 0, ...estimates, holders: [[1, 5], [2, 6]] },
+  record("start", 10, { size: SIZE, pieces: pieces.length, pieceSize: PIECE, deadline, maxHolders: 3, originReserveMs: 0,
+    ...(peerOnly ? { peerOnly: true } : {}), ...estimates, holders: [[1, 5], [2, 6]] },
     transfer.start(10, estimates));
   while (queue.length) {
     queue.sort((a, b) => a.at - b.at);
@@ -74,6 +76,21 @@ test("bounded probe start inputs replay without borrowing a full shared-rate ass
   const changed = structuredClone(calls);
   delete changed[0].probePeers;
   assert.match(replay(core, changed), /start at 10 gave different commands/);
+});
+
+test("peer-only creation mode and absent origin replay without a synthetic source", async () => {
+  const trace = recordTrace({ peerOnly: true, probePeers: [1, 2] }), [calls] = transfers(trace.rows);
+  assert.equal(calls[0].peerOnly, true);
+  assert.equal(calls[0].origin, null);
+  assert.ok(calls.every(row => !row.out.c.some(command => command.t === "origin")));
+  assert.ok(calls.at(-1).out.c.some(command => command.t === "deliver"));
+  assert.equal(replay(core, calls), null);
+  const changed = structuredClone(calls);
+  delete changed[0].peerOnly; changed[0].origin = [0, 500];
+  assert.match(replay(core, changed), /start at 10 gave different commands/);
+  const out = await report(traceSets(trace), { core, whatIf: [1, 2] });
+  assert.deepEqual(out.replayMismatches, []);
+  assert.equal(out.originShare, 0);
 });
 
 test("direct measures count each piece once and keep holder timing", () => {

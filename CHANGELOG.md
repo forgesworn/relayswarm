@@ -2,13 +2,14 @@
 
 ## Unreleased
 
-- Keep the zero-budget cached arm on the existing complete-object peer request
-  and asynchronous WebCrypto hash. Its independent HTTP arm supplies no
-  pieces to a Rust transfer; a fast HTTP sample therefore cannot strand the
-  peer attempt behind an unavailable internal origin lane. Cached snapshot,
-  exact connection, hash, deadline and one-HTTP-request guards remain. Whole
-  uploads retain the existing two-second burst and cumulative allowance;
-  larger objects can refuse while HTTP continues.
+- Add explicit originless `peerOnly` Rust transfers for the zero-budget cached
+  arm. Pending pieces refill after verified calibration; no fast whole-HTTP
+  estimate, invented origin lane or ignored origin command can strand them.
+  The independent HTTP arm, initial cached identity, hashes, hard deadline and
+  existing per-range upload limits remain. Older modules safely decline the
+  optional mode without retiring healthy mixed transfers. The failed native
+  whole-object fallback control remains recorded; final performance and
+  playback qualification use the unchanged acceptance gates.
 - Add opt-in `transferWorkerUrl`: warm one explicitly packaged worker from
   the already compiled core, then run the shared Rust schema-3 transfer
   facade off the main thread. Startup, resource limits and genuine worker

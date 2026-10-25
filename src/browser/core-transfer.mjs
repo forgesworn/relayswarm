@@ -16,12 +16,19 @@ function withBytes(exports, bytes, run) {
 const resultBytes = (exports, length) => new Uint8Array(exports.memory.buffer, exports.rs_result_ptr(), length);
 
 
-export function createCoreTransfer(exports, { size, sha256, pieces, deadline, maxHolders, originReserveMs }, retired, fail) {
+export function createCoreTransfer(exports, { size, sha256, pieces, deadline, maxHolders, originReserveMs, peerOnly = false }, retired, fail) {
   if (retired() || !TRANSFER_EXPORTS.every(name => typeof exports[name] === "function")) return null;
+  if (typeof peerOnly !== "boolean") return null;
+  // An older module must not silently ignore originless mode and invent an
+  // HTTP lane. Decline just this object before allocation, retaining mixed.
+  if (peerOnly) {
+    try { if (typeof exports.rs_xfer_capabilities !== "function" || !(exports.rs_xfer_capabilities() & 2)) return null; }
+    catch { return null; }
+  }
   try {
-    const handle = withBytes(exports, encoder.encode(JSON.stringify({ sha256, pieces })),
+    const handle = withBytes(exports, encoder.encode(JSON.stringify({ sha256, pieces, ...(peerOnly ? { peerOnly: true } : {}) })),
       (pointer, length) => exports.rs_xfer_new(size, deadline, maxHolders, originReserveMs, pointer, length));
-    return handle ? new CoreTransfer(exports, handle, retired, fail) : null;
+    return handle ? new CoreTransfer(exports, handle, retired, fail, peerOnly) : null;
   } catch (error) { fail(error); return null; }
 }
 
@@ -49,8 +56,8 @@ const XFER = { start: 0, delivered: 1, failed: 2, tick: 3, state: 4, progress: 5
  * verified so far (each piece once), or null once the core has failed. Sources are a
  * peer's numeric ID, or "origin". */
 class CoreTransfer {
-  #exports; #handle; #retired; #fail;
-  constructor(exports, handle, retired, fail) { this.#exports = exports; this.#handle = handle; this.#retired = retired; this.#fail = fail; }
+  #exports; #handle; #retired; #fail; #peerOnly;
+  constructor(exports, handle, retired, fail, peerOnly = false) { this.#exports = exports; this.#handle = handle; this.#retired = retired; this.#fail = fail; this.#peerOnly = peerOnly; }
   start(now, { peers, origin, sharedFirstByteMs = null, sharedRate = null, probePeers = [] }) {
     let boundedProbes = false;
     try { boundedProbes = typeof this.#exports.rs_xfer_capabilities === "function" && Boolean(this.#exports.rs_xfer_capabilities() & 1); } catch {}
@@ -58,7 +65,7 @@ class CoreTransfer {
     // silently turning a calibration request into a whole-object assignment.
     const probes = new Set(probePeers);
     const eligible = boundedProbes ? peers : peers.filter(([id]) => !probes.has(id));
-    return this.#call(XFER.start, now, -1, 0, 0, encoder.encode(JSON.stringify({ peers: eligible, origin, sharedFirstByteMs, sharedRate,
+    return this.#call(XFER.start, now, -1, 0, 0, encoder.encode(JSON.stringify({ peers: eligible, origin: this.#peerOnly ? null : origin, sharedFirstByteMs, sharedRate,
       ...(boundedProbes ? { probePeers } : {}) })));
   }
   delivered(now, source, range, bytes) { return this.#call(XFER.delivered, now, source, range.start, range.end, bytes); }

@@ -150,19 +150,22 @@ test("pieces that do not fit the size are refused", async () => {
   assert.equal(core.transfer({ size: 200_000, sha256: "a".repeat(64), pieces: ["a".repeat(64)], deadline: 1, maxHolders: 3, originReserveMs: 0 }), null);
 });
 
-async function probeCore({ legacy = false } = {}) {
+async function probeCore({ legacy = false, withoutPeerOnly = false } = {}) {
   const instantiate = WebAssembly.instantiate, failures = [];
-  let supported = false;
+  let supported = false, allocations = 0;
   WebAssembly.instantiate = async (...args) => {
     const instance = await instantiate(...args);
     if (args[0] !== compiled) return instance;
     supported = Boolean(instance.exports.rs_xfer_capabilities?.() & 1);
     const exports = { ...instance.exports };
+    const originalNew = exports.rs_xfer_new;
+    exports.rs_xfer_new = (...args) => { allocations++; return originalNew(...args); };
     if (legacy) delete exports.rs_xfer_capabilities;
+    else if (withoutPeerOnly) exports.rs_xfer_capabilities = () => (instance.exports.rs_xfer_capabilities?.() ?? 0) & ~2;
     return { exports };
   };
   try {
-    return { core: await loadCore(compiled, { onFailure: error => failures.push(error) }), failures, supported };
+    return { core: await loadCore(compiled, { onFailure: error => failures.push(error) }), failures, supported, get allocations() { return allocations; } };
   } finally { WebAssembly.instantiate = instantiate; }
 }
 
@@ -187,6 +190,25 @@ test("a shared fast rate cannot enlarge a bounded refresh before its own verifie
     assert.ok(accepted.commands.filter(command => command.t === "request").every(command => command.p[1] - command.p[0] <= 4));
     assert.deepEqual(failures, []);
   } finally { transfer.core.free(); core.retire(); }
+});
+
+test("unsupported peer-only mode declines before allocation and preserves the ordinary mixed core", async () => {
+  const tracked = await probeCore({ withoutPeerOnly: true }), bytes = object(200_000), c = commitment(bytes);
+  const options = { size: c.size, sha256: c.sha256, pieces: c.pieces, deadline: 11_000, maxHolders: 3, originReserveMs: 0 };
+  try {
+    assert.equal(tracked.core.transfer({ ...options, peerOnly: true }), null);
+    assert.equal(tracked.allocations, 0, "old modules do not allocate an ambiguous origin-backed transfer");
+    assert.equal(tracked.core.retired, false);
+    const mixed = tracked.core.transfer(options);
+    try {
+      const initial = mixed.start(1_000, { peers: [], origin: [0, 1_000] });
+      const request = initial.commands.find(command => command.t === "origin");
+      const result = mixed.delivered(1_010, "origin", request.range, bytes);
+      assert.ok(result.finished);
+      assert.deepEqual(result.bytes, bytes);
+      assert.deepEqual(tracked.failures, []);
+    } finally { mixed.free(); }
+  } finally { tracked.core.retire(); }
 });
 
 test("a corrupt or cancelled probe never unlocks further work through the real module", async () => {

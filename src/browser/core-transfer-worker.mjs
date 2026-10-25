@@ -34,31 +34,33 @@ export function coreTransferWorkerLimits(options = {}) {
 export function coreTransferWorkerConfig(value, limits) {
   if (!value || !Array.isArray(value.pieces) || value.pieces.length < 1 || value.pieces.length > 256) throw new CoreTransferWorkerError("invalid-transfer");
   const config = value && { size: value.size, sha256: value.sha256, pieces: value.pieces?.slice(),
-    deadline: value.deadline, maxHolders: value.maxHolders, originReserveMs: value.originReserveMs };
+    deadline: value.deadline, maxHolders: value.maxHolders, originReserveMs: value.originReserveMs,
+    ...(value.peerOnly === true ? { peerOnly: true } : {}) };
   if (!config || !integer(config.size) || config.size < 1 || config.size > limits.maxSegmentBytes
     || !hash(config.sha256) || !Array.isArray(config.pieces) || config.pieces.length < 1 || config.pieces.length > 256
     || !config.pieces.every(hash) || !time(config.deadline) || !integer(config.maxHolders) || config.maxHolders < 1
-    || config.maxHolders > 32 || !time(config.originReserveMs)) throw new CoreTransferWorkerError("invalid-transfer");
+    || config.maxHolders > 32 || !time(config.originReserveMs) || (value.peerOnly !== undefined && typeof value.peerOnly !== "boolean")) throw new CoreTransferWorkerError("invalid-transfer");
   return config;
 }
 
-export function coreTransferWorkerArguments(op, args, maxSegmentBytes) {
+export function coreTransferWorkerArguments(op, args, maxSegmentBytes, peerOnly = false) {
   const [at, source, value] = args;
   if (!time(at)) throw new CoreTransferWorkerError("invalid-operation");
   if (op === "start") {
     const input = source;
     if (!input || !Array.isArray(input.peers) || input.peers.length > 32
       || !input.peers.every(row => Array.isArray(row) && row.length === 3 && integer(row[0]) && estimate(row[1]) && estimate(row[2]))
-      || !Array.isArray(input.origin) || input.origin.length !== 2 || !input.origin.every(estimate)
+      || (peerOnly ? input.origin != null : !Array.isArray(input.origin) || input.origin.length !== 2 || !input.origin.every(estimate))
       || !estimate(input.sharedFirstByteMs ?? null) || !estimate(input.sharedRate ?? null)
       || !Array.isArray(input.probePeers ?? []) || (input.probePeers?.length ?? 0) > 32 || !(input.probePeers ?? []).every(integer)) {
       throw new CoreTransferWorkerError("invalid-operation");
     }
-    return [at, { peers: input.peers.map(row => [...row]), origin: [...input.origin],
+    return [at, { peers: input.peers.map(row => [...row]), origin: peerOnly ? null : [...input.origin],
       sharedFirstByteMs: input.sharedFirstByteMs ?? null, sharedRate: input.sharedRate ?? null, probePeers: [...(input.probePeers ?? [])] }];
   }
   if (op === "tick") return [at];
   if (source !== "origin" && !integer(source)) throw new CoreTransferWorkerError("invalid-operation");
+  if (peerOnly && source === "origin") throw new CoreTransferWorkerError("invalid-operation");
   if (op === "failed") return [at, source];
   if (op === "progress" && integer(value) && value <= maxSegmentBytes) return [at, source, value];
   if (op === "delivered" && value && integer(value.start) && integer(value.end) && value.start < value.end && value.end <= 256) {
@@ -167,7 +169,7 @@ export async function createCoreTransferWorker({ module, workerUrl, workerFactor
       const call = async (op, args) => {
         if (record.closed) throw new CoreTransferWorkerError("closed-transfer");
         try {
-          const input = coreTransferWorkerArguments(op, args, limits.maxSegmentBytes);
+          const input = coreTransferWorkerArguments(op, args, limits.maxSegmentBytes, config.peerOnly === true);
           let bytes = 0, transfer = [];
           if (op === "delivered") {
             bytes = input[3].byteLength;

@@ -1,7 +1,8 @@
 # Dedicated transfer worker
 
-This unreleased experimental opt-in moves normal mixed schema-3 piece
-verification and transfer scheduling into one dedicated worker per swarm. Both execution paths
+This unreleased experimental opt-in moves schema-3 piece verification and
+transfer scheduling into one dedicated worker per swarm, for mixed and
+explicit peer-only transfers. Both execution paths
 share the same small transfer facade and compiled Rust module. Piece hashes,
 the whole-object hash, planner, probe caps and returned commands remain Rust's
 decisions; there is no additional JavaScript verifier.
@@ -94,28 +95,40 @@ release one handle; `stop` terminates the worker. `WorkerImpl` on the HLS
 options is a constructor injection point for tests or an equivalent host
 worker transport.
 
-## Independent cached whole-object race
+## Explicit peer-only cached race
 
-When no safe serial wait remains, `zeroBudgetPeerRace` runs its original
-whole-object peer request and asynchronous WebCrypto hash alongside the one
-normal HTTP request. That HTTP arm cannot supply pieces to an assembled Rust
-transfer. Giving a piece planner its fast whole-HTTP estimate could otherwise
-strand peer work behind origin commands that performed no I/O. Cached racing
-therefore uses the existing complete-object path, with no invented origin
-estimate, and restricts every candidate to the initial snapshot and current
-HAVE. The serial early-abandon estimator does not cancel this already-parallel
-arm during a temporary gap: the real HTTP winner, fixed race deadline and
-host/loader cancellation own its lifetime. Progress still trains timing
-evidence. Normal mixed transfers retain worker-based piece verification and
-positive-budget abandonment remains unchanged.
+When no safe serial wait remains, `zeroBudgetPeerRace` starts one normal
+whole-object HTTP request immediately. The competing Rust transfer is created
+with `peerOnly: true`: there is no origin lane, origin estimate or ignored
+origin command inside it. Fast whole-HTTP history cannot strand ranges behind
+work that performs no I/O. Candidate identity stays inside the initial cached
+snapshot and current HAVE.
 
-This preserves upload policy. A whole object must fit the holder's available
-rate tokens, whose maximum burst is two seconds of its configured upload rate,
-and its remaining allowance. The SDK default maximum burst is 2,500,000 bytes;
-a host configured for 4 MiB/s has an 8 MiB maximum burst. Larger cached whole
-objects are refused and HTTP continues. Ranged mixed transfers can still
-serve bounded pieces. The cached path offers neither aggregation across
-holders nor a peerable-object guarantee, and never increases upload allowances.
+Cold holders receive bounded one-piece calibration. Remaining unverified,
+uncovered pieces stay pending until verified progress refills bounded peer
+requests. Failed or corrupt holders return only unfinished work to that pool.
+No speculative serial-recovery abandonment kills this already-parallel arm;
+the real HTTP winner, peer floor and host cancellation own its lifetime.
+At the floor, Rust cancels peers and fails this transfer while normal HTTP
+continues. Piece and whole-object hashes, request size, holder, worker queue
+and upload allowance bounds remain in force. Normal mixed transfers retain
+their origin lane and existing abandonment rules.
+
+The optional capability mask is `2` (alongside bounded-probe mask `1`).
+Low-level callers request `peerOnly: true` in transfer creation, then supply
+`origin: null` at start. Existing constructor/C/native signatures remain
+compatible. A synchronous core without the capability declines before
+allocation; a worker declines that handle without retiring healthy mixed
+transfers. HLS retains its already-running HTTP arm. No synthetic origin
+latency is substituted.
+
+Ranged requests are charged by their actual bounded size under unchanged
+rate and session limits. Unlike a whole-object upload, an entire large media
+object need not fit one two-second rate bucket. The temporary whole-object
+fallback was hash-safe but lost the same-M4 native first-load comparison;
+that failed control is retained. New mode qualification still requires the
+unchanged native three-load win/HTTP-win/win assertion and physical playback
+evidence; the capability alone is not a performance guarantee.
 
 ## Focused verification
 
