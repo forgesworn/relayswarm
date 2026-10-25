@@ -25,6 +25,12 @@ reuse. Promoting an in-flight warm object to actual demand now frees the
 speculative slot for its successor, with aggregate reservations and an
 independent buffer-bounded source recovery path. These causal source fixes
 still require another unchanged cold-cache playback comparison.
+The subsequent M4 comparison also remained RED. Its trace identified an
+in-buffer clock alignment cancelling needed loads, and promoted current
+requests still using the eight-second speculative cap. Source regressions
+now retain useful work for buffered seeks and preserve the original parent's
+deadline/error callback on promotion. This remains source evidence, pending
+the same browser continuity and contribution gate.
 
 Cold-cache physical diagnostics exposed two distinct timing errors: a
 holder's completion rate already included startup, yet the piece planner

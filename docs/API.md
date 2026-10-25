@@ -119,10 +119,19 @@ entering the shared held cache. At most three warm references and 24 MiB of
 warm data/reservations fit inside the existing `maxHeldBytes` budget. The warm
 map references the held buffer; delivery to hls.js receives a transfer-safe
 copy. Normal player/decoder memory and transient demand buffers remain
-separate. Speculation expires after eight seconds. Pause, seek, ticket change,
+separate. Speculation expires after eight seconds. Promotion retires that
+speculation-only timer; the already-running parent's timeout still runs from
+its original start. A parent error or timeout settles the genuine demand
+through its original callback, without an implicit fresh request or reset
+deadline. Pause, out-of-buffer seek, ticket change,
 rendition change and stop clear speculative state; unrelated work yields to a
 new demanded position. Gap, ranged, encrypted and alternate-audio fragments
 retain the ordinary loader path.
+
+Seeks inside the existing appended buffer retain current and future work.
+This includes shared-clock alignment: it must not throw away the very next
+objects still needed after a buffered correction. Normal hls.js abort handling
+and the next actual demand continue to prune unrelated contexts.
 
 Every demand reuse checks the host's current commitment/delegation/revocation
 view. Only actual buffer beyond the normal origin recovery reserve permits

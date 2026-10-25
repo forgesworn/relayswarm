@@ -625,7 +625,17 @@ class HlsSwarm {
         hls.config.fLoader = this.warmAhead.Loader;
         const media = hls.media;
         const cancelWarm = () => this.warmAhead?.clear();
-        for (const name of ["pause", "seeking", "ended"]) media?.addEventListener?.(name, cancelWarm, { signal: this.lifecycle.signal });
+        for (const name of ["pause", "ended"]) media?.addEventListener?.(name, cancelWarm, { signal: this.lifecycle.signal });
+        media?.addEventListener?.("seeking", () => {
+          try {
+            const time = media.currentTime;
+            for (let i = 0; i < media.buffered.length; i++) {
+              const start = media.buffered.start(i), end = media.buffered.end(i);
+              if (Number.isFinite(time) && Number.isFinite(start) && Number.isFinite(end) && start <= time && time < end) return;
+            }
+          } catch {}
+          cancelWarm();
+        }, { signal: this.lifecycle.signal });
       }
       if (this.options.mode === "peer-first" && this.options.abrIgnorePeers) this.#withholdPeerAbrSamples(hls);
       if (this.options.mode === "peer-first" && this.options.coreWasm !== undefined) {

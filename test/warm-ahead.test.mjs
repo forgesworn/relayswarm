@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure';
-import { M3U8Parser, LoaderContextType } from 'hls.js';
+import Hls, { M3U8Parser, LoaderContextType } from 'hls.js';
 import { warmContext } from '../src/browser/warm-ahead.mjs';
 import { commitmentContent, KIND_SEGMENT_COMMITMENT } from '../src/browser/segment-commitment.mjs';
 import { startLocalRelay } from './support/local-relay.mjs';
@@ -18,7 +18,7 @@ const until = async predicate => { for (let i = 0; i < 200; i++) { if (predicate
 async function fixture(t, options = {}) {
   const relay = await startLocalRelay();
   const bytes = Uint8Array.from({ length: options.size ?? 1024 }, (_, i) => i % 251);
-  const requests = [], sk = generateSecretKey(), swarmId = 'warm-ahead-fixture';
+  const requests = [], clients = new Set(), sk = generateSecretKey(), swarmId = 'warm-ahead-fixture';
   const streamEvent = finalizeEvent({ kind: 30311, created_at: Math.floor(Date.now() / 1000),
     tags: [['d', swarmId], ['relayswarm', 'redistribute', '1']], content: '' }, sk);
   // Use real hls.js 1.7.3 Fragment getters/base.url identity rather than a
@@ -34,14 +34,24 @@ async function fixture(t, options = {}) {
       this.context = context;
       const row = { context, config, callbacks, loader: this, aborted: false, completed: false, started: performance.now(), finish: (body = bytes) => {
         if (row.aborted) return;
+        clearTimeout(row.parentTimer);
         row.completed = true;
         Object.assign(this.stats, { loaded: body.length, total: body.length, loading: { start: row.started, first: row.started, end: performance.now() } });
         callbacks.onSuccess({ url: context.url, data: body.slice().buffer, code: 200 }, this.stats, context, null);
+      }, fail: error => {
+        if (row.aborted || row.completed) return;
+        clearTimeout(row.parentTimer); row.completed = true;
+        callbacks.onError(error, context, null, this.stats);
       } };
       this.row = row; requests.push(row);
+      if (options.parentDeadlineMs) row.parentTimer = setTimeout(() => {
+        if (row.aborted || row.completed) return;
+        row.completed = true; row.timedOut = true; this.stats.aborted = true;
+        callbacks.onTimeout(this.stats, context, null);
+      }, config.loadPolicy.maxLoadTimeMs);
       if (!options.held?.includes(context.frag.sn)) row.finish();
     }
-    abort() { if (this.row && !this.row.completed && !this.row.aborted) { this.row.aborted = true; this.stats.aborted = true; this.row.callbacks.onAbort?.(this.stats, this.context, null); } }
+    abort() { if (this.row && !this.row.completed && !this.row.aborted) { clearTimeout(this.row.parentTimer); this.row.aborted = true; this.stats.aborted = true; this.row.callbacks.onAbort?.(this.stats, this.context, null); } }
     destroy() { this.abort(); }
   }
   const connections = [];
@@ -71,19 +81,25 @@ async function fixture(t, options = {}) {
     ...(options.allowance === undefined ? {} : { maxUploadBytesPerSession: options.allowance }) });
   const hls = { config: { loader: Loader, progressive: false }, media, levels: [{ details: { live: true, fragments } }] };
   swarm.attach(hls);
-  t.after(async () => { swarm.stop(); await relay.close(); });
+  t.after(async () => { for (const loader of clients) loader.destroy(); swarm.stop(); await relay.close(); });
   if (coreWasm) await until(() => swarm.metrics().core?.state === 'ready');
   const load = (sn, existing, hooks = {}) => {
     const loader = existing ?? new hls.config.fLoader(hls.config), context = { url: fragments[sn].url, frag: fragments[sn], responseType: 'arraybuffer',
       type: LoaderContextType.MEDIA_FRAGMENT, headers: {}, part: null, rangeStart: 0, rangeEnd: 0 };
+    clients.add(loader);
+    loader.stats.retry = fragments[sn].stats.retry;
+    fragments[sn].stats = loader.stats;
     let done, fail;
     const calls = { success: 0, abort: 0, error: 0, timeout: 0 };
     const terminals = [];
     const result = new Promise((resolve, reject) => { done = resolve; fail = reject; });
-    loader.load(context, {}, { onSuccess: (response, _stats, delivered) => {
+    const loadPolicy = { ...Hls.DefaultConfig.fragLoadPolicy.default,
+      ...(options.parentDeadlineMs ? { maxLoadTimeMs: options.parentDeadlineMs } : {}), errorRetry: null, timeoutRetry: null };
+    loader.load(context, { loadPolicy, timeout: loadPolicy.maxLoadTimeMs, maxRetry: 0, retryDelay: 0, maxRetryDelay: 0, highWaterMark: 64 * 1024 }, { onSuccess: (response, _stats, delivered) => {
       calls.success++; terminals.push({ type: 'success', sn: delivered.frag.sn }); hooks.onSuccess?.(loader); done(new Uint8Array(response.data));
     },
-      onError: error => { calls.error++; fail(error); }, onTimeout: error => { calls.timeout++; fail(error); },
+      onError: (error, failed) => { calls.error++; terminals.push({ type: 'error', sn: failed.frag.sn, code: error.code }); fail(error); },
+      onTimeout: (error, timedOut) => { calls.timeout++; terminals.push({ type: 'timeout', sn: timedOut.frag.sn }); fail(error); },
       onAbort: (stats, aborted) => { calls.abort++; terminals.push({ type: 'abort', sn: aborted.frag.sn, aborted: stats.aborted }); done(null); } });
     return { loader, result, calls, terminals };
   };
@@ -161,6 +177,57 @@ test('promoting warmed work to genuine demand permits the next future load befor
   assert(m.bytes.held + m.warmAhead.reservationBytes <= 4096);
   f.requests.find(row => row.context.frag.sn === 1).finish();
   assert.deepEqual(await demand.result, f.bytes);
+});
+
+test('an in-buffer seek retains wanted demand and speculation while an outside seek cancels speculation', async t => {
+  const f = await fixture(t, { held: [1, 2] });
+  await f.load(0).result;
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const demand = f.load(1);
+  await until(() => f.requests.some(row => row.context.frag.sn === 2));
+  f.media.currentTime = 1.25; f.media.dispatchEvent(new Event('seeking'));
+  assert(f.requests.filter(row => [1, 2].includes(row.context.frag.sn)).every(row => !row.aborted));
+  f.requests.find(row => row.context.frag.sn === 1).finish();
+  assert.deepEqual(await demand.result, f.bytes);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+  f.media.currentTime = 25; f.media.dispatchEvent(new Event('seeking'));
+  assert.equal(f.requests.find(row => row.context.frag.sn === 2).aborted, true);
+  assert.equal(f.swarm.metrics().warmAhead.reservationBytes, 0);
+});
+
+test('a promoted request retains its original parent deadline and timeout result', async t => {
+  const f = await fixture(t, { held: [1, 2], parentDeadlineMs: 12_000 });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    await f.load(0).result;
+    for (let i = 0; i < 2000 && !f.requests.some(row => row.context.frag.sn === 1); i++) await new Promise(setImmediate);
+    const row = f.requests.find(row => row.context.frag.sn === 1); assert(row);
+    t.mock.timers.tick(6000);
+    const demand = f.load(1), outcome = demand.result.then(value => ({ value }), error => ({ error }));
+    t.mock.timers.tick(2000);
+    await new Promise(setImmediate);
+    assert.equal(row.aborted, false, 'promotion removes the speculative eight-second cap');
+    assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+    t.mock.timers.tick(4000);
+    await new Promise(setImmediate);
+    assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1, 'the parent timeout is not a hidden fresh GET');
+    assert.equal(demand.calls.timeout, 1);
+    assert.equal((await outcome).error.aborted, true);
+    assert.equal(f.fragments[1].stats, demand.loader.stats);
+    assert.deepEqual(demand.terminals, [{ type: 'timeout', sn: 1 }]);
+  } finally { t.mock.timers.reset(); }
+});
+
+test('a promoted parent error settles the original demand without an implicit retry', async t => {
+  const f = await fixture(t, { held: [1] });
+  await f.load(0).result;
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const demand = f.load(1), outcome = demand.result.then(value => ({ value }), error => ({ error }));
+  f.requests.find(row => row.context.frag.sn === 1).fail({ code: 503, text: 'Fixture parent refusal' });
+  await new Promise(setImmediate);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+  assert.equal((await outcome).error.code, 503);
+  assert.deepEqual(demand.terminals, [{ type: 'error', sn: 1, code: 503 }]);
 });
 
 test('a stale completion cannot cancel a newer promoted demand on the same loader instance', async t => {

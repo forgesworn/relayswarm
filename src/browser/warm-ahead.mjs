@@ -55,6 +55,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     const controller = new AbortController(), revision = generation, cfg = config, policy = loaderConfig;
     let loader, timer, finish;
     const row = { ...item, reserved: 0, finished: false, waiters: new Set(), promise: new Promise(resolve => { finish = resolve; }),
+      promote() { clearTimeout(timer); },
       finish: result => finish(result), cancel() {
         controller.abort(); clearTimeout(timer); try { loader?.abort(); loader?.destroy(); } catch {}
       } };
@@ -74,9 +75,15 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         loader = new Loader(cfg); counters.started++;
         const response = await new Promise(resolve => loader.load(item.context, policy, {
           onSuccess: (response, stats, _context, details) => resolve({ response, stats, details }),
-          onError: () => resolve(null), onTimeout: () => resolve(null), onAbort: () => resolve(null),
+          onError: (...args) => resolve({ failure: { name: 'onError', args, stats: loader.stats } }),
+          onTimeout: (...args) => resolve({ failure: { name: 'onTimeout', args, stats: loader.stats } }),
+          onAbort: (...args) => resolve({ failure: { name: 'onAbort', args, stats: loader.stats } }),
           onProgress: stats => { if (stats?.loaded > permit.size) { controller.abort(); try { loader.abort(); } catch {} resolve(null); } },
         }));
+        if (response?.failure) {
+          if (controller.signal.aborted || closed || revision !== generation || !live(row)) return null;
+          counters.rejected++; return response;
+        }
         if (!response || controller.signal.aborted || closed || revision !== generation || !live(row) ||
             !await verify(permit, response.response.data, item.context, controller.signal)) { counters.rejected++; return null; }
         if (controller.signal.aborted || closed || revision !== generation || !live(row)) return null;
@@ -122,7 +129,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         if (pending) {
           counters.coalesced++;
           pending.waiters.add(this); this.warmPending = pending;
-          if (active === pending && promoted.size === 0) { active = null; promoted.add(pending); counters.promotions++; }
+          if (active === pending && promoted.size === 0) { active = null; promoted.add(pending); pending.promote(); counters.promotions++; }
         }
         this.reuseAbort = new AbortController();
         const revision = generation;
@@ -153,6 +160,14 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
           if (!current()) return;
           this.releasePending();
           if (closed || !row || revision !== generation) return startOrigin(true);
+          if (row.failure) {
+            const { name, args, stats } = row.failure;
+            winner = 'origin'; cleanup(); this.reuseAbort.abort();
+            if (stats) Object.assign(this.stats, stats);
+            if (name === 'onError') callbacks.onError(args[0], context, args[2], this.stats);
+            else callbacks[name](this.stats, context, args[2]);
+            return;
+          }
           pinned = row.permit.key; pins.set(pinned, (pins.get(pinned) ?? 0) + 1);
           const budget = Math.max(0, Math.min(25, reuseBudget(context) || 0));
           if (budget > 0) timer = setTimeout(startOrigin, budget); else startOrigin();
