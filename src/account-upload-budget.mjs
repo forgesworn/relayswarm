@@ -17,7 +17,8 @@ export function createAccountUploadBudget({ statePath, defaultLimit = 100000000,
     || !Number.isSafeInteger(delegationTtlSeconds) || delegationTtlSeconds < grantTtlSeconds || delegationTtlSeconds > 86400
     || [accountCapacity, identityCapacity, grantCapacity, operationCapacity, mutationCapacity].some((n) => !Number.isSafeInteger(n) || n < 1)
     || accountCapacity > 4096 || identityCapacity > 8192 || grantCapacity > 8192 || operationCapacity > 32768 || mutationCapacity > 256) throw new Error("Invalid account budget options.");
-  let state, store, lease, broken = false, stopping = false, pending = 0, queue = Promise.resolve(), closePromise, highestWall = 0;
+  let state, store, lease, broken = false, stopping = false, pending = 0, draining = null, closePromise, highestWall = 0;
+  const waiting = [];
   const expiries = new Map();
   function time() { const at = now(); if (!Number.isSafeInteger(at) || at < highestWall) refuse("account-clock-unavailable", 503); highestWall = at; return at; }
   const readyPromise = (async () => {
@@ -112,31 +113,56 @@ export function createAccountUploadBudget({ statePath, defaultLimit = 100000000,
     expiries.set(value.token, { grant: mono + Math.max(0, value.expiresAt - time()), delegation: priorToken ? expiries.get(priorToken).delegation : mono + Math.max(0, delegationExpiresAt - time()) });
     data.grants.push(value); return value;
   }
+  // Operations run one at a time in arrival order, each on its own copy of
+  // the state, so a refused operation leaves no trace. Those that queue while
+  // a write is in flight share the next durable write. No result is released
+  // before the write that contains it, and cancellation is checked as each
+  // operation is applied, as before.
+  async function drain() {
+    try { await readyPromise; }
+    catch (error) { for (const entry of waiting.splice(0)) entry.reject(error); return; }
+    while (waiting.length) {
+      const batch = waiting.splice(0), held = [];
+      let working = state, writes = false, slice = performance.now();
+      for (const entry of batch) {
+        try {
+          if (broken || entry.signal?.aborted) refuse("account-operation-cancelled", 503);
+          if (time() < working.lastWall) refuse("account-clock-unavailable", 503);
+          const candidate = entry.write ? structuredClone(working) : working;
+          if (entry.write) prune(candidate);
+          const result = entry.operation(candidate);
+          if (entry.signal?.aborted) refuse("account-operation-cancelled", 503);
+          if (entry.write) { candidate.lastWall = time(); validate(candidate); working = candidate; writes = true; }
+          // A read that follows no unpersisted write needs no wait.
+          if (writes) held.push({ entry, result }); else entry.resolve(result);
+        } catch (error) { entry.reject(error); }
+        // A long batch still lets the event loop run.
+        if (performance.now() - slice > 10) { await new Promise((resume) => setImmediate(resume)); slice = performance.now(); }
+      }
+      if (writes) {
+        try { await store.write(working); state = working; }
+        catch {
+          broken = true;
+          for (const { entry } of held) entry.reject(accountBudgetError("account-persistence-unavailable", 503));
+          continue;
+        }
+      }
+      // Once persisted, cancellation cannot refund or undo these decisions.
+      for (const { entry, result } of held) entry.resolve(result);
+    }
+  }
   function transact(operation, { signal, write = true } = {}) {
     if (stopping || broken) return Promise.reject(accountBudgetError("account-budget-unavailable", 503));
     if (pending >= mutationCapacity) return Promise.reject(accountBudgetError("account-budget-queue-capacity", 503));
     pending++;
-    const task = queue.then(async () => {
-      try {
-        await readyPromise;
-        if (broken || signal?.aborted) refuse("account-operation-cancelled", 503);
-        if (time() < state.lastWall) refuse("account-clock-unavailable", 503);
-        const candidate = write ? structuredClone(state) : state;
-        if (write) prune(candidate);
-        const result = operation(candidate);
-        if (signal?.aborted) refuse("account-operation-cancelled", 503);
-        if (write) {
-          candidate.lastWall = time();
-          validate(candidate);
-          try { await store.write(candidate); state = candidate; }
-          catch { broken = true; refuse("account-persistence-unavailable", 503); }
-        }
-        // Once persisted, cancellation cannot refund or undo this decision.
-        return result;
-      } finally { pending--; }
-    });
-    queue = task.catch(() => {}); return task;
+    const task = new Promise((resolve, reject) => { waiting.push({ operation, signal, write, resolve, reject }); })
+      .finally(() => { pending--; });
+    startDrain();
+    return task;
   }
+  // An operation can arrive after the loop has emptied but before it is
+  // marked finished, so a finished drain restarts for anything left waiting.
+  function startDrain() { draining ??= drain().finally(() => { draining = null; if (waiting.length) startDrain(); }); }
   return {
     ready: () => readyPromise,
     parameters: { defaultLimit, grantTtlSeconds, delegationTtlSeconds },
@@ -212,7 +238,7 @@ export function createAccountUploadBudget({ statePath, defaultLimit = 100000000,
       return { v: 1, revoked: true };
     }, options); },
     close() { if (!closePromise) { stopping = true; closePromise = (async () => {
-      try { await readyPromise; await queue; if (!broken && highestWall > state.lastWall) { const next = { ...state, lastWall: highestWall }; await store.write(next); state = next; } }
+      try { await readyPromise; while (draining) await draining; if (!broken && highestWall > state.lastWall) { const next = { ...state, lastWall: highestWall }; await store.write(next); state = next; } }
       finally { lease?.close(); expiries.clear(); }
     })(); } return closePromise; },
   };

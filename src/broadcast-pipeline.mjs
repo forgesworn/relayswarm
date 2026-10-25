@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { isIP } from "node:net";
 import { promisify } from "node:util";
+import { watch } from "node:fs";
 import { mkdir, readFile, writeFile, rename, readdir, lstat, realpath, rm } from "node:fs/promises";
 import { join, resolve, relative, isAbsolute } from "node:path";
 
@@ -88,7 +89,7 @@ async function atomicText(path, value) {
 }
 
 export async function startBroadcastPipeline({ input = "rtsp://127.0.0.1:8554/live", mediaDir, ffmpeg = "ffmpeg", forwardUrl, allowInsecureLoopbackForward = false,
-  retryFloorMs = 1000, retryCeilingMs = 15000, publicationIntervalMs = 250, retainGenerations = 3, generationGraceMs = 120000 } = {}) {
+  retryFloorMs = 1000, retryCeilingMs = 15000, publicationIntervalMs = 250, retainGenerations = 3, generationGraceMs = 120000, watchDirectory = watch } = {}) {
   const source = inputAddress(input);
   const target = forwardUrl ? outputAddress(forwardUrl, allowInsecureLoopbackForward) : undefined;
   if (!mediaDir || typeof ffmpeg !== "string" || !ffmpeg || !Number.isSafeInteger(retryFloorMs) || retryFloorMs < 50 || !Number.isSafeInteger(retryCeilingMs) || retryCeilingMs < retryFloorMs || retryCeilingMs > 60000
@@ -177,6 +178,8 @@ export async function startBroadcastPipeline({ input = "rtsp://127.0.0.1:8554/li
     const position = await publishedPosition();
     generation = { entry, directory, discontinuity: position.nextDiscontinuity, startNumber: position.nextSequence };
     lastCopies = new Map();
+    // Watch the new directories before the encoder writes its first playlist.
+    requestPublication();
     return directory;
   }
 
@@ -286,14 +289,48 @@ export async function startBroadcastPipeline({ input = "rtsp://127.0.0.1:8554/li
     failureFencing.catch(() => {});
     fatalResolve(new Error("Broadcast worker guardian stopped; operator recovery is required.")); control.close().catch(() => {});
   });
+  // The encoder renames each rendition playlist into place when a segment
+  // completes. A directory watch on the current generation starts publication
+  // at once; the interval remains the fallback where watching is unavailable
+  // or an event is missed. Events only wake the loop, which rereads the files.
+  let watched = null, watchers = [], publicationRequested = false, wakePublication = null, unnamedTimer = null;
+  const requestPublication = () => { publicationRequested = true; wakePublication?.(); };
+  // Some platforms omit the filename. Those events cannot be told apart from
+  // segment writes, so they wake publication at most every 10 ms.
+  const requestPublicationSoon = () => { unnamedTimer ??= setTimeout(() => { unnamedTimer = null; requestPublication(); }, 10); };
+  function closeWatchers() {
+    for (const watcher of watchers) { try { watcher.close(); } catch {} }
+    watchers = []; watched = null; clearTimeout(unnamedTimer); unnamedTimer = null;
+  }
+  function watchGeneration() {
+    if (stopped || !generation || watched === generation.entry) return;
+    closeWatchers(); watched = generation.entry;
+    for (const level of RENDITIONS) {
+      try {
+        const watcher = watchDirectory(join(generation.directory, level.name), { persistent: false },
+          (_event, filename) => { if (filename === null || filename === undefined) requestPublicationSoon(); else if (String(filename) === "index.m3u8") requestPublication(); });
+        watcher.on("error", () => { try { watcher.close(); } catch {} });
+        watchers.push(watcher);
+      } catch { /* The interval still publishes. */ }
+    }
+  }
+  const publicationPause = (ms) => new Promise((done) => {
+    const finish = () => { clearTimeout(timer); wakeups.delete(finish); if (wakePublication === finish) wakePublication = null; done(); };
+    const timer = setTimeout(finish, ms); wakeups.add(finish); wakePublication = finish;
+  });
   const workers = [runWorker("hls"), ...(forwardUrl ? [runWorker("forward")] : [])];
   const publisher = (async () => {
     let lastPrune = 0;
-    while (!stopped) {
-      try { await publish(); if (Date.now() - lastPrune > 30000) { await prune(); lastPrune = Date.now(); } }
-      catch { counters.hls.state = "publication-error"; }
-      await pause(publicationIntervalMs);
-    }
+    try {
+      while (!stopped) {
+        publicationRequested = false;
+        try { await publish(); if (Date.now() - lastPrune > 30000) { await prune(); lastPrune = Date.now(); } }
+        catch { counters.hls.state = "publication-error"; }
+        watchGeneration();
+        // A playlist renamed during this publication is read on the next pass.
+        if (!publicationRequested) await publicationPause(publicationIntervalMs);
+      }
+    } finally { closeWatchers(); }
   })();
   const control = {
     failure, mediaDir: root, manifest: "master.m3u8",

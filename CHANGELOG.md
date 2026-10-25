@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Republish broadcast rendition playlists when a directory watch reports the
+  encoder's playlist rename, keeping the 250 ms interval as the fallback.
+  Measured publication delay fell from a 135 ms mean to 6 ms.
+- Let allowance operations that queue behind an in-flight write share the
+  next durable write. Order, per-operation atomicity, cancellation checks and
+  persistence before any decision is returned are unchanged; concurrent
+  reservations completed about four times faster in the measured profile.
 - Reduce hot-path work, measured in [Performance](docs/PERFORMANCE.md):
   - Remember proved Schnorr signatures in both commitment verifiers, keyed by
     the recomputed event hash, public key and signature. The unchanged stream

@@ -126,6 +126,44 @@ test("disconnect revokes retained renewal tokens without affecting another devic
   assert.equal((await f.ledger.inspectGrant(other.grant)).snapshot.spent, 13);
 });
 
+test("concurrent reservations commit in arrival order and stop exactly at the limit", posixState, async (t) => {
+  const f = await fixture(t, { defaultLimit: 100 }); const a = await f.authorize();
+  const decisions = await Promise.all(Array.from({ length: 12 }, (_, index) => f.ledger.reserve(a.grant, op(index + 1), 10)));
+  assert.deepEqual(decisions.map((d) => d.accepted), [...Array(10).fill(true), false, false]);
+  assert.deepEqual(decisions.map((d) => d.snapshot.spent), [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 100, 100]);
+  const saved = JSON.parse(await readFile(f.statePath, "utf8"));
+  assert.equal(saved.accounts[0].spent, 100); assert.equal(saved.operations.length, 12);
+  await f.ledger.close();
+  const reopened = createAccountUploadBudget(f.config);
+  try { await reopened.ready(); assert.equal((await reopened.reserve(a.grant, op(12), 10)).duplicate, true); assert.equal((await reopened.inspectGrant(a.grant)).snapshot.spent, 100); }
+  finally { await reopened.close(); }
+});
+
+test("an operation cancelled while queued behind a write leaves no charge", posixState, async (t) => {
+  const f = await fixture(t); const a = await f.authorize(), controller = new AbortController();
+  const first = f.ledger.reserve(a.grant, op(1), 5);
+  const queued = f.ledger.reserve(a.grant, op(2), 7, { signal: controller.signal });
+  const after = f.ledger.reserve(a.grant, op(3), 11);
+  const cancelled = assert.rejects(queued, { code: "account-operation-cancelled" });
+  controller.abort();
+  assert.equal((await first).accepted, true);
+  await cancelled;
+  assert.equal((await after).snapshot.spent, 16);
+  assert.equal(JSON.parse(await readFile(f.statePath, "utf8")).operations.length, 2);
+});
+
+test("a failed shared write refuses every operation in it and persists none", posixState, async (t) => {
+  const f = await fixture(t); const a = await f.authorize();
+  await f.ledger.reserve(a.grant, op(1), 3);
+  await chmod(f.statePath, 0o400);
+  const results = await Promise.allSettled([4, 5, 6].map((bytes, index) => f.ledger.reserve(a.grant, op(index + 2), bytes)));
+  await chmod(f.statePath, 0o600);
+  assert.ok(results.every((result) => result.status === "rejected" && result.reason.status === 503), "no unpersisted decision is released");
+  const saved = JSON.parse(await readFile(f.statePath, "utf8"));
+  assert.equal(saved.accounts[0].spent, 3); assert.equal(saved.operations.length, 1);
+  await assert.rejects(f.ledger.reserve(a.grant, op(9), 1), { code: "account-budget-unavailable" });
+});
+
 test("pending mutation cap refuses excess before allocating queued work", posixState, async (t) => {
   const f = await fixture(t, { mutationCapacity: 1 }); const a = await f.authorize();
   const accepted = f.ledger.reserve(a.grant, op(1), 3);

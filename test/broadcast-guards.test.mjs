@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, realpath, mkdir, writeFile, readFile, readdir, rm, chmod, symlink, stat } from "node:fs/promises";
+import { mkdtemp, realpath, mkdir, writeFile, readFile, readdir, rm, chmod, symlink, stat, rename } from "node:fs/promises";
+import { EventEmitter } from "node:events";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -117,6 +118,54 @@ test("one incomplete rendition preserves both old aliases until a complete gener
     assert.ok(playlist.includes(`../${run}/${level}/`));
     assert.ok(playlist.includes("#EXT-X-DISCONTINUITY-SEQUENCE:5\n"));
   }
+});
+
+// As the encoder does: complete the playlist under a temporary name, then rename it.
+async function encoderPlaylist(directory, run, level, sequence) {
+  await writeFile(join(directory, run, level, segmentName(sequence)), "next fixture segment");
+  await writeFile(join(directory, run, level, "index.m3u8.tmp"), rawAt(sequence));
+  await rename(join(directory, run, level, "index.m3u8.tmp"), join(directory, run, level, "index.m3u8"));
+}
+
+test("an encoder playlist rename publishes without waiting for the fallback interval", { timeout: 5000 }, async (t) => {
+  const directory = await fixture(t);
+  const value = await pipeline(t, directory, { publicationIntervalMs: 5000 });
+  await until(() => value.metrics().hls.state === "failed");
+  const run = await currentRun(directory);
+  await pause(50);
+  const started = performance.now();
+  for (const level of ["low", "high"]) await encoderPlaylist(directory, run, level, 21);
+  await until(() => value.metrics().publications === 2, 2000);
+  assert.ok(performance.now() - started < 1000, "a directory event, not the 5 s interval, started publication");
+  for (const level of ["low", "high"]) assert.ok((await readFile(join(directory, level, "index.m3u8"), "utf8")).includes(`../${run}/${level}/${segmentName(21)}`));
+});
+
+test("only playlist events wake publication, the interval still publishes when watching fails, and watches close", { timeout: 5000 }, async (t) => {
+  const watches = [];
+  const watchDirectory = (path, options, listener) => {
+    const watcher = Object.assign(new EventEmitter(), { path, options, listener, closed: false, close() { this.closed = true; } });
+    watches.push(watcher); return watcher;
+  };
+  const directory = await fixture(t);
+  const value = await pipeline(t, directory, { publicationIntervalMs: 5000, watchDirectory });
+  await until(() => value.metrics().hls.state === "failed" && watches.length === 2);
+  const run = await currentRun(directory);
+  assert.deepEqual(watches.map((watcher) => [watcher.path, watcher.options.persistent]), ["low", "high"].map((level) => [join(directory, run, level), false]));
+  for (const level of ["low", "high"]) await encoderPlaylist(directory, run, level, 21);
+  for (const watcher of watches) watcher.listener("rename", segmentName(21));
+  await pause(100);
+  assert.equal(value.metrics().publications, 0, "segment events do not publish");
+  watches[0].listener("rename", "index.m3u8");
+  await until(() => value.metrics().publications === 2, 1000);
+  await value.close();
+  assert.ok(watches.every((watcher) => watcher.closed), "closing the pipeline closes its directory watches");
+
+  const fallback = await fixture(t);
+  const polled = await pipeline(t, fallback, { publicationIntervalMs: 20, watchDirectory: () => { throw Object.assign(new Error("unavailable"), { code: "ENOSPC" }); } });
+  await until(() => polled.metrics().hls.state === "failed");
+  const fallbackRun = await currentRun(fallback);
+  for (const level of ["low", "high"]) await encoderPlaylist(fallback, fallbackRun, level, 21);
+  await until(() => polled.metrics().publications === 2);
 });
 
 test("empty retry generations cannot prune published media while unreferenced old generations are removed", { timeout: 5000 }, async (t) => {
