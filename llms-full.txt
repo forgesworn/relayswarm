@@ -1188,6 +1188,16 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 - Retain the speed-optimised SHA-256 path while keeping the remaining module
   size-optimised. Device playback and net network benefit remain separate
   acceptance gates.
+- Republish broadcast rendition playlists when a directory watch reports the
+  encoder's playlist rename, keeping the 250 ms interval as the fallback.
+  Measured publication delay fell from a 135 ms mean to 6 ms. Closing the
+  pipeline during a publication no longer waits for another interval.
+- Let allowance operations that queue behind an in-flight write share the
+  next durable write. Operations still apply and settle in arrival order, a
+  refused operation leaves no trace, cancellation is checked as before, and
+  no acceptance, refusal or read is returned before a write it may depend on
+  completes; concurrent reservations completed about four times faster in the
+  measured profile.
 - Reduce hot-path work, measured in [Performance](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/PERFORMANCE.md):
   - Remember proved Schnorr signatures in both commitment verifiers, keyed by
     the recomputed event hash, public key and signature. The unchanged stream
@@ -2376,7 +2386,10 @@ complete discoverable NIP-53 broadcast.
 allowInsecureLoopbackForward?, retryFloorMs?, retryCeilingMs?,
 publicationIntervalMs?, retainGenerations?, generationGraceMs? })` returns
 `{ mediaDir, manifest, metrics(), ready({ timeoutMs? }), close() }`.
-Default input is the local RTSP live path; `mediaDir` is required and must be a
+Rendition playlists are republished when a directory watch on the current
+generation reports the encoder's playlist rename; `publicationIntervalMs`
+(250) is the fallback interval where watching is unavailable or an event is
+missed, and `close()` does not wait for it. Default input is the local RTSP live path; `mediaDir` is required and must be a
 dedicated owner-controlled directory. The pipeline holds an exclusive lock
 until close. Unclean process termination needs operator lock recovery.
 Supported inputs are RTSP, RTMP, RTMPS and SRT. Use plaintext inputs on a private
@@ -7142,6 +7155,11 @@ The standalone demo accepts `--account-budget-state FILE`. Its parent directory
 must be private, owned by the service user and free of symlinks. The ledger is a
 0600 file on a supported local POSIX filesystem, protected by an exclusive
 writer lease. Preserve it and its lease files during upgrades and backups.
+Operations apply and settle one at a time in arrival order; those that arrive
+while a write is in progress share the next durable write. No acceptance,
+refusal or read is returned before every write it may depend on completes, and
+if a shared write fails every operation in it is refused with
+`account-persistence-unavailable`.
 Keep account state outside the source checkout. The default
 `account-budget.json` name and its sidecars are excluded from Git, package and
 container contexts; a custom filename needs equivalent protection.
@@ -8528,7 +8546,7 @@ The encoder produces two fixed H.264/AAC renditions:
 
 Scaling preserves aspect ratio and pads to the fixed frame shape. Each rendition uses a two-second segment target and a twelve-segment live playlist: approximately **24 seconds of listed media**, not a 120-second playlist. ffmpeg retains an additional deletion tail; prior process generations have a separate two-minute pruning grace by default. These durations are storage/publication policy, not a measured end-to-end latency guarantee. Both renditions belong to one supported codec/frame-rate family; this is a fixed ladder, not a general encoding service.
 
-The HLS worker and optional forwarding worker retry independently, with bounded exponential delay. Each HLS process generation uses a distinct segment directory and a persisted discontinuity sequence. Variant/master publication uses atomic file replacement. Source loss leaves the last published playlists available while workers reconnect; old HTTP availability does not establish fresh media or successful decoder recovery. Inspect publication age in operator status.
+The HLS worker and optional forwarding worker retry independently, with bounded exponential delay. Each HLS process generation uses a distinct segment directory and a persisted discontinuity sequence. Variant/master publication uses atomic file replacement. A directory watch on the current generation starts publication when ffmpeg renames a playlist into place; a 250 ms interval remains the fallback. Source loss leaves the last published playlists available while workers reconnect; old HTTP availability does not establish fresh media or successful decoder recovery. Inspect publication age in operator status.
 
 Use a dedicated canonical state directory owned by the launching user, preferably mode **0700**, with no symlink components or group/world writes. New directories use 0700. The launcher keeps `publisher.json` and `operator-token` as owner-only **0600**, regular, single-link files. The publisher file contains a private signing key and its signed redistribution authorisation; neither secret is delivered in browser sessions or operator status. Existing malformed/mismatched publisher state is rejected rather than replaced. Restarting with the same state retains publisher identity, swarm ID and authorisation; starting with another state directory creates another identity.
 
@@ -9517,19 +9535,48 @@ These were measured or reviewed and left alone, with the reason.
 - Incoming relay events are deduplicated before signature verification, and
   every bounded map in the session and relay pool stays bounded.
 
+## Later changes (25 October 2026)
+
+Measured on the same host against `5ed12be` (main after the changes above),
+with in-memory or local-filesystem harnesses rather than a real encoder or
+browser.
+
+| Path | Before | After |
+|---|---:|---:|
+| Encoder playlist rename to republished playlist, both renditions | mean 135 ms, max 216 ms | mean 6 ms, max 28 ms |
+| Allowance reservations, 8 at once | 571/s, slowest tenth 16 ms | 2,770/s, 5 ms |
+| Allowance reservations, 32 at once | 436/s, slowest tenth 65 ms | 1,985/s, 20 ms |
+| Allowance reservations, 64 at once | 399/s, slowest tenth 149 ms | 1,426/s, 56 ms |
+
+- The broadcast publisher watches the current generation's rendition
+  directories and publishes when the encoder renames `index.m3u8` into place.
+  A new generation wakes it so the watch is in place before the first
+  playlist. Events only wake the loop, which rereads and validates the files
+  as before; segment events are ignored, events without a filename wake it at
+  most every 10 ms, and the 250 ms interval remains the fallback. Blocking
+  playlist reloads already watch the published playlists, so they release
+  correspondingly sooner. The figures include the harness's own writes.
+  `close()` during a publication no longer waits for another interval.
+- The allowance ledger still applies operations one at a time in arrival
+  order, each on its own copy of the state and checked for cancellation
+  before and after it applies. Operations that queue while a write is in
+  flight now share the next durable write and its two fsyncs. Once one of
+  them has changed the state, every later outcome in the batch, refusals and
+  reads included, is held until the write completes and released in arrival
+  order; if that write fails, every operation in it is refused and none is
+  kept. This host's fsync is fast, so slower storage gains more. A single
+  reservation is unchanged.
+
 ## Follow-ups
 
 Ranked by expected effect. None is implemented here.
 
-1. Republish broadcast playlists on a file-system watch instead of the 250 ms
-   poll, so blocking playlist reloads release sooner after a segment is written.
-2. Group account-allowance writes so concurrent reservations share one durable
-   write; each operation must stay atomic and a failed one must not persist.
-   Most of the remaining reservation cost is the state clone and full rewrite.
-3. Count only signatures, not joined or cached requests, against the demo's
+1. Count only signatures, not joined or cached requests, against the demo's
    commitment budget, which otherwise caps a server near 48 viewers.
-4. Keep a per-relay retry count so a relay that accepts and then drops each
+2. Keep a per-relay retry count so a relay that accepts and then drops each
    connection backs off instead of being redialled every 1–2 s.
+3. Reduce per-reservation CPU at large ledger states: each operation still
+   clones and validates the whole state.
 
 ---
 

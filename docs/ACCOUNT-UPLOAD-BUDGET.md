@@ -25,6 +25,11 @@ The standalone demo accepts `--account-budget-state FILE`. Its parent directory
 must be private, owned by the service user and free of symlinks. The ledger is a
 0600 file on a supported local POSIX filesystem, protected by an exclusive
 writer lease. Preserve it and its lease files during upgrades and backups.
+Operations apply and settle one at a time in arrival order; those that arrive
+while a write is in progress share the next durable write. No acceptance,
+refusal or read is returned before every write it may depend on completes, and
+if a shared write fails every operation in it is refused with
+`account-persistence-unavailable`.
 Keep account state outside the source checkout. The default
 `account-budget.json` name and its sidecars are excluded from Git, package and
 container contexts; a custom filename needs equivalent protection.
