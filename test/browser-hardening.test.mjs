@@ -1081,6 +1081,18 @@ function peerPlaybackOptions(originFallbackMs = 300) {
   return { bytes, key, options: { mode: "peer-first", streamEvent: signed.options.streamEvent, getCommitment: () => signed.event, originFallbackMs } };
 }
 
+// Policy-clock assertions exclude native crypto scheduling. Only this known
+// segment key is synchronous; all other algorithms and inputs stay native.
+function synchronousFixtureSegmentKey(t) {
+  const subtle = globalThis.crypto.subtle, digest = subtle.digest.bind(subtle);
+  const known = Buffer.from(`${base.swarmId}\n/seg.ts`);
+  t.mock.method(subtle, "digest", (algorithm, input) => {
+    if (algorithm !== "SHA-256" || !(input instanceof Uint8Array) || !Buffer.from(input).equals(known)) return digest(algorithm, input);
+    const bytes = createHash("sha256").update(input).digest();
+    return Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  });
+}
+
 class ServingChannel extends RecordedChannel {
   constructor(bytes, delayMs, trace, label) { super(); this.bytes = bytes; this.delayMs = delayMs; this.trace = trace; this.label = label; }
   send(data) {
@@ -5120,6 +5132,7 @@ test("recorded VOD coordination requires a live same-key FETCH lease and preserv
       f.hls.levels = [{ details: { live: false } }];
       const channel = await f.addPeer(new ServingChannel(playback.bytes, 1, requested, "fetching-holder"));
       channel.receive(JSON.stringify({ t: "contribution", serving: true, rendition: "main:0" }));
+      synchronousFixtureSegmentKey(t);
       clock = virtualClock(t);
       if (variant !== "no-lease") channel.receive(JSON.stringify({ t: "fetching", k: variant === "other-key" ? "f".repeat(64) : playback.key, ms: variant === "expired" ? 10 : 2000 }));
       if (variant === "expired") await clock.advance(11);
@@ -5173,6 +5186,7 @@ test("live and unknown playlists retain bounded receive-only and ranked coordina
           assert.ok(n < 1024, "a bounded deterministic key establishes the contributor rank");
         }
       }
+      synchronousFixtureSegmentKey(t);
       clock = virtualClock(t);
       const began = clock.now(), pending = new Promise(resolve => new f.hls.config.fLoader({}).load(loadContext, {}, { onSuccess: resolve }));
       if (variant.arrives) setTimeout(() => channel.receive(JSON.stringify({ t: "have", keys: [playback.key] })), 20);
