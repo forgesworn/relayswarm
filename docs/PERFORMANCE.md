@@ -151,16 +151,45 @@ These were measured or reviewed and left alone, with the reason.
 - Incoming relay events are deduplicated before signature verification, and
   every bounded map in the session and relay pool stays bounded.
 
+## Later changes (25 October 2026)
+
+Measured on the same host against `5ed12be` (main after the changes above),
+with in-memory or local-filesystem harnesses rather than a real encoder or
+browser.
+
+| Path | Before | After |
+|---|---:|---:|
+| Encoder playlist rename to republished playlist, both renditions | mean 135 ms, max 216 ms | mean 6 ms, max 28 ms |
+| Allowance reservations, 8 at once | 571/s, slowest tenth 16 ms | 2,770/s, 5 ms |
+| Allowance reservations, 32 at once | 436/s, slowest tenth 65 ms | 1,985/s, 20 ms |
+| Allowance reservations, 64 at once | 399/s, slowest tenth 149 ms | 1,426/s, 56 ms |
+
+- The broadcast publisher watches the current generation's rendition
+  directories and publishes when the encoder renames `index.m3u8` into place.
+  A new generation wakes it so the watch is in place before the first
+  playlist. Events only wake the loop, which rereads and validates the files
+  as before; segment events are ignored, events without a filename wake it at
+  most every 10 ms, and the 250 ms interval remains the fallback. Blocking
+  playlist reloads already watch the published playlists, so they release
+  correspondingly sooner. The figures include the harness's own writes.
+  `close()` during a publication no longer waits for another interval.
+- The allowance ledger still applies operations one at a time in arrival
+  order, each on its own copy of the state and checked for cancellation
+  before and after it applies. Operations that queue while a write is in
+  flight now share the next durable write and its two fsyncs. Once one of
+  them has changed the state, every later outcome in the batch, refusals and
+  reads included, is held until the write completes and released in arrival
+  order; if that write fails, every operation in it is refused and none is
+  kept. This host's fsync is fast, so slower storage gains more. A single
+  reservation is unchanged.
+
 ## Follow-ups
 
 Ranked by expected effect. None is implemented here.
 
-1. Republish broadcast playlists on a file-system watch instead of the 250 ms
-   poll, so blocking playlist reloads release sooner after a segment is written.
-2. Group account-allowance writes so concurrent reservations share one durable
-   write; each operation must stay atomic and a failed one must not persist.
-   Most of the remaining reservation cost is the state clone and full rewrite.
-3. Count only signatures, not joined or cached requests, against the demo's
+1. Count only signatures, not joined or cached requests, against the demo's
    commitment budget, which otherwise caps a server near 48 viewers.
-4. Keep a per-relay retry count so a relay that accepts and then drops each
+2. Keep a per-relay retry count so a relay that accepts and then drops each
    connection backs off instead of being redialled every 1–2 s.
+3. Reduce per-reservation CPU at large ledger states: each operation still
+   clones and validates the whole state.

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm, readFile, chmod, realpath, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -124,6 +125,74 @@ test("disconnect revokes retained renewal tokens without affecting another devic
   await assert.rejects(f.ledger.reserve(first.grant, op(3), 1), { status: 403 });
   await assert.rejects(f.ledger.inspectGrant(renewed.grant), { status: 403 });
   assert.equal((await f.ledger.inspectGrant(other.grant)).snapshot.spent, 13);
+});
+
+test("concurrent reservations commit in arrival order and stop exactly at the limit", posixState, async (t) => {
+  const f = await fixture(t, { defaultLimit: 100 }); const a = await f.authorize();
+  const decisions = await Promise.all(Array.from({ length: 12 }, (_, index) => f.ledger.reserve(a.grant, op(index + 1), 10)));
+  assert.deepEqual(decisions.map((d) => d.accepted), [...Array(10).fill(true), false, false]);
+  assert.deepEqual(decisions.map((d) => d.snapshot.spent), [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 100, 100]);
+  const saved = JSON.parse(await readFile(f.statePath, "utf8"));
+  assert.equal(saved.accounts[0].spent, 100); assert.equal(saved.operations.length, 12);
+  await f.ledger.close();
+  const reopened = createAccountUploadBudget(f.config);
+  try { await reopened.ready(); assert.equal((await reopened.reserve(a.grant, op(12), 10)).duplicate, true); assert.equal((await reopened.inspectGrant(a.grant)).snapshot.spent, 100); }
+  finally { await reopened.close(); }
+});
+
+test("an operation cancelled while queued behind a write leaves no charge", posixState, async (t) => {
+  const f = await fixture(t); const a = await f.authorize(), controller = new AbortController();
+  const first = f.ledger.reserve(a.grant, op(1), 5);
+  // Let the first write start, so the others queue behind it.
+  await new Promise((resume) => setImmediate(resume));
+  const queued = f.ledger.reserve(a.grant, op(2), 7, { signal: controller.signal });
+  const after = f.ledger.reserve(a.grant, op(3), 11);
+  controller.abort();
+  assert.equal((await first).accepted, true);
+  await assert.rejects(queued, { code: "account-operation-cancelled" });
+  assert.equal((await after).snapshot.spent, 16);
+  assert.equal(JSON.parse(await readFile(f.statePath, "utf8")).operations.length, 2);
+});
+
+test("outcomes settle in arrival order, a refusal only after the write it depends on", posixState, async (t) => {
+  const f = await fixture(t); const a = await f.authorize(), settled = [];
+  const onDisk = () => JSON.parse(readFileSync(f.statePath, "utf8"));
+  const charge = f.ledger.reserve(a.grant, op(1), 5), conflict = f.ledger.reserve(a.grant, op(1), 6);
+  const revoke = f.ledger.revokeGrant(a.grant), inspect = f.ledger.inspectGrant(a.grant);
+  charge.then(() => settled.push("charge"));
+  conflict.catch((error) => settled.push(`conflict ${error.code} ${onDisk().operations.length}`));
+  revoke.then(() => settled.push("revoke"));
+  inspect.catch((error) => settled.push(`inspect ${error.code} ${onDisk().grants[0].revoked}`));
+  // A caller that awaits in turn handles each refusal as it reaches it.
+  assert.equal((await charge).accepted, true);
+  await assert.rejects(conflict, { code: "account-operation-conflict" });
+  await revoke;
+  await assert.rejects(inspect, { code: "account-grant-unavailable" });
+  assert.deepEqual(settled, ["charge", "conflict account-operation-conflict 1", "revoke", "inspect account-grant-unavailable true"]);
+});
+
+test("a failed shared write refuses every operation in it and persists none", posixState, async (t) => {
+  const f = await fixture(t); const a = await f.authorize();
+  await f.ledger.reserve(a.grant, op(1), 3);
+  await chmod(f.statePath, 0o400);
+  const results = await Promise.allSettled([4, 5, 6].map((bytes, index) => f.ledger.reserve(a.grant, op(index + 2), bytes)));
+  await chmod(f.statePath, 0o600);
+  assert.deepEqual(results.map((result) => result.reason?.code), Array(3).fill("account-persistence-unavailable"), "the three operations shared one write");
+  const saved = JSON.parse(await readFile(f.statePath, "utf8"));
+  assert.equal(saved.accounts[0].spent, 3); assert.equal(saved.operations.length, 1);
+  await assert.rejects(f.ledger.reserve(a.grant, op(9), 1), { code: "account-budget-unavailable" });
+});
+
+test("a refusal that depends on a change whose write fails is not released", posixState, async (t) => {
+  const f = await fixture(t); const a = await f.authorize();
+  await chmod(f.statePath, 0o400);
+  const results = await Promise.allSettled([f.ledger.reserve(a.grant, op(1), 4), f.ledger.reserve(a.grant, op(1), 5),
+    f.ledger.revokeGrant(a.grant), f.ledger.reserve(a.grant, op(2), 1), f.ledger.inspectGrant(a.grant)]);
+  await chmod(f.statePath, 0o600);
+  // Neither the conflict with the unsaved charge nor the unsaved revocation is reported.
+  assert.deepEqual(results.map((result) => result.reason?.code), Array(5).fill("account-persistence-unavailable"));
+  const saved = JSON.parse(await readFile(f.statePath, "utf8"));
+  assert.equal(saved.operations.length, 0); assert.equal(saved.grants[0].revoked, false);
 });
 
 test("pending mutation cap refuses excess before allocating queued work", posixState, async (t) => {
