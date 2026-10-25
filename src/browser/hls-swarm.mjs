@@ -1796,10 +1796,10 @@ class HlsSwarm {
         return multi ? { ...multi, holderContext } : multi;
       }
     }
-    if (plan.cachedOnly) return null;
+    if (plan.cachedOnly && !plan.peerOnly) return null;
     // The committed size is now known and a holder has it.
-    const transfer = this.peerSelection.projectMs(commitment.size);
-    let known = this.#projection(transfer, 0, plan);
+    const transfer = plan.peerOnly ? null : this.peerSelection.projectMs(commitment.size);
+    let known = plan.peerOnly ? "unknown" : this.#projection(transfer, 0, plan);
     // The same single trial: a grant made at entry continues here, and otherwise one is
     // granted if available. The latest row of this decision takes the commitment detail.
     // An entry grant is not a second grant; the request loop re-checks the holder.
@@ -1816,6 +1816,10 @@ class HlsSwarm {
     }
     this.#applyProjection(known, transfer, plan);
     const tried = new Set();
+    // Cached racing uses only the exact links advertised at load entry and
+    // still holding the key. A later HAVE/new connection cannot join it.
+    const eligibleLinks = () => plan.cachedHolders
+      ? [...plan.cachedHolders].filter(link => this.links.get(link.pubkey) === link && link.have.has(key)) : [...this.links.values()];
     while (!signal.aborted && !this.stopped && now() < plan.deadline && tried.size < this.options.maxPeers) {
       // Candidates are judged against the buffer-safe limit, which the wait
       // may grow to; the chosen link's own estimate then sets the deadline.
@@ -1824,7 +1828,7 @@ class HlsSwarm {
       // segment no recent transfer could have delivered in the time left, or
       // with too little time left for even a recent first byte to arrive.
       const firstByte = this.peerSelection.firstByteMs();
-      if (this.peerSelection.minimumMs(commitment.size) > room || (firstByte ?? 0) > room) {
+      if (!plan.peerOnly && (this.peerSelection.minimumMs(commitment.size) > room || (firstByte ?? 0) > room)) {
         this.counters.peerSkippedLate += 1;
         return null;
       }
@@ -1832,12 +1836,12 @@ class HlsSwarm {
       // The first request of a load granted a trial goes to an untested holder.
       const trialLink = trial && tried.size === 0 ? this.#untestedHolder(key, demand.context) : null;
       if (trialLink) this.peerSelection.markSelected(trialLink);
-      const link = trialLink ?? this.peerSelection.select(this.links.values(), key, tried, commitment.size, room);
+      const link = trialLink ?? this.peerSelection.select(eligibleLinks(), key, tried, commitment.size, room);
       if (!link) {
-        if (![...this.links.values()].some((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, room))) {
+        if (!eligibleLinks().some((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, room))) {
           this.counters.peerNoFit += 1;
           // Holders whose own estimate does not fit, and links already asked and failed.
-          this.#recordOutcome(demand, { unfit: [...this.links.values()].filter((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key) && !fits(peer, room)).map((peer) => peer.pubkey) });
+          this.#recordOutcome(demand, { unfit: eligibleLinks().filter((peer) => !peer.closed && !tried.has(peer.pubkey) && peer.have.has(key) && !fits(peer, room)).map((peer) => peer.pubkey) });
           return null;
         }
         await this.#waitForHave(key, Math.min(100, plan.deadline - now()), signal);
@@ -1849,7 +1853,7 @@ class HlsSwarm {
       if (estimateMs !== null && plan.extend(now() + estimateMs * 1.25 + 25)) this.counters.peerWaitExtended += 1;
       const requestedAt = now();
       const remainingMs = plan.deadline - now();
-      const alternatives = [...this.links.values()].filter((peer) => !peer.closed && !peer.busy && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, remainingMs)).length;
+      const alternatives = eligibleLinks().filter((peer) => !peer.closed && !peer.busy && !tried.has(peer.pubkey) && peer.have.has(key) && fits(peer, remainingMs)).length;
       // Give an unmeasured route time to complete, retaining the existing
       // 25ms minimum opportunity for up to two quick alternative attempts.
       // Equal slices can time out every cold route before any can be measured.
@@ -1918,6 +1922,10 @@ class HlsSwarm {
   // the core's Transfer (CORE-SPEC section 6). Undefined when it does not
   // apply, so the single-holder path runs; null sends the load to origin.
   async #multiHolder(context, signal, plan, key, commitment, discoveryContext) {
+    // The parallel HTTP arm can win only as a whole object; it supplies no
+    // ranges to this transfer. Use the existing complete-object/WebCrypto
+    // race instead of giving Rust an origin lane whose commands are ignored.
+    if (plan.peerOnly) return undefined;
     const worker = this.options.transferWorkerUrl !== undefined;
     // An explicit worker opt-in must never quietly retry a large transfer on
     // the main thread after worker startup, policy, resource or runtime failure.
@@ -2178,7 +2186,7 @@ class HlsSwarm {
       controller.abort(PeerLink.ABANDON_REASON);
     };
     let silence = null;
-    if (firstByteMs !== null) {
+    if (!plan.peerOnly && firstByteMs !== null) {
       const hopelessAt = best ? plan.deadline - size / best : -Infinity;
       silence = setTimeout(() => { if (firstByte === null) abandon(); }, Math.max(SILENCE_FLOOR_MS, firstByteMs * 3, hopelessAt - now()));
     }
@@ -2196,6 +2204,10 @@ class HlsSwarm {
       if (firstByte === null) firstByte = Number.isFinite(firstByteAt) ? firstByteAt : at - requestedAt;
       points.push([at, received]);
       if (points.length > 256) points.shift();
+      // HTTP already runs independently for a cached race. A temporary peer
+      // gap need not reserve time for starting it; the real HTTP winner and
+      // the fixed race deadline own cancellation. Keep measuring this flow.
+      if (plan.peerOnly) return;
       if (at - requestedAt < firstByte * 2) return;
       const recent = windowRate(400);
       if (!recent) return;

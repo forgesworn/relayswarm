@@ -75,8 +75,12 @@ link closes or the swarm stops. It creates no new network messages.
 
 The opt-in `zeroBudgetPeerRace: true` races an already advertised cached
 schema 3 object against immediately started normal HTTP when no safe peer
-wait remains. It requires the WASM multi-holder engine and adds no ranged
-origin fetch. Only a complete verified peer winner counts as peer media.
+wait remains. It requires `coreWasm`/`multiHolder` framing eligibility but uses
+the existing whole-object request and asynchronous WebCrypto hash, with no
+ranged origin fetch or unavailable internal origin lane. Candidates stay
+inside the initial cached snapshot and current HAVE. Whole uploads must fit
+the unchanged two-second rate bucket and remaining allowance. Only a complete
+verified peer winner counts as peer media.
 Normal HTTP never waits for metadata; stopping the swarm cancels its peer
 arm while that pending HTTP request continues. Progressive hls.js loads skip
 the race. See the [options and lifecycle contract](../INTEGRATION.md#options).

@@ -1,7 +1,7 @@
 # Dedicated transfer worker
 
-This unreleased experimental opt-in moves schema-3 piece verification and
-transfer scheduling into one dedicated worker per swarm. Both execution paths
+This unreleased experimental opt-in moves normal mixed schema-3 piece
+verification and transfer scheduling into one dedicated worker per swarm. Both execution paths
 share the same small transfer facade and compiled Rust module. Piece hashes,
 the whole-object hash, planner, probe caps and returned commands remain Rust's
 decisions; there is no additional JavaScript verifier.
@@ -42,10 +42,11 @@ immutable release downloads do not contain this unreleased feature.
 `loadCore(...)` exposes its already compiled `module`, a
 `WebAssembly.Module`. The swarm warms the worker asynchronously from that
 module, without a second WASM fetch or holding session/player startup. While
-the worker is warming or after a worker failure, configured schema-3 loads
-use ordinary HTTP. They do not quietly retry a large Rust transfer on the
-main thread. The synchronous/native transfer API and unconfigured swarms
-retain their existing path; schemas 1/2 retain their existing behaviour.
+the worker is warming or after a worker failure, configured peer-first loads
+use ordinary HTTP before any metadata or coordinated wait. They do not quietly
+retry a large Rust transfer on the main thread. The synchronous/native transfer
+API and unconfigured swarms retain their existing path. Once the worker is
+ready, schemas 1/2 retain their existing path too.
 
 The companion imports only the shared transfer facade. It receives a cloned
 compiled module, numeric scheduler inputs, commitment digests and media bytes.
@@ -76,6 +77,8 @@ terminate the worker and reject pending work. The normal pending HTTP arm of
 a cached-peer race remains owned by its loader.
 
 The loader keeps generation/abort guards and complete-object acceptance.
+An explicit clock check fences worker replies at the absolute backstop even
+when its timer has not run; the mixed path retains its origin reserve.
 Late worker replies cannot credit peer bytes or call the player. Only
 first-verified-copy contributions in an accepted complete object reach
 `onPeerDelivery`. `metrics().core.transferWorker` reports state/reason and,
@@ -91,6 +94,29 @@ release one handle; `stop` terminates the worker. `WorkerImpl` on the HLS
 options is a constructor injection point for tests or an equivalent host
 worker transport.
 
+## Independent cached whole-object race
+
+When no safe serial wait remains, `zeroBudgetPeerRace` runs its original
+whole-object peer request and asynchronous WebCrypto hash alongside the one
+normal HTTP request. That HTTP arm cannot supply pieces to an assembled Rust
+transfer. Giving a piece planner its fast whole-HTTP estimate could otherwise
+strand peer work behind origin commands that performed no I/O. Cached racing
+therefore uses the existing complete-object path, with no invented origin
+estimate, and restricts every candidate to the initial snapshot and current
+HAVE. The serial early-abandon estimator does not cancel this already-parallel
+arm during a temporary gap: the real HTTP winner, fixed race deadline and
+host/loader cancellation own its lifetime. Progress still trains timing
+evidence. Normal mixed transfers retain worker-based piece verification and
+positive-budget abandonment remains unchanged.
+
+This preserves upload policy. A whole object must fit the holder's available
+rate tokens, whose maximum burst is two seconds of its configured upload rate,
+and its remaining allowance. The SDK default maximum burst is 2,500,000 bytes;
+a host configured for 4 MiB/s has an 8 MiB maximum burst. Larger cached whole
+objects are refused and HTTP continues. Ranged mixed transfers can still
+serve bounded pieces. The cached path offers neither aggregation across
+holders nor a peerable-object guarantee, and never increases upload allowances.
+
 ## Focused verification
 
 ```sh
@@ -102,7 +128,9 @@ The bridge fixture uses a real Node worker thread with the committed WASM,
 comparing every six-MiB mixed/corrupt transfer frame and final bytes against
 the synchronous core. It covers independent cleanup, limits, stale replies,
 deadlines, worker errors and stop. Loader checks cover a six-MiB verified
-contribution with exact observations, HTTP during held worker initialisation,
-and genuine worker failure with no peer credit or synchronous retry. These
+contribution with exact observations, HTTP during held initialisation with a
+real FETCH/no HAVE, delayed replies within and past the origin reserve,
+ordinary HTTP surviving peer shutdown, and genuine worker failure with no
+peer credit or synchronous retry. These
 are protocol/lifecycle checks; physical HLS continuity and net network benefit
 remain separate acceptance gates.

@@ -5385,23 +5385,87 @@ test("zero-budget cached race clears holder history only for an accepted peer co
   }
 });
 
-test("zero-budget cached race discards verified partial pieces when HTTP wins the whole object", async t => {
+test("zero-budget cached race keeps a bursty peer until the real HTTP winner or absolute deadline", async t => {
+  class BurstyCachedChannel extends RangedChannel {
+    send(data) {
+      const request = typeof data === "string" ? JSON.parse(data) : null;
+      if (request?.t !== "want") return super.send(data);
+      RecordedChannel.prototype.send.call(this, data); this.wants.push(request.p ?? null);
+      setTimeout(() => this.receive(JSON.stringify({ t: "meta", id: request.id, size: this.bytes.length })), 0);
+      for (let chunk = 0; chunk < 4; chunk++) setTimeout(() => {
+        if (this.readyState === "open") this.receive(this.bytes.slice(chunk * 16_384, (chunk + 1) * 16_384).buffer);
+      }, 10 + chunk * 200);
+      setTimeout(() => {
+        if (this.readyState !== "open") return;
+        for (let at = 4 * 16_384; at < this.bytes.length; at += 16_384) this.receive(this.bytes.slice(at, at + 16_384).buffer);
+        this.receive(JSON.stringify({ t: "eof", id: request.id }));
+      }, 700);
+    }
+  }
+  const clock = virtualClock(t), observed = [];
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { holders: [{ Channel: BurstyCachedChannel }], size: 1024 * 1024, wholeOriginDelayMs: 900,
+      onPeerDelivery: row => observed.push(row), swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 1_000 } }));
+    f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    const pending = beginCountedMultiLoad(f);
+    sameBytes(await clock.settle(pending.response, 1_100), f.bytes);
+    assert.equal(f.swarm.metrics().segments.peerAbandoned, 0, "the serial recovery projection does not kill the parallel peer arm");
+    assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaceWins, 1);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length);
+    assert.equal(observed.reduce((sum, row) => sum + row.bytes, 0), f.bytes.length);
+    assert.equal(observed[0].connection, f.connections[0]);
+    assert.equal(f.wholeLoads.length, 1);
+    assert.equal(f.wholeLoads[0].loader.aborted, true);
+    assert.deepEqual(f.ranges, []);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test("zero-budget cached race discards incomplete peer media when HTTP wins the whole object", async t => {
+  class TrackedPartialChannel extends PhasedFlowChannel {
+    received = 0;
+    receive(data) { if (typeof data !== "string") this.received += data.byteLength; return super.receive(data); }
+  }
   const observed = [];
-  const f = await multiFixture(t, { holders: [{ delayMs: 20 }], size: 2 * 1024 * 1024, wholeOriginDelayMs: 500,
+  const f = await multiFixture(t, { holders: [{ Channel: TrackedPartialChannel, firstByteMs: 20, flowMs: 200 }], size: 2 * 1024 * 1024, wholeOriginDelayMs: 2_000,
     onPeerDelivery: value => observed.push(value), swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 1_000 } });
   f.hls.media = { currentTime: 0, buffered: { length: 0 } };
   try {
     const load = beginCountedMultiLoad(f);
-    await until(() => f.swarm.metrics().core.multiHolder.peerBytes > 0);
+    await until(() => f.channels[0].received >= 32_768);
+    assert.ok(f.channels[0].received < f.bytes.length, "actual partial peer media arrived before the HTTP winner");
+    assert.deepEqual(f.channels[0].wants, [null], "the cached arm requests a complete object");
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, 0);
     assert.equal(f.swarm.metrics().core.multiHolder.delivered, 0);
     const origin = f.wholeLoads[0];
     origin.callbacks.onSuccess({ data: f.bytes.slice().buffer }, origin.loader.stats, multiContext, null);
     sameBytes(await load.response, f.bytes);
     assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
     assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaceWins, 0);
-    assert.deepEqual(observed, [], "partial verified pieces did not become an accepted player object");
+    assert.deepEqual(observed, [], "incomplete peer media did not become an accepted player object");
     assert.equal(origin.loader.aborted, false);
     assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
+  } finally { await f.close(); }
+});
+
+test("zero-budget cached race excludes a later HAVE even after its initial holder fails integrity", async t => {
+  const observed = [], key = createHash("sha256").update(`${base.swarmId}\n/media/seg.ts`).digest("hex");
+  let f;
+  f = await multiFixture(t, { holders: [{ corrupt: true, delayMs: 10 }, {}], wholeOriginDelayMs: 150,
+    onPeerDelivery: value => observed.push(value), beforeCommitment: () => f.channels[1].receive(JSON.stringify({ t: "have", keys: [key] })),
+    swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 500 } });
+  try {
+    f.channels[1].receive(JSON.stringify({ t: "have", keys: [] }));
+    f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+    sameBytes(await beginCountedMultiLoad(f).response, f.bytes);
+    assert.deepEqual(f.channels[0].wants, [null], "only the initial cached holder receives a whole-object request");
+    assert.deepEqual(f.channels[1].wants, [], "a later HAVE cannot replace membership captured at load entry");
+    assert.equal(f.channels[0].readyState, "closed");
+    assert.equal(f.swarm.metrics().segments.peerCorrupt, 1);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.deepEqual(observed, []);
+    assert.equal(f.wholeLoads.length, 1);
+    assert.deepEqual(f.ranges, []);
   } finally { await f.close(); }
 });
 
@@ -5481,7 +5545,10 @@ test("zero-budget cached race rejects corrupt pieces and expires only the peer a
       assert.equal(load.calls.success.length, 1); assert.equal(load.calls.abort.length, 0);
       assert.equal(f.wholeLoads[0].loader.aborted === true, false);
       assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.deepEqual(observed, []);
-      if (variant === "corrupt") assert.equal(f.swarm.metrics().core.multiHolder.bans, 1);
+      if (variant === "corrupt") {
+        assert.equal(f.swarm.metrics().segments.peerCorrupt, 1);
+        assert.equal(f.channels[0].readyState, "closed", "the altered whole payload closes its actual holder link");
+      }
       assert.equal(f.wholeLoads.length, 1); assert.deepEqual(f.ranges, []);
     } finally {
       if (f) await clock.settle(f.close());
