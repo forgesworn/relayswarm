@@ -37,6 +37,7 @@ import { commitmentPieceSize, validStreamAuthorisation, verifySegmentCommitment,
 import { loadCore } from "./core-wasm.mjs";
 import { createCoreTransferWorker } from "./core-transfer-worker.mjs";
 import { fetchOriginRange, loadOriginRange } from "./origin-range.mjs";
+import { createWarmAhead, WARM_AHEAD } from "./warm-ahead.mjs";
 
 export const HLS_SWARM_METRICS_VERSION = 2;
 
@@ -57,6 +58,9 @@ const DEFAULTS = Object.freeze({
   // Opt-in: also leave room to recover from origin within the duration this
   // fragment adds, so repeated peer misses need not steadily drain playback.
   sustainablePeerWait: false,
+  // Opt-in: one speculative whole-fragment load for this player's next two
+  // parsed fragments. Verified bytes share the existing bounded held cache.
+  warmAhead: false,
   lateWindowMs: 6_000,
   maxPeers: 6,
   maxUploadPeers: 4,
@@ -557,6 +561,7 @@ class HlsSwarm {
     if (typeof this.options.zeroBudgetPeerRace !== "boolean") return "invalid-cached-race-option";
     if (typeof this.options.lateHaveRace !== "boolean") return "invalid-late-have-race-option";
     if (typeof this.options.sustainablePeerWait !== "boolean") return "invalid-sustainable-wait-option";
+    if (typeof this.options.warmAhead !== "boolean" || this.options.warmAhead && (mode !== "peer-first" || this.options.serve !== true)) return "invalid-warm-ahead-option";
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (this.options.reserveUploadBytes !== undefined && typeof this.options.reserveUploadBytes !== "function") return "invalid-upload-reservation";
     if (typeof this.options.serve !== "boolean" || typeof this.options.serveOnCellular !== "boolean") return "invalid-serve-option";
@@ -579,6 +584,37 @@ class HlsSwarm {
       this.originalFragmentLoader = hls.config.fLoader;
       const BaseLoader = hls.config.fLoader || hls.config.loader;
       hls.config.fLoader = this.options.mode === "peer-first" ? this.#peerFirstLoader(BaseLoader) : this.#shadowLoader(BaseLoader);
+      if (this.options.warmAhead) {
+        this.warmAhead = createWarmAhead({ Loader: hls.config.fLoader,
+          allowed: () => !this.stopped && hls.media?.paused !== true && !onCellular(),
+          next: context => {
+            const fragments = hls.levels?.[context.frag?.level]?.details?.fragments;
+            if (!Array.isArray(fragments)) return [];
+            const index = fragments.findIndex(frag => frag.sn === context.frag.sn && (frag.cc ?? 0) === (context.frag.cc ?? 0));
+            return index < 0 ? [] : fragments.slice(index + 1, index + 3).map(frag => ({ url: frag.url, frag,
+              type: "media-fragment", headers: {}, part: null, responseType: "arraybuffer",
+              rangeStart: frag.byteRangeStartOffset, rangeEnd: frag.byteRangeEndOffset }));
+          },
+          authorise: async (context, signal) => {
+            const key = await this.#segmentKey(context);
+            const event = await boundedOperation(operationSignal => this.options.getCommitment(context, { signal: operationSignal }), signal, 1_000);
+            if (signal.aborted || this.stopped) return null;
+            const commitment = this.#verifyCommitment(event, { streamEvent: this.options.streamEvent, swarmId: this.options.swarmId,
+              key, context, maxSegmentBytes: this.options.maxSegmentBytes, delegation: this.options.delegation,
+              revokedDelegationIds: this.options.revokedDelegationIds, delegationRevocations: this.options.delegationRevocations });
+            return commitment && commitment.size <= this.options.maxHeldBytes ? { ...commitment, key } : null;
+          },
+          verify: async (permit, data, _context, signal) => data instanceof ArrayBuffer && data.byteLength === permit.size &&
+            !signal.aborted && await sha256Hex(data) === permit.sha256,
+          reserve: size => { this.#trimHeld(this.options.maxHeldBytes - size); return !this.stopped; },
+          onVerified: (permit, data) => { this.#dropHeld(permit.key); this.#hold(permit.key, new Uint8Array(data)); return this.held.has(permit.key); },
+          onReuse: (context, _bytes, peerBytes) => { if (peerBytes > 0 && context.frag) this.peerFragments.add(context.frag); },
+        });
+        hls.config.fLoader = this.warmAhead.Loader;
+        const media = hls.media;
+        const cancelWarm = () => this.warmAhead?.clear();
+        for (const name of ["pause", "seeking", "ended"]) media?.addEventListener?.(name, cancelWarm, { signal: this.lifecycle.signal });
+      }
       if (this.options.mode === "peer-first" && this.options.abrIgnorePeers) this.#withholdPeerAbrSamples(hls);
       if (this.options.mode === "peer-first" && this.options.coreWasm !== undefined) {
         let release;
@@ -632,6 +668,7 @@ class HlsSwarm {
   updateTicket(ticket) {
     if (this.stopped || this.disabledReason || !this.#gated() || !validTicket(ticket)) return false;
     if (ticket === this.options.ticket) return true;
+    this.warmAhead?.clear();
     this.options.ticket = ticket;
     this.#scheduleReannounce();
     return true;
@@ -640,6 +677,7 @@ class HlsSwarm {
   stop() {
     if (this.stopped) return;
     this.stopped = true;
+    this.warmAhead?.stop();
     this.#endDiscovery();
     this.discovery.clear();
     this.lifecycle.abort();
@@ -756,6 +794,7 @@ class HlsSwarm {
       mode: this.disabledReason ? "off" : this.options.mode,
       disabledReason: this.disabledReason || null,
       stopped: this.stopped,
+      warmAhead: this.warmAhead?.snapshot() ?? null,
       pubkey: this.session?.pubkey || null,
       uptimeMs: Date.now() - this.startedAt,
       serving: this.#servingAllowed(),
@@ -1052,7 +1091,7 @@ class HlsSwarm {
             onAbort: (...args) => { traceOrigin("abort"); finishOrigin(); callbacks.onAbort?.(...args); },
             onSuccess: (response, stats, ctx, details) => {
               const receivedMs = firstByteWallMs(stats);
-              const { copy, size } = swarm.#originCopy(response);
+              const { copy, size } = swarm.#originCopy(response, context);
               traceOrigin("payload", size || null);
               completed = true;
               pushSample(swarm.originLatencySamples, now() - originStarted);
@@ -1168,7 +1207,7 @@ class HlsSwarm {
           onSuccess: (response, stats, ctx, details) => {
             if (!finishOrigin()) return;
             const receivedMs = firstByteWallMs(stats);
-            const { copy, size } = swarm.#originCopy(response);
+            const { copy, size } = swarm.#originCopy(response, context);
             pushSample(swarm.originLatencySamples, now() - t0);
             swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - t0);
             callbacks.onSuccess(response, stats, ctx, details);
@@ -1220,11 +1259,11 @@ class HlsSwarm {
 
   // An origin response's size, and a copy of its bytes only when #hold may
   // keep them. Copied before the player sees the buffer, which it may transfer.
-  #originCopy(response) {
+  #originCopy(response, context) {
     try {
       const data = response.data, size = data?.byteLength;
       if (!size) return { copy: null, size: 0 };
-      return { copy: this.#mayServe() ? data.slice(0) : null, size };
+      return { copy: this.#mayServe() && !context?.[WARM_AHEAD] ? data.slice(0) : null, size };
     } catch { return { copy: null, size: 0 }; }
   }
 
@@ -1235,38 +1274,45 @@ class HlsSwarm {
       bwEstimate: size * 8_000 / Math.max(1, end - t0), loading: { start: t0, first: end, end },
       parsing: { start: 0, end: 0 }, buffering: { start: 0, first: 0, end: 0 } });
     const peerBytes = result.multi ? result.peerBytes : size;
-    if (peerBytes > 0) this.counters.peerFirstLoaded += 1;
-    this.counters.peerFirstBytes += peerBytes; this.counters.bytesFromPeers += peerBytes;
-    if (peerBytes > 0) {
-      if (!result.multi) {
-        this.discovery.holderDelivered(result.holderContext, result.pubkey);
-        this.#noteUsefulLink(this.links.get(result.pubkey), size);
+    // Network reception is recorded once. Speculation is not a delivery to
+    // hls.js until the genuine player later consumes that verified object.
+    this.counters.bytesFromPeers += peerBytes;
+    const accept = acceptedContext => {
+      if (peerBytes > 0) this.counters.peerFirstLoaded += 1;
+      this.counters.peerFirstBytes += peerBytes;
+      if (peerBytes > 0) {
+        if (!result.multi) {
+          this.discovery.holderDelivered(result.holderContext, result.pubkey);
+          this.#noteUsefulLink(this.links.get(result.pubkey), size);
+        }
+        else {
+          const contributed = new Map(result.contributions.filter(row => row.bytes > 0).map(row => [row.connection, row.bytes]));
+          const refreshed = new Map((result.shortRefreshes || []).map(row => [row.connection, row.at]));
+          for (const link of this.links.values()) if (contributed.has(link.pc)) {
+            this.discovery.holderDelivered(result.holderContext, link.pubkey);
+            this.#noteUsefulLink(link, contributed.get(link.pc), refreshed.get(link.pc));
+          }
+        }
+        if (this.discovery.verified(result.discoveryContext) && this.discovery.window?.context === result.discoveryContext) this.#endDiscovery();
+        if (this.firstPeerSegmentAtMs === null) this.firstPeerSegmentAtMs = Date.now() - this.startedAt;
+        pushSample(this.peerLatencySamples, end - t0);
+        if (acceptedContext.frag) this.peerFragments.add(acceptedContext.frag);
       }
-      else {
-        const contributed = new Map(result.contributions.filter(row => row.bytes > 0).map(row => [row.connection, row.bytes]));
-        const refreshed = new Map((result.shortRefreshes || []).map(row => [row.connection, row.at]));
-        for (const link of this.links.values()) if (contributed.has(link.pc)) {
-          this.discovery.holderDelivered(result.holderContext, link.pubkey);
-          this.#noteUsefulLink(link, contributed.get(link.pc), refreshed.get(link.pc));
+      if (typeof this.options.onPeerDelivery === "function") {
+        const contributions = result.multi ? result.contributions : [{ connection: result.connection, bytes: size }];
+        for (const { connection, bytes } of contributions) {
+          if (bytes <= 0) continue;
+          try {
+            const observed = this.options.onPeerDelivery({ connection, bytes });
+            if (observed && typeof observed.then === "function") Promise.resolve(observed).catch(() => {});
+          } catch {}
         }
       }
-      if (this.discovery.verified(result.discoveryContext) && this.discovery.window?.context === result.discoveryContext) this.#endDiscovery();
-      if (this.firstPeerSegmentAtMs === null) this.firstPeerSegmentAtMs = Date.now() - this.startedAt;
-      pushSample(this.peerLatencySamples, end - t0);
-      if (context.frag) this.peerFragments.add(context.frag);
-    }
+    };
+    if (context[WARM_AHEAD]) Object.assign(context[WARM_AHEAD], { peerBytes, accept });
+    else accept(context);
     // #hold keeps nothing while serving is off or the key is already held.
-    if (this.#servingAllowed() && !this.held.has(result.key)) this.#hold(result.key, result.bytes.slice());
-    if (typeof this.options.onPeerDelivery === "function") {
-      const contributions = result.multi ? result.contributions : [{ connection: result.connection, bytes: size }];
-      for (const { connection, bytes } of contributions) {
-        if (bytes <= 0) continue;
-        try {
-          const observed = this.options.onPeerDelivery({ connection, bytes });
-          if (observed && typeof observed.then === "function") Promise.resolve(observed).catch(() => {});
-        } catch {}
-      }
-    }
+    if (!context[WARM_AHEAD] && this.#servingAllowed() && !this.held.has(result.key)) this.#hold(result.key, result.bytes.slice());
     callbacks.onSuccess({ url: context.url, data: result.bytes.buffer, code: 200 }, loader.peerStats, context, null);
   }
 
@@ -1370,6 +1416,10 @@ class HlsSwarm {
   }
 
   #peerBudget(context, geometry) {
+    // Speculation never reserves a positive peer-only wait or asks a mixed
+    // transfer to create origin ranges. Cached peers can still race the one
+    // immediately started whole-object HTTP request through the usual path.
+    if (context?.[WARM_AHEAD]) { geometry.source = "warm-ahead"; return 0; }
     const media = this.hls?.media;
     let sustainableMs = Infinity;
     if (this.options.sustainablePeerWait) {
@@ -2523,15 +2573,28 @@ class HlsSwarm {
     if (!this.#servingAllowed() || this.held.has(key) || bytes.byteLength > this.options.maxSegmentBytes) return;
     this.held.set(key, bytes);
     this.heldBytes += bytes.byteLength;
-    const evicted = [];
-    while (this.held.size > this.options.maxHeldSegments || this.heldBytes > this.options.maxHeldBytes) {
-      const [oldKey, oldBytes] = this.held.entries().next().value;
-      this.held.delete(oldKey);
-      this.heldBytes -= oldBytes.byteLength;
-      evicted.push(oldKey);
-    }
+    const evicted = this.#trimHeld(this.options.maxHeldBytes - (this.warmAhead?.snapshot().reservationBytes ?? 0), false);
     if (!this.#servingAllowed()) return;
     for (const link of this.links.values()) link.sendHaveChange([key], evicted);
+  }
+
+  #dropHeld(key) {
+    const bytes = this.held.get(key);
+    if (!bytes) return;
+    this.held.delete(key); this.heldBytes -= bytes.byteLength;
+    this.warmAhead?.release(key);
+    for (const link of this.links.values()) link.sendHaveChange([], [key]);
+  }
+
+  #trimHeld(limit, announce = true) {
+    const evicted = [];
+    while (this.held.size && (this.held.size > this.options.maxHeldSegments || this.heldBytes > Math.max(0, limit))) {
+      const [key, bytes] = this.held.entries().next().value;
+      this.held.delete(key); this.heldBytes -= bytes.byteLength;
+      this.warmAhead?.release(key); evicted.push(key);
+    }
+    if (announce && evicted.length) for (const link of this.links.values()) link.sendHaveChange([], evicted);
+    return evicted;
   }
 
   // Whether serving could be allowed by the time #hold runs. Allowance and

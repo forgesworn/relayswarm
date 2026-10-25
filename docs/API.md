@@ -102,6 +102,33 @@ buffer reserve remains in force. Unknown origin recovery, unknown duration or
 no spare duration starts HTTP immediately; an enabled cached/late-HAVE race retains its independent
 window. This is an admission bound, not a smooth-playback guarantee.
 
+The unreleased experimental `warmAhead: true` option requires peer-first and
+explicit `serve: true`. It observes this player's actual parsed main-media
+fragments, loads at most the next two, and keeps one speculative whole-object
+HTTP arm in flight. Existing demanded whole/range request limits still apply;
+this is not a two-request global HTTP limit. Demand starts immediately and
+joins already-running exact-object work instead of downloading it again.
+There is no startup gate, pause, hidden player, clock offset or automatic seek.
+
+Future bytes need a current signed commitment and matching SHA-256 before
+entering the shared held cache. At most three warm references and 24 MiB of
+warm data/reservations fit inside the existing `maxHeldBytes` budget. The warm
+map references the held buffer; delivery to hls.js receives a transfer-safe
+copy. Normal player/decoder memory and transient demand buffers remain
+separate. Speculation expires after eight seconds. Pause, seek, ticket change,
+rendition change and stop clear speculative state; unrelated work yields to a
+new demanded position. Gap, ranged, encrypted and alternate-audio fragments
+retain the ordinary loader path.
+
+Every demand reuse checks the host's current commitment/delegation/revocation
+view. Refusal falls back to the ordinary origin loader. `metrics().warmAhead`
+reports `verifiedBytes`, `verifiedPeerBytes`, `consumedPeerBytes`,
+`localReuseBytes`, active work, cache bytes and reservations. Raw peer reception
+is recorded once; `bytes.peerFirst` and `onPeerDelivery` receive speculative
+peer credit only when real hls.js demand consumes it. Local reuse does not
+create network bytes. These source tests do not establish sustained cold-cache
+4K, a public TURN route, network savings or physical-device continuity.
+
 The unreleased opt-in `transferWorkerUrl` warms one explicitly packaged
 companion worker asynchronously after `coreWasm` loads. With `multiHolder`,
 schema-3 verification and planning use the same Rust transfer facade in that

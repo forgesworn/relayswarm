@@ -12,6 +12,15 @@ Earlier release and pilot evidence below retains its date and source.
 
 ## Unreleased per-connection timing and bounded recovery (25 October 2026)
 
+The experimental `warmAhead` option is disabled by default. Signed-commitment
+loader tests using actual hls.js 1.7.3 parsed Fragment objects cover future
+object verification, exact-demand reuse/coalescing, current-authority refusal,
+cache/reservation limits, cancellation and the untouched default path. Its
+speculative map shares the existing held byte budget, and local reuse is
+reported separately from accepted peer payload. Sustained cold-cache 4K,
+useful peer contribution, shared-clock behaviour and physical iPhone acceptance
+require fresh browser/device measurements before enabling it in a deployment.
+
 Cold-cache physical diagnostics exposed two distinct timing errors: a
 holder's completion rate already included startup, yet the piece planner
 also added a viewer-wide first-byte delay from another connection; HTTP
