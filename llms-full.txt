@@ -359,7 +359,7 @@ decision is not cached as permission for later upload requests.
 | `maxPeerWaitMs` | `5000` | Peer-first may wait past `originFallbackMs`, up to this, only while recent peer timing projects the segment needs it and the playback buffer covers the wait with `originReserveMs` to spare. |
 | `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
 | `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-object origin time with a 25% and 100 ms recovery margin. Substantial origin ranges update this estimate after scaling by their actual byte count. Unknown origin timing or duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. Independent cached/late-HAVE races keep their window beside immediate HTTP. |
-| `warmAhead` | `false` | Experimental peer-first option, requiring `serve: true`: use the same player's next two parsed, unencrypted, whole main-media fragments for bounded speculative loading. One extra whole-object HTTP arm at most; existing demand/range limits are unchanged. Verified future objects share the held cache, with at most three warm references and 24 MiB of warm data/reservation within `maxHeldBytes`, not an additional cache. |
+| `warmAhead` | `false` | Experimental peer-first option, requiring `serve: true`: use the same player's next two parsed, unencrypted, whole main-media fragments for bounded speculative loading. A warmed object promoted to genuine demand frees the sole speculative slot. Existing demand/range limits are unchanged. Verified future objects share the held cache; at most three distinct cached/in-flight objects and 24 MiB of warm data plus all reservations fit within `maxHeldBytes`. Fresh cache permission may wait only within actual buffer headroom, up to 25 ms, before ordinary source recovery proceeds independently. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
 | `maxPeers` | `6` | Connections in and out. The demo selects four explicitly. |
 | `maxDialsInFlight` / `dialTimeoutMs` | `2` / `12000` | Simultaneous outbound dials and setup deadline. |
@@ -2071,6 +2071,10 @@ fragments, loads at most the next two, and keeps one speculative whole-object
 HTTP arm in flight. Existing demanded whole/range request limits still apply;
 this is not a two-request global HTTP limit. Demand starts immediately and
 joins already-running exact-object work instead of downloading it again.
+That work becomes genuine demand and frees the single speculative slot, so
+the following object can load concurrently. The combined cache and in-flight
+set remains bounded to three distinct objects and 24 MiB; all in-flight
+reservations reduce the existing held-cache budget together.
 There is no startup gate, pause, hidden player, clock offset or automatic seek.
 
 Future bytes need a current signed commitment and matching SHA-256 before
@@ -2084,9 +2088,20 @@ new demanded position. Gap, ranged, encrypted and alternate-audio fragments
 retain the ordinary loader path.
 
 Every demand reuse checks the host's current commitment/delegation/revocation
-view. Refusal falls back to the ordinary origin loader. `metrics().warmAhead`
+view. Only actual buffer beyond the normal origin recovery reserve permits
+waiting for that check, capped at 25 ms. Unknown/empty headroom starts the
+ordinary source immediately; otherwise source recovery starts when this small
+budget expires. The first authorised cache result or source result wins and
+cancels the other arm. Refusal leaves source recovery running. Thus buffered,
+promptly authorised cache reuse avoids another HTTP request, while underflow
+recovery can make another request; actual traffic remains counted. Stopping
+does not wait for an unresponsive cache provider. Exhausting upload allowance
+also clears warm references and reservations.
+
+`metrics().warmAhead`
 reports `verifiedBytes`, `verifiedPeerBytes`, `consumedPeerBytes`,
-`localReuseBytes`, active work, cache bytes and reservations. Raw peer reception
+`localReuseBytes`, active speculative work, promoted demand, tracked objects,
+cache bytes and aggregate reservations. Raw peer reception
 is recorded once; `bytes.peerFirst` and `onPeerDelivery` receive speculative
 peer credit only when real hls.js demand consumes it. Local reuse does not
 create network bytes. These source tests do not establish sustained cold-cache
@@ -2656,6 +2671,11 @@ speculative map shares the existing held byte budget, and local reuse is
 reported separately from accepted peer payload. Sustained cold-cache 4K,
 useful peer contribution, shared-clock behaviour and physical iPhone acceptance
 require fresh browser/device measurements before enabling it in a deployment.
+An initial 60-second public-4K candidate run remained RED despite local cache
+reuse. Promoting an in-flight warm object to actual demand now frees the
+speculative slot for its successor, with aggregate reservations and an
+independent buffer-bounded source recovery path. These causal source fixes
+still require another unchanged cold-cache playback comparison.
 
 Cold-cache physical diagnostics exposed two distinct timing errors: a
 holder's completion rate already included startup, yet the piece planner

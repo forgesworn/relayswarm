@@ -22,53 +22,67 @@ export function warmContext(context) {
   } catch { return null; }
 }
 
-export function createWarmAhead({ Loader, next, authorise, verify, reserve = () => true, onVerified, onReuse, allowed = () => true }) {
+export function createWarmAhead({ Loader, next, authorise, verify, reserve = () => true, onVerified, onReuse,
+  reuseBudget = () => 0, allowed = () => true }) {
   let closed = false, generation = 0, active = null, scope = null, queued = [], config, loaderConfig;
-  const cache = new Map(), demand = new Set();
-  const counters = { started: 0, verified: 0, rejected: 0, cancelled: 0, coalesced: 0, localReuseBytes: 0,
-    verifiedBytes: 0, verifiedPeerBytes: 0, consumedPeerBytes: 0,
-    cacheBytes: 0, highWaterBytes: 0, reservationBytes: 0 };
+  const cache = new Map(), demand = new Set(), jobs = new Map(), promoted = new Set(), reuseWaiters = new Set(), pins = new Map();
+  const counters = { started: 0, verified: 0, rejected: 0, cancelled: 0, coalesced: 0, promotions: 0, localReuseBytes: 0,
+    verifiedBytes: 0, verifiedPeerBytes: 0, consumedPeerBytes: 0, cacheBytes: 0, highWaterBytes: 0 };
+  const reserved = () => [...jobs.values()].reduce((sum, row) => sum + row.reserved, 0);
+  const tracked = () => new Set([...cache.keys(), ...jobs.keys()]).size;
+  const live = row => jobs.get(row.key) === row && !row.finished;
   const drop = key => { const row = cache.get(key); if (row) { counters.cacheBytes -= row.data.byteLength; cache.delete(key); } };
+  const finishJob = (row, result) => {
+    if (!live(row)) return;
+    row.finished = true; jobs.delete(row.key); promoted.delete(row);
+    if (active === row) active = null;
+    row.reserved = 0; row.finish(result);
+    queueMicrotask(pump);
+  };
+  const cancelJob = row => { if (live(row)) { counters.cancelled++; row.cancel(); finishJob(row, null); } };
   const clear = () => {
     generation++; queued = [];
-    const old = active; active = null;
-    if (old) { counters.cancelled++; old.cancel(); }
-    counters.reservationBytes = 0;
+    for (const row of [...jobs.values()]) cancelJob(row);
     for (const key of cache.keys()) drop(key);
+    for (const resume of [...reuseWaiters]) resume(true);
   };
   const pump = () => {
-    if (closed || active || !allowed() || !queued.length || demand.size > 1) return;
+    if (closed || active || !allowed() || !queued.length || demand.size + promoted.size > 1) return;
     const item = queued.shift();
-    if (cache.has(item.key)) { queueMicrotask(pump); return; }
-    const controller = new AbortController(), revision = generation;
+    if (cache.has(item.key) || jobs.has(item.key)) { queueMicrotask(pump); return; }
+    while (tracked() >= MAX_OBJECTS && cache.size) drop(cache.keys().next().value);
+    if (tracked() >= MAX_OBJECTS) return;
+    const controller = new AbortController(), revision = generation, cfg = config, policy = loaderConfig;
     let loader, timer, finish;
-    const row = { ...item, promise: new Promise(resolve => { finish = resolve; }), cancel() {
-      controller.abort(); clearTimeout(timer); try { loader?.abort(); loader?.destroy(); } catch {} finish(null);
-    } };
-    active = row;
-    timer = setTimeout(() => { if (active === row) { counters.cancelled++; row.cancel(); active = null; counters.reservationBytes = 0; pump(); } }, DEADLINE_MS);
+    const row = { ...item, reserved: 0, finished: false, waiters: new Set(), promise: new Promise(resolve => { finish = resolve; }),
+      finish: result => finish(result), cancel() {
+        controller.abort(); clearTimeout(timer); try { loader?.abort(); loader?.destroy(); } catch {}
+      } };
+    active = row; jobs.set(row.key, row);
+    timer = setTimeout(() => cancelJob(row), DEADLINE_MS);
     void (async () => {
       try {
         const permit = await authorise(item.context, controller.signal);
-        if (controller.signal.aborted || closed || revision !== generation || active !== row || !allowed()) return null;
+        if (controller.signal.aborted || closed || revision !== generation || !live(row) || !allowed()) return null;
         if (!permit || !Number.isSafeInteger(permit.size) || permit.size < 1 || permit.size > MAX_BYTES) { counters.rejected++; return null; }
-        while (cache.size >= MAX_OBJECTS || counters.cacheBytes + permit.size > MAX_BYTES) drop(cache.keys().next().value);
-        counters.reservationBytes = permit.size;
-        if (!reserve(permit.size)) { counters.rejected++; return null; }
-        counters.highWaterBytes = Math.max(counters.highWaterBytes, counters.cacheBytes + permit.size);
+        while (counters.cacheBytes + reserved() + permit.size > MAX_BYTES && cache.size) drop(cache.keys().next().value);
+        if (counters.cacheBytes + reserved() + permit.size > MAX_BYTES) { counters.rejected++; return null; }
+        row.reserved = permit.size;
+        if (!reserve(reserved())) { row.reserved = 0; counters.rejected++; return null; }
+        counters.highWaterBytes = Math.max(counters.highWaterBytes, counters.cacheBytes + reserved());
         const warm = item.context[WARM_AHEAD] = { peerBytes: 0 };
-        loader = new Loader(config); counters.started++;
-        const response = await new Promise(resolve => loader.load(item.context, loaderConfig, {
+        loader = new Loader(cfg); counters.started++;
+        const response = await new Promise(resolve => loader.load(item.context, policy, {
           onSuccess: (response, stats, _context, details) => resolve({ response, stats, details }),
           onError: () => resolve(null), onTimeout: () => resolve(null), onAbort: () => resolve(null),
           onProgress: stats => { if (stats?.loaded > permit.size) { controller.abort(); try { loader.abort(); } catch {} resolve(null); } },
         }));
-        if (!response || controller.signal.aborted || closed || revision !== generation || active !== row ||
+        if (!response || controller.signal.aborted || closed || revision !== generation || !live(row) ||
             !await verify(permit, response.response.data, item.context, controller.signal)) { counters.rejected++; return null; }
-        if (controller.signal.aborted || closed || revision !== generation || active !== row) return null;
+        if (controller.signal.aborted || closed || revision !== generation || !live(row)) return null;
         const data = response.response.data;
         if (data.byteLength !== permit.size) { counters.rejected++; return null; }
-        counters.reservationBytes = 0;
+        row.reserved = 0;
         if (onVerified?.(permit, data, item.context) === false) return null;
         const result = { ...response, data, permit, peerBytes: warm.peerBytes, accept: warm.accept };
         cache.set(item.key, result); counters.cacheBytes += data.byteLength; counters.verified++;
@@ -76,10 +90,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         return result;
       } catch { if (!controller.signal.aborted) counters.rejected++; return null; }
       finally { clearTimeout(timer); try { loader?.destroy(); } catch {} }
-    })().then(result => {
-      finish(result);
-      if (active === row) { active = null; counters.reservationBytes = 0; queueMicrotask(pump); }
-    });
+    })().then(result => finishJob(row, result));
   };
   const noteDemand = (context, cfg, policy) => {
     const own = warmContext(context);
@@ -91,7 +102,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     catch { /* Malformed future metadata cannot break the demanded load. */ }
     const keep = new Set([own.key, ...upcoming.map(item => item.key)]);
     for (const key of cache.keys()) if (!keep.has(key)) drop(key);
-    if (active && !keep.has(active.key)) { const old = active; active = null; old.cancel(); counters.cancelled++; counters.reservationBytes = 0; }
+    for (const row of [...jobs.values()]) if (!keep.has(row.key)) cancelJob(row);
     queued = upcoming;
     return own;
   };
@@ -100,24 +111,57 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     constructor(cfg) { this.config = cfg; this.inner = new Loader(cfg); this.stats = this.inner.stats; this.context = null; this.token = 0; }
     load(context, policy, callbacks) {
       this.abort(); this.context = context;
-      const token = ++this.token, own = noteDemand(context, this.config, policy);
-      const existing = own && (cache.get(own.key) ?? (active?.key === own.key ? active.promise : null));
+      const token = ++this.token, own = noteDemand(context, this.config, policy), cached = own && cache.get(own.key);
+      const pending = !cached && own && jobs.get(own.key), existing = cached ?? pending?.promise;
       if (existing) {
-        if (existing instanceof Promise) counters.coalesced++;
+        if (pending) {
+          counters.coalesced++;
+          pending.waiters.add(this); this.warmPending = pending;
+          if (active === pending && promoted.size === 0) { active = null; promoted.add(pending); counters.promotions++; }
+        }
         this.reuseAbort = new AbortController();
+        const revision = generation;
+        let winner = null, timer, pinned = null;
+        const current = () => token === this.token;
+        const cleanup = () => {
+          clearTimeout(timer); reuseWaiters.delete(startOrigin);
+          if (pinned !== null) { const count = pins.get(pinned) - 1; if (count > 0) pins.set(pinned, count); else pins.delete(pinned); pinned = null; }
+        };
+        const startOrigin = (invalidated = false) => {
+          if (invalidated) { cleanup(); this.reuseAbort.abort(); }
+          if (!current() || winner || this.originStarted) return;
+          this.originStarted = true; clearTimeout(timer);
+          const wrapped = { ...callbacks, onProgress: (...args) => {
+            if (!current() || winner === 'cache') return;
+            if (args[2]?.byteLength > 0) { winner = 'origin'; this.reuseAbort.abort(); cleanup(); }
+            callbacks.onProgress?.(...args);
+          } };
+          for (const name of ['onSuccess', 'onError', 'onTimeout', 'onAbort']) wrapped[name] = (...args) => {
+            if (!current() || winner === 'cache') return;
+            winner = 'origin'; this.reuseAbort.abort(); cleanup(); callbacks[name]?.(...args);
+          };
+          this.start(context, policy, wrapped, token);
+        };
+        this.cancelReuse = () => { cleanup(); this.reuseAbort.abort(); };
+        reuseWaiters.add(startOrigin);
         Promise.resolve(existing).then(async row => {
-          if (token !== this.token) return;
-          if (closed) return this.start(context, policy, callbacks, token);
-          if (!row) return this.start(context, policy, callbacks, token);
-          // A cache entry authenticates bytes, not continuing authority. Read
-          // the host's current commitment/delegation/revocation view again.
+          this.releasePending();
+          if (!current()) return;
+          if (closed || !row || revision !== generation) return startOrigin(true);
+          pinned = row.permit.key; pins.set(pinned, (pins.get(pinned) ?? 0) + 1);
+          const budget = Math.max(0, Math.min(25, reuseBudget(context) || 0));
+          if (budget > 0) timer = setTimeout(startOrigin, budget); else startOrigin();
+          // Cached bytes do not imply continuing authority. Source recovery
+          // proceeds independently when the actual buffer cannot cover this check.
           let permit;
           try { permit = await authorise(context, this.reuseAbort.signal); } catch {}
-          if (token !== this.token) return;
-          if (closed) return this.start(context, policy, callbacks, token);
+          if (!current() || winner === 'origin') return;
+          if (closed || revision !== generation) return startOrigin(true);
           if (!permit || permit.key !== row.permit.key || permit.size !== row.permit.size || permit.sha256 !== row.permit.sha256) {
-            drop(own.key); return this.start(context, policy, callbacks, token);
+            drop(own.key); return startOrigin();
           }
+          winner = 'cache'; cleanup();
+          if (this.originStarted) this.inner.abort();
           Object.assign(this.stats, row.stats);
           const data = row.data.slice(0);
           counters.localReuseBytes += data.byteLength;
@@ -131,7 +175,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     }
     start(context, policy, callbacks, token) {
       demand.add(this);
-      if (demand.size > 1 && active) { const old = active; active = null; old.cancel(); counters.cancelled++; counters.reservationBytes = 0; }
+      if (demand.size + promoted.size > 1 && active) cancelJob(active);
       const end = () => { demand.delete(this); queueMicrotask(pump); };
       const wrapped = { ...callbacks };
       for (const name of ['onSuccess', 'onError', 'onTimeout', 'onAbort']) wrapped[name] = (...args) => {
@@ -139,13 +183,18 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       };
       this.inner.load(context, policy, wrapped);
     }
-    abort() { this.token++; this.reuseAbort?.abort(); demand.delete(this); this.inner.abort(); }
-    destroy() { this.token++; this.reuseAbort?.abort(); demand.delete(this); this.inner.destroy(); }
+    releasePending() {
+      const row = this.warmPending; this.warmPending = null;
+      if (row) { row.waiters.delete(this); if (promoted.has(row) && !row.waiters.size) cancelJob(row); }
+    }
+    abort() { this.token++; this.originStarted = false; this.cancelReuse?.(); this.releasePending(); demand.delete(this); this.inner.abort(); }
+    destroy() { this.token++; this.cancelReuse?.(); this.releasePending(); demand.delete(this); this.inner.destroy(); }
     getCacheAge() { return this.inner.getCacheAge?.() ?? null; }
     getResponseHeader(name) { return this.inner.getResponseHeader?.(name) ?? null; }
   };
-  return { Loader: Wrapped, clear, release(key) { for (const [id, row] of cache) if (row.permit.key === key) drop(id); },
+  return { Loader: Wrapped, clear, pinned: key => pins.has(key), release(key) { for (const [id, row] of cache) if (row.permit.key === key) drop(id); },
     stop() { closed = true; clear(); }, snapshot: () => ({ ...counters,
-    active: Number(Boolean(active)), queued: queued.length, cacheObjects: cache.size,
-    limits: { objects: MAX_OBJECTS, bytes: MAX_BYTES, speculativeWholeRequests: 1, deadlineMs: DEADLINE_MS } }) };
+      reservationBytes: reserved(), active: Number(Boolean(active)), promoted: promoted.size, trackedObjects: tracked(),
+      queued: queued.length, cacheObjects: cache.size,
+      limits: { objects: MAX_OBJECTS, bytes: MAX_BYTES, speculativeWholeRequests: 1, deadlineMs: DEADLINE_MS, revalidationMs: 25 } }) };
 }

@@ -26,7 +26,8 @@ async function fixture(t, options = {}) {
   const playlist = '#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n' +
     Array.from({ length: 12 }, (_, sn) => `#EXTINF:2,\ns${sn}.m4s\n`).join('');
   const fragments = M3U8Parser.parseLevelPlaylist(playlist, 'https://origin.example/media/index.m3u8', 0, 'main', 0, null).fragments;
-  const state = { refuse: false, expired: false };
+  const events = new Map();
+  const state = { refuse: false, expired: false, stall: false, blockedChecks: 0, onBlock: null };
   class Loader {
     stats = { loaded: 0, loading: { start: 0, first: 0, end: 0 } };
     load(context, config, callbacks) {
@@ -50,18 +51,24 @@ async function fixture(t, options = {}) {
     close() {} async createAnswer() { return { type: 'answer', sdp: 'fixture-sdp' }; }
     async setLocalDescription() {} async setRemoteDescription() {}
   }
-  const media = Object.assign(new EventTarget(), { paused: false, currentTime: 0, buffered: { length: 0 } });
+  const media = Object.assign(new EventTarget(), { paused: false, currentTime: 0,
+    buffered: options.buffered === false ? { length: 0 } : { length: 1, start: () => 0, end: () => 20 } });
   const getCommitment = async context => {
+    if (state.stall) { state.blockedChecks++; state.onBlock?.(); return new Promise(() => {}); }
     if (state.refuse) return null;
     const seconds = Math.floor(Date.now() / 1000), key = sha(`${swarmId}\n${new URL(context.url).pathname}`);
-    return finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds, tags: [['x', swarmId], ['e', streamEvent.id]],
+    const cacheKey = `${key}:${context.frag.sn}:${context.frag.cc}:${state.expired}`;
+    if (events.has(cacheKey)) return events.get(cacheKey);
+    const event = finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds, tags: [['x', swarmId], ['e', streamEvent.id]],
       content: commitmentContent({ v: 2, streamEventId: streamEvent.id, swarmId, key, rendition: '/media/index.m3u8',
         playlist: '/media/index.m3u8', mediaType: 'main', encryption: null, sequence: context.frag.sn, discontinuity: context.frag.cc,
         part: null, sha256: options.badHash ? 'f'.repeat(64) : sha(bytes), size: bytes.length, expiresAt: seconds + (state.expired ? -1 : 120) }) }, sk);
+    events.set(cacheKey, event); return event;
   };
   const swarm = createHlsSwarm({ swarmId, mode: 'peer-first', serve: true, warmAhead: options.enabled ?? true,
     streamEvent, getCommitment, RTCPeerConnectionImpl: PC, relays: [relay.url], ...(coreWasm ? { coreWasm } : {}),
-    maxHeldBytes: options.maxHeldBytes ?? 64 * 1024 * 1024, maxHeldSegments: options.maxHeldSegments ?? 12 });
+    maxHeldBytes: options.maxHeldBytes ?? 64 * 1024 * 1024, maxHeldSegments: options.maxHeldSegments ?? 12,
+    ...(options.allowance === undefined ? {} : { maxUploadBytesPerSession: options.allowance }) });
   const hls = { config: { loader: Loader, progressive: false }, media, levels: [{ details: { live: true, fragments } }] };
   swarm.attach(hls);
   t.after(async () => { swarm.stop(); await relay.close(); });
@@ -133,6 +140,37 @@ test('a demanded in-flight warm object joins its existing load', async t => {
   assert.equal(f.swarm.metrics().warmAhead.coalesced, 1);
 });
 
+test('promoting warmed work to genuine demand permits the next future load before the current one finishes', async t => {
+  const f = await fixture(t, { held: [1, 2], size: 2048, maxHeldBytes: 4096 });
+  await f.load(0).result;
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const demand = f.load(1);
+  await until(() => f.requests.some(row => row.context.frag.sn === 2));
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+  assert.equal(f.requests.find(row => row.context.frag.sn === 1).completed, false);
+  const m = f.swarm.metrics();
+  assert.equal(m.warmAhead.promoted, 1); assert.equal(m.warmAhead.active, 1);
+  assert.equal(m.warmAhead.reservationBytes, 2 * f.bytes.length);
+  assert(m.warmAhead.trackedObjects <= 3);
+  assert(m.bytes.held + m.warmAhead.reservationBytes <= 4096);
+  f.requests.find(row => row.context.frag.sn === 1).finish();
+  assert.deepEqual(await demand.result, f.bytes);
+});
+
+test('pause cancels promoted demand and the speculative successor, releasing their combined reservation', async t => {
+  const f = await fixture(t, { held: [1, 2], size: 2048, maxHeldBytes: 4096 });
+  await f.load(0).result;
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const demand = f.load(1);
+  await until(() => f.requests.some(row => row.context.frag.sn === 2));
+  demand.loader.abort();
+  f.media.paused = true; f.media.dispatchEvent(new Event('pause'));
+  assert(f.requests.filter(row => [1, 2].includes(row.context.frag.sn)).every(row => row.aborted));
+  const m = f.swarm.metrics();
+  assert.equal(m.warmAhead.promoted, 0); assert.equal(m.warmAhead.active, 0);
+  assert.equal(m.warmAhead.reservationBytes, 0); assert.equal(m.warmAhead.trackedObjects, 0);
+});
+
 test('wrong committed content is rejected and never cached or advertised', async t => {
   const f = await fixture(t, { badHash: true });
   await f.load(0).result;
@@ -152,6 +190,49 @@ for (const invalidation of ['refuse', 'expired']) test(`cached bytes require the
   assert.equal(f.swarm.metrics().warmAhead.localReuseBytes, 0);
 });
 
+test('underflow starts ordinary source immediately while cache authority is unresponsive', async t => {
+  const f = await fixture(t);
+  await f.load(0).result;
+  await until(() => f.swarm.metrics().warmAhead.verified >= 2);
+  f.state.stall = true; f.media.buffered = { length: 0 };
+  const demand = f.load(1);
+  await sleep(0);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 2, 'an explicit recovery request is visible');
+  assert.deepEqual(await demand.result, f.bytes);
+  assert.equal(f.swarm.metrics().warmAhead.localReuseBytes, 0);
+});
+
+test('buffered authority checks get at most 25 ms before independent source recovery', async t => {
+  const f = await fixture(t);
+  await f.load(0).result;
+  await until(() => f.swarm.metrics().warmAhead.verified >= 2);
+  f.state.stall = true;
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const demand = f.load(1);
+    for (let i = 0; i < 2000 && !f.state.blockedChecks; i++) await new Promise(setImmediate);
+    assert(f.state.blockedChecks > 0);
+    t.mock.timers.tick(24);
+    assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+    t.mock.timers.tick(1);
+    assert.deepEqual(await demand.result, f.bytes);
+    assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 2);
+    assert.equal(f.swarm.metrics().warmAhead.localReuseBytes, 0);
+  } finally { t.mock.timers.reset(); }
+});
+
+test('stopping during buffered cache revalidation starts source without waiting for the provider', async t => {
+  const f = await fixture(t);
+  await f.load(0).result;
+  await until(() => f.swarm.metrics().warmAhead.verified >= 2);
+  f.state.stall = true;
+  f.state.onBlock = () => f.swarm.stop();
+  const demand = f.load(1);
+  assert.deepEqual(await demand.result, f.bytes);
+  assert(f.state.blockedChecks > 0);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 2);
+});
+
 test('a connected peer can request the verified future object before local demand consumes it', async t => {
   const f = await fixture(t);
   const peer = await f.addPeer();
@@ -163,6 +244,18 @@ test('a connected peer can request the verified future object before local deman
   assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
   assert.equal(f.swarm.metrics().warmAhead.localReuseBytes, 0);
   assert.equal(f.swarm.metrics().bytes.uploaded, f.bytes.length);
+});
+
+test('exhausting the upload allowance also withdraws warm references and reservations', async t => {
+  const f = await fixture(t, { allowance: 1024 });
+  const peer = await f.addPeer();
+  await f.load(0).result;
+  await until(() => f.swarm.metrics().warmAhead.verified >= 2);
+  peer.want(1);
+  await until(() => f.swarm.metrics().bytes.uploadExhausted);
+  const m = f.swarm.metrics();
+  assert.equal(m.bytes.held, 0); assert.equal(m.warmAhead.cacheBytes, 0);
+  assert.equal(m.warmAhead.reservationBytes, 0); assert.equal(m.warmAhead.active, 0);
 });
 
 test('pause and stop abort speculation and release verified warm references', async t => {

@@ -108,6 +108,10 @@ fragments, loads at most the next two, and keeps one speculative whole-object
 HTTP arm in flight. Existing demanded whole/range request limits still apply;
 this is not a two-request global HTTP limit. Demand starts immediately and
 joins already-running exact-object work instead of downloading it again.
+That work becomes genuine demand and frees the single speculative slot, so
+the following object can load concurrently. The combined cache and in-flight
+set remains bounded to three distinct objects and 24 MiB; all in-flight
+reservations reduce the existing held-cache budget together.
 There is no startup gate, pause, hidden player, clock offset or automatic seek.
 
 Future bytes need a current signed commitment and matching SHA-256 before
@@ -121,9 +125,20 @@ new demanded position. Gap, ranged, encrypted and alternate-audio fragments
 retain the ordinary loader path.
 
 Every demand reuse checks the host's current commitment/delegation/revocation
-view. Refusal falls back to the ordinary origin loader. `metrics().warmAhead`
+view. Only actual buffer beyond the normal origin recovery reserve permits
+waiting for that check, capped at 25 ms. Unknown/empty headroom starts the
+ordinary source immediately; otherwise source recovery starts when this small
+budget expires. The first authorised cache result or source result wins and
+cancels the other arm. Refusal leaves source recovery running. Thus buffered,
+promptly authorised cache reuse avoids another HTTP request, while underflow
+recovery can make another request; actual traffic remains counted. Stopping
+does not wait for an unresponsive cache provider. Exhausting upload allowance
+also clears warm references and reservations.
+
+`metrics().warmAhead`
 reports `verifiedBytes`, `verifiedPeerBytes`, `consumedPeerBytes`,
-`localReuseBytes`, active work, cache bytes and reservations. Raw peer reception
+`localReuseBytes`, active speculative work, promoted demand, tracked objects,
+cache bytes and aggregate reservations. Raw peer reception
 is recorded once; `bytes.peerFirst` and `onPeerDelivery` receive speculative
 peer credit only when real hls.js demand consumes it. Local reuse does not
 create network bytes. These source tests do not establish sustained cold-cache

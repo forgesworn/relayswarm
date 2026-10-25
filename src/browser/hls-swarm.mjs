@@ -586,7 +586,7 @@ class HlsSwarm {
       hls.config.fLoader = this.options.mode === "peer-first" ? this.#peerFirstLoader(BaseLoader) : this.#shadowLoader(BaseLoader);
       if (this.options.warmAhead) {
         this.warmAhead = createWarmAhead({ Loader: hls.config.fLoader,
-          allowed: () => !this.stopped && hls.media?.paused !== true && !onCellular(),
+          allowed: () => this.#servingAllowed() && hls.media?.paused !== true && !onCellular(),
           next: context => {
             const fragments = hls.levels?.[context.frag?.level]?.details?.fragments;
             if (!Array.isArray(fragments)) return [];
@@ -606,7 +606,19 @@ class HlsSwarm {
           },
           verify: async (permit, data, _context, signal) => data instanceof ArrayBuffer && data.byteLength === permit.size &&
             !signal.aborted && await sha256Hex(data) === permit.sha256,
-          reserve: size => { this.#trimHeld(this.options.maxHeldBytes - size); return !this.stopped; },
+          reserve: size => { this.#trimHeld(this.options.maxHeldBytes - size); return !this.stopped && this.heldBytes + size <= this.options.maxHeldBytes; },
+          reuseBudget: context => {
+            try {
+              const media = hls.media, time = media.currentTime;
+              const recovery = Math.max(this.options.originReserveMs, (percentile(this.#originSamples(context), 0.9) || 0) * 1.25 + 100);
+              for (let i = 0; i < media.buffered.length; i++) {
+                const end = media.buffered.end(i);
+                if (Number.isFinite(end) && media.buffered.start(i) <= time && end > time)
+                  return Math.min(25, Math.max(0, (end - time) * 1000 - recovery));
+              }
+            } catch {}
+            return 0;
+          },
           onVerified: (permit, data) => { this.#dropHeld(permit.key); this.#hold(permit.key, new Uint8Array(data)); return this.held.has(permit.key); },
           onReuse: (context, _bytes, peerBytes) => { if (peerBytes > 0 && context.frag) this.peerFragments.add(context.frag); },
         });
@@ -2575,7 +2587,7 @@ class HlsSwarm {
     this.heldBytes += bytes.byteLength;
     const evicted = this.#trimHeld(this.options.maxHeldBytes - (this.warmAhead?.snapshot().reservationBytes ?? 0), false);
     if (!this.#servingAllowed()) return;
-    for (const link of this.links.values()) link.sendHaveChange([key], evicted);
+    for (const link of this.links.values()) link.sendHaveChange(this.held.has(key) ? [key] : [], evicted);
   }
 
   #dropHeld(key) {
@@ -2589,7 +2601,9 @@ class HlsSwarm {
   #trimHeld(limit, announce = true) {
     const evicted = [];
     while (this.held.size && (this.held.size > this.options.maxHeldSegments || this.heldBytes > Math.max(0, limit))) {
-      const [key, bytes] = this.held.entries().next().value;
+      const entry = this.warmAhead ? [...this.held].find(([key]) => !this.warmAhead.pinned(key)) : this.held.entries().next().value;
+      if (!entry) break;
+      const [key, bytes] = entry;
       this.held.delete(key); this.heldBytes -= bytes.byteLength;
       this.warmAhead?.release(key); evicted.push(key);
     }
@@ -2613,6 +2627,7 @@ class HlsSwarm {
   }
 
   #withdrawContribution() {
+    this.warmAhead?.clear();
     for (const controller of this.cachedRaces) controller.abort();
     this.held.clear();
     this.heldBytes = 0;

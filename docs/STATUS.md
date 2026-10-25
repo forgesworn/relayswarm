@@ -20,6 +20,11 @@ speculative map shares the existing held byte budget, and local reuse is
 reported separately from accepted peer payload. Sustained cold-cache 4K,
 useful peer contribution, shared-clock behaviour and physical iPhone acceptance
 require fresh browser/device measurements before enabling it in a deployment.
+An initial 60-second public-4K candidate run remained RED despite local cache
+reuse. Promoting an in-flight warm object to actual demand now frees the
+speculative slot for its successor, with aggregate reservations and an
+independent buffer-bounded source recovery path. These causal source fixes
+still require another unchanged cold-cache playback comparison.
 
 Cold-cache physical diagnostics exposed two distinct timing errors: a
 holder's completion rate already included startup, yet the piece planner
