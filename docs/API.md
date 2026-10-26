@@ -150,6 +150,10 @@ context, parsed-fragment and resident-coverage checks. Insufficient headroom
 does not recall the hook or extend the deadline. The hook establishes encoded
 reservoir readiness, not decoded frames or accepted playback. The SDK itself
 does not publish, start, pause or reanchor any room.
+The signal also ends after successful HLS handoff. A host must detach its
+pending-acknowledgement listener once acknowledged, so normal operation cleanup
+does not cancel an established room. The final authority verdict and HLS
+callback share one synchronous turn; success cleanup follows actual delivery.
 
 With `warmAhead: false`, startup may preload the parsed upcoming fragments and
 retain them for genuine consumption, then stops speculative fetching. Peer

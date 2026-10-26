@@ -750,7 +750,7 @@ function startupFixture(t, options = {}) {
     const loader = new engine.Loader({ progressive: options.progressive ?? false }), ctx = context(sn), calls = { success: 0, error: 0, abort: 0, progress: 0 };
     ctx.frag.stats = loader.stats;
     loader.load(ctx, { loadPolicy: { maxLoadTimeMs: parentMs } }, {
-      onSuccess: (...args) => { calls.success++; calls.args = args; },
+      onSuccess: (...args) => { calls.success++; calls.args = args; options.onSuccess?.(...args); },
       onError: (...args) => { calls.error++; calls.args = args; },
       onAbort: (...args) => { calls.abort++; calls.args = args; },
       onProgress: (...args) => { calls.progress++; calls.progressArgs = args; },
@@ -1295,4 +1295,38 @@ test('startup commit invalid configuration declines without a startup target or 
   const invalid = await fixture(t, { enabled: false, startupTarget: () => 0, startupCommit: true });
   assert.equal(absent.swarm.metrics().disabledReason, 'invalid-startup-buffer-commit');
   assert.equal(invalid.swarm.metrics().disabledReason, 'invalid-startup-buffer-commit');
+});
+
+test('startup commit final authority verdict and Hls handoff share one synchronous turn', async t => {
+  for (const useHook of [false, true]) {
+    let afterAck = !useHook, queued = false, revoked = false;
+    const events = [];
+    const f = startupFixture(t, { commit: useHook ? () => { afterAck = true; } : null,
+      permit: ctx => ({ key: ctx.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => {
+        if (afterAck && ctx.frag.sn === 1 && !queued) {
+          queued = true; queueMicrotask(() => { revoked = true; events.push('revoked'); });
+        }
+        return !revoked;
+      } }),
+      onSuccess: () => events.push(revoked ? 'delivered-after-revocation' : 'delivered-before-revocation'),
+    }), first = f.load();
+    f.requests[0].finish(); await flushStartup(); f.requests[1].finish(); await flushStartup();
+    assert.equal(first.calls.success, 1);
+    assert.deepEqual(events, ['delivered-before-revocation', 'revoked'], 'no Promise boundary may separate the final authority verdict from actual handoff');
+  }
+});
+
+test('startup commit successful-signal cleanup cannot stop Hls before its credited peer handoff', async t => {
+  let first, atAbort = null;
+  const f = await fixture(t, { enabled: false, startupTarget: () => 1.3, held: [0], rangePeer: true,
+    startupCommit: ({ signal }) => signal.addEventListener('abort', () => {
+      atAbort = { callbacks: first.calls.success, credited: f.swarm.metrics().bytes.peerFirst };
+      first.loader.destroy(); f.swarm.stop();
+    }, { once: true }),
+  });
+  const peer = await f.addPeer(); peer.have(0);
+  first = f.load(0); await until(() => atAbort !== null);
+  assert.deepEqual(atAbort, { callbacks: 1, credited: f.bytes.length });
+  assert.deepEqual(first.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
+  assert.deepEqual(await first.result, f.bytes);
 });

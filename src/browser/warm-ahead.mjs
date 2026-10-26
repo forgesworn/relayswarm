@@ -258,7 +258,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       }
       return true;
     };
-    const validate = async ({ covered, recovery }) => {
+    const validate = async ({ covered }) => {
       for (const [key, row] of cache) if (covered.rows.includes(row) && !resident.has(row)) {
         resident.set(row, { key, row, identity: warmContext(row.context) });
         pinKeys.push(row.permit.key); pins.set(row.permit.key, (pins.get(row.permit.key) ?? 0) + 1);
@@ -266,26 +266,36 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       const checks = [{ context: startup.own.context, permit: startup.permit },
         ...covered.rows.filter(row => row.context !== startup.own.context)];
       const permits = await Promise.all(checks.map(row => authorise(row.context, startup.controller.signal)));
-      if (!startupCurrent() || generation !== revision) return;
-      if (permits.some((permit, i) => !permit || permit.key !== checks[i].permit.key ||
-          permit.size !== checks[i].permit.size || permit.sha256 !== checks[i].permit.sha256))
-        return endStartup('failed', 'authority-changed');
-      const fresh = readStartupTarget(); if (fresh === null || !startupCurrent()) return;
-      if (!allowed()) return endStartup('cancelled', 'not-allowed');
-      // A permission obtained early in the batch can expire or be revoked
-      // while another row yields. Recheck its same signed authority now,
-      // synchronously, with no new metadata request or renewed deadline.
-      if (permits.some((permit, i) => typeof permit.current !== 'function' || permit.current(checks[i].context) !== true))
-        return endStartup('failed', 'authority-changed');
-      if (!startupCurrent()) return;
-      if (performance.now() >= startup.deadline) return endStartup('failed', 'deadline');
-      if (!residentCurrent()) return;
-      const final = coverage(fresh, covered.rows);
-      if (final.end === null || (final.end - fresh) * 1000 < recovery) return;
-      return true;
+      // Return the final verdict, rather than running it inside this async
+      // function: its caller's await is another microtask boundary. No such
+      // boundary may separate current authority from the actual handoff.
+      return () => {
+        if (!startupCurrent() || generation !== revision) return;
+        if (permits.some((permit, i) => !permit || permit.key !== checks[i].permit.key ||
+            permit.size !== checks[i].permit.size || permit.sha256 !== checks[i].permit.sha256))
+          return endStartup('failed', 'authority-changed');
+        const fresh = readStartupTarget(); if (fresh === null || !startupCurrent()) return;
+        if (!allowed()) return endStartup('cancelled', 'not-allowed');
+        let recovery;
+        try { recovery = startupRecovery(startup.own.context); } catch {}
+        if (!Number.isFinite(recovery) || recovery < 0) return endStartup('failed', 'invalid-recovery');
+        startup.requiredHeadroomMs = recovery;
+        // A permission obtained early in the batch can expire or be revoked
+        // while another row yields. Recheck its same signed authority now,
+        // synchronously, with no new metadata request or renewed deadline.
+        if (permits.some((permit, i) => typeof permit.current !== 'function' || permit.current(checks[i].context) !== true))
+          return endStartup('failed', 'authority-changed');
+        if (!startupCurrent()) return;
+        if (performance.now() >= startup.deadline) return endStartup('failed', 'deadline');
+        if (!residentCurrent()) return;
+        const final = coverage(fresh, covered.rows);
+        if (final.end === null || (final.end - fresh) * 1000 < recovery) return;
+        return true;
+      };
     };
     try {
-      if (!await validate(candidate)) return;
+      let current = await validate(candidate);
+      if (!current()) return;
       if (typeof startupCommit === 'function' && !startup.commitStarted) {
         startup.commitStarted = true;
         try { await waitStartupCommit(startup.controller.signal); }
@@ -298,7 +308,9 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         // same held objects/pins and recheck all authority and geometry before
         // any player callback or consumed credit. Never invoke the hook again.
         const afterCommit = startupCandidate();
-        if (!afterCommit || !await validate(afterCommit)) return;
+        if (!afterCommit) return;
+        current = await validate(afterCommit);
+        if (!current()) return;
       }
       // Same pending play and same response/context/stats. Only now can the
       // first verified peer object become accepted-player contribution.
@@ -313,11 +325,16 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       if (!startupCurrent()) return;
       if (mark?.peerBytes > 0) counters.consumedPeerBytes += mark.peerBytes;
       startup.state = 'ready'; startup.reason = null; startup.released++;
-      clearTimeout(startup.timer); startup.timer = null; startup.controller.abort(); startup.reserved = 0;
+      clearTimeout(startup.timer); startup.timer = null; startup.reserved = 0;
+      const completedController = startup.controller;
       startup.owner = null; startup.terminal = null; startup.response = null;
       if (!steady) { queued = []; for (const row of [...jobs.values()]) cancelJob(row); }
       try { owner.deliver(terminal, 'onSuccess', args); }
-      finally { mark?.notify?.(); }
+      finally {
+        // The hook exposes this signal to host code. Its normal cleanup may
+        // reenter stop/destroy, so only abort it after the exact Hls handoff.
+        try { completedController.abort(); } finally { mark?.notify?.(); }
+      }
     } catch { if (startupCurrent()) endStartup('failed', 'authority-refused'); }
     finally {
       releasePins();
