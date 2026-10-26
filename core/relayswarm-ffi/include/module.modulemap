@@ -1,0 +1,4 @@
+module RelaySwarmFFI {
+    header "RelaySwarmFFI.h"
+    export *
+}

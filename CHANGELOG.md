@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Replace UniFFI with a versioned C ABI, thin JNI Kotlin facade and direct
+  C-import Swift facade. Public records, enums, objects and functions retain
+  their existing shapes; Android packages no longer require JNA.
 - Add experimental `lateHaveRace`, disabled by default. With a zero-budget
   cached race, normal whole HTTP starts immediately while existing accepted
   connections may advertise an exact HAVE within the original deadline.

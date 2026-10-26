@@ -1,4 +1,4 @@
-// Calls the core through the generated Swift bindings. Reads the line format
+// Calls the core through the handwritten Swift facade. Reads the line format
 // scripts/ffi-smoke.mjs writes and prints one JSON line per result, which the
 // script checks. Main.kt is the same program in Kotlin.
 import Foundation
@@ -27,7 +27,19 @@ func jsonNumber(_ value: Double?) -> Any {
 func double(_ field: Substring) -> Double? { field == "-" ? nil : Double(field)! }
 func hexList(_ field: Substring) -> [String] { field == "-" ? [] : field.split(separator: ",").map(String.init) }
 
-// Exercise the advisory command through generated bindings as well as Rust.
+do {
+    _ = try Transfer(settings: TransferSettings(maxHolders: 3, originReserveMs: 0), size: 1, sha256: "not hex", pieces: [], deadline: 0)
+    fatalError("invalid transfer was accepted")
+} catch CoreError.InvalidTransfer {}
+_ = try Transfer(settings: TransferSettings(maxHolders: 3, originReserveMs: .infinity), size: 1,
+                 sha256: String(repeating: "0", count: 64), pieces: [String(repeating: "0", count: 64)], deadline: 0)
+precondition(defaultTransferSettings() == defaultTransferSettings())
+precondition(Set([linkLimits()]).count == 1)
+let unicodeLink = PeerLink(settings: LinkSettings(maxSegmentBytes: 8_388_608, maxQueuedRequests: 4, drainTimeoutMs: 1_000, reliable: true), now: 0)
+guard case let .sendText(unicodeText) = unicodeLink.sendHave(keys: ["🦀/é"]).events[0] else { fatalError("missing HAVE") }
+precondition(unicodeText.contains("🦀/é"))
+
+// Exercise the advisory command through the Swift facade as well as Rust.
 let hint = playerHint(supply: PlayerSupply(rendition: "main:0", size: 131_072,
     peers: [PeerTiming(peer: 1, timing: Timing(firstByteMs: 0, rate: 1024)),
             PeerTiming(peer: 2, timing: Timing(firstByteMs: 0, rate: 1024))],

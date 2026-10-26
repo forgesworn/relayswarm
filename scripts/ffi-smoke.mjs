@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Build the core's UniFFI library, generate Swift or Kotlin bindings, compile
-// a small program against them and check its answers: every shared commitment
-// vector, one transfer from a holder and origin, a piece range exchanged
-// between two peer links, the link's channel-state calls, every recorded
-// peer link trace, and the seeded peer selection and neighbour discovery
-// sequences that `npm run proto:traces` records from the JavaScript. Swift needs swiftc; Kotlin needs kotlinc and java, and downloads a
-// pinned JNA jar into core/target.
+// Build the core's C library, compile the handwritten Swift or Kotlin facade
+// with a small program and check its answers: every shared commitment vector,
+// one transfer from a holder and origin, a piece range exchanged between two
+// peer links, the link's channel-state calls, every recorded peer link trace,
+// and the seeded peer selection and neighbour discovery sequences that
+// `npm run proto:traces` records from the JavaScript. Swift needs swiftc;
+// Kotlin needs a C compiler, kotlinc and a JDK.
 //
 //   node scripts/ffi-smoke.mjs swift|kotlin
 //   node scripts/ffi-smoke.mjs swift|kotlin <label> -- <command> [args...]
@@ -22,7 +22,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { commitmentPieceSize } from "../src/browser/segment-commitment.mjs";
 
@@ -36,30 +36,9 @@ const label = prebuilt ? process.argv[3] : `${language} bindings`;
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const core = join(root, "core");
 const ffi = join(core, "relayswarm-ffi");
-// The debug build: release strips symbols, and on Linux that removes the
-// metadata the binding generator reads.
 const libraryDir = join(core, "target/debug");
-const library = join(libraryDir, process.platform === "darwin" ? "librelayswarm_ffi.dylib" : "librelayswarm_ffi.so");
 const run = (command, args, options = {}) => execFileSync(command, args, { cwd: core, maxBuffer: 256 * 1024 * 1024, ...options });
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-
-const JNA = {
-  url: "https://repo1.maven.org/maven2/net/java/dev/jna/jna/5.14.0/jna-5.14.0.jar",
-  sha256: "34ed1e1f27fa896bca50dbc4e99cf3732967cec387a7a0d5e3486c09673fe8c6",
-  path: join(core, "target/jna-5.14.0.jar"),
-};
-
-async function jna() {
-  if (!existsSync(JNA.path) || sha256(readFileSync(JNA.path)) !== JNA.sha256) {
-    const response = await fetch(JNA.url);
-    if (!response.ok) throw new Error(`JNA download failed: ${response.status}`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (sha256(bytes) !== JNA.sha256) throw new Error("JNA jar does not match its pinned SHA-256");
-    mkdirSync(dirname(JNA.path), { recursive: true });
-    writeFileSync(JNA.path, bytes);
-  }
-  return JNA.path;
-}
 
 // --- input -------------------------------------------------------------------
 
@@ -352,35 +331,42 @@ function check(output) {
 
 // --- build and run -----------------------------------------------------------
 
+function runAndCheck(command, args) {
+  const output = execFileSync(command, args, { input: input(), maxBuffer: 256 * 1024 * 1024 }).toString("utf8");
+  if (process.env.RELAYSWARM_FFI_OUTPUT) writeFileSync(resolve(process.env.RELAYSWARM_FFI_OUTPUT), output);
+  check(output);
+}
+
 if (prebuilt) {
   const [command, ...args] = prebuilt;
-  check(execFileSync(command, args, { input: input(), maxBuffer: 256 * 1024 * 1024 }).toString("utf8"));
+  runAndCheck(command, args);
 } else {
   const work = mkdtempSync(join(tmpdir(), "relayswarm-ffi-"));
   try {
-    run("cargo", ["build", "--locked", "-p", "relayswarm-ffi"], { stdio: "inherit" });
-    const bindings = join(work, "bindings");
-    run("cargo", ["run", "--locked", "--quiet", "--features", "bindgen", "--bin", "uniffi-bindgen", "--",
-      "generate", "--library", library, "--language", language, "--no-format", "--out-dir", bindings], { stdio: "inherit" });
-    const generated = language === "swift" ? join(bindings, "relayswarm_ffi.swift") : join(bindings, "uniffi/relayswarm_ffi/relayswarm_ffi.kt");
-    if (!existsSync(generated)) throw new Error(`The binding generator wrote no ${language}; check the library still carries its UniFFI metadata.`);
-
+    run("cargo", ["build", "--locked", "-p", "relayswarm-ffi", "--lib"], { stdio: "inherit" });
     let program;
     if (language === "swift") {
       const binary = join(work, "smoke");
-      run("swiftc", ["-O", "-module-name", "smoke", "-I", bindings,
-        "-Xcc", `-fmodule-map-file=${join(bindings, "relayswarm_ffiFFI.modulemap")}`,
-        generated, join(ffi, "smoke/main.swift"),
+      run("swiftc", ["-O", "-module-name", "smoke", "-I", join(ffi, "include"),
+        "-Xcc", `-fmodule-map-file=${join(ffi, "include/module.modulemap")}`,
+        join(ffi, "swift/relayswarm_ffi.swift"), join(ffi, "smoke/main.swift"),
         "-L", libraryDir, "-lrelayswarm_ffi", "-Xlinker", "-rpath", "-Xlinker", libraryDir, "-o", binary], { stdio: "inherit" });
       program = [binary, []];
     } else {
-      const jar = await jna();
+      const darwin = process.platform === "darwin";
+      const javaHome = process.env.JAVA_HOME ?? (darwin
+        ? run("/usr/libexec/java_home", []).toString("utf8").trim()
+        : dirname(dirname(run("readlink", ["-f", run("which", ["java"]).toString("utf8").trim()]).toString("utf8").trim())));
+      const jni = join(work, darwin ? "librelayswarm_jni.dylib" : "librelayswarm_jni.so");
+      run("cc", ["-shared", "-fPIC", "-Wall", "-Wextra", "-Werror",
+        `-I${join(javaHome, "include")}`, `-I${join(javaHome, "include", darwin ? "darwin" : "linux")}`, `-I${join(ffi, "include")}`,
+        join(ffi, "jni/relayswarm_jni.c"), `-L${libraryDir}`, "-lrelayswarm_ffi", "-Wl,-rpath", `-Wl,${libraryDir}`, "-o", jni], { stdio: "inherit" });
       const smoke = join(work, "smoke.jar");
-      run("kotlinc", ["-nowarn", "-include-runtime", "-cp", jar, "-d", smoke, generated, join(ffi, "smoke/Main.kt")], { stdio: "inherit" });
-      program = ["java", [`-Djna.library.path=${libraryDir}`, "-cp", [smoke, jar].join(delimiter), "MainKt"]];
+      run("kotlinc", ["-nowarn", "-include-runtime", "-d", smoke, join(ffi, "kotlin/uniffi/relayswarm_ffi/relayswarm_ffi.kt"), join(ffi, "smoke/Main.kt")], { stdio: "inherit" });
+      program = ["java", [`-Djava.library.path=${work}:${libraryDir}`, "-cp", smoke, "MainKt"]];
     }
     const [command, args] = program;
-    check(execFileSync(command, args, { input: input(), maxBuffer: 256 * 1024 * 1024 }).toString("utf8"));
+    runAndCheck(command, args);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

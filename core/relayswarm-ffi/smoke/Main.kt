@@ -1,4 +1,4 @@
-// Calls the core through the generated Kotlin bindings. Reads the line format
+// Calls the core through the handwritten Kotlin facade. Reads the line format
 // scripts/ffi-smoke.mjs writes and prints one JSON line per result, which the
 // script checks. main.swift is the same program in Swift.
 import java.util.Base64
@@ -127,6 +127,20 @@ fun range(field: List<String>) {
 
 fun double(field: String): Double? = if (field == "-") null else field.toDouble()
 fun hexList(field: String): List<String> = if (field == "-") emptyList() else field.split(",")
+
+fun apiChecks() {
+    try {
+        Transfer(TransferSettings(3u, 0.0), 1uL, "not hex", emptyList(), 0uL)
+        error("invalid transfer was accepted")
+    } catch (_: CoreException.InvalidTransfer) {}
+    Transfer(TransferSettings(3u, Double.POSITIVE_INFINITY), 1uL, "0".repeat(64), listOf("0".repeat(64)), 0uL).close()
+    check(defaultTransferSettings() == defaultTransferSettings())
+    check(setOf(linkLimits()).size == 1)
+    PeerLink(LinkSettings(8_388_608uL, 4u, 1_000uL, true), 0uL).use { link ->
+        val event = link.sendHave(listOf("🦀/é")).events.single() as PeerLinkEvent.SendText
+        check(event.text.contains("🦀/é"))
+    }
+}
 
 // Selection state after each operation, as arrays the script names.
 class SelectionRun(field: List<String>) {
@@ -267,6 +281,7 @@ fun snapshot(link: PeerLink, update: LinkUpdate): List<Any?> {
 }
 
 fun main() {
+    apiChecks()
     val hint = playerHint(PlayerSupply("main:0", 131_072uL,
         listOf(PeerTiming(1uL, Timing(0.0, 1024.0)), PeerTiming(2uL, Timing(0.0, 1024.0))),
         Timing(0.0, 512.0), Timing(null, null), 1000.0, 3u)) as PlayerCommand.PlayerHint

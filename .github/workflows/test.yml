@@ -240,15 +240,15 @@ jobs:
       # it twice per Windows job doubles their chance of a slow-runner miss.
       - name: Loader suite with links, selection and verification in the Rust core
         run: npm run test:swarm:core
-      # The runner image ships Swift, so the UniFFI bindings compile and run
+      # The runner image ships Swift, so the C-import facade compiles and runs
       # against the shared vectors and link traces here, not only on a Mac.
-      - name: Swift bindings through UniFFI
+      - name: Swift bindings through the C ABI
         run: |
           swift --version
           npm run test:ffi:swift
-      # The image ships kotlinc and a JDK; JNA comes pinned from Maven Central.
+      # The image ships kotlinc, a JDK and a C compiler for the thin JNI shim.
       # Runs after a Swift failure too, so each run reports both bindings.
-      - name: Kotlin bindings through UniFFI
+      - name: Kotlin bindings through JNI
         if: ${{ !cancelled() }}
         run: |
           kotlinc -version

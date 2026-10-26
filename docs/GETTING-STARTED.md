@@ -79,7 +79,7 @@ Native metadata identifies the same tagged source as the JavaScript metadata.
 
 Extract both Apple archives beside one another to use the local-path Swift
 package; its minimums are iOS 16 and macOS 14, arm64 only. The AAR requires
-Android API 26+, Kotlin 2.2+ and `net.java.dev.jna:jna:5.14.0@aar`.
+Android API 26+ and Kotlin 2.2+; JNA is not required.
 See [Native core packaging](CORE-PACKAGING.md) for the complete dependency,
 build and verification contract. These are core bindings, with no native
 WebRTC adapter or client application. RelaySwarmKit v0.6.0 separately consumes the v0.3.0 core; its existing WebRTC transport remains macOS arm64 only.

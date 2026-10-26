@@ -1,7 +1,7 @@
 // swift-tools-version: 5.9
 // The RelaySwarm core for Swift. Run `npm run build:ffi:apple` from the
 // repository root first: it builds relayswarm_ffiFFI.xcframework here and
-// writes the generated bindings into Sources/RelaySwarmCore.
+// copies the handwritten facade into Sources/RelaySwarmCore.
 import PackageDescription
 
 let package = Package(

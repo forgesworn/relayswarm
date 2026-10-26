@@ -1,4 +1,4 @@
-//! UniFFI bindings for the RelaySwarm core, so Swift and Kotlin shells call the
+//! Native bindings for the RelaySwarm core, so Swift and Kotlin shells call the
 //! same verification and scheduling as the browser's WebAssembly module.
 //!
 //! Signed events and the verifier's trust options cross as JSON text, in the
@@ -15,12 +15,12 @@ use relayswarm_proto::selection;
 use serde_json::{Map, Value};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-uniffi::setup_scaffolding!();
+mod capi;
 
 pub const DEFAULT_MAX_HOLDERS: u32 = scheduler::DEFAULT_MAX_HOLDERS as u32;
 pub const DEFAULT_ORIGIN_RESERVE_MS: f64 = scheduler::DEFAULT_ORIGIN_RESERVE_MS;
 
-#[derive(Debug, uniffi::Error)]
+#[derive(Debug)]
 pub enum CoreError {
     /// The piece list does not fit the object size, or a digest is not hex.
     InvalidTransfer,
@@ -69,7 +69,6 @@ fn with_trust<T>(options: &Value, run: impl FnOnce(&Trust) -> Option<T>) -> Opti
 }
 
 /// `validStreamAuthorisation(event)`.
-#[uniffi::export]
 pub fn valid_stream_authorisation(event_json: String) -> bool {
     parse(&event_json).is_some_and(|event| commitment::valid_stream_authorisation(&event))
 }
@@ -77,7 +76,6 @@ pub fn valid_stream_authorisation(event_json: String) -> bool {
 /// `verifyCommitmentDelegation(event, options, atMs)`: the delegation content
 /// as JSON, or `None`. `options` carries `streamEvent`, `swarmId` and the
 /// optional revocation lists.
-#[uniffi::export]
 pub fn verify_commitment_delegation(event_json: String, options_json: String, at_ms: i64) -> Option<String> {
     let (event, options) = (parse(&event_json)?, parse(&options_json)?);
     with_trust(&options, |trust| {
@@ -121,7 +119,6 @@ fn canonical_media(media: &Value) -> Value {
 /// `context` (`sequence`, `discontinuity`, `part`, `level`, `fragType`,
 /// `decryptMethod`, `media`). The caller still checks the received bytes
 /// against the content's `sha256` and `size`.
-#[uniffi::export]
 pub fn verify_segment_commitment(event_json: String, options_json: String, at_ms: i64) -> Option<String> {
     let (event, options) = (parse(&event_json)?, parse(&options_json)?);
     let context = &options["context"];
@@ -152,7 +149,7 @@ pub fn verify_segment_commitment(event_json: String, options_json: String, at_ms
 // Schema 3 pieces.
 
 /// Pieces `start..end`, end exclusive.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PieceSpan {
     pub start: u32,
     pub end: u32,
@@ -177,27 +174,24 @@ impl From<PieceRange> for PieceSpan {
 }
 
 /// Byte offsets `from..to`, end exclusive, for an HTTP `Range` request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ByteSpan {
     pub from: u64,
     pub to: u64,
 }
 
 /// The schema 3 piece size for an object of `size` bytes.
-#[uniffi::export]
 pub fn commitment_piece_size(size: u64) -> u64 {
     commitment::commitment_piece_size(size.min(i64::MAX as u64) as i64) as u64
 }
 
 /// The number of pieces in an object of `size` bytes, or `None` when empty.
-#[uniffi::export]
 pub fn piece_count(size: u64) -> Option<u32> {
     pieces::piece_count(size)
 }
 
 /// The bytes `span` covers in an object of `size` bytes, or `None` when the
 /// span is empty or runs past the last piece.
-#[uniffi::export]
 pub fn piece_span_bytes(size: u64, span: PieceSpan) -> Option<ByteSpan> {
     pieces::range_bytes(size, span.into()).map(|(from, to)| ByteSpan { from, to })
 }
@@ -205,7 +199,7 @@ pub fn piece_span_bytes(size: u64, span: PieceSpan) -> Option<ByteSpan> {
 // The multi-holder transfer scheduler.
 
 /// Where pieces come from. `peer` is the shell's own link handle.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TransferSource {
     Peer { peer: u64 },
     Origin,
@@ -222,29 +216,27 @@ impl From<TransferSource> for Source {
 
 /// Known timing for one source. `rate` is payload bytes per millisecond after
 /// the first byte; `None` means untested.
-#[derive(Clone, Copy, Debug, PartialEq, uniffi::Record)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Timing {
     pub first_byte_ms: Option<f64>,
     pub rate: Option<f64>,
 }
 
 /// An eligible holder: open, framing 2, holding the object, not banned.
-#[derive(Clone, Copy, Debug, PartialEq, uniffi::Record)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PeerTiming {
     pub peer: u64,
     pub timing: Timing,
 }
 
 /// Settings for one transfer.
-#[derive(Clone, Copy, Debug, PartialEq, uniffi::Record)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TransferSettings {
     pub max_holders: u32,
     pub origin_reserve_ms: f64,
 }
 
-/// The core's defaults, which the browser loader uses too. UniFFI does not
-/// export constants, so bindings read them here.
-#[uniffi::export]
+/// The core's defaults, which the browser loader and native facades use.
 pub fn default_transfer_settings() -> TransferSettings {
     TransferSettings {
         max_holders: DEFAULT_MAX_HOLDERS,
@@ -253,7 +245,7 @@ pub fn default_transfer_settings() -> TransferSettings {
 }
 
 /// What the shell must do, in order.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TransferCommand {
     /// Send a framing 2 `want` for these pieces on this peer's link.
     Request { peer: u64, span: PieceSpan },
@@ -287,7 +279,7 @@ impl From<Command> for TransferCommand {
 }
 
 /// The commands from one call, and when to call `tick` next.
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TransferState {
     pub commands: Vec<TransferCommand>,
     pub next_deadline: Option<u64>,
@@ -299,7 +291,6 @@ pub struct TransferState {
 
 /// One object fetched from several holders and origin, piece by piece. Every
 /// method takes the shell's current time in milliseconds.
-#[derive(uniffi::Object)]
 pub struct Transfer {
     inner: Mutex<scheduler::Transfer>,
 }
@@ -322,11 +313,9 @@ impl Transfer {
     }
 }
 
-#[uniffi::export]
 impl Transfer {
     /// A transfer of `size` bytes committed to `sha256` and the schema 3
     /// `pieces` (already verified), due at `deadline`.
-    #[uniffi::constructor]
     pub fn new(settings: TransferSettings, size: u64, sha256: String, pieces: Vec<String>, deadline: u64) -> Result<Arc<Self>, CoreError> {
         let config = TransferConfig {
             max_holders: (settings.max_holders as usize).max(1),
@@ -397,7 +386,7 @@ impl Transfer {
 
 /// The link's fixed sizes. The shell sets its channel's low-water threshold
 /// to `low_water_bytes`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkLimits {
     pub chunk_bytes: u64,
     pub high_water_bytes: u64,
@@ -405,7 +394,6 @@ pub struct LinkLimits {
     pub max_have_keys: u32,
 }
 
-#[uniffi::export]
 pub fn link_limits() -> LinkLimits {
     LinkLimits {
         chunk_bytes: link::CHUNK_BYTES as u64,
@@ -416,7 +404,7 @@ pub fn link_limits() -> LinkLimits {
 }
 
 /// Settings for one link.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkSettings {
     pub max_segment_bytes: u64,
     pub max_queued_requests: u32,
@@ -425,7 +413,7 @@ pub struct LinkSettings {
     pub reliable: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RequestOutcome {
     Payload,
     None,
@@ -453,7 +441,7 @@ impl From<link::Outcome> for RequestOutcome {
 }
 
 /// The logical result of one request, reported once.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RequestReport {
     pub id: Option<u64>,
     pub outcome: RequestOutcome,
@@ -464,7 +452,7 @@ pub struct RequestReport {
 }
 
 /// What the shell must do or learn, in order.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PeerLinkEvent {
     /// Send this text frame on the channel.
     SendText {
@@ -542,7 +530,7 @@ impl From<link::LinkEvent> for PeerLinkEvent {
 /// The events from one call, the request ID `request`/`request_range`
 /// assigned, and the link's scalar state. When `version` changes, read
 /// `sets` again.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkUpdate {
     pub events: Vec<PeerLinkEvent>,
     pub request_id: Option<u64>,
@@ -561,14 +549,14 @@ pub struct LinkUpdate {
 }
 
 /// A key with the time it was announced or expires.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TimedKey {
     pub key: String,
     pub at: u64,
 }
 
 /// What the remote has announced.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkSets {
     pub have: Vec<String>,
     /// Keys the remote is fetching, with each lease's expiry.
@@ -590,7 +578,6 @@ fn timed<'a>(entries: impl IntoIterator<Item = (&'a String, &'a u64)>) -> Vec<Ti
 
 /// One data channel between two viewers. Every method that takes `now` takes
 /// the shell's current time in milliseconds; call `tick` at `next_deadline`.
-#[derive(uniffi::Object)]
 pub struct PeerLink {
     inner: Mutex<link::Link>,
 }
@@ -622,9 +609,7 @@ impl PeerLink {
     }
 }
 
-#[uniffi::export]
 impl PeerLink {
-    #[uniffi::constructor]
     pub fn new(settings: LinkSettings, now: u64) -> Arc<Self> {
         let config = LinkConfig {
             max_segment_bytes: settings.max_segment_bytes,
@@ -774,7 +759,7 @@ impl PeerLink {
 // peer takes a new handle and starts without history.
 
 /// One link as selection sees it at the moment of choice.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SelectableLink {
     pub id: u64,
     pub pubkey: String,
@@ -785,7 +770,7 @@ pub struct SelectableLink {
 }
 
 /// One link's measured history.
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LinkObservation {
     pub attempts: u32,
     pub latency_ms: Option<f64>,
@@ -810,7 +795,6 @@ impl From<selection::Observation> for LinkObservation {
 
 /// Chooses which link to ask for a segment, from shared and per-link
 /// measurements, as `peer-selection.mjs` does. One per swarm.
-#[derive(uniffi::Object)]
 pub struct PeerSelection {
     inner: Mutex<selection::PeerSelection>,
 }
@@ -821,9 +805,7 @@ impl PeerSelection {
     }
 }
 
-#[uniffi::export]
 impl PeerSelection {
-    #[uniffi::constructor]
     pub fn new() -> Arc<Self> {
         Arc::new(PeerSelection {
             inner: Mutex::new(selection::PeerSelection::new()),
@@ -911,7 +893,7 @@ impl PeerSelection {
 // other than "main" or "audio" has no context, as in JavaScript. Contexts and
 // attempts are numeric IDs where the JavaScript compares object identity.
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DiscoveryMedia {
     Main,
     Audio,
@@ -927,7 +909,7 @@ impl From<MediaType> for DiscoveryMedia {
 }
 
 /// A holder that has missed keys in one context.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DiscoveryHolder {
     pub pubkey: String,
     pub first_miss_at: u64,
@@ -935,7 +917,7 @@ pub struct DiscoveryHolder {
     pub last_key: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DiscoveryContext {
     pub id: u64,
     pub media_type: DiscoveryMedia,
@@ -974,7 +956,7 @@ impl From<&discovery::Context> for DiscoveryContext {
 }
 
 /// A peer's latest hint.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DiscoveryCandidate {
     pub pubkey: String,
     pub have: Vec<String>,
@@ -993,7 +975,7 @@ impl From<&discovery::Candidate> for DiscoveryCandidate {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DiscoveryAttempt {
     pub id: u64,
     pub pubkey: String,
@@ -1003,7 +985,7 @@ pub struct DiscoveryAttempt {
 }
 
 /// The single replacement window.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DiscoveryWindow {
     pub id: u64,
     /// The context the window serves, which may since have been replaced.
@@ -1017,7 +999,7 @@ pub struct DiscoveryWindow {
 }
 
 /// A hinted candidate for a demanded key.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FoundHolder {
     pub context: u64,
     pub media_type: DiscoveryMedia,
@@ -1025,7 +1007,7 @@ pub struct FoundHolder {
     pub key: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DiscoveryCounters {
     pub checks: u64,
     pub replacements: u64,
@@ -1043,7 +1025,7 @@ pub struct DiscoveryCounters {
     pub unmet_ineligible: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DiscoverySnapshot {
     pub candidates: u32,
     pub contexts: u32,
@@ -1065,7 +1047,6 @@ struct DiscoveryState {
 /// Demand, hints, holder misses and the single replacement window, as
 /// `neighbour-discovery.mjs` keeps them. The shell owns admission, slots and
 /// connections. One per swarm.
-#[derive(uniffi::Object)]
 pub struct NeighbourDiscovery {
     inner: Mutex<DiscoveryState>,
 }
@@ -1087,9 +1068,7 @@ impl NeighbourDiscovery {
     }
 }
 
-#[uniffi::export]
 impl NeighbourDiscovery {
-    #[uniffi::constructor]
     pub fn new() -> Arc<Self> {
         Arc::new(NeighbourDiscovery {
             inner: Mutex::new(DiscoveryState {
@@ -1305,7 +1284,7 @@ impl NeighbourDiscovery {
 
 /// Supply already known for one rendition's next segment. The host filters
 /// open, idle, unbanned, non-stale framing 2 HAVE holders; no discovery runs.
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PlayerSupply {
     pub rendition: String,
     pub size: Option<u64>,
@@ -1316,7 +1295,7 @@ pub struct PlayerSupply {
     pub max_holders: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlayerSupplyHint {
     pub rendition: String,
     pub eligible_holders: u32,
@@ -1324,12 +1303,11 @@ pub struct PlayerSupplyHint {
 }
 
 /// Advisory command; may only break ties between origin-sustainable levels.
-#[derive(Clone, Debug, PartialEq, uniffi::Enum)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum PlayerCommand {
     PlayerHint { hint: PlayerSupplyHint },
 }
 
-#[uniffi::export]
 pub fn player_hint(supply: PlayerSupply) -> PlayerCommand {
     let peers: Vec<Estimate> = supply
         .peers

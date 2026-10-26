@@ -72,7 +72,7 @@ const zip = (name, cwd, inputs) => {
 if (command === "apple") {
   const apple = join(root, "core/apple"), framework = "relayswarm_ffiFFI.xcframework";
   safe([...walk(join(apple, framework)), join(apple, "Sources/RelaySwarmCore/relayswarm_ffi.swift")]);
-  // Compile the generated Swift wrapper against the actual packaged slices.
+  // Compile the handwritten Swift facade against the actual packaged slices.
   run("swift", ["build", "--package-path", apple, "--configuration", "release"], { stdio: "inherit" });
   const archive = zip("relayswarm-core.xcframework.zip", apple, [framework]);
   const checksum = run("swift", ["package", "compute-checksum", archive]).toString().trim();
@@ -89,7 +89,7 @@ if (command === "apple") {
   const classes = run("unzip", ["-p", join(directory, "aar/classes.jar")]);
   if (privatePaths.some((path) => classes.includes(Buffer.from(path)))) throw new Error("Android classes contain a local source path");
   const entries = run("unzip", ["-Z1", library]).toString().split("\n");
-  for (const file of ["AndroidManifest.xml", "classes.jar", "proguard.txt", ...["arm64-v8a", "armeabi-v7a", "x86_64"].map((abi) => `jni/${abi}/librelayswarm_ffi.so`)]) {
+  for (const file of ["AndroidManifest.xml", "classes.jar", "proguard.txt", ...["arm64-v8a", "armeabi-v7a", "x86_64"].flatMap((abi) => [`jni/${abi}/librelayswarm_ffi.so`, `jni/${abi}/librelayswarm_jni.so`])]) {
     if (!entries.includes(file)) throw new Error(`AAR is missing ${file}`);
   }
   run("unzip", ["-tq", library]);

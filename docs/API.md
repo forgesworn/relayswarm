@@ -631,11 +631,11 @@ core is unavailable. Supply contains `rendition`, `size` (nullable estimate),
 the projection is not a wall-clock finish timestamp. The host filters eligible
 HAVE holders before the call. The function does no I/O and reserves no pieces.
 
-UniFFI exposes `player_hint(PlayerSupply) -> PlayerCommand::PlayerHint`, with
-`PlayerSupplyHint { rendition, eligible_holders, projected_ms }`. `PlayerSupply`
+The native facade exposes `player_hint(PlayerSupply) -> PlayerCommand::PlayerHint`,
+with `PlayerSupplyHint { rendition, eligible_holders, projected_ms }`. `PlayerSupply`
 uses typed `PeerTiming`, optional origin `Timing`, shared `Timing`, optional
 size, available milliseconds and maximum holders. Swift and Kotlin use their
-generated naming conventions. Native hosts retain origin-sustainability checks
+platform naming conventions. Native hosts retain origin-sustainability checks
 and the same eligibility filters. Discovery remains one context per media type;
 other rendition counts reflect linked HAVE advertisements only. This API is
 experimental and has no field acceptance evidence.

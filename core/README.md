@@ -164,7 +164,9 @@ Measured on 22 and 23 October 2026:
 The module is fetched separately rather than inlined: inlining it as base64
 measured 1,002,411 bytes (352,844 gzip) for the demo client.
 
-`relayswarm-ffi` is the UniFFI facade (spec step 4) for Swift and Kotlin.
+`relayswarm-ffi` is the native facade (spec step 4) for Swift and Kotlin.
+A versioned C ABI joins the Rust core to a thin JNI Kotlin facade and a direct
+C-import Swift facade; binding generators and JNA are not required.
 It exposes the commitment verifiers, taking the event and the options
 `segment-commitment.mjs` takes as JSON text and returning the verified content
 as JSON or nothing; the schema 3 piece helpers; the multi-holder `Transfer`;
@@ -186,29 +188,27 @@ as the strings HLS uses and has no context for any but `main` and `audio`, as
 in JavaScript; contexts and attempts are numeric IDs, and `begin` starts an
 attempt on the holder the latest `choose` or `hinted` returned, as the
 WebAssembly bridge does; a call that finds no holder clears it, and each
-result begins at most once. UniFFI exports no constants,
-so `default_transfer_settings()` and `link_limits()` return the core's values.
+result begins at most once. `default_transfer_settings()` and `link_limits()`
+return the core's values.
 
 `cargo test` runs the shared vectors and every recorded link trace through
 the facade, and replays a scripted transfer and a piece range exchange through
 both the facade and the core, expecting the same commands and events.
 `npm run test:ffi:swift` and `npm run test:ffi:kotlin` build the debug
-library, generate bindings, compile a small program against them and check
-every vector, every link trace, one transfer and a piece range exchanged
-between two links, that a full send buffer holds the range's data until a
-drain, that the channel's open and reliable flags change what the link
-sends and how an abort ends, and every seeded selection and discovery
-sequence that `npm run proto:traces` records from the JavaScript (the script
-records them first if they are missing); CI runs both on Linux. The
-Kotlin check downloads JNA 5.14.0 from Maven Central into `core/target/` and
-verifies its SHA-256. Generate bindings from an unstripped build: the release
-profile strips symbols, and on Linux that removes the UniFFI metadata.
+library, compile the handwritten facades with a small program and check every
+vector, every link trace, one transfer and a piece range exchanged between two
+links, that a full send buffer holds the range's data until a drain, that the
+channel's open and reliable flags change what the link sends and how an abort
+ends, and every seeded selection and discovery sequence that
+`npm run proto:traces` records from the JavaScript (the script records them
+first if they are missing); CI runs both on Linux. The Kotlin check compiles
+the thin JNI shim with the host C compiler and JDK.
 
 `npm run build:ffi:apple` packages the facade for Apple platforms as the
 Swift package in `core/apple`: arm64 release static libraries for iPhone,
 the iOS simulator and macOS, for iOS 16 and
 macOS 14 as RelaySwarmKit requires, in `relayswarm_ffiFFI.xcframework`, with
-the generated bindings as the `RelaySwarmCore` library. Both are built into
+the handwritten Swift facade as the `RelaySwarmCore` library. Both are built into
 `core/apple` and git-ignored, so run the script before using the package; it
 needs Xcode and the three Rust targets it names. It refuses a library with an
 object built for a newer OS than the package declares.
@@ -224,22 +224,25 @@ by local path, not by Git URL. RelaySwarmKit does not use the package yet.
 `npm run build:ffi:android` packages the facade for Android as
 `core/target/android/relayswarm-core.aar`: release shared libraries for
 arm64-v8a, armeabi-v7a and x86_64, built with `cargo-ndk` for API 26 and
-later, and the generated Kotlin bindings compiled against `android.jar`. It
-needs the Android SDK and an NDK (`ANDROID_HOME` and `ANDROID_NDK_HOME`, or
-their defaults under `~/Library/Android/sdk`), `cargo-ndk`, `kotlinc` and the
-three Rust targets it names. It refuses a library built for the wrong
-machine, a 64-bit library without 16 KB page alignment, and one that needs a
-library beyond Android's own. The AAR names no dependencies, so an app adds
-`net.java.dev.jna:jna:5.14.0@aar` itself and needs Kotlin 2.2 or later; its
-R8 rules keep JNA and the bindings. `npm run test:ffi:android` also builds a
+later, with a JNI shared library for each and the handwritten Kotlin facade
+compiled against `android.jar`. It needs the Android SDK and an NDK
+(`ANDROID_HOME` and `ANDROID_NDK_HOME`, or their defaults under
+`~/Library/Android/sdk`), `cargo-ndk`, `kotlinc` and the three Rust targets it
+names. It refuses a library built for the wrong machine, a 64-bit library
+without 16 KB page alignment, and one that needs a library beyond Android's
+own and the packaged Rust library. The AAR names no dependencies and needs
+Kotlin 2.2 or later; its R8 rules keep the facade and native entry-point
+class. `npm run test:ffi:android` also builds a
 throwaway app against the AAR with the Android Gradle plugin, and
 `node scripts/ffi-android.mjs --device` runs that app's code through
 `app_process` on the device or emulator adb reaches and checks it the same
 way. CI builds the AAR and the app on Linux; the device run is local, and it
 has passed on an API 35 arm64 emulator. Nothing here has run on a phone.
 
-Release builds abort on panic, so a panic in the core ends the host process rather
-than raising an error.
+The C ABI validates UTF-8 and pointers, returns a per-call error buffer and
+contains Rust panics with `catch_unwind` in debug and release builds. Returned
+buffers have one matching free call, and objects are opaque reference-counted
+handles. Production libraries export no test entry points.
 
 ```sh
 cd core

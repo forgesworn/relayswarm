@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Package the core for Apple platforms: release static libraries for iPhone,
 // the iOS simulator and macOS, gathered into core/apple/relayswarm_ffiFFI.xcframework,
-// with the generated Swift bindings as the RelaySwarmCore target of the
+// with the handwritten Swift facade as the RelaySwarmCore target of the
 // Swift package in core/apple. Both outputs are git-ignored; run this before
 // `swift build` or adding the package to an Xcode project.
 //
@@ -87,19 +87,11 @@ const libraries = SLICES.map((slice) => {
   return library;
 });
 
-// The bindings come from the host's debug library, built in this same run:
-// release strips the metadata the generator reads on some platforms, and the
-// generated Swift checks at load time that it matches the library's API.
-run("cargo", ["build", "--locked", "-p", "relayswarm-ffi", "--lib"], { stdio: "inherit" });
-const bindings = join(out, "bindings");
-run("cargo", ["run", "--locked", "--quiet", "--features", "bindgen", "--bin", "uniffi-bindgen", "--",
-  "generate", "--library", join(core, "target/debug/librelayswarm_ffi.dylib"), "--language", "swift",
-  "--no-format", "--out-dir", bindings], { stdio: "inherit" });
 const headers = join(out, "headers");
 mkdirSync(headers);
-cpSync(join(bindings, "relayswarm_ffiFFI.h"), join(headers, "relayswarm_ffiFFI.h"));
+cpSync(join(core, "relayswarm-ffi/include/RelaySwarmFFI.h"), join(headers, "RelaySwarmFFI.h"));
 // The XCFramework's module map must be named module.modulemap.
-cpSync(join(bindings, "relayswarm_ffiFFI.modulemap"), join(headers, "module.modulemap"));
+cpSync(join(core, "relayswarm-ffi/include/module.modulemap"), join(headers, "module.modulemap"));
 
 // --- package -------------------------------------------------------------------
 
@@ -107,7 +99,7 @@ const xcframework = join(apple, "relayswarm_ffiFFI.xcframework");
 rmSync(xcframework, { recursive: true, force: true });
 run("xcodebuild", ["-create-xcframework", ...libraries.flatMap((library) => ["-library", library, "-headers", headers]),
   "-output", xcframework], { stdio: "inherit" });
-cpSync(join(bindings, "relayswarm_ffi.swift"), join(apple, "Sources/RelaySwarmCore/relayswarm_ffi.swift"));
+cpSync(join(core, "relayswarm-ffi/swift/relayswarm_ffi.swift"), join(apple, "Sources/RelaySwarmCore/relayswarm_ffi.swift"));
 console.log(`Apple package: ${apple} (arm64 for iPhone, the simulator and macOS; iOS ${IOS}, macOS ${MACOS})`);
 
 if (!options.has("--check")) process.exit(0);

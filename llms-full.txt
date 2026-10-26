@@ -1165,6 +1165,9 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 ## Unreleased
 
+- Replace UniFFI with a versioned C ABI, thin JNI Kotlin facade and direct
+  C-import Swift facade. Public records, enums, objects and functions retain
+  their existing shapes; Android packages no longer require JNA.
 - Add experimental `lateHaveRace`, disabled by default. With a zero-budget
   cached race, normal whole HTTP starts immediately while existing accepted
   connections may advertise an exact HAVE within the original deadline.
@@ -1866,7 +1869,7 @@ Native metadata identifies the same tagged source as the JavaScript metadata.
 
 Extract both Apple archives beside one another to use the local-path Swift
 package; its minimums are iOS 16 and macOS 14, arm64 only. The AAR requires
-Android API 26+, Kotlin 2.2+ and `net.java.dev.jna:jna:5.14.0@aar`.
+Android API 26+ and Kotlin 2.2+; JNA is not required.
 See [Native core packaging](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-PACKAGING.md) for the complete dependency,
 build and verification contract. These are core bindings, with no native
 WebRTC adapter or client application. RelaySwarmKit v0.6.0 separately consumes the v0.3.0 core; its existing WebRTC transport remains macOS arm64 only.
@@ -2593,11 +2596,11 @@ core is unavailable. Supply contains `rendition`, `size` (nullable estimate),
 the projection is not a wall-clock finish timestamp. The host filters eligible
 HAVE holders before the call. The function does no I/O and reserves no pieces.
 
-UniFFI exposes `player_hint(PlayerSupply) -> PlayerCommand::PlayerHint`, with
-`PlayerSupplyHint { rendition, eligible_holders, projected_ms }`. `PlayerSupply`
+The native facade exposes `player_hint(PlayerSupply) -> PlayerCommand::PlayerHint`,
+with `PlayerSupplyHint { rendition, eligible_holders, projected_ms }`. `PlayerSupply`
 uses typed `PeerTiming`, optional origin `Timing`, shared `Timing`, optional
 size, available milliseconds and maximum holders. Swift and Kotlin use their
-generated naming conventions. Native hosts retain origin-sustainability checks
+platform naming conventions. Native hosts retain origin-sustainability checks
 and the same eligibility filters. Discovery remains one context per media type;
 other rendition counts reflect linked HAVE advertisements only. This API is
 experimental and has no field acceptance evidence.
@@ -8668,7 +8671,7 @@ unexpected assets and invalid checksums. Actions artefacts are retained for
 |---|---|
 | `relayswarm-core.xcframework.zip` | The binary XCFramework at the archive root, arm64 for iPhone, iOS simulator and macOS |
 | `relayswarm-core.xcframework.zip.checksum` | Actual `swift package compute-checksum` result for that archive |
-| `relayswarm-core-swift-bindings.zip` | Generated Swift wrapper and unchanged local-path `Package.swift` |
+| `relayswarm-core-swift-bindings.zip` | Handwritten Swift facade and unchanged local-path `Package.swift` |
 | `relayswarm-core.aar` | Kotlin bindings and native libraries for arm64-v8a, armeabi-v7a and x86_64 |
 | `SHA256SUMS-apple`, `SHA256SUMS-android` | Digests of each platform's assets and metadata |
 | `BUILD-METADATA-apple.json`, `BUILD-METADATA-android.json` | Source commit, package version, Node and Rust versions |
@@ -8678,11 +8681,11 @@ Swift package. Its minimums are macOS 14 and iOS 16. The build compiles the
 Swift wrapper against the actual XCFramework before archiving it.
 The SwiftPM checksum describes the binary archive, not the bindings archive.
 
-The Android minimum is API 26. Consumers also add
-`net.java.dev.jna:jna:5.14.0@aar` and Kotlin 2.2 or later; the AAR does not
-embed those dependencies. The existing builder checks each ABI's machine,
-16 KiB load alignment for 64-bit libraries and system-library dependencies.
-Packaging checks the manifest, classes, consumer rules and all three libraries.
+The Android minimum is API 26 and consumers need Kotlin 2.2 or later; JNA is
+not required. Each ABI contains Rust and JNI shared libraries. The builder
+checks each library's machine, 16 KiB load alignment for 64-bit libraries and
+system-library dependencies. Packaging checks the manifest, classes, consumer
+rules and all six libraries.
 
 ## Local build and scope
 

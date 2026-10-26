@@ -49,7 +49,7 @@ unexpected assets and invalid checksums. Actions artefacts are retained for
 |---|---|
 | `relayswarm-core.xcframework.zip` | The binary XCFramework at the archive root, arm64 for iPhone, iOS simulator and macOS |
 | `relayswarm-core.xcframework.zip.checksum` | Actual `swift package compute-checksum` result for that archive |
-| `relayswarm-core-swift-bindings.zip` | Generated Swift wrapper and unchanged local-path `Package.swift` |
+| `relayswarm-core-swift-bindings.zip` | Handwritten Swift facade and unchanged local-path `Package.swift` |
 | `relayswarm-core.aar` | Kotlin bindings and native libraries for arm64-v8a, armeabi-v7a and x86_64 |
 | `SHA256SUMS-apple`, `SHA256SUMS-android` | Digests of each platform's assets and metadata |
 | `BUILD-METADATA-apple.json`, `BUILD-METADATA-android.json` | Source commit, package version, Node and Rust versions |
@@ -59,11 +59,11 @@ Swift package. Its minimums are macOS 14 and iOS 16. The build compiles the
 Swift wrapper against the actual XCFramework before archiving it.
 The SwiftPM checksum describes the binary archive, not the bindings archive.
 
-The Android minimum is API 26. Consumers also add
-`net.java.dev.jna:jna:5.14.0@aar` and Kotlin 2.2 or later; the AAR does not
-embed those dependencies. The existing builder checks each ABI's machine,
-16 KiB load alignment for 64-bit libraries and system-library dependencies.
-Packaging checks the manifest, classes, consumer rules and all three libraries.
+The Android minimum is API 26 and consumers need Kotlin 2.2 or later; JNA is
+not required. Each ABI contains Rust and JNI shared libraries. The builder
+checks each library's machine, 16 KiB load alignment for 64-bit libraries and
+system-library dependencies. Packaging checks the manifest, classes, consumer
+rules and all six libraries.
 
 ## Local build and scope
 

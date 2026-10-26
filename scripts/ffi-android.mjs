@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Package the core for Android: release shared libraries for arm64-v8a,
-// armeabi-v7a and x86_64, and the generated Kotlin bindings compiled against
-// android.jar, zipped into core/target/android/relayswarm-core.aar.
+// Package the core for Android: release Rust and JNI shared libraries for
+// arm64-v8a, armeabi-v7a and x86_64, and the handwritten Kotlin facade
+// compiled against android.jar, zipped into core/target/android/relayswarm-core.aar.
 //
 //   node scripts/ffi-android.mjs [--check] [--device]
 //
@@ -16,13 +16,11 @@
 // (ANDROID_NDK_HOME, or the newest under the SDK), cargo-ndk, kotlinc and the
 // three Rust targets listed below; --check also needs gradle.
 //
-// The AAR names no dependencies, so an app adds JNA itself
-// (net.java.dev.jna:jna:5.14.0@aar) and needs Kotlin 2.2 or later. Its
-// consumer R8 rules keep JNA and the bindings.
+// The AAR names no dependencies and needs Kotlin 2.2 or later. Its consumer
+// R8 rules keep the facade and its native entry-point class.
 
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +35,6 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const core = join(root, "core");
 const out = join(core, "target/android");
 const run = (command, args, options = {}) => execFileSync(command, args, { cwd: core, maxBuffer: 256 * 1024 * 1024, ...options });
-const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 // Android 8.0; the bindings' callers commonly use java.util.Base64, as the
 // smoke does, which arrived in API 26.
@@ -47,15 +44,10 @@ const NAMESPACE = "uniffi.relayswarm_ffi";
 // Arm phones, older 32-bit Arm phones and x86_64 emulators. 64-bit
 // libraries must use 16 KB pages for Android 15 devices that need them.
 const ABIS = [
-  { abi: "arm64-v8a", target: "aarch64-linux-android", machine: "AArch64", pages: 0x4000 },
-  { abi: "armeabi-v7a", target: "armv7-linux-androideabi", machine: "ARM", pages: 0x1000 },
-  { abi: "x86_64", target: "x86_64-linux-android", machine: "Advanced Micro Devices X86-64", pages: 0x4000 },
+  { abi: "arm64-v8a", target: "aarch64-linux-android", clangTarget: "aarch64-linux-android", machine: "AArch64", pages: 0x4000 },
+  { abi: "armeabi-v7a", target: "armv7-linux-androideabi", clangTarget: "armv7a-linux-androideabi", machine: "ARM", pages: 0x1000 },
+  { abi: "x86_64", target: "x86_64-linux-android", clangTarget: "x86_64-linux-android", machine: "Advanced Micro Devices X86-64", pages: 0x4000 },
 ];
-const JNA = {
-  url: "https://repo1.maven.org/maven2/net/java/dev/jna/jna/5.14.0/jna-5.14.0.aar",
-  sha256: "81a8b9afc65f9d6b205338c25908af8de0ff8411a00985104c9d83fffdfab380",
-  coordinate: "net.java.dev.jna:jna:5.14.0@aar",
-};
 // The Android Gradle plugin for the throwaway consumer; Kotlin is built in.
 const AGP = "9.2.1";
 
@@ -85,7 +77,7 @@ function checkLibrary(library, { abi, machine, pages }) {
     if (align < pages) throw new Error(`${library} has a LOAD segment aligned to ${align}, below ${pages}`);
   }
   const needed = [...run(readelf, ["-dW", library]).toString("utf8").matchAll(/\(NEEDED\)\s+Shared library: \[(.+)\]/g)].map((match) => match[1]);
-  const extra = needed.filter((name) => !["libc.so", "libdl.so", "libm.so", "liblog.so"].includes(name));
+  const extra = needed.filter((name) => !["libc.so", "libdl.so", "libm.so", "liblog.so", "librelayswarm_ffi.so"].includes(name));
   if (extra.length > 0) throw new Error(`${library} needs ${extra.join(", ")}, which an app would have to ship`);
 }
 
@@ -97,35 +89,20 @@ mkdirSync(aar, { recursive: true });
 const ndkEnv = { ...process.env, ANDROID_HOME: sdk, ANDROID_NDK_HOME: ndk };
 run("cargo", ["ndk", ...ABIS.flatMap(({ abi }) => ["-t", abi]), "-P", String(MIN_SDK), "-o", join(aar, "jni"),
   "build", "--locked", "--release", "-p", "relayswarm-ffi", "--lib"], { stdio: "inherit", env: ndkEnv });
-for (const entry of ABIS) checkLibrary(join(aar, "jni", entry.abi, "librelayswarm_ffi.so"), entry);
-
-// The bindings come from the host's debug library, as in ffi-smoke.mjs:
-// release strips the metadata the generator reads.
-run("cargo", ["build", "--locked", "-p", "relayswarm-ffi", "--lib"], { stdio: "inherit" });
-const host = join(core, "target/debug", process.platform === "darwin" ? "librelayswarm_ffi.dylib" : "librelayswarm_ffi.so");
-const bindings = join(out, "bindings");
-run("cargo", ["run", "--locked", "--quiet", "--features", "bindgen", "--bin", "uniffi-bindgen", "--",
-  "generate", "--library", host, "--language", "kotlin", "--no-format", "--out-dir", bindings], { stdio: "inherit" });
-const generated = join(bindings, "uniffi/relayswarm_ffi/relayswarm_ffi.kt");
-
-async function jnaAar() {
-  const path = join(core, "target/jna-5.14.0.aar");
-  if (!existsSync(path) || sha256(readFileSync(path)) !== JNA.sha256) {
-    const response = await fetch(JNA.url);
-    if (!response.ok) throw new Error(`JNA download failed: ${response.status}`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (sha256(bytes) !== JNA.sha256) throw new Error("JNA AAR does not match its pinned SHA-256");
-    writeFileSync(path, bytes);
-  }
-  return path;
+const hostTag = readdirSync(prebuilt)[0];
+for (const entry of ABIS) {
+  const directory = join(aar, "jni", entry.abi);
+  const clang = join(prebuilt, hostTag, "bin", `${entry.clangTarget}${MIN_SDK}-clang`);
+  run(clang, ["-shared", "-fPIC", "-Wall", "-Wextra", "-Werror", `-I${join(core, "relayswarm-ffi/include")}`,
+    join(core, "relayswarm-ffi/jni/relayswarm_jni.c"), `-L${directory}`, "-lrelayswarm_ffi", "-Wl,--no-undefined",
+    "-Wl,-z,max-page-size=16384", "-o", join(directory, "librelayswarm_jni.so")], { stdio: "inherit" });
+  for (const name of ["librelayswarm_ffi.so", "librelayswarm_jni.so"]) checkLibrary(join(directory, name), entry);
 }
-const jnaClasses = join(out, "jna");
-run("unzip", ["-q", "-o", await jnaAar(), "classes.jar", "-d", jnaClasses]);
 
-// Compiled against android.jar alone, with no JDK, so the bindings use only
+// Compiled against android.jar alone, with no JDK, so the facade uses only
 // what Android provides; Kotlin 2.2 metadata, so older apps can read it.
 run("kotlinc", ["-nowarn", "-no-jdk", "-jvm-target", "11", "-language-version", "2.2", "-api-version", "2.2",
-  "-cp", [androidJar, join(jnaClasses, "classes.jar")].join(":"), "-d", join(aar, "classes.jar"), generated], { stdio: "inherit" });
+  "-cp", androidJar, "-d", join(aar, "classes.jar"), join(core, "relayswarm-ffi/kotlin/uniffi/relayswarm_ffi/relayswarm_ffi.kt")], { stdio: "inherit" });
 
 // --- package -------------------------------------------------------------------
 
@@ -135,11 +112,8 @@ writeFileSync(join(aar, "AndroidManifest.xml"), `<?xml version="1.0" encoding="u
 </manifest>
 `);
 writeFileSync(join(aar, "R.txt"), "");
-// JNA finds classes and fields by reflection, so R8 must keep them.
-writeFileSync(join(aar, "proguard.txt"), `-keep class com.sun.jna.** { *; }
--keep class * implements com.sun.jna.** { *; }
--keep class ${NAMESPACE}.** { *; }
--dontwarn java.awt.**
+// JNI resolves the native entry-point class and methods by name.
+writeFileSync(join(aar, "proguard.txt"), `-keep class ${NAMESPACE}.** { *; }
 `);
 const library = join(out, "relayswarm-core.aar");
 run("zip", ["-q", "-X", "-r", library, "AndroidManifest.xml", "R.txt", "proguard.txt", "classes.jar", "jni"], { cwd: aar });
@@ -185,7 +159,6 @@ android {
 
 dependencies {
     implementation(files("${library}"))
-    implementation("${JNA.coordinate}")
 }
 `);
 writeFileSync(join(smoke, "app/src/main/AndroidManifest.xml"), `<?xml version="1.0" encoding="utf-8"?>
@@ -197,7 +170,7 @@ const apk = join(smoke, "app/build/outputs/apk/debug/app-debug.apk");
 if (!existsSync(apk)) throw new Error("gradle left no smoke APK");
 const listing = run("unzip", ["-Z1", apk]).toString("utf8").split("\n");
 for (const { abi } of ABIS) {
-  for (const name of ["librelayswarm_ffi.so", "libjnidispatch.so"]) {
+  for (const name of ["librelayswarm_ffi.so", "librelayswarm_jni.so"]) {
     if (!listing.includes(`lib/${abi}/${name}`)) throw new Error(`The smoke APK has no lib/${abi}/${name}`);
   }
 }
@@ -205,8 +178,8 @@ console.log(`smoke app built against the AAR: ${apk}`);
 
 if (!options.has("--device")) process.exit(0);
 
-// The APK's dex holds the smoke, the bindings, JNA and the Kotlin library;
-// app_process runs its main() with the device's libraries beside it.
+// The APK's dex holds the smoke, facade and Kotlin library; app_process runs
+// its main() with the device's Rust and JNI libraries beside it.
 const adb = join(sdk, "platform-tools/adb");
 const shell = (...args) => run(adb, ["shell", ...args]).toString("utf8").trim();
 const abi = shell("getprop", "ro.product.cpu.abi");
@@ -221,8 +194,7 @@ try {
   run(adb, ["push", apk, `${remote}/smoke.apk`], { stdio: "ignore" });
   for (const name of readdirSync(libs)) run(adb, ["push", join(libs, name), `${remote}/${name}`], { stdio: "ignore" });
   execFileSync(process.execPath, [join(root, "scripts/ffi-smoke.mjs"), "kotlin", `Android library on API ${api} (${abi})`, "--",
-    adb, "shell", `CLASSPATH=${remote}/smoke.apk`, "app_process", `-Djna.library.path=${remote}`, `-Djna.boot.library.path=${remote}`,
-    "-Djna.nosys=true", "/", "MainKt"], { cwd: root, stdio: "inherit" });
+    adb, "shell", `CLASSPATH=${remote}/smoke.apk`, "app_process", `-Djava.library.path=${remote}`, "/", "MainKt"], { cwd: root, stdio: "inherit" });
 } finally {
   shell("rm", "-rf", remote);
 }
