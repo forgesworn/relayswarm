@@ -6,7 +6,7 @@ export const SEAMS = Object.freeze({
     ['window.relaySwarmDemo = { report, stop:', ''],
   ],
   swarm: [
-    ['    const key = await this.#segmentKey(context);\n    if (signal.aborted || this.stopped) {', '    availabilityObservation.key(context, key, deadline, budgetMs);\n'],
+    ['    const key = plan.knownKey ?? await this.#segmentKey(context);\n    if (signal.aborted || this.stopped || plan.currentValid && !plan.currentValid()) {', '    availabilityObservation.key(context, key, deadline, budgetMs);\n'],
     ['                  const key = await swarm.#segmentKey(context);\n                  if (copy && !swarm.stopped)', '                  availabilityObservation.key(context, key);\n'],
   ],
   peer: [
