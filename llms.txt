@@ -70,6 +70,10 @@ three-object/24 MiB and eight-second/parent limits. With warmAhead false,
 speculation stops after startup. It preserves the pending trusted play and
 never changes the player, rate or room clock; failure is explicit. Source
 and fixture checks do not prove decoded playback or device acceptance.
+While the first callback waits, a bounded 100 ms target poll can replace
+completed obsolete future objects with currently parsed successors, retaining
+the first response, in-flight reservations, pins and original deadline.
+The bounded rolling plan retains metadata only; polling ends with startup.
 Only an owned pending startup may give its required future fragments a bounded
 startup-buffer-dependency role for late peers; steady speculation stays unchanged.
 Verified transport usefulness is separate from consumed media credit, so a held

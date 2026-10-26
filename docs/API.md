@@ -134,6 +134,16 @@ insufficient capacity or expiration fails the loader explicitly; it does not
 release stale media or renew the deadline on automatic HLS retries. A separate
 new adapter may start again after an explicit user retry.
 
+While that first callback remains pending, a bounded 100 ms poll reads the
+host's fresh target. Completed future fragments wholly behind that target can
+give their slots to the next currently parsed fragments. The first response
+stays held unchanged; the reservoir still contains at most three objects and
+24 MiB. In-flight verification and authority pins keep their reservations.
+The rolling plan stores metadata only, without retaining discarded payloads.
+Polling stops on release, failure or cancellation and pauses its target reads
+while the commit hook is pending. It never changes the host's clock or renews
+the original deadline.
+
 The optional `startupBufferCommit` function defaults to `null` and requires
 `startupBufferTarget`. It runs once after the encoded reservoir passes the
 readiness checks, before held callbacks or consumed-media credit reach HLS.

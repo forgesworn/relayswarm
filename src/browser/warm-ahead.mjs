@@ -1,8 +1,9 @@
 // Optional, bounded work for the same visible player's next parsed fragments.
-// No media clock, playback command, timer-driven background holder or alternate
-// rendition is created here. The supplied loader remains the SDK's loader.
+// A bounded poll exists only while the first genuine startup terminal waits;
+// no media clock, playback command, background holder or alternate rendition
+// is created here. The supplied loader remains the SDK's loader.
 export const WARM_AHEAD = Symbol('relayswarm-warm-ahead');
-const MAX_BYTES = 24 * 1024 * 1024, MAX_OBJECTS = 3, DEADLINE_MS = 8_000;
+const MAX_BYTES = 24 * 1024 * 1024, MAX_OBJECTS = 3, DEADLINE_MS = 8_000, STARTUP_POLL_MS = 100;
 const validInterval = item => {
   const { start, duration } = item?.context?.frag ?? {};
   return Number.isFinite(start) && start >= 0 && Number.isFinite(duration) && duration > 0 && Number.isFinite(start + duration);
@@ -35,7 +36,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
   const cache = new Map(), demand = new Set(), jobs = new Map(), promoted = new Set(), reuseWaiters = new Set(), pins = new Map();
   const startup = { enabled: typeof startupTarget === 'function', state: startupTarget ? 'idle' : 'off', reason: null,
     owner: null, terminal: null, own: null, permit: null, response: null, verified: false, reserved: 0,
-    controller: null, timer: null, checking: false, targetTime: null, verifiedStart: null, verifiedEnd: null,
+    controller: null, timer: null, poll: null, plan: [], cursor: null, checking: false, targetTime: null, verifiedStart: null, verifiedEnd: null,
     requiredHeadroomMs: null, released: 0, failures: 0, cancellations: 0, commitStarted: false, commitCompleted: false };
   const counters = { started: 0, verified: 0, rejected: 0, cancelled: 0, coalesced: 0, promotions: 0, localReuseBytes: 0,
     verifiedBytes: 0, verifiedPeerBytes: 0, consumedPeerBytes: 0, cacheBytes: 0, highWaterBytes: 0 };
@@ -63,9 +64,12 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
   const pump = () => {
     if (closed || active || !allowed() || !queued.length || demand.size + promoted.size > 1 ||
         (!steady && startup.state !== 'buffering') || (startup.state === 'buffering' && (!startup.permit || startup.checking))) return;
+    // A pending bootstrap may replace obsolete future rows, but cannot evict
+    // current coverage (or an authority pin) simply to admit another object.
+    if (startup.state === 'buffering' && tracked() >= MAX_OBJECTS) return;
     const item = queued.shift();
     if (cache.has(item.key) || jobs.has(item.key)) { queueMicrotask(pump); return; }
-    while (tracked() >= MAX_OBJECTS && cache.size) drop(cache.keys().next().value);
+    while (tracked() >= MAX_OBJECTS && cache.size && startup.state !== 'buffering') drop(cache.keys().next().value);
     if (tracked() >= MAX_OBJECTS) return;
     const controller = new AbortController(), revision = generation, cfg = config, policy = loaderConfig;
     let loader, timer, finish;
@@ -91,7 +95,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         const permit = await authorise(item.context, controller.signal);
         if (controller.signal.aborted || closed || revision !== generation || !live(row) || !allowed()) return null;
         if (!permit || !Number.isSafeInteger(permit.size) || permit.size < 1 || permit.size > MAX_BYTES) { counters.rejected++; return null; }
-        while (counters.cacheBytes + reserved() + permit.size > MAX_BYTES && cache.size) drop(cache.keys().next().value);
+        while (counters.cacheBytes + reserved() + permit.size > MAX_BYTES && cache.size && startup.state !== 'buffering') drop(cache.keys().next().value);
         if (counters.cacheBytes + reserved() + permit.size > MAX_BYTES) { counters.rejected++; return null; }
         row.reserved = permit.size;
         if (!reserve(reserved())) { row.reserved = 0; counters.rejected++; return null; }
@@ -144,7 +148,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     for (const key of cache.keys()) if (!keep.has(key)) drop(key);
     for (const row of [...jobs.values()]) if (!keep.has(row.key)) cancelJob(row);
     queued = upcoming;
-    if (validInterval(own) && upcoming.every(validInterval)) latestDemand = { own, upcoming: [...upcoming], owner };
+    if (validInterval(own) && upcoming.every(validInterval))
+      latestDemand = { own: metadataOnly(own), upcoming: upcoming.map(metadataOnly), owner };
     return own;
   };
   const startupCurrent = () => {
@@ -160,12 +165,26 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     return true;
   };
   const startupError = reason => ({ code: 0, text: 'RelaySwarm startup buffer unavailable', startupBufferReason: reason });
+  const parsedNext = item => next(item.context).map(warmContext).filter(Boolean)
+    .filter(future => future.scope === scope && validInterval(future)).slice(0, 2);
+  const metadataOnly = item => {
+    const { key, scope, context: { url, frag } } = warmContext(item.context);
+    // warmContext preserves loader fields, including WARM_AHEAD closures. A
+    // plan/cursor must never keep that runtime object, its response promise or
+    // an arbitrary host reference after the corresponding cache row is gone.
+    return { key, scope, context: { url, frag, part: null, responseType: 'arraybuffer' } };
+  };
+  const planFuture = (item, parent) => ({ ...metadataOnly(item), identity: metadataOnly(item), parent: metadataOnly(parent) });
+  const plannedCurrent = item => {
+    try {
+      return samePosition(warmContext(item.context), item.identity) &&
+        parsedNext(item.parent).some(future => samePosition(future, item.identity));
+    } catch { return false; }
+  };
   const startupFutureCurrent = item => {
     if (!startupCurrent() || latestDemand?.owner !== startup.terminal.id) return false;
-    try {
-      return next(startup.terminal.context).map(warmContext).filter(Boolean).filter(future => future.scope === scope)
-        .slice(0, 2).some(future => samePosition(future, item));
-    } catch { return false; }
+    const planned = startup.plan.find(future => samePosition(future.identity, item));
+    return Boolean(planned && plannedCurrent(planned));
   };
   const endStartup = (state, reason, notify = true) => {
     if (!['idle', 'buffering'].includes(startup.state)) return;
@@ -173,9 +192,10 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     startup.state = state; startup.reason = reason;
     if (state === 'failed') startup.failures++;
     if (state === 'cancelled') startup.cancellations++;
-    clearTimeout(startup.timer); startup.timer = null; startup.controller?.abort(); startup.releasePins?.();
+    clearTimeout(startup.timer); startup.timer = null; clearTimeout(startup.poll); startup.poll = null;
+    startup.controller?.abort(); startup.releasePins?.();
     startup.owner = null; startup.terminal = null; startup.response = null; startup.reserved = 0;
-    queued = [];
+    queued = []; startup.plan = []; startup.cursor = null;
     for (const row of [...jobs.values()]) cancelJob(row);
     for (const key of cache.keys()) drop(key);
     if (!owner || !terminal || terminal.settled || owner.pendingTerminal !== terminal) return;
@@ -193,6 +213,64 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     if (!Number.isFinite(value) || value < 0) { endStartup('failed', 'invalid-target'); return null; }
     startup.targetTime = value; return value;
   };
+  const rollStartup = target => {
+    if (!startupCurrent() || startup.checking) return;
+    if (startup.plan.some(item => !plannedCurrent(item)) || startup.cursor && !plannedCurrent(startup.cursor))
+      return endStartup('cancelled', 'context-changed');
+    // Retain one metadata cursor when both futures pass behind the room clock.
+    // Its parent is a single snapshot, not an ever-growing chain of old rows.
+    while (startup.plan.length) {
+      const item = startup.plan[0], row = cache.get(item.key), job = jobs.get(item.key);
+      // A job may still own a full response inside an awaited verifier. Keep
+      // its slot/reservation until finishJob, even after its interval expires.
+      if (item.context.frag.start + item.context.frag.duration > target || job ||
+          row && pins.has(row.permit.key) ||
+          [...demand].some(loader => loader.pendingTerminal && warmContext(loader.context)?.key === item.key)) break;
+      startup.cursor = item; startup.plan.shift();
+      queued = queued.filter(future => future.key !== item.key);
+      if (!startupCurrent() || startup.checking) return;
+      drop(item.key);
+    }
+    while (startup.plan.length < 2) {
+      const parent = startup.plan.at(-1) ?? startup.cursor ?? startup.own;
+      let item;
+      try { item = parsedNext(parent)[0]; } catch { return endStartup('cancelled', 'context-changed'); }
+      if (!item) return;
+      const boundary = parent.context.frag.start + parent.context.frag.duration;
+      if (Math.abs(item.context.frag.start - boundary) > 0.001 || item.key === startup.own.key ||
+          startup.plan.some(future => future.key === item.key)) return endStartup('cancelled', 'context-changed');
+      const planned = planFuture(item, parent);
+      if (item.context.frag.start + item.context.frag.duration <= target) {
+        // At most one unrequested obsolete hop per poll. Never download an old
+        // fragment or scan an arbitrary horizon to chase a distant target.
+        startup.cursor = planned; return;
+      }
+      startup.plan.push(planned);
+      // The loader can add markers to its own context. Keep that context
+      // separate from the payload-free plan and its latest-demand snapshot.
+      queued.push(item);
+    }
+  };
+  const scheduleStartupPoll = () => {
+    if (startup.poll !== null || !startupCurrent()) return;
+    const remaining = startup.deadline - performance.now();
+    if (remaining <= 0) return endStartup('failed', 'deadline');
+    startup.poll = setTimeout(() => {
+      startup.poll = null;
+      if (!startupCurrent()) return;
+      // The commit hook legitimately moves prepared -> publishing -> active.
+      // Its original deadline/signal stay live; fresh checks follow its ACK.
+      if (!startup.checking) {
+        const target = readStartupTarget();
+        if (target === null || !startupCurrent()) return;
+        if (!allowed()) return endStartup('cancelled', 'not-allowed');
+        rollStartup(target);
+        if (!startupCurrent()) return;
+        void checkStartup(target); queueMicrotask(pump);
+      }
+      scheduleStartupPoll();
+    }, Math.min(STARTUP_POLL_MS, remaining));
+  };
   const coverage = (target, checkedRows = null) => {
     const first = startup.verified && startup.response ? [{ ...startup.own, permit: startup.permit }] : [];
     const rows = (checkedRows ?? [...first, ...cache.values()]).filter(row => row.scope === scope && validInterval(row))
@@ -206,9 +284,10 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     startup.verifiedStart = start; startup.verifiedEnd = end;
     return { start, end, rows: used };
   };
-  const startupCandidate = () => {
+  const startupCandidate = (target = undefined) => {
     if (!startupCurrent()) return null;
-    const target = readStartupTarget(); if (target === null || !startupCurrent()) return;
+    if (target === undefined) target = readStartupTarget();
+    if (target === null || !startupCurrent()) return;
     if (!allowed()) return endStartup('cancelled', 'not-allowed');
     let recovery;
     try { recovery = startupRecovery(startup.own.context); } catch {}
@@ -231,9 +310,9 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     try { Promise.resolve(startupCommit(Object.freeze({ signal }))).then(() => finish(true), () => finish(false)); }
     catch { finish(false); }
   });
-  const checkStartup = async () => {
+  const checkStartup = async (target = undefined) => {
     if (!startupCurrent() || startup.checking || !startup.verified) return;
-    const candidate = startupCandidate(); if (!candidate) return;
+    const candidate = startupCandidate(target); if (!candidate) return;
     startup.checking = true;
     const owner = startup.owner, terminal = startup.terminal, revision = generation;
     const resident = new Map(), pinKeys = [];
@@ -325,9 +404,9 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       if (!startupCurrent()) return;
       if (mark?.peerBytes > 0) counters.consumedPeerBytes += mark.peerBytes;
       startup.state = 'ready'; startup.reason = null; startup.released++;
-      clearTimeout(startup.timer); startup.timer = null; startup.reserved = 0;
+      clearTimeout(startup.timer); startup.timer = null; clearTimeout(startup.poll); startup.poll = null; startup.reserved = 0;
       const completedController = startup.controller;
-      startup.owner = null; startup.terminal = null; startup.response = null;
+      startup.owner = null; startup.terminal = null; startup.response = null; startup.plan = []; startup.cursor = null;
       if (!steady) { queued = []; for (const row of [...jobs.values()]) cancelJob(row); }
       try { owner.deliver(terminal, 'onSuccess', args); }
       finally {
@@ -372,6 +451,9 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       identity: { key: own.key, scope: own.scope, context: { frag: { start: own.context.frag.start, duration: own.context.frag.duration } } },
       contextUrl: terminal.context.url, fragUrl: terminal.context.frag.url,
       controller: new AbortController(), deadline: at + Math.min(DEADLINE_MS, Number.isFinite(parent) && parent > 0 ? parent : DEADLINE_MS) });
+    startup.plan = (latestDemand?.upcoming ?? []).map(item => planFuture(item, own));
+    if (latestDemand?.owner === terminal.id) latestDemand.rolling = startup.plan;
+    startup.cursor = null;
     terminal.context[WARM_AHEAD] = { peerBytes: 0, genuine: () => startupCurrent() ? { at, context: terminal.context } : null };
     if (!validInterval(own) || !allowed()) { endStartup('failed', 'not-allowed'); return false; }
     if (owner.config.progressive === true) { endStartup('failed', 'progressive-unsupported'); return false; }
@@ -385,6 +467,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     if (!startupCurrent()) return false;
     if (!allowed()) { endStartup('cancelled', 'not-allowed'); return false; }
     startup.timer = setTimeout(() => endStartup('failed', 'deadline'), Math.max(0, startup.deadline - performance.now()));
+    scheduleStartupPoll();
     // Keep the first normal HTTP load synchronous; metadata work follows it.
     void Promise.resolve().then(() => startupCurrent() ? authorise(own.context, startup.controller.signal) : null).then(permit => {
       if (!startupCurrent()) return;
@@ -543,8 +626,9 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         startup.state = name === 'onAbort' ? 'cancelled' : 'failed';
         startup.reason = name === 'onAbort' ? 'origin-abort' : 'origin-error';
         if (name === 'onAbort') startup.cancellations++; else startup.failures++;
-        clearTimeout(startup.timer); startup.controller?.abort(); startup.releasePins?.(); startup.owner = null; startup.terminal = null;
-        startup.response = null; startup.reserved = 0; queued = [];
+        clearTimeout(startup.timer); clearTimeout(startup.poll); startup.poll = null;
+        startup.controller?.abort(); startup.releasePins?.(); startup.owner = null; startup.terminal = null;
+        startup.response = null; startup.reserved = 0; queued = []; startup.plan = []; startup.cursor = null;
         for (const row of [...jobs.values()]) cancelJob(row);
         for (const key of cache.keys()) drop(key);
       }
@@ -589,14 +673,15 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       const latest = latestDemand;
       if (!latest || latest.own.scope !== scope || !inside(latest.own, time)) return false;
       try {
-        const upcoming = next(latest.own.context).map(warmContext).filter(Boolean).filter(item => item.scope === scope).slice(0, 2);
-        const planned = new Map([latest.own, ...latest.upcoming].map(item => [item.key, item]));
-        if (upcoming.length !== latest.upcoming.length || upcoming.some((item, i) => !samePosition(item, latest.upcoming[i])) ||
+        const upcoming = latest.rolling ?? next(latest.own.context).map(warmContext).filter(Boolean).filter(item => item.scope === scope).slice(0, 2);
+        const planned = new Map([latest.own, ...upcoming].map(item => [item.key, item]));
+        if ((latest.rolling ? upcoming.some(item => !plannedCurrent(item)) :
+          upcoming.length !== latest.upcoming.length || upcoming.some((item, i) => !samePosition(item, latest.upcoming[i]))) ||
             [...jobs, ...cache].some(([key, row]) => !samePosition({ ...row, key }, planned.get(key)))) {
           latestDemand = null; return false;
         }
         // Successful HTTP can precede the first append. Retain only that last
-        // genuine demand's unchanged parsed next window, without new work.
+        // genuine demand's bounded, still-parsed next window, without new work.
         return true;
       } catch { latestDemand = null; }
       return false;
