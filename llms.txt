@@ -59,9 +59,44 @@ each segment/part duration less measured origin recovery with a 25% and 100 ms
 margin. Independent cached-peer races retain their window beside immediate HTTP.
 Current main requires measured HTTP recovery before allowing a serial wait;
 unknown origin timing keeps HTTP immediate and cached/late-HAVE races parallel.
+Unreleased warmAhead is disabled by default: bounded future main-fragment
+loads share the existing held cache and coalesce with genuine player demand.
+Current signed authority and content hashes gate cache reuse; local reuse,
+raw verified peer reception and consumed peer payload remain distinct.
+Source tests do not qualify cold-cache 4K or physical devices.
+Unreleased startupBufferTarget is null by default. A host-provided fresh raw
+HLS target enables one-shot verified startup buffering within the existing
+three-object/24 MiB and eight-second/parent limits. With warmAhead false,
+speculation stops after startup. It preserves the pending trusted play and
+never changes the player, rate or room clock; failure is explicit. Source
+and fixture checks do not prove decoded playback or device acceptance.
+Only an owned pending startup may give its required future fragments a bounded
+startup-buffer-dependency role for late peers; steady speculation stays unchanged.
+Verified transport usefulness is separate from consumed media credit, so a held
+first object can inform the next transfer without inventing bytes or a rate.
+Optional startupBufferCommit runs once after verified reservoir readiness and
+before HLS delivery. Its host acknowledgement shares the original startup
+AbortSignal, deadline and memory caps; fresh checks follow. A host may prepare
+a new room before publishing its start. Existing room clocks keep advancing.
+On 26 October 2026, startup-only full-4K M4 browser runs of 60 and 330 seconds
+had zero post-first-frame stalls/drops for both viewers, qualified shared-clock drift and an
+actual recording wrap plus over 61 seconds afterwards. Steady warm-ahead stayed
+off. Long-run accepted peer shares were 12.02%/6.65%; this is not net bandwidth
+saving or physical-phone/NAT/public-TURN qualification. Summary:
+https://github.com/forgesworn/forgesworn.dev/blob/main/docs/evidence/prepared-room-4k-20261026.json
+Unreleased uploadPacing also defaults off: canonical pieces may wait in a
+bounded 250 ms refill FIFO without increasing upload rate, burst or quota.
+High-level multi-holder link leases precede asynchronous worker creation;
+queue time and reservation counts never imply accepted peer delivery.
 Its matching WASM upload ABI copies only the requested range instead of the
 whole held object per request. These are bounded-policy and byte-copy changes;
 physical iPhone/iPad and Pixel/Vanadium continuity remains unverified.
+Unreleased latePeerRace defaults off: a still-running genuine whole-fragment
+HTTP request with no previous peer plan may make one first attempt using a
+newly accepted exact-HAVE peer, with fresh authority and unchanged HTTP.
+Its original genuine-demand window, peer-arm cap and original HTTP deadline
+all apply. Source fixtures do not establish playback or synchronisation;
+the preceding actual cold-4K candidate remained RED despite useful peer bytes.
 v0.4.4 lets already-HAVE framing-2 schema-3 objects enter bounded mixed piece
 planning despite a late whole-object peer forecast; valid schemas 1/2 retain
 that forecast. Known-VOD main-media waits require a live same-key FETCH lease,

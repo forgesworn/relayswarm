@@ -10,7 +10,127 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Measured startup and recording wrap (26 October 2026)
+
+The paired site at `a0db0e63`, using SDK `bea813a`, passed real 60-second and
+330-second full-4K runs on two fresh visible M4 Chrome contexts. Browser HTTP
+caching was disabled; CDN state was not asserted cold. Both viewers had zero
+post-first-frame stalls and dropped frames. The separate whole-window 0.75-second sync audit
+passed; maximum drift in the long run was 0.343 and 0.116 seconds. Actual
+programme rollover and CC0-to-CC1 transitions were followed by over 61 seconds
+of clean periodic samples. This used startup-only buffering with steady
+`warmAhead` disabled; it does not qualify steady speculation.
+
+The first room prepared verified media locally before publishing its start;
+the later viewer joined the advancing epoch. Accepted peer shares were
+11.08%/19.72% in the short run and 12.02%/6.65% in the long run. The unchanged
+harness qualifies its selected receiver, not every viewer above 10%. Peer
+share is not net HTTP saving, wire cost or a competitor comparison. Both
+viewers used native host-to-host UDP on one Mac; physical iPhone, public-NAT
+and independently operated public TURN acceptance remain separate.
+
+The [privacy-safe measurement summary](https://github.com/forgesworn/forgesworn.dev/blob/main/docs/evidence/prepared-room-4k-20261026.json)
+records source and raw-receipt hashes, protocol scope and per-viewer results.
+Earlier failures below remain historical evidence rather than the latest
+startup-only qualification result. Release assets remain version 0.4.4;
+these opt-in source changes are not substituted into existing release files.
+
 ## Unreleased per-connection timing and bounded recovery (25 October 2026)
+
+An M4 comparison with steady speculation disabled still had one 0.88-second
+startup interruption; its other viewer had none. Both received useful peer
+media, but the interrupted viewer failed the shared-clock audit. Its first
+freshly aligned position left 0.68 seconds of buffered media while the next
+whole-fragment source request took 1.73 seconds. No peer wait or subsequent
+clock seek caused that underflow. The experimental, default-null
+`startupBufferTarget` contract therefore holds the first encoded callback
+until verified upcoming media covers a fresh host target plus measured
+recovery headroom, within the existing reservoir and deadlines. This is
+unreleased work; at that stage real continuity, shared-clock and physical-device
+acceptance remained pending.
+
+The first startup-buffer M4 run kept one viewer playing for 73 seconds with
+zero waits or dropped frames and at most 0.283 seconds of room drift. The
+other viewer never presented a frame: a required future HTTP request could
+not use a peer accepted after load entry, and its first verified short peer
+transfer did not establish link usefulness until player consumption. That
+formed a startup dependency cycle. The media gate remained RED and overall
+sync was unqualified. The follow-up changes distinguish owned startup-buffer
+dependencies and verified transport usefulness from actual HLS consumption,
+with the original memory, rate and deadline limits. Fresh real playback
+qualification was still required before the later results above.
+
+The next M4 run failed before the first viewer presented a frame; a second
+viewer never joined. All three contiguous bodies (18.27 MB) completed, but the
+first room's clock had advanced before media preparation. At the last coverage
+check, the verified tail provided 2.388 seconds ahead of the target against
+3.076 seconds of measured recovery headroom. The original eight-second startup
+deadline expired. This remains RED, with no observation samples and unqualified
+sync. Follow-up work adds an optional bounded host acknowledgement hook so a
+new room can prepare before publishing its start, without reanchoring an
+existing room or changing the media acceptance gates. Real playback was still
+pending before the later results above.
+
+The experimental `warmAhead` option is disabled by default. Signed-commitment
+loader tests using actual hls.js 1.7.3 parsed Fragment objects cover future
+object verification, exact-demand reuse/coalescing, current-authority refusal,
+cache/reservation limits, cancellation and the untouched default path. Its
+speculative map shares the existing held byte budget, and local reuse is
+reported separately from accepted peer payload. Sustained cold-cache 4K,
+useful peer contribution, shared-clock behaviour and physical iPhone acceptance
+require fresh browser/device measurements before enabling it in a deployment.
+An initial 60-second public-4K candidate run remained RED despite local cache
+reuse. Promoting an in-flight warm object to actual demand now frees the
+speculative slot for its successor, with aggregate reservations and an
+independent buffer-bounded source recovery path. These causal source fixes
+still require another unchanged cold-cache playback comparison.
+The subsequent M4 comparison also remained RED. Its trace identified an
+in-buffer clock alignment cancelling needed loads, and promoted current
+requests still using the eight-second speculative cap. Source regressions
+now retain useful work for buffered seeks and preserve the original parent's
+deadline/error callback on promotion. A subsequent 60.269-second M4 run retained
+both peer-assisted players with no dropped frames, but remained strictly RED:
+buffered shared-clock seeks produced one 13 ms and one 39 ms wait. Accepted
+peer shares were 14.5% and 16.9%. Partial-inclusive HTTP bodies were 5.61% and
+7.27% below accepted media bytes; this is not a matched origin-only comparison,
+wire savings or production/device acceptance. The trace showed initial
+alignment using a manifest-time target about two seconds behind the room clock.
+The SDK now also retains an exact already-tracked, same-scope warm interval
+when a seek enters it before append. Real parsed-fragment regressions cover
+verified/in-flight reuse and invalid or unrelated seek cancellation. This
+paired SDK/site startup-alignment candidate subsequently passed a 60-second
+continuity gate with no stalls/drops and 16.1% receiver peer contribution.
+The unchanged 330-second gate remained RED with early interruptions, despite
+82.2% receiver peer contribution. The short pass does not establish close
+room synchronisation or physical-phone acceptance. Its startup trace also
+showed a seek inside the completed genuine first fragment, before append,
+discarding a verified next object and downloading its full body again.
+Source regressions now retain only that last genuine fragment's unchanged
+parsed next window, retiring it on incompatible metadata, unsuccessful
+termination or lifecycle changes. This additional fix remains unmeasured.
+
+The longer trace also exposed concurrent asynchronous worker admissions
+selecting the same free-looking link, followed by token-bucket refusal during
+piece upload. High-level source regressions now reserve link ownership before
+the worker await and permit only bounded warm contention waiting. The new
+default-off `uploadPacing` option defers canonical-piece refill in a bounded
+250 ms FIFO without increasing rate, burst or quota. Tests exercise actual
+committed-Core worker/provider contracts and unchanged cancellation framing;
+they do not establish smooth full-track playback or close room synchronisation.
+
+The subsequent 60-second M4 candidate with these retention, admission and
+pacing changes remained RED on continuity and whole-window synchronisation:
+one viewer had two waits totalling 2.49 seconds and seven dropped frames; the
+other had none. Accepted peer shares were approximately 36% and 1.9%.
+Pacing reported no refusal or expiry. The trace instead showed a needed HTTP
+object starting before a peer connected, then continuing through an underflow
+while that peer completed the same object. Its exact HAVE arrival was not
+captured. A newly implemented, default-off `latePeerRace` permits only a first
+peer arm for such genuine demand, with fresh authority and the original HTTP
+left running. Source tests cover late accepted exact-HAVE adoption, bounded
+windows, stale context and cancellation; actual playback and synchronisation
+with this option remain unmeasured. No wire-savings, public-NAT, production or
+physical-device pass is claimed.
 
 Cold-cache physical diagnostics exposed two distinct timing errors: a
 holder's completion rate already included startup, yet the piece planner

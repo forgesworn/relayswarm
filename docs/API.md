@@ -102,6 +102,187 @@ buffer reserve remains in force. Unknown origin recovery, unknown duration or
 no spare duration starts HTTP immediately; an enabled cached/late-HAVE race retains its independent
 window. This is an admission bound, not a smooth-playback guarantee.
 
+The unreleased experimental `warmAhead: true` option requires peer-first and
+explicit `serve: true`. It observes this player's actual parsed main-media
+fragments, loads at most the next two, and keeps one speculative whole-object
+HTTP arm in flight. Existing demanded whole/range request limits still apply;
+this is not a two-request global HTTP limit. Demand starts immediately and
+joins already-running exact-object work instead of downloading it again.
+That work becomes genuine demand and frees the single speculative slot, so
+the following object can load concurrently. The combined cache and in-flight
+set remains bounded to three distinct objects and 24 MiB; all in-flight
+reservations reduce the existing held-cache budget together.
+This option alone adds no startup gate, pause, hidden player, clock offset or automatic seek.
+
+The separate unreleased `startupBufferTarget` option defaults to `null`. A host
+may supply a synchronous function returning its fresh raw HLS target time in
+seconds. Return `null` when the player, room epoch or playback intent is no
+longer current. This enables a one-shot buffer before the first genuine main
+fragment reaches HLS demuxing. The original attached media element and pending
+trusted play request remain owned by the host.
+
+The first held body and verified upcoming fragments share the same three-object,
+24 MiB reservoir. Before first HTTP, the host must admit the worst-case 24 MiB
+reservation against its existing held budget; a smaller available budget fails
+explicitly. The original first response is handed to HLS unchanged and
+is not retained as an extra shared-cache seed; its reservation is released.
+Release requires a contiguous verified interval covering the
+fresh target plus at least the origin reserve or measured p90 whole-origin
+recovery with its 25% and 100 ms margin, whichever is greater. The original
+eight-second and parent load deadlines remain upper bounds. Invalid ownership,
+insufficient capacity or expiration fails the loader explicitly; it does not
+release stale media or renew the deadline on automatic HLS retries. A separate
+new adapter may start again after an explicit user retry.
+
+The optional `startupBufferCommit` function defaults to `null` and requires
+`startupBufferTarget`. It runs once after the encoded reservoir passes the
+readiness checks, before held callbacks or consumed-media credit reach HLS.
+Its frozen argument contains only the original startup `AbortSignal`; it may
+return a promise. For example, a host can prepare a new room locally at zero,
+publish its start after verified media is ready, and await acknowledgement.
+An existing room must retain its advancing clock.
+
+The original eight-second/parent deadline and held reservations remain in force
+while the host acknowledges. Cancellation retires the operation; late resolution
+or rejection cannot release media. A current hook failure reports
+`commit-refused`. After success, the loader repeats fresh target, authority,
+context, parsed-fragment and resident-coverage checks. Insufficient headroom
+does not recall the hook or extend the deadline. The hook establishes encoded
+reservoir readiness, not decoded frames or accepted playback. The SDK itself
+does not publish, start, pause or reanchor any room.
+The signal also ends after successful HLS handoff. A host must detach its
+pending-acknowledgement listener once acknowledged, so normal operation cleanup
+does not cancel an established room. The final authority verdict and HLS
+callback share one synchronous turn; success cleanup follows actual delivery.
+
+With `warmAhead: false`, startup may preload the parsed upcoming fragments and
+retain them for genuine consumption, then stops speculative fetching. Peer
+consumption credit is deferred until the corresponding genuine callback is
+released. `metrics().startupBuffer` distinguishes buffering, release, failure
+and cancellation and reports reservoir use, target and recovery headroom. It
+does not establish decoded playback, shared-clock accuracy or device acceptance.
+
+The separate unreleased `latePeerRace: true` option defaults to false and
+requires peer-first plus `zeroBudgetPeerRace`. When a whole main-fragment
+HTTP request began without any peer plan, its first peer arm may use a newly
+accepted framing-2 connection advertising that exact object. Ordinary
+speculation cannot arm it: a warm object needs a genuine hls.js consumer. The
+window starts at that earliest genuine demand, including promotion before the
+inner loader is ready. An existing or expired peer plan is never renewed.
+
+HTTP starts immediately and keeps its original request and network timers.
+The peer arm ends by the earliest of four seconds from genuine demand,
+`lateWindowMs`, 2.5 seconds from arming, `maxPeerWaitMs`, and the known original
+HTTP load deadline. Unknown load deadlines and progressive delivery retain the
+ordinary path. Fresh admission, signed authority, exact immutable context and
+current connection identity gate peer work and final delivery. Nonempty HTTP
+progress locks the response to HTTP. Only one complete authorised result can
+win; this creates no second HTTP request or playback-clock adjustment.
+
+Dormant metadata and active cached races share `maxConcurrentRaces`.
+Pause, end, epoch/rendition/ticket change, abort, stop and original HTTP
+termination retire the watcher. `metrics().latePeerRace` exposes entered,
+armed, won, expired, retired and refused counts plus at most 64 numeric timing
+records. Waiting and arming create no peer credit. Existing load-entry
+`lateHaveRace` membership remains unchanged when this separate option is off.
+
+When startup buffering is explicitly enabled, its required parsed future
+fragments may instead carry a `startup-buffer-dependency` role while the real
+first HLS terminal remains owned and pending. This leaves `genuineAt` unset;
+the future object has not been consumed by HLS. Its existing HTTP-entry window,
+peer-arm limit, parent deadline and original first startup deadline all apply.
+The startup abort signal retires the role immediately on release or cancellation.
+Steady speculative work receives no such role, and accepted-byte counters still
+wait for the actual HLS callback.
+
+Verified peer reception updates physical link usefulness independently from
+player consumption. Fast short transfers keep an unknown rate below the
+unchanged 300 ms observation floor; no rate is invented. Discovery delivery,
+consumed bytes and external delivery notifications still require actual player
+acceptance. This avoids using deferred playback credit as a prerequisite for
+the next startup transfer.
+
+Future bytes need a current signed commitment and matching SHA-256 before
+entering the shared held cache. At most three warm references and 24 MiB of
+warm data/reservations fit inside the existing `maxHeldBytes` budget. The warm
+map references the held buffer; delivery to hls.js receives a transfer-safe
+copy. Normal player/decoder memory and transient demand buffers remain
+separate. Speculation expires after eight seconds. Promotion retires that
+speculation-only timer; the already-running parent's timeout still runs from
+its original start. A parent error or timeout settles the genuine demand
+through its original callback, without an implicit fresh request or reset
+deadline. Pause, unrelated seek, ticket change,
+rendition change and stop clear speculative state; unrelated work yields to a
+new demanded position. Gap, ranged, encrypted and alternate-audio fragments
+retain the ordinary loader path.
+
+Seeks inside the existing appended buffer retain current and future work,
+including shared-clock alignment.
+An unbuffered target also retains already-tracked work when it falls inside
+an exact warm fragment's finite media interval in the active rendition scope.
+This covers initial alignment into a next object before its append; it creates
+no new request. Targets outside both the playable buffer and tracked warm
+intervals still clear speculative state. Normal hls.js abort handling and the
+next actual demand continue to prune unrelated contexts.
+
+Before the first append, the last genuine parsed-demand interval can also
+retain its unchanged same-scope next window after HTTP has already completed.
+Its normalised identity and finite interval are snapshots, distinct from an
+active request. Changed parsed next metadata, invalid/new demand, unsuccessful
+termination, clear and stop retire that record. This creates no work, extends
+no deadline and does not change permission or byte accounting.
+
+Every demand reuse checks the host's current commitment/delegation/revocation
+view. Only actual buffer beyond the normal origin recovery reserve permits
+waiting for that check, capped at 25 ms. Unknown/empty headroom starts the
+ordinary source immediately; otherwise source recovery starts when this small
+budget expires. The first authorised cache result or source result wins and
+cancels the other arm. Refusal leaves source recovery running. Thus buffered,
+promptly authorised cache reuse avoids another HTTP request, while underflow
+recovery can make another request; actual traffic remains counted. Stopping
+does not wait for an unresponsive cache provider. Exhausting upload allowance
+also clears warm references and reservations.
+
+`metrics().warmAhead`
+reports `verifiedBytes`, `verifiedPeerBytes`, `consumedPeerBytes`,
+`localReuseBytes`, active speculative work, promoted demand, tracked objects,
+cache bytes and aggregate reservations. Raw peer reception
+is recorded once; `bytes.peerFirst` and `onPeerDelivery` receive speculative
+peer credit only when real hls.js demand consumes it. Local reuse does not
+create network bytes. These source tests do not establish sustained cold-cache
+4K, a public TURN route, network savings or physical-device continuity.
+
+Multi-holder admission reserves its candidate links synchronously before
+asynchronous worker creation. Other download selectors respect those leases.
+Only warm work may wait once for an already-captured candidate to become free,
+within its original peer window and speculation lifetime; its existing HTTP
+arm continues. Abort, failure and settlement release ownership. This does not
+add a request, admit another peer or extend a playback recovery deadline.
+
+The unreleased `uploadPacing: true` option is disabled by default. Canonical
+piece ranges can wait in one global FIFO for the existing token bucket to
+refill: at most one waiter per link, `min(maxUploadPeers, maxPeers)` waiters
+overall, and a fixed 250 ms absolute queue deadline. A delayed event loop
+expires overdue work instead of granting it. Rate and twice-rate burst caps
+stay unchanged; unsupported whole-object requests still refuse immediately.
+Queue rows retain no bulk media buffer. Current held data, host admission,
+serving policy and allowance are rechecked before delivery; the final lookup
+follows every host await. An owned rate reservation is refunded once when
+nothing is submitted. Explicit host refusal releases its session reservation;
+accepted or unknown host outcomes retain conservative session billing.
+
+The existing provider callback exposes no remote request cancellation signal.
+Remote CANCEL therefore cannot immediately end this short refill wait: the
+unchanged Core/JavaScript framing suppresses late output and returns unsent
+rate capacity, while accepted session/host reservations stay charged. Local
+stop or link closure cancels immediately. `metrics().uploadPacing` reports
+queued work, reserved rate bytes, grants/refusals/expiry/cancellation and total
+and maximum deferred queue milliseconds (including time behind the head).
+Observed expiry can exceed 250 ms when the event loop is delayed; the grant
+deadline stays fixed. Host-policy time and payload time are not queue time.
+`metrics().peerAdmission` reports held link leases and bounded waiter outcomes.
+Neither waiting nor reservation creates peer delivery credit or rate evidence.
+
 The unreleased opt-in `transferWorkerUrl` warms one explicitly packaged
 companion worker asynchronously after `coreWasm` loads. With `multiHolder`,
 schema-3 verification and planning use the same Rust transfer facade in that
