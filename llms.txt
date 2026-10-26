@@ -78,6 +78,12 @@ Optional startupBufferCommit runs once after verified reservoir readiness and
 before HLS delivery. Its host acknowledgement shares the original startup
 AbortSignal, deadline and memory caps; fresh checks follow. A host may prepare
 a new room before publishing its start. Existing room clocks keep advancing.
+On 26 October 2026, startup-only full-4K M4 browser runs of 60 and 330 seconds
+had zero post-first-frame stalls/drops for both viewers, qualified shared-clock drift and an
+actual recording wrap plus over 61 seconds afterwards. Steady warm-ahead stayed
+off. Long-run accepted peer shares were 12.02%/6.65%; this is not net bandwidth
+saving or physical-phone/NAT/public-TURN qualification. Summary:
+https://github.com/forgesworn/forgesworn.dev/blob/main/docs/evidence/prepared-room-4k-20261026.json
 Unreleased uploadPacing also defaults off: canonical pieces may wait in a
 bounded 250 ms refill FIFO without increasing upload rate, burst or quota.
 High-level multi-holder link leases precede asynchronous worker creation;
