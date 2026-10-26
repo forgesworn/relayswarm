@@ -11,6 +11,14 @@ const validInterval = item => {
 const inside = (item, time) => validInterval(item) && item.context.frag.start <= time && time < item.context.frag.start + item.context.frag.duration;
 const samePosition = (a, b) => a?.key === b?.key && a?.scope === b?.scope && validInterval(a) && validInterval(b) &&
   a.context.frag.start === b.context.frag.start && a.context.frag.duration === b.context.frag.duration;
+const futureServiceTime = (stats, size, entry, success) => {
+  try {
+    const { start, end } = stats.loading;
+    return stats.aborted !== true && stats.loaded === size &&
+      [entry, success, start, end].every(Number.isFinite) && entry >= 0 &&
+      entry <= start && start < end && end <= success ? end - start : null;
+  } catch { return null; }
+};
 
 export function warmContext(context) {
   try {
@@ -37,7 +45,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
   const startup = { enabled: typeof startupTarget === 'function', state: startupTarget ? 'idle' : 'off', reason: null,
     owner: null, terminal: null, own: null, permit: null, response: null, verified: false, reserved: 0,
     controller: null, timer: null, poll: null, plan: [], cursor: null, frozenStart: null, hopAvailable: true, checking: false, targetTime: null, verifiedStart: null, verifiedEnd: null,
-    requiredHeadroomMs: null, released: 0, failures: 0, cancellations: 0, commitStarted: false, commitCompleted: false };
+    requiredHeadroomMs: null, planningServiceMs: null, released: 0, failures: 0, cancellations: 0, commitStarted: false, commitCompleted: false };
   const counters = { started: 0, verified: 0, rejected: 0, cancelled: 0, coalesced: 0, promotions: 0, localReuseBytes: 0,
     verifiedBytes: 0, verifiedPeerBytes: 0, consumedPeerBytes: 0, cacheBytes: 0, highWaterBytes: 0 };
   const reserved = () => startup.reserved + [...jobs.values()].reduce((sum, row) => sum + row.reserved, 0);
@@ -56,6 +64,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
   const cancelJob = row => { if (live(row)) { counters.cancelled++; row.cancel(); finishJob(row, null); } };
   const clear = () => {
     if (startup.state === 'idle' || startup.state === 'buffering') endStartup('cancelled', 'cleared', !closed);
+    startup.planningServiceMs = null;
     generation++; queued = []; latestDemand = null;
     for (const row of [...jobs.values()]) cancelJob(row);
     for (const key of cache.keys()) drop(key);
@@ -110,8 +119,12 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
             } catch { return null; }
           } };
         loader = new Loader(cfg); counters.started++;
+        const requestEntry = performance.now();
         const response = await new Promise(resolve => loader.load(item.context, policy, {
-          onSuccess: (response, stats, _context, details) => resolve({ response, stats, details }),
+          // Keep only an elapsed scalar before destroy/reuse can mutate stats.
+          // It becomes planning evidence only after this whole future verifies.
+          onSuccess: (response, stats, _context, details) => resolve({ response, stats, details,
+            serviceMs: futureServiceTime(stats, permit.size, requestEntry, performance.now()) }),
           onError: (...args) => resolve({ failure: { name: 'onError', args, stats: loader.stats } }),
           onTimeout: (...args) => resolve({ failure: { name: 'onTimeout', args, stats: loader.stats } }),
           onAbort: (...args) => resolve({ failure: { name: 'onAbort', args, stats: loader.stats } }),
@@ -131,6 +144,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         const result = { ...response, context: item.context, scope: item.scope, data, permit, peerBytes: warm.peerBytes, accept: warm.accept };
         cache.set(item.key, result); counters.cacheBytes += data.byteLength; counters.verified++;
         counters.verifiedBytes += data.byteLength; counters.verifiedPeerBytes += warm.peerBytes;
+        if (startupCurrent() && live(row) && generation === revision && item.scope === scope && startupFutureCurrent(item))
+          startup.planningServiceMs = response.serviceMs;
         return result;
       } catch { if (!controller.signal.aborted) counters.rejected++; return null; }
       finally { clearTimeout(timer); try { loader?.destroy(); } catch {} }
@@ -196,7 +211,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     clearTimeout(startup.timer); startup.timer = null; clearTimeout(startup.poll); startup.poll = null;
     startup.controller?.abort(); startup.releasePins?.();
     startup.owner = null; startup.terminal = null; startup.response = null; startup.reserved = 0;
-    queued = []; startup.plan = []; startup.cursor = null; startup.frozenStart = null;
+    queued = []; startup.plan = []; startup.cursor = null; startup.frozenStart = null; startup.planningServiceMs = null;
     for (const row of [...jobs.values()]) cancelJob(row);
     for (const key of cache.keys()) drop(key);
     if (!owner || !terminal || terminal.settled || owner.pendingTerminal !== terminal) return;
@@ -287,7 +302,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     if (startup.frozenStart !== null && target < startup.frozenStart || startup.plan[0]?.context.frag.start > target) return true;
     const item = queued[0], index = startup.plan.findIndex(future => future.key === item.key);
     if (index < 0) { endStartup('cancelled', 'context-changed'); return false; }
-    if (item.context.frag.start + item.context.frag.duration <= target + recovery / 1000) {
+    if (item.context.frag.start + item.context.frag.duration <= target + (recovery + (startup.planningServiceMs ?? 0)) / 1000) {
       if (!startup.hopAvailable) return false;
       startup.hopAvailable = false;
       startup.cursor = startup.plan[index]; startup.plan.splice(index, 1); queued.shift();
@@ -455,6 +470,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       if (!startupCurrent()) return;
       if (mark?.peerBytes > 0) counters.consumedPeerBytes += mark.peerBytes;
       startup.state = 'ready'; startup.reason = null; startup.released++;
+      startup.planningServiceMs = null;
       clearTimeout(startup.timer); startup.timer = null; clearTimeout(startup.poll); startup.poll = null; startup.reserved = 0;
       const completedController = startup.controller;
       startup.owner = null; startup.terminal = null; startup.response = null; startup.plan = []; startup.cursor = null; startup.frozenStart = null;
@@ -679,7 +695,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         if (name === 'onAbort') startup.cancellations++; else startup.failures++;
         clearTimeout(startup.timer); clearTimeout(startup.poll); startup.poll = null;
         startup.controller?.abort(); startup.releasePins?.(); startup.owner = null; startup.terminal = null;
-        startup.response = null; startup.reserved = 0; queued = []; startup.plan = []; startup.cursor = null; startup.frozenStart = null;
+        startup.response = null; startup.reserved = 0; queued = []; startup.plan = []; startup.cursor = null; startup.frozenStart = null; startup.planningServiceMs = null;
         for (const row of [...jobs.values()]) cancelJob(row);
         for (const key of cache.keys()) drop(key);
       }
@@ -713,7 +729,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       heldObjects: startup.state === 'buffering' ? tracked() : 0,
       heldBytes: startup.state === 'buffering' ? counters.cacheBytes + reserved() : 0,
       targetTime: startup.targetTime, verifiedStart: startup.verifiedStart, verifiedEnd: startup.verifiedEnd,
-      requiredHeadroomMs: startup.requiredHeadroomMs, released: startup.released, failures: startup.failures,
+      requiredHeadroomMs: startup.requiredHeadroomMs, planningServiceMs: startup.planningServiceMs,
+      released: startup.released, failures: startup.failures,
       cancellations: startup.cancellations, commitStarted: startup.commitStarted, commitCompleted: startup.commitCompleted,
       limits: { objects: MAX_OBJECTS, bytes: MAX_BYTES, deadlineMs: DEADLINE_MS } }),
     contains(time) {

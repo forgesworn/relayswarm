@@ -714,11 +714,14 @@ function startupFixture(t, options = {}) {
   class Loader {
     stats = { loading: { start: 0 }, loaded: 0 };
     load(ctx, _policy, callbacks) {
+      if (options.timedStats) this.stats.loading = { start: performance.now() };
       const row = { context: ctx, callbacks, aborted: false, stats: this.stats,
         finish: (force = false, body = bytes) => {
           if (row.aborted && !force) return;
           row.response = { data: body.slice().buffer, url: ctx.url, code: 200 };
           this.stats.loaded = body.length;
+          if (options.timedStats) this.stats.loading.end = performance.now();
+          options.beforeSuccess?.(ctx, this.stats);
           callbacks.onSuccess(row.response, this.stats, ctx, null);
         } };
       this.row = row; requests.push(row);
@@ -776,6 +779,134 @@ const fillStartupWindow = async (f, beforeFinish = () => {}) => {
   f.state.target = 3.885; f.state.recovery = 2762.5;
   beforeFinish(f.requests[0]); f.requests[0].finish(); await flushStartup();
 };
+
+test('startup service lead plans beyond measured retrieval cost in the sourceSN2 offset replay', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 10000, elapsed = 0; t.mock.method(performance, 'now', () => clock);
+  const f = startupFixture(t, { timedStats: true,
+    starts: [0, 2, 0, 2, 4, 6.64, 8.64, 10.56], durations: [2, 2, 2, 2, 2.64, 2, 1.92, 2] });
+  f.state.target = 0; const first = f.load(2, 8000), samples = [];
+  const advance = async ms => {
+    for (let left = ms; left > 0;) {
+      const step = Math.min(100, left); elapsed += step; left -= step; clock += step;
+      f.state.target = elapsed / 1000; t.mock.timers.tick(step); await flushStartup();
+      samples.push(f.engine.startupSnapshot().planningServiceMs);
+    }
+  };
+  await flushStartup();
+  await advance(2636); f.requests[0].finish(); await flushStartup();
+  await advance(607); f.requests[1].finish(); await flushStartup();
+  // Raw times are offset from actual sourceSN2, whose programme start is4s.
+  // Successful stats below model the observed cancelled-HTTP cadence; those
+  // HTTP timings were NOT captured peer-loader stats. SN6's full completion
+  // was unknown, so2000ms is an explicit controlled completion for BOTH paths.
+  const cadence = { 4: 2059, 5: 1449, 6: 2000, 7: 2000 };
+  samples.push(f.engine.startupSnapshot().planningServiceMs);
+  while (!first.calls.success && !first.calls.error && elapsed < 8000) {
+    const row = f.requests.find(row => row.context.frag.sn >= 4 && !row.response && !row.aborted);
+    if (!row) { await advance(Math.min(100, 8000 - elapsed)); continue; }
+    await advance(Math.min(cadence[row.context.frag.sn] ?? 2000, 8000 - elapsed));
+    if (!first.calls.error) { row.finish(); await flushStartup(); }
+    assert.ok(f.engine.startupSnapshot().heldObjects <= 3);
+    assert.ok(f.engine.snapshot().active <= 1);
+  }
+  assert.equal(first.calls.success, 1, 'planning must account for verified future retrieval cost before the unchanged8s deadline');
+  assert.equal(first.calls.error, 0); assert.ok(elapsed < 8000);
+  assert.ok(samples.includes(3243));
+  assert.ok(!f.requests.some(row => row.context.frag.sn === 4), 'unrequested raw[4,6.64] is too short after3.243s measured service');
+  assert.strictEqual(first.calls.args[0], f.requests[0].response);
+  assert.strictEqual(first.calls.args[1], f.requests[0].stats);
+  assert.strictEqual(first.calls.args[2], first.context);
+  assert.equal(f.engine.startupSnapshot().requiredHeadroomMs, 2000, 'service lead never becomes release recovery');
+  assert.ok(f.engine.startupSnapshot().verifiedEnd - f.state.target >= 2);
+  assert.equal(f.engine.startupSnapshot().planningServiceMs, null, 'active timing sample retires on terminal success');
+});
+
+test('startup service lead accepts a verified50ms future without a rate floor or slow-path baseline', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 1000; t.mock.method(performance, 'now', () => clock);
+  const f = startupFixture(t, { timedStats: true }), first = f.load(0, 8000); await flushStartup();
+  clock += 50; f.requests[1].finish(); await flushStartup();
+  assert.equal(f.engine.startupSnapshot().planningServiceMs, 50);
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2]);
+  clock += 50; f.requests[2].finish(); await flushStartup();
+  clock += 10; f.requests[0].finish(); await flushStartup();
+  assert.equal(first.calls.success, 1);
+  assert.equal(f.engine.startupSnapshot().requiredHeadroomMs, 2000);
+});
+
+test('startup service lead ignores unknown, invalid and foreign-operation timestamps', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 1000; t.mock.method(performance, 'now', () => clock);
+  for (const bad of ['missing', 'negative', 'zero', 'future', 'stale', 'nan', 'aborted', 'partial']) {
+    const f = startupFixture(t, { timedStats: true, beforeSuccess: (ctx, stats) => {
+      if (ctx.frag.sn !== 1) return;
+      if (bad === 'missing') delete stats.loading;
+      if (bad === 'negative') stats.loading.end = stats.loading.start - 1;
+      if (bad === 'zero') stats.loading.end = stats.loading.start;
+      if (bad === 'future') stats.loading.end = clock + 1;
+      if (bad === 'stale') stats.loading.start -= 1;
+      if (bad === 'nan') stats.loading.end = NaN;
+      if (bad === 'aborted') stats.aborted = true;
+      if (bad === 'partial') stats.loaded--;
+    } }), first = f.load(0, 8000); await flushStartup();
+    f.state.target = 3.9; clock += 50; f.requests[1].finish(); await flushStartup();
+    assert.equal(f.engine.startupSnapshot().planningServiceMs, null, bad);
+    assert.equal(first.calls.success, 0, bad);
+    assert.equal(f.requests[2]?.context.frag.sn, 2, 'unknown timing adds no invented delay');
+    f.engine.stop();
+  }
+});
+
+test('startup service lead snapshots scalar timing before stats mutation during verification', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 1000, release; t.mock.method(performance, 'now', () => clock); t.after(() => release?.());
+  const f = startupFixture(t, { timedStats: true,
+    beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
+  const first = f.load(0, 8000); await flushStartup(); f.state.target = 3.9;
+  clock += 50; f.requests[1].finish(); await flushStartup();
+  assert.equal(f.engine.startupSnapshot().planningServiceMs, null);
+  Object.assign(f.requests[1].stats, { aborted: true, loaded: 0, loading: { start: -1, end: 999999 } });
+  clock += 20; release(); await flushStartup();
+  assert.equal(f.engine.startupSnapshot().planningServiceMs, 50, 'no stats object or mutable interval is retained');
+  assert.equal(first.calls.success, 0);
+});
+
+test('startup service lead learns nothing from corrupt or cancelled pending verification', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 1000; t.mock.method(performance, 'now', () => clock);
+  for (const action of ['corrupt', 'abort', 'clear']) {
+    let release; t.after(() => release?.());
+    const f = startupFixture(t, { timedStats: true,
+      beforeVerify: ctx => action !== 'corrupt' && ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
+    const first = f.load(0, 8000); await flushStartup(); f.state.target = 3.9;
+    clock += 50;
+    f.requests[1].finish(false, action === 'corrupt' ? Uint8Array.of(9, 8, 7, 6) : undefined); await flushStartup();
+    if (action === 'abort') first.loader.abort();
+    if (action === 'clear') f.engine.clear();
+    release?.(); await flushStartup();
+    assert.equal(f.engine.startupSnapshot().planningServiceMs, null, action);
+    assert.equal(first.calls.success, 0, action);
+    assert.equal(f.engine.snapshot().consumedPeerBytes, 0, action);
+    f.engine.stop();
+  }
+});
+
+test('startup service lead changes cannot move an already selected forward start', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 1000; t.mock.method(performance, 'now', () => clock);
+  const f = startupFixture(t, { timedStats: true, starts: [0, 2, 4, 5, 6, 9], durations: [2, 2, 1, 1, 3, 2] });
+  const first = f.load(0, 8000); await flushStartup(); f.state.target = 3.5; f.state.recovery = 3500;
+  clock += 50; f.requests[1].finish(); await flushStartup();
+  clock += 100; t.mock.timers.tick(100); await flushStartup();
+  assert.equal(f.requests[2]?.context.frag.sn, 3);
+  clock += 500; f.requests[2].finish(); await flushStartup();
+  assert.equal(f.engine.startupSnapshot().planningServiceMs, 500);
+  f.requests[0].finish(); await flushStartup();
+  clock += 100; t.mock.timers.tick(100); await flushStartup();
+  assert.equal(f.requests[3]?.context.frag.sn, 4, 'changed service fills contiguous[6,9] rather than selecting a later start');
+  assert.equal(first.calls.success, 0);
+});
 
 test('startup horizon planner survives the captured serial peer cadence without renewing the eight-second deadline', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
