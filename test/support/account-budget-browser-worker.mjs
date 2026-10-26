@@ -141,12 +141,46 @@ try {
   assert.equal(pages[1].keyReads(), 0);
   if (turnRenewal) {
     receipt.stage = "turn-credential-rollover";
-    await consumer.waitForFunction((before) => {
-      const report = window.relaySwarmDemo.report();
-      return report.durationMs >= 35000 && report.turnCredentials?.refreshes >= 2
-        && report.turnCredentials.refreshes > before.refreshes && report.current?.startedAtMs > before.startedAtMs
-        && report.current?.metrics.segments.peerFirstLoaded > 0 && report.current?.metrics.bytes.peerFirst > 0;
-    }, { startedAtMs: turnBefore[2].activeSwarmStartedAtMs, refreshes: turnBefore[2].turn.refreshes }, { timeout: cap({ work: String(renewalEnd) }, "work", budget(40000)) });
+    try {
+      await consumer.waitForFunction((before) => {
+        const report = window.relaySwarmDemo.report();
+        return report.durationMs >= 35000 && report.turnCredentials?.refreshes >= 2
+          && report.turnCredentials.refreshes > before.refreshes && report.current?.startedAtMs > before.startedAtMs
+          && report.current?.metrics.segments.peerFirstLoaded > 0 && report.current?.metrics.bytes.peerFirst > 0;
+      }, { startedAtMs: turnBefore[2].activeSwarmStartedAtMs, refreshes: turnBefore[2].turn.refreshes }, { timeout: cap({ work: String(renewalEnd) }, "work", budget(40000)) });
+    } catch (error) {
+      receipt.turnRolloverFailureDiagnostics = { v: 1, status: "unknown" };
+      try {
+        receipt.turnRolloverFailureDiagnostics = await bounded(() => consumer.evaluate((before) => {
+          const report = window.relaySwarmDemo?.report?.();
+          if (!report || typeof report !== "object") return { v: 1, status: "unknown" };
+          const finite = (value) => Number.isFinite(value) ? value : null;
+          const count = (value) => Number.isSafeInteger(value) && value >= 0 ? value : null;
+          const bool = (value) => typeof value === "boolean" ? value : null;
+          const atLeast = (value, minimum) => value === null ? null : value >= minimum;
+          const advanced = (value, previous) => value === null || previous === null ? null : value > previous;
+          const metrics = report.current?.metrics, mixed = metrics?.core?.multiHolder, peers = metrics?.peers;
+          const durationMs = finite(report.durationMs), refreshes = count(report.turnCredentials?.refreshes);
+          const startedAtMs = finite(report.current?.startedAtMs), peerLoads = count(metrics?.segments?.peerFirstLoaded), peerBytes = count(metrics?.bytes?.peerFirst);
+          const previous = { startedAtMs: finite(before.startedAtMs), refreshes: count(before.refreshes) };
+          return { v: 1, status: "captured", durationMs, before: previous,
+            predicate: { durationAtLeast35Seconds: atLeast(durationMs, 35000), refreshesAtLeastTwo: atLeast(refreshes, 2),
+              refreshesAdvanced: advanced(refreshes, previous.refreshes), swarmStartedLater: advanced(startedAtMs, previous.startedAtMs),
+              acceptedPeerLoadsPositive: atLeast(peerLoads, 1), acceptedPeerBytesPositive: atLeast(peerBytes, 1) },
+            turn: { refreshes, available: bool(report.turnCredentials?.available), failures: count(report.turnCredentials?.failures), remainingMs: finite(report.turnCredentials?.remainingMs) },
+            current: { present: report.current != null, startedAtMs,
+              mode: ["off", "shadow", "peer-first"].includes(metrics?.mode) ? metrics.mode : null,
+              stopped: bool(metrics?.stopped), serving: bool(metrics?.serving), acceptedPeerLoads: peerLoads, acceptedPeerBytes: peerBytes,
+              // Reception and verified pieces are distinct from accepted media.
+              verifiedWholePeerBytes: count(metrics?.bytes?.fromPeers),
+              mixed: { enabled: bool(mixed?.enabled), transfers: count(mixed?.transfers), delivered: count(mixed?.delivered), failed: count(mixed?.failed),
+                verifiedPiecePeerBytes: count(mixed?.peerBytes), originBytes: count(mixed?.originBytes), unusedBytes: count(mixed?.unusedBytes) },
+              peers: { connected: count(peers?.connected), dialling: count(peers?.dialling), openPeersKnown: count(peers?.openPeersKnown),
+                linksOpened: count(peers?.linksOpened), linksClosed: count(peers?.linksClosed) } } };
+        }, { startedAtMs: turnBefore[2].activeSwarmStartedAtMs, refreshes: turnBefore[2].turn.refreshes }), clock, "work", 2000);
+      } catch { /* Unavailable diagnostics must not replace the failed gate. */ }
+      throw error;
+    }
     const after = await Promise.all(pages.map(({ name, page }) => inspect(name, page)));
     for (let i = 0; i < after.length; i++) {
       assert.ok(after[i].turn.refreshes >= 2); assert.equal(after[i].turn.available, true);

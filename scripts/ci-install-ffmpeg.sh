@@ -27,6 +27,12 @@ for attempt in 1 2 3; do
     exit 0
   fi
   echo "ffmpeg install attempt ${attempt} failed or timed out" >&2
+  if [[ "$attempt" == 1 && "${GITHUB_ACTIONS:-}" == true ]]; then
+    if ! run_phase "$attempt" mirror-fallback timeout 10 sudo bash \
+      "$(dirname "${BASH_SOURCE[0]}")/ci-fallback-apt-mirrors.sh" /etc/apt/apt-mirrors.txt; then
+      echo "ffmpeg mirror fallback failed; continuing bounded install attempts" >&2
+    fi
+  fi
   sleep 5
 done
 
