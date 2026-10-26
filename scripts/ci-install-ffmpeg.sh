@@ -20,7 +20,7 @@ run_phase() {
 
 for attempt in 1 2 3; do
   if run_phase "$attempt" update timeout 120 sudo apt-get "${apt_options[@]}" update -qq &&
-    run_phase "$attempt" install timeout 120 sudo DEBIAN_FRONTEND=noninteractive apt-get "${apt_options[@]}" install -y -qq --no-install-recommends ffmpeg; then
+    run_phase "$attempt" install timeout 120 sudo DEBIAN_FRONTEND=noninteractive apt-get "${apt_options[@]}" install -y --no-install-recommends ffmpeg; then
     run_phase "$attempt" version ffmpeg -hide_banner -version
     exit 0
   fi
