@@ -3,7 +3,9 @@
 # this step until the job limit, so each attempt is time-boxed and retried.
 set -euo pipefail
 
-apt_options=(-o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=3)
+# The outer loop retries whole attempts. Retrying each failed download inside
+# APT can consume the phase deadline before its mirror transport falls back.
+apt_options=(-o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=0)
 
 run_phase() {
   local attempt="$1" phase="$2" phase_status
@@ -25,6 +27,12 @@ for attempt in 1 2 3; do
     exit 0
   fi
   echo "ffmpeg install attempt ${attempt} failed or timed out" >&2
+  if [[ "$attempt" == 1 && "${GITHUB_ACTIONS:-}" == true ]]; then
+    if ! run_phase "$attempt" mirror-fallback timeout 10 sudo bash \
+      "$(dirname "${BASH_SOURCE[0]}")/ci-fallback-apt-mirrors.sh" /etc/apt/apt-mirrors.txt; then
+      echo "ffmpeg mirror fallback failed; continuing bounded install attempts" >&2
+    fi
+  fi
   sleep 5
 done
 
