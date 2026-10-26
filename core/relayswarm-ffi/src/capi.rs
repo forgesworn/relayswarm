@@ -18,6 +18,21 @@ pub struct RsBufferList {
     pub len: usize,
 }
 
+#[repr(C)]
+pub struct RsPackedStrings {
+    pub ptr: *const u8,
+    pub len: usize,
+    pub lengths: *const usize,
+    pub count: usize,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct RsTransferSource {
+    pub peer: u64,
+    pub tag: u8,
+}
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct RsTiming {
@@ -465,7 +480,7 @@ unsafe fn object<'a>(value: *const c_void) -> CapiResult<&'a Handle> {
 
 #[no_mangle]
 pub extern "C" fn relayswarm_abi_version() -> u32 {
-    2
+    3
 }
 
 #[no_mangle]
@@ -720,6 +735,70 @@ fn link_handle(value: &Handle) -> CapiResult<&PeerLink> {
     }
 }
 
+fn link_binary(value: LinkUpdate) -> RsBuffer {
+    let mut binary = Binary::default();
+    binary.link_update(value);
+    owned(binary.0)
+}
+
+fn transfer_binary(value: TransferState) -> RsBuffer {
+    let mut binary = Binary::default();
+    binary.transfer_state(value);
+    owned(binary.0)
+}
+
+unsafe fn string_list(keys: RsBufferList) -> CapiResult<Vec<String>> {
+    let inputs = if keys.ptr.is_null() {
+        if keys.len == 0 {
+            &[][..]
+        } else {
+            return argument();
+        }
+    } else {
+        slice::from_raw_parts(keys.ptr, keys.len)
+    };
+    inputs.iter().map(|key| text(key.ptr, key.len)).collect()
+}
+
+unsafe fn packed_strings(keys: RsPackedStrings) -> CapiResult<Vec<String>> {
+    let input = bytes(keys.ptr, keys.len)?;
+    let lengths = if keys.lengths.is_null() {
+        if keys.count == 0 {
+            &[][..]
+        } else {
+            return argument();
+        }
+    } else {
+        slice::from_raw_parts(keys.lengths, keys.count)
+    };
+    let mut offset = 0usize;
+    let mut output = Vec::with_capacity(keys.count);
+    for len in lengths {
+        let end = offset
+            .checked_add(*len)
+            .filter(|end| *end <= input.len())
+            .ok_or(CapiError::Argument)?;
+        output.push(
+            std::str::from_utf8(&input[offset..end])
+                .map(str::to_owned)
+                .map_err(|_| CapiError::Argument)?,
+        );
+        offset = end;
+    }
+    if offset != input.len() {
+        return argument();
+    }
+    Ok(output)
+}
+
+fn source_input(value: RsTransferSource) -> CapiResult<TransferSource> {
+    match value.tag {
+        0 => Ok(TransferSource::Peer { peer: value.peer }),
+        1 => Ok(TransferSource::Origin),
+        _ => argument(),
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn relayswarm_transfer_start(
     handle: *const c_void,
@@ -821,6 +900,240 @@ pub unsafe extern "C" fn relayswarm_peer_link_send_have(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn relayswarm_transfer_delivered(
+    handle: *const c_void,
+    now: u64,
+    source: RsTransferSource,
+    start: u32,
+    end: u32,
+    bytes_ptr: *const u8,
+    bytes_len: usize,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        let span = PieceSpan { start, end };
+        let state = transfer_handle(object(handle)?)?.delivered(now, source_input(source)?, span, bytes(bytes_ptr, bytes_len)?.to_vec());
+        Ok(transfer_binary(state))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_transfer_progress(
+    handle: *const c_void,
+    now: u64,
+    source: RsTransferSource,
+    received: u64,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        Ok(transfer_binary(transfer_handle(object(handle)?)?.progress(
+            now,
+            source_input(source)?,
+            received,
+        )))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_transfer_failed(
+    handle: *const c_void,
+    now: u64,
+    source: RsTransferSource,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        Ok(transfer_binary(
+            transfer_handle(object(handle)?)?.failed(now, source_input(source)?),
+        ))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_transfer_tick(handle: *const c_void, now: u64, out: *mut RsBuffer, error: *mut RsBuffer) -> i32 {
+    write(out, error, || Ok(transfer_binary(transfer_handle(object(handle)?)?.tick(now))))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_peer_link_send_have_packed(
+    handle: *const c_void,
+    keys: RsPackedStrings,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        Ok(link_binary(link_handle(object(handle)?)?.send_have(packed_strings(keys)?)))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_peer_link_state(handle: *const c_void, out: *mut RsBuffer, error: *mut RsBuffer) -> i32 {
+    write(out, error, || Ok(link_binary(link_handle(object(handle)?)?.state())))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_peer_link_handle_binary(
+    handle: *const c_void,
+    now: u64,
+    chunk: *const u8,
+    chunk_len: usize,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        Ok(link_binary(
+            link_handle(object(handle)?)?.handle_binary(now, bytes(chunk, chunk_len)?.to_vec()),
+        ))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_peer_link_request(
+    handle: *const c_void,
+    now: u64,
+    key: *const u8,
+    key_len: usize,
+    timeout_ms: u64,
+    expected_size: u64,
+    expected_size_present: bool,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        let expected = expected_size_present.then_some(expected_size);
+        Ok(link_binary(link_handle(object(handle)?)?.request(
+            now,
+            text(key, key_len)?,
+            timeout_ms,
+            expected,
+        )))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_peer_link_request_range(
+    handle: *const c_void,
+    now: u64,
+    key: *const u8,
+    key_len: usize,
+    timeout_ms: u64,
+    start: u32,
+    end: u32,
+    object_size: u64,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        let span = PieceSpan { start, end };
+        Ok(link_binary(link_handle(object(handle)?)?.request_range(
+            now,
+            text(key, key_len)?,
+            timeout_ms,
+            span,
+            object_size,
+        )))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_peer_link_tick(handle: *const c_void, now: u64, out: *mut RsBuffer, error: *mut RsBuffer) -> i32 {
+    write(out, error, || Ok(link_binary(link_handle(object(handle)?)?.tick(now))))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_peer_link_buffered_amount_low(
+    handle: *const c_void,
+    now: u64,
+    buffered: u64,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        Ok(link_binary(link_handle(object(handle)?)?.buffered_amount_low(now, buffered)))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_peer_link_abort(
+    handle: *const c_void,
+    now: u64,
+    id: u64,
+    abandoned: bool,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        Ok(link_binary(link_handle(object(handle)?)?.abort(now, id, abandoned)))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_peer_link_close_link(
+    handle: *const c_void,
+    reason: *const u8,
+    reason_len: usize,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        Ok(link_binary(link_handle(object(handle)?)?.close_link(text(reason, reason_len)?)))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_peer_link_send_have_change(
+    handle: *const c_void,
+    add: RsBufferList,
+    del: RsBufferList,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        Ok(link_binary(
+            link_handle(object(handle)?)?.send_have_change(string_list(add)?, string_list(del)?),
+        ))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_peer_link_send_contribution(
+    handle: *const c_void,
+    serving: bool,
+    rendition: *const u8,
+    rendition_len: usize,
+    rendition_present: bool,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        let rendition = if rendition_present {
+            Some(text(rendition, rendition_len)?)
+        } else {
+            None
+        };
+        Ok(link_binary(link_handle(object(handle)?)?.send_contribution(serving, rendition)))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn relayswarm_peer_link_send_fetching(
+    handle: *const c_void,
+    key: *const u8,
+    key_len: usize,
+    lease_ms: u64,
+    out: *mut RsBuffer,
+    error: *mut RsBuffer,
+) -> i32 {
+    write(out, error, || {
+        Ok(link_binary(
+            link_handle(object(handle)?)?.send_fetching(text(key, key_len)?, lease_ms),
+        ))
+    })
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn relayswarm_peer_selection_order(handle: *const c_void, out: *mut u64, error: *mut RsBuffer) -> i32 {
     write(out, error, || {
         if let Handle::PeerSelection(value) = object(handle)? {
@@ -837,7 +1150,7 @@ mod tests {
 
     #[test]
     fn the_abi_is_versioned() {
-        assert_eq!(relayswarm_abi_version(), 2);
+        assert_eq!(relayswarm_abi_version(), 3);
     }
 
     #[test]

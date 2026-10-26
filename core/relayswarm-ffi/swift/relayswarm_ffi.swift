@@ -110,63 +110,71 @@ private func optional<T>(_ value: Any?, _ convert: (Any) -> T) -> T? {
 }
 private func data(_ value: Any?) -> Data { Data(array(value!).map { UInt8(($0 as! NSNumber).uint8Value) }) }
 
-private final class BinaryReader {
-    let input: Data
+private struct BinaryReader {
+    let input: UnsafeRawBufferPointer
     var at = 0
-    init(_ input: Data) { self.input = input }
-    func u8() -> UInt8 { defer { at += 1 }; return input[at] }
-    func bool() -> Bool { u8() != 0 }
-    func u32() -> UInt32 { defer { at += 4 }; return input.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: at, as: UInt32.self) }.littleEndian }
-    func u64() -> UInt64 { defer { at += 8 }; return input.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: at, as: UInt64.self) }.littleEndian }
-    func bytes() -> Data { let len = Int(u64()); defer { at += len }; return input.subdata(in: at..<at + len) }
-    func string() -> String { String(decoding: bytes(), as: UTF8.self) }
-    func optionalU64() -> UInt64? { bool() ? u64() : nil }
-    func optionalBytes() -> Data? { bool() ? bytes() : nil }
-    func optionalString() -> String? { bool() ? string() : nil }
-    func span() -> PieceSpan { PieceSpan(start: u32(), end: u32()) }
+    init(_ input: UnsafeRawBufferPointer) { self.input = input }
+    mutating func u8() -> UInt8 { defer { at += 1 }; return input[at] }
+    mutating func bool() -> Bool { u8() != 0 }
+    mutating func u32() -> UInt32 { defer { at += 4 }; return input.loadUnaligned(fromByteOffset: at, as: UInt32.self).littleEndian }
+    mutating func u64() -> UInt64 { defer { at += 8 }; return input.loadUnaligned(fromByteOffset: at, as: UInt64.self).littleEndian }
+    mutating func bytes() -> Data { let len = Int(u64()); defer { at += len }; return Data(input[at..<at + len]) }
+    mutating func string() -> String {
+        let len = Int(u64())
+        defer { at += len }
+        return String(decoding: input[at..<at + len], as: UTF8.self)
+    }
+    mutating func optionalU64() -> UInt64? { bool() ? u64() : nil }
+    mutating func optionalBytes() -> Data? { bool() ? bytes() : nil }
+    mutating func optionalString() -> String? { bool() ? string() : nil }
+    mutating func span() -> PieceSpan { PieceSpan(start: u32(), end: u32()) }
     func done() { precondition(at == input.count, "Trailing native record bytes") }
 }
 
 private func transferStateBinary(_ bytes: Data) -> TransferState {
-    let input = BinaryReader(bytes)
-    let commands = (0..<Int(input.u32())).map { _ -> TransferCommand in
-        switch input.u8() {
-        case 0: return .request(peer: input.u64(), span: input.span())
-        case 1: return .fetchOrigin(span: input.span())
-        case 2: return .cancel(peer: input.u64())
-        case 3: return .abandon(peer: input.u64())
-        case 4: return .ban(peer: input.u64())
-        case 5: return .deliver(bytes: input.bytes())
-        case 6: return .fail
-        default: fatalError("Unknown TransferCommand")
+    bytes.withUnsafeBytes { raw in
+        var input = BinaryReader(raw)
+        let commands = (0..<Int(input.u32())).map { _ -> TransferCommand in
+            switch input.u8() {
+            case 0: return .request(peer: input.u64(), span: input.span())
+            case 1: return .fetchOrigin(span: input.span())
+            case 2: return .cancel(peer: input.u64())
+            case 3: return .abandon(peer: input.u64())
+            case 4: return .ban(peer: input.u64())
+            case 5: return .deliver(bytes: input.bytes())
+            case 6: return .fail
+            default: fatalError("Unknown TransferCommand")
+            }
         }
+        let state = TransferState(commands: commands, nextDeadline: input.optionalU64(), late: input.bool(), finished: input.bool(), verifiedBytes: input.u64())
+        input.done()
+        return state
     }
-    let state = TransferState(commands: commands, nextDeadline: input.optionalU64(), late: input.bool(), finished: input.bool(), verifiedBytes: input.u64())
-    input.done()
-    return state
 }
 
 private func linkUpdateBinary(_ bytes: Data) -> LinkUpdate {
-    let input = BinaryReader(bytes)
-    let events = (0..<Int(input.u32())).map { _ -> PeerLinkEvent in
-        switch input.u8() {
-        case 0: return .sendText(text: input.string())
-        case 1: return .sendBinary(bytes: input.bytes())
-        case 2: return .closed(reason: input.string())
-        case 3: return .report(report: RequestReport(id: input.optionalU64(), outcome: [RequestOutcome.payload, .none, .timeout, .abort, .abandoned, .closed, .busy, .sendError][Int(input.u8())], receivedBytes: input.u64(), metadataReceived: input.bool(), draining: input.bool(), closeReason: input.optionalString()))
-        case 4: return .resolved(id: input.optionalU64(), bytes: input.optionalBytes())
-        case 5: return .haveChanged(keys: (0..<Int(input.u32())).map { _ in input.string() })
-        case 6: return .scheduleChanged
-        case 7: return .serveRequest(key: input.string())
-        case 8: return .serveRange(key: input.string(), span: input.span())
-        case 9: return .uploadCancelled(bytes: input.u64())
-        case 10: return .progress(received: input.u64(), size: input.u64())
-        default: fatalError("Unknown PeerLinkEvent")
+    bytes.withUnsafeBytes { raw in
+        var input = BinaryReader(raw)
+        let events = (0..<Int(input.u32())).map { _ -> PeerLinkEvent in
+            switch input.u8() {
+            case 0: return .sendText(text: input.string())
+            case 1: return .sendBinary(bytes: input.bytes())
+            case 2: return .closed(reason: input.string())
+            case 3: return .report(report: RequestReport(id: input.optionalU64(), outcome: [RequestOutcome.payload, .none, .timeout, .abort, .abandoned, .closed, .busy, .sendError][Int(input.u8())], receivedBytes: input.u64(), metadataReceived: input.bool(), draining: input.bool(), closeReason: input.optionalString()))
+            case 4: return .resolved(id: input.optionalU64(), bytes: input.optionalBytes())
+            case 5: return .haveChanged(keys: (0..<Int(input.u32())).map { _ in input.string() })
+            case 6: return .scheduleChanged
+            case 7: return .serveRequest(key: input.string())
+            case 8: return .serveRange(key: input.string(), span: input.span())
+            case 9: return .uploadCancelled(bytes: input.u64())
+            case 10: return .progress(received: input.u64(), size: input.u64())
+            default: fatalError("Unknown PeerLinkEvent")
+            }
         }
+        let update = LinkUpdate(events: events, requestId: input.optionalU64(), version: input.u64(), closed: input.bool(), busy: input.bool(), transferring: input.bool(), outboundInFlight: input.u32(), bytesIn: input.u64(), bytesOut: input.u64(), openedAt: input.u64(), lastServedAt: input.u64(), lastDeliveredAt: input.u64(), nextDeadline: input.optionalU64(), uploadWaiting: input.bool())
+        input.done()
+        return update
     }
-    let update = LinkUpdate(events: events, requestId: input.optionalU64(), version: input.u64(), closed: input.bool(), busy: input.bool(), transferring: input.bool(), outboundInFlight: input.u32(), bytesIn: input.u64(), bytesOut: input.u64(), openedAt: input.u64(), lastServedAt: input.u64(), lastDeliveredAt: input.u64(), nextDeadline: input.optionalU64(), uploadWaiting: input.bool())
-    input.done()
-    return update
 }
 
 public enum CoreError: Swift.Error { case InvalidTransfer }
@@ -220,6 +228,7 @@ private func timing(_ value: Any) -> Timing { let v = dict(value); return Timing
 private func timingJson(_ value: Timing) -> [String: Any] { ["first_byte_ms": value.firstByteMs as Any, "rate": value.rate as Any] }
 private func peerTimingJson(_ value: PeerTiming) -> [String: Any] { ["peer": value.peer, "timing": timingJson(value.timing)] }
 private func sourceJson(_ value: TransferSource) -> Any { switch value { case let .peer(peer): return ["Peer": ["peer": peer]]; case .origin: return "Origin" } }
+private func sourceC(_ value: TransferSource) -> RsTransferSource { switch value { case let .peer(peer): return RsTransferSource(peer: peer, tag: 0); case .origin: return RsTransferSource(peer: 0, tag: 1) } }
 private func outcome(_ value: Any) -> RequestOutcome { switch string(value) { case "Payload": return .payload; case "None": return .none; case "Timeout": return .timeout; case "Abort": return .abort; case "Abandoned": return .abandoned; case "Closed": return .closed; case "Busy": return .busy; case "SendError": return .sendError; default: fatalError("Unknown RequestOutcome") } }
 private func report(_ value: Any) -> RequestReport { let v = dict(value); return RequestReport(id: optional(v["id"], uint64), outcome: outcome(v["outcome"]!), receivedBytes: uint64(v["received_bytes"]), metadataReceived: boolean(v["metadata_received"]), draining: boolean(v["draining"]), closeReason: optional(v["close_reason"], string)) }
 private func command(_ value: Any) -> TransferCommand {
@@ -260,10 +269,12 @@ open class Transfer: TransferProtocol, @unchecked Sendable {
             transferStateBinary(try! buffer { out, error in relayswarm_transfer_start(raw, now, peers.baseAddress, peers.count, origin, shared, out, error) })
         }
     }
-    open func progress(now: UInt64, source: TransferSource, received: UInt64) -> TransferState { transferState(try! nativeMethod(raw, "progress", ["now": now, "source": sourceJson(source), "received": received])) }
-    open func delivered(now: UInt64, source: TransferSource, span: PieceSpan, bytes: Data) -> TransferState { transferState(try! nativeMethod(raw, "delivered", ["now": now, "source": sourceJson(source), "span": spanJson(span), "bytes": bytes])) }
-    open func failed(now: UInt64, source: TransferSource) -> TransferState { transferState(try! nativeMethod(raw, "failed", ["now": now, "source": sourceJson(source)])) }
-    open func tick(now: UInt64) -> TransferState { transferState(try! nativeMethod(raw, "tick", ["now": now])) }
+    open func progress(now: UInt64, source: TransferSource, received: UInt64) -> TransferState { transferStateBinary(try! buffer { out, error in relayswarm_transfer_progress(raw, now, sourceC(source), received, out, error) }) }
+    open func delivered(now: UInt64, source: TransferSource, span: PieceSpan, bytes: Data) -> TransferState {
+        withData(bytes) { bytes, len in transferStateBinary(try! buffer { out, error in relayswarm_transfer_delivered(raw, now, sourceC(source), span.start, span.end, bytes, len, out, error) }) }
+    }
+    open func failed(now: UInt64, source: TransferSource) -> TransferState { transferStateBinary(try! buffer { out, error in relayswarm_transfer_failed(raw, now, sourceC(source), out, error) }) }
+    open func tick(now: UInt64) -> TransferState { transferStateBinary(try! buffer { out, error in relayswarm_transfer_tick(raw, now, out, error) }) }
 }
 
 public protocol PeerLinkProtocol: AnyObject, Sendable { func setChannelOpen(open: Bool); func setReliable(reliable: Bool); func observeBuffered(buffered: UInt64); func sets() -> LinkSets; func state() -> LinkUpdate; func handleText(now: UInt64, text: String) -> LinkUpdate; func handleBinary(now: UInt64, chunk: Data) -> LinkUpdate; func request(now: UInt64, key: String, timeoutMs: UInt64, expectedSize: UInt64?) -> LinkUpdate; func requestRange(now: UInt64, key: String, timeoutMs: UInt64, span: PieceSpan, objectSize: UInt64) -> LinkUpdate; func abort(now: UInt64, id: UInt64, abandoned: Bool) -> LinkUpdate; func closeLink(reason: String) -> LinkUpdate; func tick(now: UInt64) -> LinkUpdate; func serveResponse(now: UInt64, bytes: Data?) -> LinkUpdate; func bufferedAmountLow(now: UInt64, buffered: UInt64) -> LinkUpdate; func sendHave(keys: [String]) -> LinkUpdate; func sendHaveChange(add: [String], del: [String]) -> LinkUpdate; func sendContribution(serving: Bool, rendition: String?) -> LinkUpdate; func sendFetching(key: String, leaseMs: UInt64) -> LinkUpdate }
@@ -277,31 +288,68 @@ open class PeerLink: PeerLinkProtocol, @unchecked Sendable {
     open func setReliable(reliable: Bool) { _ = try! nativeMethod(raw, "set_reliable", ["reliable": reliable]) }
     open func observeBuffered(buffered: UInt64) { _ = try! nativeMethod(raw, "observe_buffered", ["buffered": buffered]) }
     open func sets() -> LinkSets { linkSets(try! nativeMethod(raw, "sets")) }
-    open func state() -> LinkUpdate { linkUpdate(try! nativeMethod(raw, "state")) }
+    open func state() -> LinkUpdate { linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_state(raw, out, error) }) }
     open func handleText(now: UInt64, text: String) -> LinkUpdate {
         withData(Data(text.utf8)) { text, len in linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_handle_text(raw, now, text, len, out, error) }) }
     }
-    open func handleBinary(now: UInt64, chunk: Data) -> LinkUpdate { linkUpdate(try! nativeMethod(raw, "handle_binary", ["now": now, "chunk": chunk])) }
-    open func request(now: UInt64, key: String, timeoutMs: UInt64, expectedSize: UInt64?) -> LinkUpdate { linkUpdate(try! nativeMethod(raw, "request", ["now": now, "key": key, "timeout_ms": timeoutMs, "expected_size": expectedSize as Any])) }
-    open func requestRange(now: UInt64, key: String, timeoutMs: UInt64, span: PieceSpan, objectSize: UInt64) -> LinkUpdate { linkUpdate(try! nativeMethod(raw, "request_range", ["now": now, "key": key, "timeout_ms": timeoutMs, "span": spanJson(span), "object_size": objectSize])) }
-    open func abort(now: UInt64, id: UInt64, abandoned: Bool) -> LinkUpdate { linkUpdate(try! nativeMethod(raw, "abort", ["now": now, "id": id, "abandoned": abandoned])) }
-    open func closeLink(reason: String) -> LinkUpdate { linkUpdate(try! nativeMethod(raw, "close_link", ["reason": reason])) }
-    open func tick(now: UInt64) -> LinkUpdate { linkUpdate(try! nativeMethod(raw, "tick", ["now": now])) }
+    open func handleBinary(now: UInt64, chunk: Data) -> LinkUpdate {
+        withData(chunk) { chunk, len in linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_handle_binary(raw, now, chunk, len, out, error) }) }
+    }
+    open func request(now: UInt64, key: String, timeoutMs: UInt64, expectedSize: UInt64?) -> LinkUpdate {
+        withData(Data(key.utf8)) { key, len in
+            linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_request(raw, now, key, len, timeoutMs, expectedSize ?? 0, expectedSize != nil, out, error) })
+        }
+    }
+    open func requestRange(now: UInt64, key: String, timeoutMs: UInt64, span: PieceSpan, objectSize: UInt64) -> LinkUpdate {
+        withData(Data(key.utf8)) { key, len in
+            linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_request_range(raw, now, key, len, timeoutMs, span.start, span.end, objectSize, out, error) })
+        }
+    }
+    open func abort(now: UInt64, id: UInt64, abandoned: Bool) -> LinkUpdate { linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_abort(raw, now, id, abandoned, out, error) }) }
+    open func closeLink(reason: String) -> LinkUpdate {
+        withData(Data(reason.utf8)) { reason, len in linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_close_link(raw, reason, len, out, error) }) }
+    }
+    open func tick(now: UInt64) -> LinkUpdate { linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_tick(raw, now, out, error) }) }
     open func serveResponse(now: UInt64, bytes: Data?) -> LinkUpdate {
         if let bytes {
             return withData(bytes) { bytes, len in linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_serve_response(raw, now, bytes, len, true, out, error) }) }
         }
         return linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_serve_response(raw, now, nil, 0, false, out, error) })
     }
-    open func bufferedAmountLow(now: UInt64, buffered: UInt64) -> LinkUpdate { linkUpdate(try! nativeMethod(raw, "buffered_amount_low", ["now": now, "buffered": buffered])) }
+    open func bufferedAmountLow(now: UInt64, buffered: UInt64) -> LinkUpdate { linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_buffered_amount_low(raw, now, buffered, out, error) }) }
     open func sendHave(keys: [String]) -> LinkUpdate {
-        withDatas(keys.map { Data($0.utf8) }) { keys, count in
-            linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_send_have(raw, RsBufferList(ptr: keys, len: count), out, error) })
+        let lengths = keys.map { $0.utf8.count }
+        var packed = Data()
+        packed.reserveCapacity(lengths.reduce(0, +))
+        for key in keys { packed.append(contentsOf: key.utf8) }
+        return withData(packed) { bytes, len in
+            lengths.withUnsafeBufferPointer { lengths in
+                linkUpdateBinary(try! buffer { out, error in
+                    relayswarm_peer_link_send_have_packed(raw, RsPackedStrings(ptr: bytes, len: len, lengths: lengths.baseAddress, count: lengths.count), out, error)
+                })
+            }
         }
     }
-    open func sendHaveChange(add: [String], del: [String]) -> LinkUpdate { linkUpdate(try! nativeMethod(raw, "send_have_change", ["add": add, "del": del])) }
-    open func sendContribution(serving: Bool, rendition: String?) -> LinkUpdate { linkUpdate(try! nativeMethod(raw, "send_contribution", ["serving": serving, "rendition": rendition as Any])) }
-    open func sendFetching(key: String, leaseMs: UInt64) -> LinkUpdate { linkUpdate(try! nativeMethod(raw, "send_fetching", ["key": key, "lease_ms": leaseMs])) }
+    open func sendHaveChange(add: [String], del: [String]) -> LinkUpdate {
+        withDatas(add.map { Data($0.utf8) }) { add, addCount in
+            withDatas(del.map { Data($0.utf8) }) { del, delCount in
+                linkUpdateBinary(try! buffer { out, error in
+                    relayswarm_peer_link_send_have_change(raw, RsBufferList(ptr: add, len: addCount), RsBufferList(ptr: del, len: delCount), out, error)
+                })
+            }
+        }
+    }
+    open func sendContribution(serving: Bool, rendition: String?) -> LinkUpdate {
+        if let rendition {
+            return withData(Data(rendition.utf8)) { rendition, len in
+                linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_send_contribution(raw, serving, rendition, len, true, out, error) })
+            }
+        }
+        return linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_send_contribution(raw, serving, nil, 0, false, out, error) })
+    }
+    open func sendFetching(key: String, leaseMs: UInt64) -> LinkUpdate {
+        withData(Data(key.utf8)) { key, len in linkUpdateBinary(try! buffer { out, error in relayswarm_peer_link_send_fetching(raw, key, len, leaseMs, out, error) }) }
+    }
 }
 
 public protocol PeerSelectionProtocol: AnyObject, Sendable { func observe(now: UInt64, firstByteMs: Double?, bytes: Double, flowMs: Double, totalFlowMs: Double?); func record(now: UInt64, link: UInt64, elapsedMs: Double, bytes: Double); func markSelected(link: UInt64); func forget(link: UInt64); func select(links: [SelectableLink], tried: [String], size: Double, deadlineMs: Double) -> UInt64?; func firstByteMs() -> Double?; func rate() -> Double?; func projectMs(size: Double) -> Double?; func minimumMs(size: Double) -> Double; func lastObservedAt() -> UInt64; func turn() -> UInt32; func order() -> UInt64; func summary(link: UInt64) -> LinkObservation; func estimate(link: UInt64, size: Double) -> Double? }

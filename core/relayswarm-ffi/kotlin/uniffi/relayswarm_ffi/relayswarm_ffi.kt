@@ -212,16 +212,31 @@ private object Native {
     init {
         System.loadLibrary("relayswarm_ffi")
         System.loadLibrary("relayswarm_jni")
-        check(abiVersion() == 2) { "Unsupported RelaySwarm ABI version: ${abiVersion()}" }
+        check(abiVersion() == 3) { "Unsupported RelaySwarm ABI version: ${abiVersion()}" }
     }
     @JvmStatic external fun abiVersion(): Int
     @JvmStatic external fun call(name: ByteArray, args: ByteArray): ByteArray
     @JvmStatic external fun new(name: ByteArray, args: ByteArray): Long
     @JvmStatic external fun method(handle: Long, name: ByteArray, args: ByteArray): ByteArray
     @JvmStatic external fun transferStart(handle: Long, now: Long, peers: LongArray, timings: DoubleArray, present: BooleanArray, origin: DoubleArray, shared: DoubleArray, originPresent: BooleanArray, sharedPresent: BooleanArray): ByteArray
+    @JvmStatic external fun transferDelivered(handle: Long, now: Long, sourcePeer: Long, sourceTag: Int, start: Int, end: Int, bytes: ByteArray): ByteArray
+    @JvmStatic external fun transferProgress(handle: Long, now: Long, sourcePeer: Long, sourceTag: Int, received: Long): ByteArray
+    @JvmStatic external fun transferFailed(handle: Long, now: Long, sourcePeer: Long, sourceTag: Int): ByteArray
+    @JvmStatic external fun transferTick(handle: Long, now: Long): ByteArray
     @JvmStatic external fun peerLinkHandleText(handle: Long, now: Long, text: ByteArray): ByteArray
     @JvmStatic external fun peerLinkServeResponse(handle: Long, now: Long, bytes: ByteArray?): ByteArray
-    @JvmStatic external fun peerLinkSendHave(handle: Long, keys: Array<ByteArray>): ByteArray
+    @JvmStatic external fun peerLinkSendHave(handle: Long, keys: ByteArray, lengths: IntArray): ByteArray
+    @JvmStatic external fun peerLinkState(handle: Long): ByteArray
+    @JvmStatic external fun peerLinkHandleBinary(handle: Long, now: Long, chunk: ByteArray): ByteArray
+    @JvmStatic external fun peerLinkRequest(handle: Long, now: Long, key: ByteArray, timeoutMs: Long, expectedSize: Long, expectedSizePresent: Boolean): ByteArray
+    @JvmStatic external fun peerLinkRequestRange(handle: Long, now: Long, key: ByteArray, timeoutMs: Long, start: Int, end: Int, objectSize: Long): ByteArray
+    @JvmStatic external fun peerLinkTick(handle: Long, now: Long): ByteArray
+    @JvmStatic external fun peerLinkBufferedAmountLow(handle: Long, now: Long, buffered: Long): ByteArray
+    @JvmStatic external fun peerLinkAbort(handle: Long, now: Long, id: Long, abandoned: Boolean): ByteArray
+    @JvmStatic external fun peerLinkCloseLink(handle: Long, reason: ByteArray): ByteArray
+    @JvmStatic external fun peerLinkSendHaveChange(handle: Long, add: Array<ByteArray>, del: Array<ByteArray>): ByteArray
+    @JvmStatic external fun peerLinkSendContribution(handle: Long, serving: Boolean, rendition: ByteArray?): ByteArray
+    @JvmStatic external fun peerLinkSendFetching(handle: Long, key: ByteArray, leaseMs: Long): ByteArray
     @JvmStatic external fun peerSelectionOrder(handle: Long): Long
     @JvmStatic external fun free(handle: Long)
 }
@@ -259,7 +274,7 @@ abstract class NativeObject internal constructor(handle: Long) : Disposable, Aut
         check(handle != 0L) { "${javaClass.simpleName} object has already been destroyed" }
         decode(Native.method(handle, name.toByteArray(Charsets.UTF_8), json(args).toByteArray(Charsets.UTF_8)))
     }
-    internal fun <T> fast(block: (Long) -> T): T = synchronized(this) {
+    internal inline fun <T> fast(block: (Long) -> T): T = synchronized(this) {
         check(handle != 0L) { "${javaClass.simpleName} object has already been destroyed" }
         block(handle)
     }
@@ -340,6 +355,11 @@ private fun sourceJson(value: TransferSource): Any = when (value) {
     is TransferSource.Peer -> mapOf("Peer" to mapOf("peer" to value.peer))
     TransferSource.Origin -> "Origin"
 }
+private fun sourcePeer(value: TransferSource): Long = when (value) {
+    is TransferSource.Peer -> value.peer.toLong()
+    TransferSource.Origin -> 0
+}
+private fun sourceTag(value: TransferSource): Int = if (value is TransferSource.Peer) 0 else 1
 private fun outcome(value: Any?): RequestOutcome = when (stringValue(value)) {
     "Payload" -> RequestOutcome.PAYLOAD
     "None" -> RequestOutcome.NONE
@@ -430,10 +450,10 @@ open class Transfer : NativeObject, TransferInterface {
                 booleanArrayOf(shared.firstByteMs != null, shared.rate != null)))
         }
     }
-    override fun progress(now: ULong, source: TransferSource, received: ULong) = transferState(invoke("progress", mapOf("now" to now, "source" to sourceJson(source), "received" to received)))
-    override fun delivered(now: ULong, source: TransferSource, span: PieceSpan, bytes: ByteArray) = transferState(invoke("delivered", mapOf("now" to now, "source" to sourceJson(source), "span" to spanJson(span), "bytes" to bytes)))
-    override fun failed(now: ULong, source: TransferSource) = transferState(invoke("failed", mapOf("now" to now, "source" to sourceJson(source))))
-    override fun tick(now: ULong) = transferState(invoke("tick", mapOf("now" to now)))
+    override fun progress(now: ULong, source: TransferSource, received: ULong) = fast { transferStateBinary(Native.transferProgress(it, now.toLong(), sourcePeer(source), sourceTag(source), received.toLong())) }
+    override fun delivered(now: ULong, source: TransferSource, span: PieceSpan, bytes: ByteArray) = fast { transferStateBinary(Native.transferDelivered(it, now.toLong(), sourcePeer(source), sourceTag(source), span.start.toInt(), span.end.toInt(), bytes)) }
+    override fun failed(now: ULong, source: TransferSource) = fast { transferStateBinary(Native.transferFailed(it, now.toLong(), sourcePeer(source), sourceTag(source))) }
+    override fun tick(now: ULong) = fast { transferStateBinary(Native.transferTick(it, now.toLong())) }
 }
 
 interface PeerLinkInterface {
@@ -454,20 +474,34 @@ open class PeerLink : NativeObject, PeerLinkInterface {
     override fun setReliable(reliable: Boolean) { invoke("set_reliable", mapOf("reliable" to reliable)) }
     override fun observeBuffered(buffered: ULong) { invoke("observe_buffered", mapOf("buffered" to buffered)) }
     override fun sets() = linkSets(invoke("sets"))
-    override fun state() = linkUpdate(invoke("state"))
+    override fun state() = fast { linkUpdateBinary(Native.peerLinkState(it)) }
     override fun handleText(now: ULong, text: String) = fast { linkUpdateBinary(Native.peerLinkHandleText(it, now.toLong(), text.toByteArray(Charsets.UTF_8))) }
-    override fun handleBinary(now: ULong, chunk: ByteArray) = linkUpdate(invoke("handle_binary", mapOf("now" to now, "chunk" to chunk)))
-    override fun request(now: ULong, key: String, timeoutMs: ULong, expectedSize: ULong?) = linkUpdate(invoke("request", mapOf("now" to now, "key" to key, "timeout_ms" to timeoutMs, "expected_size" to expectedSize)))
-    override fun requestRange(now: ULong, key: String, timeoutMs: ULong, span: PieceSpan, objectSize: ULong) = linkUpdate(invoke("request_range", mapOf("now" to now, "key" to key, "timeout_ms" to timeoutMs, "span" to spanJson(span), "object_size" to objectSize)))
-    override fun abort(now: ULong, id: ULong, abandoned: Boolean) = linkUpdate(invoke("abort", mapOf("now" to now, "id" to id, "abandoned" to abandoned)))
-    override fun closeLink(reason: String) = linkUpdate(invoke("close_link", mapOf("reason" to reason)))
-    override fun tick(now: ULong) = linkUpdate(invoke("tick", mapOf("now" to now)))
+    override fun handleBinary(now: ULong, chunk: ByteArray) = fast { linkUpdateBinary(Native.peerLinkHandleBinary(it, now.toLong(), chunk)) }
+    override fun request(now: ULong, key: String, timeoutMs: ULong, expectedSize: ULong?) = fast { linkUpdateBinary(Native.peerLinkRequest(it, now.toLong(), key.toByteArray(Charsets.UTF_8), timeoutMs.toLong(), expectedSize?.toLong() ?: 0, expectedSize != null)) }
+    override fun requestRange(now: ULong, key: String, timeoutMs: ULong, span: PieceSpan, objectSize: ULong) = fast { linkUpdateBinary(Native.peerLinkRequestRange(it, now.toLong(), key.toByteArray(Charsets.UTF_8), timeoutMs.toLong(), span.start.toInt(), span.end.toInt(), objectSize.toLong())) }
+    override fun abort(now: ULong, id: ULong, abandoned: Boolean) = fast { linkUpdateBinary(Native.peerLinkAbort(it, now.toLong(), id.toLong(), abandoned)) }
+    override fun closeLink(reason: String) = fast { linkUpdateBinary(Native.peerLinkCloseLink(it, reason.toByteArray(Charsets.UTF_8))) }
+    override fun tick(now: ULong) = fast { linkUpdateBinary(Native.peerLinkTick(it, now.toLong())) }
     override fun serveResponse(now: ULong, bytes: ByteArray?) = fast { linkUpdateBinary(Native.peerLinkServeResponse(it, now.toLong(), bytes)) }
-    override fun bufferedAmountLow(now: ULong, buffered: ULong) = linkUpdate(invoke("buffered_amount_low", mapOf("now" to now, "buffered" to buffered)))
-    override fun sendHave(keys: List<String>) = fast { linkUpdateBinary(Native.peerLinkSendHave(it, keys.map { key -> key.toByteArray(Charsets.UTF_8) }.toTypedArray())) }
-    override fun sendHaveChange(add: List<String>, del: List<String>) = linkUpdate(invoke("send_have_change", mapOf("add" to add, "del" to del)))
-    override fun sendContribution(serving: Boolean, rendition: String?) = linkUpdate(invoke("send_contribution", mapOf("serving" to serving, "rendition" to rendition)))
-    override fun sendFetching(key: String, leaseMs: ULong) = linkUpdate(invoke("send_fetching", mapOf("key" to key, "lease_ms" to leaseMs)))
+    override fun bufferedAmountLow(now: ULong, buffered: ULong) = fast { linkUpdateBinary(Native.peerLinkBufferedAmountLow(it, now.toLong(), buffered.toLong())) }
+    override fun sendHave(keys: List<String>) = fast {
+        val encoded = keys.map { key -> key.toByteArray(Charsets.UTF_8) }
+        val lengths = IntArray(encoded.size) { encoded[it].size }
+        val packed = ByteArray(encoded.sumOf { it.size })
+        var offset = 0
+        for (bytes in encoded) {
+            bytes.copyInto(packed, offset)
+            offset += bytes.size
+        }
+        linkUpdateBinary(Native.peerLinkSendHave(it, packed, lengths))
+    }
+    override fun sendHaveChange(add: List<String>, del: List<String>) = fast {
+        linkUpdateBinary(Native.peerLinkSendHaveChange(it,
+            add.map { key -> key.toByteArray(Charsets.UTF_8) }.toTypedArray(),
+            del.map { key -> key.toByteArray(Charsets.UTF_8) }.toTypedArray()))
+    }
+    override fun sendContribution(serving: Boolean, rendition: String?) = fast { linkUpdateBinary(Native.peerLinkSendContribution(it, serving, rendition?.toByteArray(Charsets.UTF_8))) }
+    override fun sendFetching(key: String, leaseMs: ULong) = fast { linkUpdateBinary(Native.peerLinkSendFetching(it, key.toByteArray(Charsets.UTF_8), leaseMs.toLong())) }
 }
 
 interface PeerSelectionInterface {

@@ -278,14 +278,213 @@ JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkServeResponse)(JNIEnv *env, jclass
     return buffer_result(env, rc, out, error);
 }
 
-JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkSendHave)(JNIEnv *env, jclass cls, jlong handle, jobjectArray keys) {
+JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkSendHave)(JNIEnv *env, jclass cls, jlong handle,
+        jbyteArray keys, jintArray lengths) {
     (void)cls;
-    BufferInputs inputs;
-    if (!borrow_buffers(env, keys, &inputs)) return NULL;
+    Input input;
+    if (!borrow_input(env, keys, &input)) return NULL;
+    jsize count = lengths == NULL ? 0 : (*env)->GetArrayLength(env, lengths);
+    jint *values = NULL;
+    size_t *sizes = NULL;
+    int valid = lengths != NULL;
+    if (valid && count > 0) {
+        values = (*env)->GetIntArrayElements(env, lengths, NULL);
+        if (values == NULL) {
+            release_input(env, &input);
+            return NULL;
+        }
+        sizes = malloc((size_t)count * sizeof(*sizes));
+        if (sizes == NULL) {
+            (*env)->ReleaseIntArrayElements(env, lengths, values, JNI_ABORT);
+            release_input(env, &input);
+            jclass error_class = (*env)->FindClass(env, "java/lang/OutOfMemoryError");
+            if (error_class != NULL) {
+                (*env)->ThrowNew(env, error_class, "cannot allocate native string lengths");
+                (*env)->DeleteLocalRef(env, error_class);
+            }
+            return NULL;
+        }
+    }
+    size_t total = 0;
+    for (jsize i = 0; valid && i < count; i++) {
+        if (values[i] < 0) {
+            valid = 0;
+            break;
+        }
+        sizes[i] = (size_t)values[i];
+        size_t next = total + sizes[i];
+        if (next < total || next > input.len) {
+            valid = 0;
+            break;
+        }
+        total = next;
+    }
+    if (total != input.len) valid = 0;
     RsBuffer out = {0}, error = {0};
-    RsBufferList list = {inputs.buffers, (size_t)inputs.len};
-    int32_t rc = relayswarm_peer_link_send_have((void *)(intptr_t)handle, list, &out, &error);
-    release_buffers(env, &inputs);
+    int32_t rc = -1;
+    if (valid) {
+        RsPackedStrings packed = {input.ptr, input.len, sizes, (size_t)count};
+        rc = relayswarm_peer_link_send_have_packed((void *)(intptr_t)handle, packed, &out, &error);
+    }
+    free(sizes);
+    if (values != NULL) (*env)->ReleaseIntArrayElements(env, lengths, values, JNI_ABORT);
+    release_input(env, &input);
+    if (!valid) {
+        jclass error_class = (*env)->FindClass(env, "java/lang/IllegalArgumentException");
+        if (error_class != NULL) {
+            (*env)->ThrowNew(env, error_class, "invalid packed string lengths");
+            (*env)->DeleteLocalRef(env, error_class);
+        }
+        return NULL;
+    }
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(transferDelivered)(JNIEnv *env, jclass cls, jlong handle, jlong now,
+        jlong source_peer, jint source_tag, jint start, jint end, jbyteArray bytes) {
+    (void)cls;
+    Input input;
+    if (!borrow_input(env, bytes, &input)) return NULL;
+    RsTransferSource source = {(uint64_t)source_peer, (uint8_t)source_tag};
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_transfer_delivered((void *)(intptr_t)handle, (uint64_t)now, source,
+        (uint32_t)start, (uint32_t)end, input.ptr, input.len, &out, &error);
+    release_input(env, &input);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(transferProgress)(JNIEnv *env, jclass cls, jlong handle, jlong now,
+        jlong source_peer, jint source_tag, jlong received) {
+    (void)cls;
+    RsTransferSource source = {(uint64_t)source_peer, (uint8_t)source_tag};
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_transfer_progress((void *)(intptr_t)handle, (uint64_t)now, source, (uint64_t)received, &out, &error);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(transferFailed)(JNIEnv *env, jclass cls, jlong handle, jlong now, jlong source_peer, jint source_tag) {
+    (void)cls;
+    RsTransferSource source = {(uint64_t)source_peer, (uint8_t)source_tag};
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_transfer_failed((void *)(intptr_t)handle, (uint64_t)now, source, &out, &error);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(transferTick)(JNIEnv *env, jclass cls, jlong handle, jlong now) {
+    (void)cls;
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_transfer_tick((void *)(intptr_t)handle, (uint64_t)now, &out, &error);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkState)(JNIEnv *env, jclass cls, jlong handle) {
+    (void)cls;
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_peer_link_state((void *)(intptr_t)handle, &out, &error);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkHandleBinary)(JNIEnv *env, jclass cls, jlong handle, jlong now, jbyteArray chunk) {
+    (void)cls;
+    Input input;
+    if (!borrow_input(env, chunk, &input)) return NULL;
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_peer_link_handle_binary((void *)(intptr_t)handle, (uint64_t)now, input.ptr, input.len, &out, &error);
+    release_input(env, &input);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkRequest)(JNIEnv *env, jclass cls, jlong handle, jlong now,
+        jbyteArray key, jlong timeout_ms, jlong expected_size, jboolean expected_size_present) {
+    (void)cls;
+    Input input;
+    if (!borrow_input(env, key, &input)) return NULL;
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_peer_link_request((void *)(intptr_t)handle, (uint64_t)now, input.ptr, input.len,
+        (uint64_t)timeout_ms, (uint64_t)expected_size, expected_size_present != 0, &out, &error);
+    release_input(env, &input);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkRequestRange)(JNIEnv *env, jclass cls, jlong handle, jlong now,
+        jbyteArray key, jlong timeout_ms, jint start, jint end, jlong object_size) {
+    (void)cls;
+    Input input;
+    if (!borrow_input(env, key, &input)) return NULL;
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_peer_link_request_range((void *)(intptr_t)handle, (uint64_t)now, input.ptr, input.len,
+        (uint64_t)timeout_ms, (uint32_t)start, (uint32_t)end, (uint64_t)object_size, &out, &error);
+    release_input(env, &input);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkTick)(JNIEnv *env, jclass cls, jlong handle, jlong now) {
+    (void)cls;
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_peer_link_tick((void *)(intptr_t)handle, (uint64_t)now, &out, &error);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkBufferedAmountLow)(JNIEnv *env, jclass cls, jlong handle, jlong now, jlong buffered) {
+    (void)cls;
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_peer_link_buffered_amount_low((void *)(intptr_t)handle, (uint64_t)now, (uint64_t)buffered, &out, &error);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkAbort)(JNIEnv *env, jclass cls, jlong handle, jlong now, jlong id, jboolean abandoned) {
+    (void)cls;
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_peer_link_abort((void *)(intptr_t)handle, (uint64_t)now, (uint64_t)id, abandoned != 0, &out, &error);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkCloseLink)(JNIEnv *env, jclass cls, jlong handle, jbyteArray reason) {
+    (void)cls;
+    Input input;
+    if (!borrow_input(env, reason, &input)) return NULL;
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_peer_link_close_link((void *)(intptr_t)handle, input.ptr, input.len, &out, &error);
+    release_input(env, &input);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkSendHaveChange)(JNIEnv *env, jclass cls, jlong handle, jobjectArray add, jobjectArray del) {
+    (void)cls;
+    BufferInputs add_inputs, del_inputs;
+    if (!borrow_buffers(env, add, &add_inputs)) return NULL;
+    if (!borrow_buffers(env, del, &del_inputs)) {
+        release_buffers(env, &add_inputs);
+        return NULL;
+    }
+    RsBuffer out = {0}, error = {0};
+    RsBufferList add_list = {add_inputs.buffers, (size_t)add_inputs.len};
+    RsBufferList del_list = {del_inputs.buffers, (size_t)del_inputs.len};
+    int32_t rc = relayswarm_peer_link_send_have_change((void *)(intptr_t)handle, add_list, del_list, &out, &error);
+    release_buffers(env, &del_inputs);
+    release_buffers(env, &add_inputs);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkSendContribution)(JNIEnv *env, jclass cls, jlong handle, jboolean serving, jbyteArray rendition) {
+    (void)cls;
+    Input input;
+    memset(&input, 0, sizeof(input));
+    if (rendition != NULL && !borrow_input(env, rendition, &input)) return NULL;
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_peer_link_send_contribution((void *)(intptr_t)handle, serving != 0,
+        input.ptr, input.len, rendition != NULL, &out, &error);
+    if (rendition != NULL) release_input(env, &input);
+    return buffer_result(env, rc, out, error);
+}
+
+JNIEXPORT jbyteArray JNICALL JNI_NAME(peerLinkSendFetching)(JNIEnv *env, jclass cls, jlong handle, jbyteArray key, jlong lease_ms) {
+    (void)cls;
+    Input input;
+    if (!borrow_input(env, key, &input)) return NULL;
+    RsBuffer out = {0}, error = {0};
+    int32_t rc = relayswarm_peer_link_send_fetching((void *)(intptr_t)handle, input.ptr, input.len, (uint64_t)lease_ms, &out, &error);
+    release_input(env, &input);
     return buffer_result(env, rc, out, error);
 }
 
