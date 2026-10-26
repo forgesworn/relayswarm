@@ -36,7 +36,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
   const cache = new Map(), demand = new Set(), jobs = new Map(), promoted = new Set(), reuseWaiters = new Set(), pins = new Map();
   const startup = { enabled: typeof startupTarget === 'function', state: startupTarget ? 'idle' : 'off', reason: null,
     owner: null, terminal: null, own: null, permit: null, response: null, verified: false, reserved: 0,
-    controller: null, timer: null, poll: null, plan: [], cursor: null, checking: false, targetTime: null, verifiedStart: null, verifiedEnd: null,
+    controller: null, timer: null, poll: null, plan: [], cursor: null, frozenStart: null, hopAvailable: true, checking: false, targetTime: null, verifiedStart: null, verifiedEnd: null,
     requiredHeadroomMs: null, released: 0, failures: 0, cancellations: 0, commitStarted: false, commitCompleted: false };
   const counters = { started: 0, verified: 0, rejected: 0, cancelled: 0, coalesced: 0, promotions: 0, localReuseBytes: 0,
     verifiedBytes: 0, verifiedPeerBytes: 0, consumedPeerBytes: 0, cacheBytes: 0, highWaterBytes: 0 };
@@ -64,6 +64,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
   const pump = () => {
     if (closed || active || !allowed() || !queued.length || demand.size + promoted.size > 1 ||
         (!steady && startup.state !== 'buffering') || (startup.state === 'buffering' && (!startup.permit || startup.checking))) return;
+    if (startup.state === 'buffering' && !prepareStartupAdmission()) return;
     // A pending bootstrap may replace obsolete future rows, but cannot evict
     // current coverage (or an authority pin) simply to admit another object.
     if (startup.state === 'buffering' && tracked() >= MAX_OBJECTS) return;
@@ -195,7 +196,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     clearTimeout(startup.timer); startup.timer = null; clearTimeout(startup.poll); startup.poll = null;
     startup.controller?.abort(); startup.releasePins?.();
     startup.owner = null; startup.terminal = null; startup.response = null; startup.reserved = 0;
-    queued = []; startup.plan = []; startup.cursor = null;
+    queued = []; startup.plan = []; startup.cursor = null; startup.frozenStart = null;
     for (const row of [...jobs.values()]) cancelJob(row);
     for (const key of cache.keys()) drop(key);
     if (!owner || !terminal || terminal.settled || owner.pendingTerminal !== terminal) return;
@@ -213,8 +214,15 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     if (!Number.isFinite(value) || value < 0) { endStartup('failed', 'invalid-target'); return null; }
     startup.targetTime = value; return value;
   };
-  const rollStartup = target => {
+  const readStartupRecovery = () => {
+    let recovery;
+    try { recovery = startupRecovery(startup.own.context); } catch {}
+    if (!Number.isFinite(recovery) || recovery < 0) { endStartup('failed', 'invalid-recovery'); return null; }
+    startup.requiredHeadroomMs = recovery; return recovery;
+  };
+  const rollStartup = (target, recovery) => {
     if (!startupCurrent() || startup.checking) return;
+    if (startup.frozenStart !== null && target >= startup.frozenStart) startup.frozenStart = null;
     if (startup.plan.some(item => !plannedCurrent(item)) || startup.cursor && !plannedCurrent(startup.cursor))
       return endStartup('cancelled', 'context-changed');
     // Retain one metadata cursor when both futures pass behind the room clock.
@@ -226,13 +234,29 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       if (item.context.frag.start + item.context.frag.duration > target || job ||
           row && pins.has(row.permit.key) ||
           [...demand].some(loader => loader.pendingTerminal && warmContext(loader.context)?.key === item.key)) break;
+      if (!row) { if (!startup.hopAvailable) return; startup.hopAvailable = false; }
       startup.cursor = item; startup.plan.shift();
       queued = queued.filter(future => future.key !== item.key);
       if (!startupCurrent() || startup.checking) return;
       drop(item.key);
     }
+    // A completed window which cannot cover the measured recovery horizon
+    // only loses headroom as the room advances. Free its first future once,
+    // then keep the new window start fixed until the actual target enters it.
+    const first = startup.plan[0];
+    if (startup.verified && startup.response && startup.plan.length === 2 && cache.size === 2 &&
+        !active && !jobs.size && !demand.size && !promoted.size && inside(first, target) &&
+        startup.plan.every(item => cache.has(item.key) && !pins.has(cache.get(item.key).permit.key))) {
+      const covered = coverage(target);
+      if (covered.end !== null && (covered.end - target) * 1000 < recovery) {
+        startup.cursor = first; startup.plan.shift(); drop(first.key);
+        startup.frozenStart = startup.plan[0].context.frag.start;
+      }
+    }
     while (startup.plan.length < 2) {
-      const parent = startup.plan.at(-1) ?? startup.cursor ?? startup.own;
+      const last = startup.plan.at(-1);
+      const parent = startup.cursor && (!last || startup.cursor.context.frag.start > last.context.frag.start)
+        ? startup.cursor : last ?? startup.own;
       let item;
       try { item = parsedNext(parent)[0]; } catch { return endStartup('cancelled', 'context-changed'); }
       if (!item) return;
@@ -243,13 +267,38 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       if (item.context.frag.start + item.context.frag.duration <= target) {
         // At most one unrequested obsolete hop per poll. Never download an old
         // fragment or scan an arbitrary horizon to chase a distant target.
-        startup.cursor = planned; return;
+        if (!startup.hopAvailable) return;
+        startup.hopAvailable = false; startup.cursor = planned; return;
       }
       startup.plan.push(planned);
       // The loader can add markers to its own context. Keep that context
       // separate from the payload-free plan and its latest-demand snapshot.
       queued.push(item);
     }
+  };
+  const prepareStartupAdmission = () => {
+    if (!startupCurrent() || startup.checking) return false;
+    const target = readStartupTarget(); if (target === null || !startupCurrent()) return false;
+    const recovery = readStartupRecovery(); if (recovery === null || !startupCurrent()) return false;
+    rollStartup(target, recovery);
+    if (!startupCurrent() || startup.checking || !queued.length) return false;
+    // Once a future window starts ahead of the real target, fill it without
+    // chasing another projected horizon. Release still needs actual coverage.
+    if (startup.frozenStart !== null && target < startup.frozenStart || startup.plan[0]?.context.frag.start > target) return true;
+    const item = queued[0], index = startup.plan.findIndex(future => future.key === item.key);
+    if (index < 0) { endStartup('cancelled', 'context-changed'); return false; }
+    if (item.context.frag.start + item.context.frag.duration <= target + recovery / 1000) {
+      if (!startup.hopAvailable) return false;
+      startup.hopAvailable = false;
+      startup.cursor = startup.plan[index]; startup.plan.splice(index, 1); queued.shift();
+      rollStartup(target, recovery);
+      const selected = queued[0]?.context.frag.start;
+      if (selected > target) startup.frozenStart = selected;
+      // Do not recurse through metadata. The existing bounded poll is the
+      // only source of another skip allowance; no deadline is renewed.
+      return false;
+    }
+    return true;
   };
   const scheduleStartupPoll = () => {
     if (startup.poll !== null || !startupCurrent()) return;
@@ -261,10 +310,12 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       // The commit hook legitimately moves prepared -> publishing -> active.
       // Its original deadline/signal stay live; fresh checks follow its ACK.
       if (!startup.checking) {
+        startup.hopAvailable = true;
         const target = readStartupTarget();
         if (target === null || !startupCurrent()) return;
         if (!allowed()) return endStartup('cancelled', 'not-allowed');
-        rollStartup(target);
+        const recovery = readStartupRecovery(); if (recovery === null || !startupCurrent()) return;
+        rollStartup(target, recovery);
         if (!startupCurrent()) return;
         void checkStartup(target); queueMicrotask(pump);
       }
@@ -406,7 +457,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       startup.state = 'ready'; startup.reason = null; startup.released++;
       clearTimeout(startup.timer); startup.timer = null; clearTimeout(startup.poll); startup.poll = null; startup.reserved = 0;
       const completedController = startup.controller;
-      startup.owner = null; startup.terminal = null; startup.response = null; startup.plan = []; startup.cursor = null;
+      startup.owner = null; startup.terminal = null; startup.response = null; startup.plan = []; startup.cursor = null; startup.frozenStart = null;
       if (!steady) { queued = []; for (const row of [...jobs.values()]) cancelJob(row); }
       try { owner.deliver(terminal, 'onSuccess', args); }
       finally {
@@ -628,7 +679,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         if (name === 'onAbort') startup.cancellations++; else startup.failures++;
         clearTimeout(startup.timer); clearTimeout(startup.poll); startup.poll = null;
         startup.controller?.abort(); startup.releasePins?.(); startup.owner = null; startup.terminal = null;
-        startup.response = null; startup.reserved = 0; queued = []; startup.plan = []; startup.cursor = null;
+        startup.response = null; startup.reserved = 0; queued = []; startup.plan = []; startup.cursor = null; startup.frozenStart = null;
         for (const row of [...jobs.values()]) cancelJob(row);
         for (const key of cache.keys()) drop(key);
       }

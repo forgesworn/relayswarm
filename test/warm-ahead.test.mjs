@@ -709,7 +709,7 @@ function startupFixture(t, options = {}) {
   const state = { target: 1.3, recovery: 2_000, targetCalls: 0, accepted: 0, allowed: true, authCalls: 0,
     holdRecheck: false, holdCheckSn: null, releaseRecheck: null, reservations: [], revoked: new Set() };
   const context = sn => ({ url: `https://origin.example/media/s${sn}.m4s`, responseType: 'arraybuffer',
-    frag: { sn, cc: 0, level: 0, type: 'main', start: options.starts?.[sn] ?? sn * 2, duration: 2,
+    frag: { sn, cc: 0, level: 0, type: 'main', start: options.starts?.[sn] ?? sn * 2, duration: options.durations?.[sn] ?? 2,
       url: `https://origin.example/media/s${sn}.m4s`, baseurl: 'https://origin.example/media/index.m3u8' } });
   class Loader {
     stats = { loading: { start: 0 }, loaded: 0 };
@@ -767,16 +767,126 @@ function startupFixture(t, options = {}) {
   return { engine, state, requests, retained, verified, load };
 }
 const flushStartup = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
+const fillStartupWindow = async (f, beforeFinish = () => {}) => {
+  // Futures can verify before a slower original first body. Admit them with
+  // the initial target, then expose the captured full-window deficit only
+  // when that original response verifies. No test bypasses admission policy.
+  await flushStartup();
+  for (const i of [1, 2]) { beforeFinish(f.requests[i]); f.requests[i].finish(); await flushStartup(); }
+  f.state.target = 3.885; f.state.recovery = 2762.5;
+  beforeFinish(f.requests[0]); f.requests[0].finish(); await flushStartup();
+};
+
+test('startup horizon planner survives the captured serial peer cadence without renewing the eight-second deadline', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const starts = [0, 2, 4, 6, 8.64, 10.64, 12.56], durations = [2, 2, 2, 2.64, 2, 1.92, 2];
+  const f = startupFixture(t, { starts, durations }); f.state.target = 1.6;
+  const first = f.load(0, 8000); let elapsed = 0;
+  const advance = async ms => {
+    for (let left = ms; left > 0;) {
+      const step = Math.min(100, left); elapsed += step; left -= step;
+      f.state.target = 1.6 + elapsed / 1000;
+      t.mock.timers.tick(step); await flushStartup();
+    }
+  };
+  await flushStartup();
+  await advance(2241); f.requests[0].finish(); await flushStartup();
+  await advance(771);
+  assert.equal(f.state.target, 4.612);
+  assert.equal(f.engine.snapshot().cacheObjects, 0);
+  assert.equal(f.engine.snapshot().active, 1);
+  assert.equal(f.engine.snapshot().queued, 1);
+  f.requests[1].finish(); await flushStartup();
+  // Preserve the observed per-object peer service cadence after that point.
+  // This is an encoded-state replay, not a claim about future WAN latency.
+  const cadence = { 2: 1450, 3: 2064, 4: 1427, 5: 1427 };
+  while (!first.calls.success && !first.calls.error && elapsed < 8000) {
+    const row = f.requests.find(row => row.context.frag.sn >= 2 && !row.response && !row.aborted);
+    if (!row) { await advance(Math.min(100, 8000 - elapsed)); continue; }
+    const ms = Math.min(cadence[row.context.frag.sn] ?? 1427, 8000 - elapsed);
+    await advance(ms);
+    if (!first.calls.error) { row.finish(); await flushStartup(); }
+    assert.ok(f.engine.startupSnapshot().heldObjects <= 3);
+    assert.ok(f.engine.startupSnapshot().heldBytes <= 24 * 1024 * 1024);
+  }
+  assert.equal(first.calls.success, 1, 'fresh horizon planning must form two seconds ahead before the original deadline');
+  assert.equal(first.calls.error, 0);
+  assert.ok(elapsed < 8000);
+  assert.ok(!f.requests.some(row => row.context.frag.sn === 2), 'unrequested [4,6] cannot supply target4.612 +2s');
+  assert.strictEqual(first.calls.args[0], f.requests[0].response);
+  assert.strictEqual(first.calls.args[1], f.requests[0].stats);
+  assert.strictEqual(first.calls.args[2], first.context);
+  assert.ok(f.engine.startupSnapshot().verifiedEnd - f.state.target >= 2);
+});
+
+test('startup horizon planner retires a completed deficit once then waits for its fixed future start', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = startupFixture(t), first = f.load(0, 8000);
+  await flushStartup(); f.requests[1].finish(); await flushStartup();
+  f.state.target = 3.885; f.state.recovery = 2762.5;
+  f.requests[2].finish(); await flushStartup(); f.requests[0].finish(); await flushStartup();
+  assert.equal(f.engine.startupSnapshot().heldObjects, 3);
+  assert.equal(first.calls.success, 0);
+  t.mock.timers.tick(100); await flushStartup();
+  assert.equal(f.requests[3]?.context.frag.sn, 3, 'a full but insufficient window must free its current first future');
+  f.requests[3].finish(); await flushStartup();
+  assert.equal(first.calls.success, 0, 'target remains before the new verified window start4');
+  t.mock.timers.tick(500); await flushStartup();
+  assert.equal(f.requests.length, 4, 'do not keep retiring data while the actual target is before that start');
+  f.state.target = 4.05; t.mock.timers.tick(100); await flushStartup();
+  assert.equal(first.calls.success, 1);
+  assert.strictEqual(first.calls.args[0], f.requests[0].response);
+  assert.equal(f.engine.startupSnapshot().verifiedStart, 4);
+});
+
+test('startup horizon planner freezes an ahead window instead of skipping every short future', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const starts = [0, 2, 4, 6, 8.64, 10.64], durations = [2, 2, 2, 2.64, 2, 2];
+  const f = startupFixture(t, { starts, durations }); f.state.target = 4.612; f.state.recovery = 5000;
+  const first = f.load(0, 8000); await flushStartup();
+  f.requests[0].finish(); await flushStartup();
+  for (let i = 0; i < 3; i++) { t.mock.timers.tick(100); await flushStartup(); }
+  const future = f.requests.find(row => row.context.frag.sn === 3);
+  assert.ok(future, 'parsed [6,8.64] is the fixed first future even though it cannot alone cover the recovery horizon');
+  future.finish(); await flushStartup();
+  const next = f.requests.find(row => row.context.frag.sn === 4); assert.ok(next); next.finish(); await flushStartup();
+  t.mock.timers.tick(1000); await flushStartup();
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 3, 4]);
+  assert.equal(first.calls.success, 0);
+  assert.equal(f.engine.startupSnapshot().heldObjects, 3);
+});
+
+for (const recovery of [3500, 1500]) test(`startup horizon planner freezes a selected successor behind a cached prefix (${recovery}ms)`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = startupFixture(t, { starts: [0, 2, 4, 5, 6, 9], durations: [2, 2, 1, 1, 3, 2] });
+  const first = f.load(0, 8000); await flushStartup();
+  f.state.target = 3.5; f.state.recovery = recovery;
+  f.requests[1].finish(); await flushStartup();
+  t.mock.timers.tick(100); await flushStartup();
+  assert.equal(f.requests[2]?.context.frag.sn, 3,
+    'one hop selects [5,6]; an earlier cached [2,4] cannot allow another skip');
+  f.requests[2].finish(); await flushStartup();
+  f.requests[0].finish(); await flushStartup();
+  t.mock.timers.tick(100); await flushStartup();
+  assert.equal(first.calls.success, 0);
+  assert.equal(f.requests[3]?.context.frag.sn, 4);
+  f.requests[3].finish(); await flushStartup();
+  t.mock.timers.tick(400); await flushStartup();
+  assert.equal(f.requests.length, 4, 'the completed deficit prefix can retire without moving selected start5');
+  assert.equal(first.calls.success, 0, 'verified [5,9] still cannot release for actual target3.5');
+  f.state.target = 5.1; t.mock.timers.tick(100); await flushStartup();
+  assert.equal(first.calls.success, 1);
+  assert.ok(f.engine.startupSnapshot().verifiedEnd - f.state.target >= recovery / 1000);
+});
 
 test('rolling startup replaces only an obsolete future while retaining the exact first terminal', async t => {
   // Encoded-state replay of the M4 cause capture: all three objects verified,
   // target3.885 in [2,6], but only2115ms ahead for2762.5ms recovery. Advancing
   // beyond4 must free the old [2,4] slot, rather than wait idle until deadline.
   const f = startupFixture(t), first = f.load();
-  f.state.target = 3.885; f.state.recovery = 2762.5;
   first.context[STARTUP_MARKER].peerBytes = 4;
   first.context[STARTUP_MARKER].accept = () => { f.state.accepted++; };
-  for (let i = 0; i < 3; i++) { f.requests[i].finish(); await flushStartup(); }
+  await fillStartupWindow(f);
   assert.equal(first.calls.success, 0);
   assert.equal(f.engine.startupSnapshot().verifiedStart, 2);
   assert.equal(f.engine.startupSnapshot().verifiedEnd, 6);
@@ -810,21 +920,23 @@ test('rolling startup replaces only an obsolete future while retaining the exact
 });
 
 test('rolling startup advances from its bounded cursor when both old futures are obsolete', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = startupFixture(t), first = f.load();
-  f.state.target = 3.885; f.state.recovery = 2762.5;
-  for (let i = 0; i < 3; i++) { f.requests[i].finish(); await flushStartup(); }
+  await fillStartupWindow(f);
   f.state.target = 6.1;
-  await sleep(125);
+  for (let i = 0; i < 2; i++) { t.mock.timers.tick(100); await flushStartup(); }
   assert.equal(f.requests.length, 4);
-  assert.equal(f.requests[3].context.frag.sn, 3, 'continue after the last obsolete parsed future');
+  assert.equal(f.requests[3].context.frag.sn, 4, 'advance one unrequested short hop after the last obsolete parsed future');
   assert.ok(f.engine.startupSnapshot().heldObjects <= 3);
   f.requests[3].finish(); await flushStartup();
   assert.equal(first.calls.success, 0);
-  assert.equal(f.requests[4].context.frag.sn, 4);
+  assert.equal(f.requests[4].context.frag.sn, 5);
   assert.ok(f.engine.startupSnapshot().heldObjects <= 3);
   f.requests[4].finish(); await flushStartup();
+  assert.equal(first.calls.success, 0, 'actual target6.1 is still before the selected start8');
+  f.state.target = 8.05; t.mock.timers.tick(100); await flushStartup();
   assert.equal(first.calls.success, 1);
-  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2, 3, 4]);
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2, 4, 5]);
 });
 
 test('rolling startup metadata snapshots cannot retain runtime markers or response back-references', async t => {
@@ -833,18 +945,13 @@ test('rolling startup metadata snapshots cannot retain runtime markers or respon
     if (ctx.frag.sn > 0) seen.push({ sn: ctx.frag.sn, symbols: Object.getOwnPropertySymbols(ctx).length,
       hasBackReference: Object.hasOwn(ctx, 'fixtureResponseBackReference') });
   } }), first = f.load(0, 8000);
-  f.state.target = 3.885; f.state.recovery = 2762.5;
-  for (let i = 0; i < 3; i++) {
-    // The real WARM marker closes over a job whose resolved promise contains
-    // the whole response. A second nonmetadata reference catches shallow-copy
-    // variants that merely remove the known symbol.
-    f.requests[i].context.fixtureResponseBackReference = f.requests[i];
-    f.requests[i].finish(); await flushStartup();
-  }
+  // The runtime marker and arbitrary back-reference must not enter metadata.
+  await fillStartupWindow(f, row => { row.context.fixtureResponseBackReference = row; });
   f.state.target = 6.1;
-  t.mock.timers.tick(100); await flushStartup();
+  for (let i = 0; i < 2; i++) { t.mock.timers.tick(100); await flushStartup(); }
   f.requests[3].context.fixtureResponseBackReference = f.requests[3];
   f.requests[3].finish(); await flushStartup(); f.requests[4].finish(); await flushStartup();
+  f.state.target = 8.05; t.mock.timers.tick(100); await flushStartup();
   assert.equal(first.calls.success, 1);
   assert.equal(f.engine.contains(0), true, 'post-release retention uses only the bounded metadata plan');
   assert.ok(seen.some(row => row.sn === 2));
@@ -870,7 +977,7 @@ test('rolling startup retains an obsolete verification job reservation until its
   t.after(() => release?.());
   const f = startupFixture(t, { beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
   const first = f.load(0, 8000);
-  f.state.target = 3.885; f.state.recovery = 2762.5;
+  await flushStartup(); f.state.target = 3.885; f.state.recovery = 2762.5;
   f.requests[0].finish(); await flushStartup(); f.requests[1].finish(); await flushStartup();
   assert.equal(typeof release, 'function');
   f.state.target = 4.085;
@@ -881,9 +988,10 @@ test('rolling startup retains an obsolete verification job reservation until its
   assert.equal(f.engine.startupSnapshot().heldObjects, 2);
   release(); await flushStartup();
   t.mock.timers.tick(100); await flushStartup();
-  assert.equal(f.requests[2].context.frag.sn, 2);
+  assert.equal(f.requests[2].context.frag.sn, 3, 'only after verification settles may the stale unrequested hop be skipped');
   f.requests[2].finish(); await flushStartup();
-  assert.equal(f.requests[3].context.frag.sn, 3);
+  assert.equal(f.requests[3].context.frag.sn, 4);
+  f.state.target = 6.05;
   f.requests[3].finish(); await flushStartup();
   assert.equal(first.calls.success, 1);
   assert.ok(f.state.reservations.every(size => size <= 24 * 1024 * 1024));
@@ -892,8 +1000,7 @@ test('rolling startup retains an obsolete verification job reservation until its
 test('rolling startup retains the original deadline and rejects retry or late completion', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = startupFixture(t), first = f.load(0, 350);
-  f.state.target = 3.885; f.state.recovery = 2762.5;
-  for (let i = 0; i < 3; i++) { f.requests[i].finish(); await flushStartup(); }
+  await fillStartupWindow(f);
   f.state.target = 4.085;
   t.mock.timers.tick(100); await flushStartup();
   assert.equal(f.requests[3].context.frag.sn, 3);
@@ -914,8 +1021,7 @@ test('rolling startup retains the original deadline and rejects retry or late co
 test('rolling startup clock is bounded and never downloads a fully obsolete metadata horizon', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = startupFixture(t), first = f.load(0, 8000);
-  f.state.target = 3.885; f.state.recovery = 2762.5;
-  for (let i = 0; i < 3; i++) { f.requests[i].finish(); await flushStartup(); }
+  await fillStartupWindow(f);
   const reads = f.state.targetCalls;
   f.state.target = 1000;
   t.mock.timers.tick(7900); await flushStartup();
@@ -935,8 +1041,7 @@ test('rolling startup cancellation retires its clock and cannot release late byt
   t.mock.timers.enable({ apis: ['setTimeout'] });
   for (const action of ['abort', 'destroy', 'clear', 'stop', 'pause', 'null-target', 'context']) {
     const f = startupFixture(t), first = f.load(0, 8000);
-    f.state.target = 3.885; f.state.recovery = 2762.5;
-    for (let i = 0; i < 3; i++) { f.requests[i].finish(); await flushStartup(); }
+    await fillStartupWindow(f);
     f.state.target = 4.085;
     t.mock.timers.tick(100); await flushStartup();
     assert.equal(f.requests[3].context.frag.sn, 3);
@@ -976,10 +1081,11 @@ test('rolling startup pins coverage across commit without polling the publishing
   assert.equal(f.requests.length, 2);
   f.state.target = 4.085; release(); await flushStartup();
   assert.equal(f.engine.pinned(f.requests[1].context.url), false);
-  assert.equal(f.requests[2].context.frag.sn, 2);
   t.mock.timers.tick(100); await flushStartup();
+  assert.equal(f.requests[2].context.frag.sn, 3);
   f.requests[2].finish(); await flushStartup();
-  assert.equal(f.requests[3].context.frag.sn, 3);
+  assert.equal(f.requests[3].context.frag.sn, 4);
+  f.state.target = 6.05;
   f.requests[3].finish(); await flushStartup();
   assert.equal(first.calls.success, 1);
   assert.equal(commits, 1);
@@ -990,8 +1096,7 @@ test('rolling startup rechecks new parsed geometry and signed authority after ve
   t.mock.timers.enable({ apis: ['setTimeout'] });
   for (const action of ['geometry', 'authority']) {
     const starts = [0, 2, 4, 6], f = startupFixture(t, { starts }), first = f.load(0, 8000);
-    f.state.target = 3.885; f.state.recovery = 2762.5;
-    for (let i = 0; i < 3; i++) { f.requests[i].finish(); await flushStartup(); }
+    await fillStartupWindow(f);
     f.state.target = 4.085;
     t.mock.timers.tick(100); await flushStartup();
     f.state.holdRecheck = true; f.state.holdCheckSn = 3;
@@ -1011,8 +1116,9 @@ test('rolling startup rechecks new parsed geometry and signed authority after ve
 test('rolling startup does not evict still-needed verified bytes for an oversized next reservation', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = startupFixture(t, { permitSize: sn => sn === 2 ? 24 * 1024 * 1024 - 4 : 4 }), first = f.load(0, 8000);
+  await flushStartup(); f.requests[1].finish(); await flushStartup();
   f.state.target = 3.885; f.state.recovery = 2762.5;
-  f.requests[0].finish(); await flushStartup(); f.requests[1].finish(); await flushStartup();
+  f.requests[0].finish(); await flushStartup();
   assert.equal(f.requests.length, 2, 'the new object does not fit beside first and current future');
   assert.equal(f.engine.snapshot().rejected, 1);
   assert.equal(f.engine.snapshot().cacheObjects, 1, 'required [2,4] stays resident');
@@ -1022,12 +1128,12 @@ test('rolling startup does not evict still-needed verified bytes for an oversize
 });
 
 test('rolling startup real SDK uses currently parsed future fragments without early Hls credit', async t => {
-  let target = 3.885;
+  let target = 1.3;
   const f = await fixture(t, { enabled: false, startupTarget: () => target, held: [0, 1, 2, 3] });
   const first = f.load(0);
-  for (let sn = 0; sn < 3; sn++) {
+  for (const sn of [1, 2, 0]) {
     await until(() => f.requests.some(row => row.context.frag.sn === sn));
-    if (sn === 2) target = 4.085;
+    if (sn === 0) target = 4.085;
     f.requests.find(row => row.context.frag.sn === sn).finish();
   }
   await until(() => f.requests.some(row => row.context.frag.sn === 3));
