@@ -74,6 +74,10 @@ Only an owned pending startup may give its required future fragments a bounded
 startup-buffer-dependency role for late peers; steady speculation stays unchanged.
 Verified transport usefulness is separate from consumed media credit, so a held
 first object can inform the next transfer without inventing bytes or a rate.
+Optional startupBufferCommit runs once after verified reservoir readiness and
+before HLS delivery. Its host acknowledgement shares the original startup
+AbortSignal, deadline and memory caps; fresh checks follow. A host may prepare
+a new room before publishing its start. Existing room clocks keep advancing.
 Unreleased uploadPacing also defaults off: canonical pieces may wait in a
 bounded 250 ms refill FIFO without increasing upload rate, burst or quota.
 High-level multi-holder link leases precede asynchronous worker creation;

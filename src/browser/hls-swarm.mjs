@@ -63,6 +63,7 @@ const DEFAULTS = Object.freeze({
   // parsed fragments. Verified bytes share the existing bounded held cache.
   warmAhead: false,
   startupBufferTarget: null,
+  startupBufferCommit: null,
   lateWindowMs: 6_000,
   maxPeers: 6,
   maxUploadPeers: 4,
@@ -586,6 +587,8 @@ class HlsSwarm {
     if (typeof this.options.warmAhead !== "boolean" || this.options.warmAhead && (mode !== "peer-first" || this.options.serve !== true)) return "invalid-warm-ahead-option";
     if (this.options.startupBufferTarget !== null && (typeof this.options.startupBufferTarget !== 'function' ||
         mode !== 'peer-first' || this.options.serve !== true)) return 'invalid-startup-buffer-target';
+    if (this.options.startupBufferCommit !== null && (typeof this.options.startupBufferCommit !== 'function' ||
+        typeof this.options.startupBufferTarget !== 'function')) return 'invalid-startup-buffer-commit';
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
     if (this.options.reserveUploadBytes !== undefined && typeof this.options.reserveUploadBytes !== "function") return "invalid-upload-reservation";
     if (typeof this.options.serve !== "boolean" || typeof this.options.serveOnCellular !== "boolean") return "invalid-serve-option";
@@ -611,7 +614,7 @@ class HlsSwarm {
       hls.config.fLoader = this.options.mode === "peer-first" ? this.#peerFirstLoader(BaseLoader) : this.#shadowLoader(BaseLoader);
       if (this.options.warmAhead || this.options.startupBufferTarget) {
         this.warmAhead = createWarmAhead({ Loader: hls.config.fLoader,
-          steady: this.options.warmAhead, startupTarget: this.options.startupBufferTarget,
+          steady: this.options.warmAhead, startupTarget: this.options.startupBufferTarget, startupCommit: this.options.startupBufferCommit,
           startupRecovery: context => Math.max(this.options.originReserveMs,
             (percentile(this.#originSamples(context), 0.9) || 0) * 1.25 + 100),
           allowed: () => this.#servingAllowed() && hls.media?.paused !== true && !onCellular(),

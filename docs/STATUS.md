@@ -35,6 +35,17 @@ dependencies and verified transport usefulness from actual HLS consumption,
 with the original memory, rate and deadline limits. Fresh real playback
 qualification is still required.
 
+The next M4 run failed before the first viewer presented a frame; a second
+viewer never joined. All three contiguous bodies (18.27 MB) completed, but the
+first room's clock had advanced before media preparation. At the last coverage
+check, the verified tail provided 2.388 seconds ahead of the target against
+3.076 seconds of measured recovery headroom. The original eight-second startup
+deadline expired. This remains RED, with no observation samples and unqualified
+sync. Follow-up work adds an optional bounded host acknowledgement hook so a
+new room can prepare before publishing its start, without reanchoring an
+existing room or changing the media acceptance gates. Real playback remains
+pending.
+
 The experimental `warmAhead` option is disabled by default. Signed-commitment
 loader tests using actual hls.js 1.7.3 parsed Fragment objects cover future
 object verification, exact-demand reuse/coalescing, current-authority refusal,

@@ -134,6 +134,23 @@ insufficient capacity or expiration fails the loader explicitly; it does not
 release stale media or renew the deadline on automatic HLS retries. A separate
 new adapter may start again after an explicit user retry.
 
+The optional `startupBufferCommit` function defaults to `null` and requires
+`startupBufferTarget`. It runs once after the encoded reservoir passes the
+readiness checks, before held callbacks or consumed-media credit reach HLS.
+Its frozen argument contains only the original startup `AbortSignal`; it may
+return a promise. For example, a host can prepare a new room locally at zero,
+publish its start after verified media is ready, and await acknowledgement.
+An existing room must retain its advancing clock.
+
+The original eight-second/parent deadline and held reservations remain in force
+while the host acknowledges. Cancellation retires the operation; late resolution
+or rejection cannot release media. A current hook failure reports
+`commit-refused`. After success, the loader repeats fresh target, authority,
+context, parsed-fragment and resident-coverage checks. Insufficient headroom
+does not recall the hook or extend the deadline. The hook establishes encoded
+reservoir readiness, not decoded frames or accepted playback. The SDK itself
+does not publish, start, pause or reanchor any room.
+
 With `warmAhead: false`, startup may preload the parsed upcoming fragments and
 retain them for genuine consumption, then stops speculative fetching. Peer
 consumption credit is deferred until the corresponding genuine callback is

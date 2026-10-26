@@ -361,6 +361,7 @@ decision is not cached as permission for later upload requests.
 | `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-object origin time with a 25% and 100 ms recovery margin. Substantial origin ranges update this estimate after scaling by their actual byte count. Unknown origin timing or duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. Independent cached/late-HAVE races keep their window beside immediate HTTP. |
 | `warmAhead` | `false` | Experimental peer-first option, requiring `serve: true`: use the same player's next two parsed, unencrypted, whole main-media fragments for bounded speculative loading. A warmed object promoted to genuine demand frees the sole speculative slot. Existing demand/range limits are unchanged. Verified future objects share the held cache; at most three distinct cached/in-flight objects and 24 MiB of warm data plus all reservations fit within `maxHeldBytes`. Fresh cache permission may wait only within actual buffer headroom, up to 25 ms, before ordinary source recovery proceeds independently. |
 | `startupBufferTarget` | `null` | Experimental one-shot startup buffer for peer-first serving: a synchronous function returns the current player's fresh raw HLS target time in seconds, or `null` when its ownership/epoch is invalid. Hold the first main-fragment callback until verified contiguous upcoming media covers that target and measured origin-recovery headroom. The first held body shares the existing three-object/24 MiB budget and original eight-second/parent deadline. Works with `warmAhead: false` to stop speculative fetching after startup. It never pauses, plays, seeks or changes the room clock; bounded failure reports a loader error instead of releasing unsafe media. |
+| `startupBufferCommit` | `null` | Optional async host hook, requiring `startupBufferTarget`, called once with frozen `{ signal }` after verified reservoir readiness and before releasing HLS callbacks. The host may acknowledge a new room start here. The original startup deadline and resource limits continue; cancellation ignores late settlement. Fresh target, authority, context and resident coverage are checked again afterwards. The SDK never creates or reanchors the room clock. |
 | `uploadPacing` | `false` | Experimental canonical-piece upload refill deferral: one FIFO waiter per link, at most `min(maxUploadPeers, maxPeers)` waiters, and a fixed 250 ms queue deadline. The existing per-second rate, twice-rate burst, session allowance and wire remain unchanged. Whole-object deficits still refuse immediately. Queue rows contain identity and numeric geometry; held bytes and current host permission are checked after waiting. |
 | `latePeerRace` | `false` | Experimental peer-first option requiring `zeroBudgetPeerRace`: permit the first peer arm of still-running whole-main-fragment HTTP with no prior peer plan to use a newly accepted, current exact-HAVE holder. Warm work needs a genuine consumer or an owned pending startup-buffer dependency. Genuine demand keeps its earliest demand window; startup dependencies keep the original HTTP-entry window and first startup deadline. Both retain `min(lateWindowMs, 4000)`, arming plus `min(maxPeerWaitMs, 2500)`, and the known original HTTP load deadline. Same HTTP request/timers, fresh authority and current immutable identity; no retries or extra GET. Dormant watchers share `maxConcurrentRaces`; lifecycle changes retire them. Numeric `latePeerRace` metrics do not create delivery credit. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
@@ -2100,6 +2101,23 @@ insufficient capacity or expiration fails the loader explicitly; it does not
 release stale media or renew the deadline on automatic HLS retries. A separate
 new adapter may start again after an explicit user retry.
 
+The optional `startupBufferCommit` function defaults to `null` and requires
+`startupBufferTarget`. It runs once after the encoded reservoir passes the
+readiness checks, before held callbacks or consumed-media credit reach HLS.
+Its frozen argument contains only the original startup `AbortSignal`; it may
+return a promise. For example, a host can prepare a new room locally at zero,
+publish its start after verified media is ready, and await acknowledgement.
+An existing room must retain its advancing clock.
+
+The original eight-second/parent deadline and held reservations remain in force
+while the host acknowledges. Cancellation retires the operation; late resolution
+or rejection cannot release media. A current hook failure reports
+`commit-refused`. After success, the loader repeats fresh target, authority,
+context, parsed-fragment and resident-coverage checks. Insufficient headroom
+does not recall the hook or extend the deadline. The hook establishes encoded
+reservoir readiness, not decoded frames or accepted playback. The SDK itself
+does not publish, start, pause or reanchor any room.
+
 With `warmAhead: false`, startup may preload the parsed upcoming fragments and
 retain them for genuine consumption, then stops speculative fetching. Peer
 consumption credit is deferred until the corresponding genuine callback is
@@ -2806,6 +2824,17 @@ sync was unqualified. The follow-up changes distinguish owned startup-buffer
 dependencies and verified transport usefulness from actual HLS consumption,
 with the original memory, rate and deadline limits. Fresh real playback
 qualification is still required.
+
+The next M4 run failed before the first viewer presented a frame; a second
+viewer never joined. All three contiguous bodies (18.27 MB) completed, but the
+first room's clock had advanced before media preparation. At the last coverage
+check, the verified tail provided 2.388 seconds ahead of the target against
+3.076 seconds of measured recovery headroom. The original eight-second startup
+deadline expired. This remains RED, with no observation samples and unqualified
+sync. Follow-up work adds an optional bounded host acknowledgement hook so a
+new room can prepare before publishing its start, without reanchoring an
+existing room or changing the media acceptance gates. Real playback remains
+pending.
 
 The experimental `warmAhead` option is disabled by default. Signed-commitment
 loader tests using actual hls.js 1.7.3 parsed Fragment objects cover future

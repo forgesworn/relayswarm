@@ -91,11 +91,12 @@ async function fixture(t, options = {}) {
     maxHeldBytes: options.maxHeldBytes ?? 64 * 1024 * 1024, maxHeldSegments: options.maxHeldSegments ?? 12,
     ...(options.onPeerDelivery ? { onPeerDelivery: options.onPeerDelivery } : {}),
     ...(options.startupTarget === undefined ? {} : { startupBufferTarget: options.startupTarget }),
+    ...(options.startupCommit === undefined ? {} : { startupBufferCommit: options.startupCommit }),
     ...(options.allowance === undefined ? {} : { maxUploadBytesPerSession: options.allowance }) });
   const hls = { config: { loader: Loader, progressive: false }, media, levels: [{ details: { live: true, fragments } }] };
   swarm.attach(hls);
   t.after(async () => { for (const loader of clients) loader.destroy(); swarm.stop(); await relay.close(); });
-  if (fixtureCore) await until(() => swarm.metrics().core?.state === 'ready');
+  if (fixtureCore && !swarm.metrics().disabledReason) await until(() => swarm.metrics().core?.state === 'ready');
   const load = (sn, existing, hooks = {}) => {
     const loader = existing ?? new hls.config.fLoader(hls.config), context = { url: fragments[sn].url, frag: fragments[sn], responseType: 'arraybuffer',
       type: LoaderContextType.MEDIA_FRAGMENT, headers: {}, part: null, rangeStart: 0, rangeEnd: 0 };
@@ -726,7 +727,8 @@ function startupFixture(t, options = {}) {
     destroy() { this.abort(); }
   }
   const engine = createWarmAhead({ Loader, steady: false,
-    startupTarget: () => { state.targetCalls++; return state.target; }, startupRecovery: () => state.recovery,
+    startupTarget: () => { state.targetCalls++; return state.target; }, startupCommit: options.commit,
+    startupRecovery: () => state.recovery,
     allowed: () => state.allowed, next: ctx => [context(ctx.frag.sn + 1), context(ctx.frag.sn + 2)],
     authorise: async ctx => {
       state.authCalls++;
@@ -1137,4 +1139,160 @@ test('startup buffer future dependency cannot survive pause or changed parsed fu
     if (action === 'pause') assert.equal(dependency.signal.aborted, true);
     first.loader.destroy();
   }
+});
+
+test('startup commit waits for safe verified bytes, then ACK and fresh authority before the exact callback', async t => {
+  let commitCalls = 0, release, argument;
+  const f = startupFixture(t, { commit: value => {
+    commitCalls++; argument = value; return new Promise(resolve => { release = resolve; });
+  } }), first = f.load();
+  first.context[STARTUP_MARKER].peerBytes = 4;
+  f.requests[0].finish(); await flushStartup();
+  assert.equal(commitCalls, 0, 'the first body alone has insufficient current-target headroom');
+  f.requests[1].finish(); await flushStartup();
+  assert.equal(commitCalls, 1); assert.ok(Object.isFrozen(argument));
+  assert.deepEqual(Object.keys(argument), ['signal']); assert.ok(argument.signal instanceof AbortSignal);
+  assert.equal(argument.signal.aborted, false); assert.equal(first.calls.success, 0);
+  assert.equal(f.engine.snapshot().consumedPeerBytes, 0);
+  assert.equal(f.engine.pinned(f.requests[1].context.url), true);
+  assert.equal(f.engine.startupSnapshot().commitStarted, true);
+  assert.equal(f.engine.startupSnapshot().commitCompleted, false);
+  const beforeChecks = f.state.authCalls;
+  release(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(commitCalls, 1);
+  assert.ok(f.state.authCalls >= beforeChecks + 2, 'ACK is followed by a fresh authority batch');
+  assert.strictEqual(first.calls.args[0], f.requests[0].response);
+  assert.strictEqual(first.calls.args[1], f.requests[0].stats);
+  assert.strictEqual(first.calls.args[2], first.context);
+  assert.equal(f.engine.snapshot().consumedPeerBytes, 4);
+  assert.equal(f.engine.startupSnapshot().commitCompleted, true);
+  const second = f.load(1); await flushStartup();
+  assert.equal(second.calls.success, 1); assert.equal(commitCalls, 1);
+});
+
+test('startup commit rechecks slow ACK target and holds for more verified headroom without recalling the hook', async t => {
+  let release, calls = 0;
+  const f = startupFixture(t, { commit: () => { calls++; return new Promise(resolve => { release = resolve; }); } }), first = f.load();
+  f.requests[0].finish(); await flushStartup(); f.requests[1].finish(); await flushStartup();
+  f.state.target = 3.8; release(); await flushStartup();
+  assert.equal(first.calls.success, 0); assert.equal(calls, 1);
+  assert.equal(f.engine.startupSnapshot().commitCompleted, true);
+  assert.equal(f.requests.length, 3); f.requests[2].finish(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(calls, 1);
+  assert.equal(f.engine.startupSnapshot().verifiedEnd, 6);
+});
+
+test('startup commit keeps the original deadline and ignores a late ACK or rejection', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const rejectLate of [false, true]) {
+    let resolve, reject, signal, calls = 0;
+    const f = startupFixture(t, { commit: value => { signal = value.signal; calls++; return new Promise((yes, no) => { resolve = yes; reject = no; }); } }), first = f.load(0, 25);
+    f.requests[0].finish(); await flushStartup(); f.requests[1].finish(); await flushStartup();
+    t.mock.timers.tick(25); await flushStartup();
+    assert.equal(signal.aborted, true); assert.equal(first.calls.error, 1);
+    assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+    assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.pinned(f.requests[1].context.url), false);
+    if (rejectLate) reject(new Error('late private host error')); else resolve();
+    await flushStartup();
+    assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1);
+    const count = f.requests.length, retry = f.load();
+    assert.equal(retry.calls.error, 1); assert.equal(f.requests.length, count); assert.equal(calls, 1);
+  }
+});
+
+test('startup commit cancels quietly on caller abort, pause-clear, destroy, stop and reentrant stop', async t => {
+  for (const action of ['abort', 'pause-clear', 'destroy', 'stop', 'reentrant']) {
+    let release, signal;
+    const f = startupFixture(t, { commit: value => {
+      signal = value.signal;
+      if (action === 'reentrant') f.engine.stop();
+      return new Promise(resolve => { release = resolve; });
+    } }), first = f.load();
+    f.requests[0].finish(); await flushStartup(); f.requests[1].finish(); await flushStartup();
+    if (action === 'pause-clear') { f.state.allowed = false; f.engine.clear(); }
+    else if (action === 'stop') f.engine.stop();
+    else if (action !== 'reentrant') first.loader[action]();
+    await flushStartup(); assert.equal(signal.aborted, true);
+    const before = { ...first.calls }; release(); await flushStartup();
+    assert.deepEqual(first.calls, before); assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 0);
+    assert.equal(first.calls.abort, ['abort', 'pause-clear'].includes(action) ? 1 : 0);
+    assert.equal(f.engine.snapshot().consumedPeerBytes, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  }
+});
+
+test('startup commit failure reports a fixed reason once without leaking the host error', async t => {
+  let calls = 0;
+  const f = startupFixture(t, { commit: () => { calls++; throw new Error('private host detail'); } }), first = f.load();
+  f.requests[0].finish(); await flushStartup(); f.requests[1].finish(); await flushStartup();
+  assert.equal(first.calls.error, 1); assert.equal(first.calls.success, 0);
+  assert.equal(first.calls.args[0].startupBufferReason, 'commit-refused');
+  assert.ok(!JSON.stringify(first.calls.args[0]).includes('private'));
+  assert.equal(f.engine.snapshot().consumedPeerBytes, 0);
+  const retry = f.load(); assert.equal(retry.calls.error, 1); assert.equal(calls, 1);
+});
+
+test('startup commit revalidates original context, parsed geometry, reservoir residency and authority after ACK', async t => {
+  for (const action of ['original-context', 'parsed-future', 'evicted', 'authority']) {
+    let release;
+    const starts = [0, 2, 4], f = startupFixture(t, { starts,
+      commit: () => new Promise(resolve => { release = resolve; }) }), first = f.load();
+    first.context[STARTUP_MARKER].peerBytes = 4;
+    f.requests[0].finish(); await flushStartup(); f.requests[1].finish(); await flushStartup();
+    if (action === 'original-context') first.context.frag.sn++;
+    if (action === 'parsed-future') starts[1] += 1;
+    if (action === 'evicted') f.engine.release(f.requests[1].context.url);
+    if (action === 'authority') f.state.revoked.add(0);
+    release(); await flushStartup();
+    assert.equal(first.calls.success, 0, action); assert.equal(f.engine.snapshot().consumedPeerBytes, 0, action);
+    assert.equal(f.engine.startupSnapshot().state, ['evicted', 'authority'].includes(action) ? 'failed' : 'cancelled', action);
+  }
+});
+
+test('startup commit real SDK hook retains verified peer bytes without accepted credit until ACK', async t => {
+  let release, calls = 0;
+  const f = await fixture(t, { enabled: false, startupTarget: () => 1.3,
+    startupCommit: ({ signal }) => { assert.equal(signal.aborted, false); calls++; return new Promise(resolve => { release = resolve; }); },
+    held: [0], rangePeer: true });
+  const peer = await f.addPeer(); peer.have(0);
+  const first = f.load(0); await until(() => calls === 1);
+  assert.equal(first.calls.success, 0); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  assert.equal(f.swarm.metrics().warmAhead.consumedPeerBytes, 0);
+  release(); assert.deepEqual(await first.result, f.bytes);
+  assert.equal(first.calls.success, 1); assert.equal(calls, 1);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length);
+});
+
+test('startup commit real SDK pause aborts ACK ownership without a late first callback', async t => {
+  let release, signal;
+  const f = await fixture(t, { enabled: false, startupTarget: () => 1.3,
+    startupCommit: value => { signal = value.signal; return new Promise(resolve => { release = resolve; }); } });
+  const first = f.load(0); await until(() => typeof release === 'function');
+  f.media.paused = true; f.media.dispatchEvent(new Event('pause'));
+  assert.equal(signal.aborted, true);
+  assert.equal(await first.result, null);
+  release(); await sleep(20);
+  assert.deepEqual(first.calls, { success: 0, abort: 1, error: 0, timeout: 0 });
+  assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  assert.equal(f.swarm.metrics().startupBuffer.commitCompleted, false);
+});
+
+test('startup commit real SDK checks freshly signed expiry again after ACK', async t => {
+  let release;
+  const f = await fixture(t, { enabled: false, startupTarget: () => 1.3,
+    startupCommit: () => new Promise(resolve => { release = resolve; }) });
+  const first = f.load(0), outcome = first.result.catch(error => error);
+  await until(() => typeof release === 'function');
+  f.state.expired = true; release();
+  const error = await outcome;
+  assert.equal(error.startupBufferReason, 'authority-changed');
+  assert.deepEqual(first.calls, { success: 0, abort: 0, error: 1, timeout: 0 });
+  assert.equal(f.swarm.metrics().startupBuffer.state, 'failed');
+  assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+});
+
+test('startup commit invalid configuration declines without a startup target or function', async t => {
+  const absent = await fixture(t, { enabled: false, startupCommit: () => {} });
+  const invalid = await fixture(t, { enabled: false, startupTarget: () => 0, startupCommit: true });
+  assert.equal(absent.swarm.metrics().disabledReason, 'invalid-startup-buffer-commit');
+  assert.equal(invalid.swarm.metrics().disabledReason, 'invalid-startup-buffer-commit');
 });

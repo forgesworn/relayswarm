@@ -30,13 +30,13 @@ export function warmContext(context) {
 }
 
 export function createWarmAhead({ Loader, next, authorise, verify, reserve = () => true, onVerified, onReuse,
-  reuseBudget = () => 0, allowed = () => true, steady = true, startupTarget = null, startupRecovery = () => 2_000 }) {
+  reuseBudget = () => 0, allowed = () => true, steady = true, startupTarget = null, startupCommit = null, startupRecovery = () => 2_000 }) {
   let closed = false, generation = 0, active = null, scope = null, queued = [], config, loaderConfig, latestDemand = null, loadId = 0;
   const cache = new Map(), demand = new Set(), jobs = new Map(), promoted = new Set(), reuseWaiters = new Set(), pins = new Map();
   const startup = { enabled: typeof startupTarget === 'function', state: startupTarget ? 'idle' : 'off', reason: null,
     owner: null, terminal: null, own: null, permit: null, response: null, verified: false, reserved: 0,
     controller: null, timer: null, checking: false, targetTime: null, verifiedStart: null, verifiedEnd: null,
-    requiredHeadroomMs: null, released: 0, failures: 0, cancellations: 0 };
+    requiredHeadroomMs: null, released: 0, failures: 0, cancellations: 0, commitStarted: false, commitCompleted: false };
   const counters = { started: 0, verified: 0, rejected: 0, cancelled: 0, coalesced: 0, promotions: 0, localReuseBytes: 0,
     verifiedBytes: 0, verifiedPeerBytes: 0, consumedPeerBytes: 0, cacheBytes: 0, highWaterBytes: 0 };
   const reserved = () => startup.reserved + [...jobs.values()].reduce((sum, row) => sum + row.reserved, 0);
@@ -206,8 +206,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     startup.verifiedStart = start; startup.verifiedEnd = end;
     return { start, end, rows: used };
   };
-  const checkStartup = async () => {
-    if (!startupCurrent() || startup.checking || !startup.verified) return;
+  const startupCandidate = () => {
+    if (!startupCurrent()) return null;
     const target = readStartupTarget(); if (target === null || !startupCurrent()) return;
     if (!allowed()) return endStartup('cancelled', 'not-allowed');
     let recovery;
@@ -216,12 +216,27 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     startup.requiredHeadroomMs = recovery;
     const covered = coverage(target);
     if (covered.end === null || (covered.end - target) * 1000 < recovery) return;
+    return { covered, recovery };
+  };
+  const waitStartupCommit = signal => new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = accepted => {
+      if (settled) return;
+      settled = true; signal.removeEventListener('abort', abort);
+      if (accepted) resolve(); else reject(null);
+    };
+    const abort = () => finish(false);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) return abort();
+    try { Promise.resolve(startupCommit(Object.freeze({ signal }))).then(() => finish(true), () => finish(false)); }
+    catch { finish(false); }
+  });
+  const checkStartup = async () => {
+    if (!startupCurrent() || startup.checking || !startup.verified) return;
+    const candidate = startupCandidate(); if (!candidate) return;
     startup.checking = true;
     const owner = startup.owner, terminal = startup.terminal, revision = generation;
-    const resident = [...cache].filter(([, row]) => covered.rows.includes(row))
-      .map(([key, row]) => ({ key, row, identity: warmContext(row.context) }));
-    const pinKeys = resident.map(({ row }) => row.permit.key);
-    for (const key of pinKeys) pins.set(key, (pins.get(key) ?? 0) + 1);
+    const resident = new Map(), pinKeys = [];
     let pinned = true;
     const releasePins = () => {
       if (!pinned) return;
@@ -233,7 +248,21 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       if (startup.releasePins === releasePins) startup.releasePins = null;
     };
     startup.releasePins = releasePins;
-    try {
+    const residentCurrent = () => {
+      if ([...resident.values()].some(({ key, row, identity }) => cache.get(key) !== row ||
+          !samePosition(warmContext(row.context), identity) || row.data.byteLength !== row.permit.size)) {
+        endStartup('failed', 'coverage-evicted'); return false;
+      }
+      if ([...resident.values()].some(({ key, row }) => !startupFutureCurrent({ key, scope: row.scope, context: row.context }))) {
+        endStartup('cancelled', 'context-changed'); return false;
+      }
+      return true;
+    };
+    const validate = async ({ covered, recovery }) => {
+      for (const [key, row] of cache) if (covered.rows.includes(row) && !resident.has(row)) {
+        resident.set(row, { key, row, identity: warmContext(row.context) });
+        pinKeys.push(row.permit.key); pins.set(row.permit.key, (pins.get(row.permit.key) ?? 0) + 1);
+      }
       const checks = [{ context: startup.own.context, permit: startup.permit },
         ...covered.rows.filter(row => row.context !== startup.own.context)];
       const permits = await Promise.all(checks.map(row => authorise(row.context, startup.controller.signal)));
@@ -250,13 +279,27 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         return endStartup('failed', 'authority-changed');
       if (!startupCurrent()) return;
       if (performance.now() >= startup.deadline) return endStartup('failed', 'deadline');
-      if (resident.some(({ key, row, identity }) => cache.get(key) !== row ||
-          !samePosition(warmContext(row.context), identity) || row.data.byteLength !== row.permit.size))
-        return endStartup('failed', 'coverage-evicted');
-      if (resident.some(({ key, row }) => !startupFutureCurrent({ key, scope: row.scope, context: row.context })))
-        return endStartup('cancelled', 'context-changed');
+      if (!residentCurrent()) return;
       const final = coverage(fresh, covered.rows);
       if (final.end === null || (final.end - fresh) * 1000 < recovery) return;
+      return true;
+    };
+    try {
+      if (!await validate(candidate)) return;
+      if (typeof startupCommit === 'function' && !startup.commitStarted) {
+        startup.commitStarted = true;
+        try { await waitStartupCommit(startup.controller.signal); }
+        catch { if (startupCurrent()) endStartup('failed', 'commit-refused'); return; }
+        if (!startupCurrent()) return;
+        if (performance.now() >= startup.deadline) return endStartup('failed', 'deadline');
+        startup.commitCompleted = true;
+        if (!residentCurrent()) return;
+        // ACK may establish a new clock target or retire this scope. Keep the
+        // same held objects/pins and recheck all authority and geometry before
+        // any player callback or consumed credit. Never invoke the hook again.
+        const afterCommit = startupCandidate();
+        if (!afterCommit || !await validate(afterCommit)) return;
+      }
       // Same pending play and same response/context/stats. Only now can the
       // first verified peer object become accepted-player contribution.
       const args = startup.response;
@@ -519,7 +562,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       heldBytes: startup.state === 'buffering' ? counters.cacheBytes + reserved() : 0,
       targetTime: startup.targetTime, verifiedStart: startup.verifiedStart, verifiedEnd: startup.verifiedEnd,
       requiredHeadroomMs: startup.requiredHeadroomMs, released: startup.released, failures: startup.failures,
-      cancellations: startup.cancellations, limits: { objects: MAX_OBJECTS, bytes: MAX_BYTES, deadlineMs: DEADLINE_MS } }),
+      cancellations: startup.cancellations, commitStarted: startup.commitStarted, commitCompleted: startup.commitCompleted,
+      limits: { objects: MAX_OBJECTS, bytes: MAX_BYTES, deadlineMs: DEADLINE_MS } }),
     contains(time) {
       if (closed || !allowed() || !Number.isFinite(time)) return false;
       for (const row of [...jobs.values(), ...cache.values()]) {
