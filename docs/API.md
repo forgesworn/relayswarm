@@ -137,6 +137,9 @@ new adapter may start again after an explicit user retry.
 While that first callback remains pending, a bounded 100 ms poll reads the
 host's fresh target. Admission can skip an unrequested parsed fragment already
 behind the required recovery horizon, with at most one metadata hop per poll.
+When available, the last verified future fragment's measured whole-load time
+adds a scheduling lead to that admission horizon. This is a time observation,
+not a throughput estimate or a change to the required release headroom.
 Completed obsolete future data can give its slot to a currently parsed
 successor. When a full verified window has insufficient headroom, its completed,
 unpinned first future can also give up its slot if it contains the target.
@@ -148,6 +151,10 @@ The rolling plan stores metadata only, without retaining discarded payloads.
 Polling stops on release, failure or cancellation and pauses its target reads
 while the commit hook is pending. It never changes the host's clock or renews
 the original deadline.
+`metrics().startupBuffer.planningServiceMs` reports the active verified timing
+sample, or `null` when unavailable. Failed, cancelled, stale and partial loads
+do not train it; ending startup clears it. A new sample cannot move an already
+selected future window while the actual target remains before that window.
 
 The optional `startupBufferCommit` function defaults to `null` and requires
 `startupBufferTarget`. It runs once after the encoded reservoir passes the

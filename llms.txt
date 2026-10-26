@@ -71,7 +71,9 @@ speculation stops after startup. It preserves the pending trusted play and
 never changes the player, rate or room clock; failure is explicit. Source
 and fixture checks do not prove decoded playback or device acceptance.
 While the first callback waits, a bounded 100 ms poll plans currently parsed
-future data around measured recovery headroom. It can skip unrequested metadata
+future data around measured recovery headroom and a verified future-load timing
+observation when available; this adds no release headroom waiver or rate estimate.
+It can skip unrequested metadata
 or reclaim completed unowned coverage, retaining the first response, in-flight
 reservations, pins and original deadline. A future window ahead of the actual
 target waits for that target; release still requires current verified coverage.
