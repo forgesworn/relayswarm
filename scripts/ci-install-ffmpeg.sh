@@ -3,7 +3,9 @@
 # this step until the job limit, so each attempt is time-boxed and retried.
 set -euo pipefail
 
-apt_options=(-o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=3)
+# The outer loop retries whole attempts. Retrying each failed download inside
+# APT can consume the phase deadline before its mirror transport falls back.
+apt_options=(-o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=0)
 
 run_phase() {
   local attempt="$1" phase="$2" phase_status
