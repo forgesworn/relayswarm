@@ -132,10 +132,14 @@ fragment reaches HLS demuxing. The original attached media element and pending
 trusted play request remain owned by the host.
 
 The first held body and verified upcoming fragments share a startup reservoir
-of at most four objects and 24 MiB; steady warm-ahead retains its three-object
-limit. Before first HTTP, the host must admit the worst-case 24 MiB
-reservation against its existing held budget; a smaller available budget fails
-explicitly. The original first response is handed to HLS unchanged and
+of at most four objects. `startupBufferMaxBytes` defaults to 24 MiB; a host may
+explicitly select a safe integer byte allowance from 24 MiB through 32 MiB,
+requiring `startupBufferTarget` for a non-default value. The original response
+counts towards this aggregate. Cached and in-flight future bytes retain a
+separate 24 MiB limit; steady warm-ahead retains its three-object limit.
+Before first HTTP, the host must admit the entire chosen allowance against
+its existing held budget; insufficient available capacity fails explicitly.
+This bounds the encoded reservoir, not total browser memory. The original first response is handed to HLS unchanged and
 is not retained as an extra shared-cache seed; its reservation is released.
 Release requires a contiguous verified interval covering the
 fresh target plus at least the origin reserve or measured p90 whole-origin
@@ -173,7 +177,7 @@ does not trigger this extension. Otherwise the existing rolling policy may
 retire its completed, unpinned first future when it contains the target.
 Once a future window starts ahead of the actual target, its start stays fixed;
 release waits for the real target and verified coverage to meet again.
-Startup contains at most four objects and 24 MiB. Future requests remain serial,
+Startup contains at most four objects within its chosen byte allowance. Future requests remain serial,
 and insufficient capacity cannot release unsafe media or extend the deadline.
 In-flight work and authority pins keep their reservations.
 The rolling plan stores metadata only, without retaining discarded payloads.

@@ -81,7 +81,10 @@ raw verified peer reception and consumed peer payload remain distinct.
 Source tests do not qualify cold-cache 4K or physical devices.
 Unreleased startupBufferTarget is null by default. A host-provided fresh raw
 HLS target enables one-shot verified startup buffering within the existing
-startup-only four-object/24 MiB and twelve-second/parent limits; steady warm-ahead
+startup-only four-object and twelve-second/parent limits. startupBufferMaxBytes
+defaults to 24 MiB, with an explicit host choice up to 32 MiB including the held
+original; future bytes alone remain capped at 24 MiB. The chosen allowance must
+fit the host's shared held budget before HTTP; it is not total browser memory. Steady warm-ahead
 stays at three objects with its separate eight-second request expiry. Parsed
 timestamp comparisons tolerate only capped arithmetic round-off (at most one
 nanosecond); media identity stays exact and real geometry changes cancel. A fully verified contiguous future prefix may add one

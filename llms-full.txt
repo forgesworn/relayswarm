@@ -360,7 +360,8 @@ decision is not cached as permission for later upload requests.
 | `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
 | `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-object origin time with a 25% and 100 ms recovery margin. Substantial origin ranges update this estimate after scaling by their actual byte count. Unknown origin timing or duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. Independent cached/late-HAVE races keep their window beside immediate HTTP. |
 | `warmAhead` | `false` | Experimental peer-first option, requiring `serve: true`: use the same player's next two parsed, unencrypted, whole main-media fragments for bounded speculative loading. A warmed object promoted to genuine demand frees the sole speculative slot. Existing demand/range limits are unchanged. Verified future objects share the held cache; at most three distinct cached/in-flight objects and 24 MiB of warm data plus all reservations fit within `maxHeldBytes`. Fresh cache permission may wait only within actual buffer headroom, up to 25 ms, before ordinary source recovery proceeds independently. |
-| `startupBufferTarget` | `null` | Experimental one-shot startup buffer for peer-first serving: a synchronous function returns the current player's fresh raw HLS target time in seconds, or `null` when its ownership/epoch is invalid. Hold the first main-fragment callback until verified contiguous upcoming media covers that target and measured origin-recovery headroom. While pending, a 100 ms poll advances a bounded parsed future window toward that horizon, skipping unrequested near-tip work and reclaiming completed unowned coverage only when needed. A window ahead of the actual target waits for it; in-flight work and authority pins retain their reservations. When both verified futures contribute to contiguous coverage of the current target but still lack recovery headroom, preserve that useful prefix and admit one additional parsed successor, even if the held original first interval is obsolete. Startup permits at most four objects within the same 24 MiB budget; steady warm-ahead remains at three. Future requests remain serial. The startup deadline is twelve seconds from the original first-fragment load entry, or the shorter parent load deadline; retries do not renew it. Ordinary speculative requests retain their separate eight-second expiry. Works with `warmAhead: false` to stop speculative fetching after startup. It never pauses, plays, seeks or changes the room clock; bounded failure reports a loader error instead of releasing unsafe media. |
+| `startupBufferTarget` | `null` | Experimental one-shot startup buffer for peer-first serving: a synchronous function returns the current player's fresh raw HLS target time in seconds, or `null` when its ownership/epoch is invalid. Hold the first main-fragment callback until verified contiguous upcoming media covers that target and measured origin-recovery headroom. While pending, a 100 ms poll advances a bounded parsed future window toward that horizon, skipping unrequested near-tip work and reclaiming completed unowned coverage only when needed. A window ahead of the actual target waits for it; in-flight work and authority pins retain their reservations. When both verified futures contribute to contiguous coverage of the current target but still lack recovery headroom, preserve that useful prefix and admit one additional parsed successor, even if the held original first interval is obsolete. Startup permits at most four objects within `startupBufferMaxBytes` (24 MiB by default); steady warm-ahead remains at three. Future requests remain serial. The startup deadline is twelve seconds from the original first-fragment load entry, or the shorter parent load deadline; retries do not renew it. Ordinary speculative requests retain their separate eight-second expiry. Works with `warmAhead: false` to stop speculative fetching after startup. It never pauses, plays, seeks or changes the room clock; bounded failure reports a loader error instead of releasing unsafe media. |
+| `startupBufferMaxBytes` | `25165824` | Encoded startup aggregate including the retained original response. Safe integer from 24 MiB through 32 MiB; a non-default value requires `startupBufferTarget`. Reserve the full chosen allowance against the shared held budget before HTTP. Cached/in-flight future bytes separately remain within 24 MiB, as do existing per-object checks. Object limits, recovery and deadlines are unchanged; this is not total browser memory. |
 | `startupBufferCommit` | `null` | Optional async host hook, requiring `startupBufferTarget`, called once with frozen `{ signal }` after verified reservoir readiness and before releasing HLS callbacks. The host may acknowledge a new room start here. The original startup deadline and resource limits continue; cancellation ignores late settlement. Fresh target, authority, context and resident coverage are checked again afterwards. The SDK never creates or reanchors the room clock. |
 | `uploadPacing` | `false` | Experimental canonical-piece upload refill deferral: one FIFO waiter per link, at most `min(maxUploadPeers, maxPeers)` waiters, and a fixed 250 ms queue deadline. The existing per-second rate, twice-rate burst, session allowance and wire remain unchanged. Whole-object deficits still refuse immediately. Queue rows contain identity and numeric geometry; held bytes and current host permission are checked after waiting. |
 | `latePeerRace` | `false` | Experimental peer-first option requiring `zeroBudgetPeerRace`: permit the first peer arm of still-running whole-main-fragment HTTP with no prior peer plan to use a newly accepted, current exact-HAVE holder. Warm work needs a genuine consumer or an owned pending startup-buffer dependency. Genuine demand keeps its earliest demand window; startup dependencies keep the original HTTP-entry window and first startup deadline. Both retain `min(lateWindowMs, 4000)`, arming plus `min(maxPeerWaitMs, 2500)`, and the known original HTTP load deadline. Same HTTP request/timers, fresh authority and current immutable identity; no retries or extra GET. Dormant watchers share `maxConcurrentRaces`; lifecycle changes retire them. Numeric `latePeerRace` metrics do not create delivery credit. |
@@ -1181,6 +1182,12 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 # RelaySwarm changelog
 
 ## Unreleased
+
+- Add optional `startupBufferMaxBytes`, defaulting to 24 MiB and explicitly
+  bounded to 32 MiB. It includes the retained original response; cached and
+  in-flight future bytes still share a separate 24 MiB limit. The host must
+  reserve the chosen allowance before HTTP. Object limits, per-object limits,
+  recovery headroom and absolute deadlines remain unchanged.
 
 - Preserve the fourth-slot parsed successor when it extends two verified
   startup futures covering the current target. A previous fragment's service-time lead
@@ -2137,10 +2144,14 @@ fragment reaches HLS demuxing. The original attached media element and pending
 trusted play request remain owned by the host.
 
 The first held body and verified upcoming fragments share a startup reservoir
-of at most four objects and 24 MiB; steady warm-ahead retains its three-object
-limit. Before first HTTP, the host must admit the worst-case 24 MiB
-reservation against its existing held budget; a smaller available budget fails
-explicitly. The original first response is handed to HLS unchanged and
+of at most four objects. `startupBufferMaxBytes` defaults to 24 MiB; a host may
+explicitly select a safe integer byte allowance from 24 MiB through 32 MiB,
+requiring `startupBufferTarget` for a non-default value. The original response
+counts towards this aggregate. Cached and in-flight future bytes retain a
+separate 24 MiB limit; steady warm-ahead retains its three-object limit.
+Before first HTTP, the host must admit the entire chosen allowance against
+its existing held budget; insufficient available capacity fails explicitly.
+This bounds the encoded reservoir, not total browser memory. The original first response is handed to HLS unchanged and
 is not retained as an extra shared-cache seed; its reservation is released.
 Release requires a contiguous verified interval covering the
 fresh target plus at least the origin reserve or measured p90 whole-origin
@@ -2178,7 +2189,7 @@ does not trigger this extension. Otherwise the existing rolling policy may
 retire its completed, unpinned first future when it contains the target.
 Once a future window starts ahead of the actual target, its start stays fixed;
 release waits for the real target and verified coverage to meet again.
-Startup contains at most four objects and 24 MiB. Future requests remain serial,
+Startup contains at most four objects within its chosen byte allowance. Future requests remain serial,
 and insufficient capacity cannot release unsafe media or extend the deadline.
 In-flight work and authority pins keep their reservations.
 The rolling plan stores metadata only, without retaining discarded payloads.
@@ -2926,6 +2937,26 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased explicit startup byte allowance (27 October 2026)
+
+`startupBufferMaxBytes` lets a host explicitly choose an encoded startup
+reservoir between 24 MiB (the unchanged default) and 32 MiB. A source-only
+4K check still missed its late-join deadline after the contiguous-admission
+fix. Its sampled 21,136,364 held bytes match the original fragment plus two
+verified futures; the next signed successor would require 27,195,621 bytes,
+exceeding the old aggregate cap. The exact refusal branch was not captured.
+An audit of the pinned recording's catalogue gives a conservative maximum
+of 30,602,204 bytes for any original plus three contiguous futures, below
+32 MiB. These sizes establish a capacity requirement, not playback success.
+
+The chosen allowance must fit the host's shared held budget before HTTP.
+Future bytes alone retain their separate 24 MiB cap, including reservations,
+so startup cannot leave a larger steady cache after releasing its original.
+Per-object limits, four-object startup residency, serial future loading,
+authority, recovery and deadlines remain unchanged. This is an encoded
+reservoir bound; decoding, transport copies and other browser memory are
+additional. Real-source and physical-device qualification remain open.
 
 ## Unreleased contiguous startup admission (27 October 2026)
 

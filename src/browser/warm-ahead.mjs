@@ -42,7 +42,9 @@ export function warmContext(context) {
 }
 
 export function createWarmAhead({ Loader, next, authorise, verify, reserve = () => true, onVerified, onReuse,
-  reuseBudget = () => 0, allowed = () => true, steady = true, startupTarget = null, startupCommit = null, startupRecovery = () => 2_000 }) {
+  reuseBudget = () => 0, allowed = () => true, steady = true, startupTarget = null, startupCommit = null, startupMaxBytes = MAX_BYTES, startupRecovery = () => 2_000 }) {
+  if (!Number.isSafeInteger(startupMaxBytes) || startupMaxBytes < MAX_BYTES || startupMaxBytes > 32 * 1024 * 1024 ||
+      startupMaxBytes !== MAX_BYTES && typeof startupTarget !== 'function') throw new RangeError('Invalid startup byte budget');
   let closed = false, generation = 0, active = null, scope = null, queued = [], config, loaderConfig, latestDemand = null, loadId = 0;
   const cache = new Map(), demand = new Set(), jobs = new Map(), promoted = new Set(), reuseWaiters = new Set(), pins = new Map();
   const startup = { enabled: typeof startupTarget === 'function', state: startupTarget ? 'idle' : 'off', reason: null,
@@ -51,7 +53,11 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     requiredHeadroomMs: null, planningServiceMs: null, released: 0, failures: 0, cancellations: 0, commitStarted: false, commitCompleted: false };
   const counters = { started: 0, verified: 0, rejected: 0, cancelled: 0, coalesced: 0, promotions: 0, localReuseBytes: 0,
     verifiedBytes: 0, verifiedPeerBytes: 0, consumedPeerBytes: 0, cacheBytes: 0, highWaterBytes: 0 };
-  const reserved = () => startup.reserved + [...jobs.values()].reduce((sum, row) => sum + row.reserved, 0);
+  const futureReserved = () => [...jobs.values()].reduce((sum, row) => sum + row.reserved, 0);
+  const reserved = () => startup.reserved + futureReserved();
+  const byteLimit = () => startup.state === 'buffering' ? startupMaxBytes : MAX_BYTES;
+  const bytesFit = size => counters.cacheBytes + futureReserved() + size <= MAX_BYTES &&
+    counters.cacheBytes + reserved() + size <= byteLimit();
   const tracked = () => new Set([...cache.keys(), ...jobs.keys(), ...(startup.owner ? [startup.own.key] : [])]).size;
   const objectLimit = () => startup.state === 'buffering' ? MAX_STARTUP_OBJECTS : MAX_OBJECTS;
   const live = row => jobs.get(row.key) === row && !row.finished;
@@ -109,8 +115,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         const permit = await authorise(item.context, controller.signal);
         if (controller.signal.aborted || closed || revision !== generation || !live(row) || !allowed()) return null;
         if (!permit || !Number.isSafeInteger(permit.size) || permit.size < 1 || permit.size > MAX_BYTES) { counters.rejected++; return null; }
-        while (counters.cacheBytes + reserved() + permit.size > MAX_BYTES && cache.size && startup.state !== 'buffering') drop(cache.keys().next().value);
-        if (counters.cacheBytes + reserved() + permit.size > MAX_BYTES) { counters.rejected++; return null; }
+        while (!bytesFit(permit.size) && cache.size && startup.state !== 'buffering') drop(cache.keys().next().value);
+        if (!bytesFit(permit.size)) { counters.rejected++; return null; }
         row.reserved = permit.size;
         if (!reserve(reserved())) { row.reserved = 0; counters.rejected++; return null; }
         counters.highWaterBytes = Math.max(counters.highWaterBytes, counters.cacheBytes + reserved());
@@ -535,7 +541,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     }
     if (startup.state !== 'idle') return true;
     const at = performance.now(), parent = policy?.loadPolicy?.maxLoadTimeMs ?? policy?.timeout;
-    Object.assign(startup, { state: 'buffering', owner, terminal, own, revision: generation, reserved: MAX_BYTES, entryAt: at,
+    Object.assign(startup, { state: 'buffering', owner, terminal, own, revision: generation, reserved: startupMaxBytes, entryAt: at,
       identity: { key: own.key, scope: own.scope, context: { frag: { start: own.context.frag.start, duration: own.context.frag.duration } } },
       contextUrl: terminal.context.url, fragUrl: terminal.context.frag.url,
       controller: new AbortController(), deadline: at + Math.min(STARTUP_DEADLINE_MS, Number.isFinite(parent) && parent > 0 ? parent : STARTUP_DEADLINE_MS) });
@@ -753,7 +759,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       requiredHeadroomMs: startup.requiredHeadroomMs, planningServiceMs: startup.planningServiceMs,
       released: startup.released, failures: startup.failures,
       cancellations: startup.cancellations, commitStarted: startup.commitStarted, commitCompleted: startup.commitCompleted,
-      limits: { objects: MAX_STARTUP_OBJECTS, bytes: MAX_BYTES, deadlineMs: STARTUP_DEADLINE_MS } }),
+      limits: { objects: MAX_STARTUP_OBJECTS, bytes: startupMaxBytes, futureBytes: MAX_BYTES, deadlineMs: STARTUP_DEADLINE_MS } }),
     contains(time) {
       if (closed || !allowed() || !Number.isFinite(time)) return false;
       for (const row of [...jobs.values(), ...cache.values()]) {
@@ -779,5 +785,5 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     stop() { closed = true; clear(); }, snapshot: () => ({ ...counters,
       reservationBytes: reserved(), active: Number(Boolean(active)), promoted: promoted.size, trackedObjects: tracked(),
       queued: queued.length, cacheObjects: cache.size,
-      limits: { objects: objectLimit(), bytes: MAX_BYTES, speculativeWholeRequests: 1, deadlineMs: startup.state === 'buffering' ? STARTUP_DEADLINE_MS : DEADLINE_MS, revalidationMs: 25 } }) };
+      limits: { objects: objectLimit(), bytes: byteLimit(), speculativeWholeRequests: 1, deadlineMs: startup.state === 'buffering' ? STARTUP_DEADLINE_MS : DEADLINE_MS, revalidationMs: 25 } }) };
 }
