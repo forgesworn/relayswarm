@@ -1038,6 +1038,30 @@ test('startup service lead learns nothing from corrupt or cancelled pending veri
   }
 });
 
+test('startup service lead retains a contiguous fourth-slot extension after the target reaches its verified prefix', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 1000; t.mock.method(performance, 'now', () => clock);
+  const f = startupFixture(t, { timedStats: true }), first = f.load(0, 8000);
+  await flushStartup();
+  // Both futures verify before the held first body. Their last measured
+  // service is a planning sample, not a minimum cost for the next object.
+  for (const index of [1, 2]) { clock += 2100; f.requests[index].finish(); await flushStartup(); }
+  f.state.target = 3.885; f.state.recovery = 3627.5;
+  f.requests[0].finish(); await flushStartup();
+  assert.equal(f.engine.startupSnapshot().planningServiceMs, 2100);
+  assert.equal(first.calls.success, 0);
+  clock += 100; t.mock.timers.tick(100); await flushStartup();
+  assert.equal(f.requests[3]?.context.frag.sn, 3, 'extend verified [2,6] with [6,8] instead of skipping its successor');
+  assert.equal(f.engine.startupSnapshot().heldObjects, 4);
+  clock += 50; f.state.target += 0.05; f.requests[3].finish(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.abort, 0); assert.equal(first.calls.error, 0);
+  assert.equal(first.calls.args[0], f.requests[0].response);
+  assert.equal(first.calls.args[1], f.requests[0].stats); assert.equal(first.calls.args[2], first.context);
+  assert.equal(f.engine.startupSnapshot().requiredHeadroomMs, 3627.5);
+  assert.equal(f.engine.startupSnapshot().limits.objects, 4);
+  assert.ok(f.engine.startupSnapshot().verifiedEnd - f.state.target >= 3.6275);
+});
+
 test('startup service lead changes cannot move an already selected forward start', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let clock = 1000; t.mock.method(performance, 'now', () => clock);
