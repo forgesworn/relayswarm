@@ -9,8 +9,11 @@ const validInterval = item => {
   return Number.isFinite(start) && start >= 0 && Number.isFinite(duration) && duration > 0 && Number.isFinite(start + duration);
 };
 const inside = (item, time) => validInterval(item) && item.context.frag.start <= time && time < item.context.frag.start + item.context.frag.duration;
+// Allow bounded floating-point roundoff when Hls refreshes parsed geometry.
+const sameTime = (a, b) => a === b || Math.abs(a - b) <= Math.min(1e-9,
+  32 * Number.EPSILON * Math.max(1, Math.abs(a), Math.abs(b)));
 const samePosition = (a, b) => a?.key === b?.key && a?.scope === b?.scope && validInterval(a) && validInterval(b) &&
-  a.context.frag.start === b.context.frag.start && a.context.frag.duration === b.context.frag.duration;
+  sameTime(a.context.frag.start, b.context.frag.start) && sameTime(a.context.frag.duration, b.context.frag.duration);
 const futureServiceTime = (stats, size, entry, success) => {
   try {
     const { start, end } = stats.loading;
