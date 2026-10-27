@@ -1195,28 +1195,33 @@ test("broadcast availability: existing PeerLink sends original once and only suc
   assert.ok(!JSON.stringify(out).includes(key)); assert.ok(!JSON.stringify(out).includes("PRIVATE"));
 });
 test("broadcast availability: captured and unresolved origin keys are emitted before retained HAVE is queued", async () => {
-  const swarm = transform("swarm", await readFile(new URL("src/browser/hls-swarm.mjs", ROOT), "utf8")).source;
-  const peer = transform("peer", await readFile(new URL("src/browser/peer-link.mjs", ROOT), "utf8")).source
-    .replace(/^import[^\n]+\n/u, "").replace("export class PeerLink", "class PeerLink");
-  const knownStart = swarm.indexOf("              // Publish retained source bytes before Hls synchronously disposes");
-  const unknownStart = swarm.indexOf("                  const key = await keyPromise;");
-  const snippets = [swarm.slice(knownStart, swarm.indexOf("              if (!finishOrigin()) return;", knownStart)),
-    swarm.slice(unknownStart, swarm.indexOf("\n                }\n              });", unknownStart))];
-  for (const known of [true, false]) for (const retain of [true, false]) {
-    let tick = 0, sends = 0;
-    const observation = createObservation(() => tick++, 1000), context = { frag: { sn: 1, cc: 0, level: 0 } };
-    const PeerLink = new Function("availabilityObservation", peer + "\nreturn PeerLink;")(observation);
-    const channel = { readyState: "open", addEventListener() {}, send() { sends++; }, close() {} };
-    const link = new PeerLink({ pubkey: "fixture", pc: { addEventListener() {}, close() {} }, channel, maxSegmentBytes: 1e6 });
-    const body = snippets[known ? 0 : 1].replaceAll("swarm.#hold", "swarm.hold");
-    await new Function("availabilityObservation", "originKey", "keyPromise", "copy", "swarm", "context", `return (async () => {${body}})();`)(
-      observation, key, Promise.resolve(key), retain ? new ArrayBuffer(8) : null,
-      { stopped: false, hold(held, bytes) { assert.equal(held, key); assert.equal(bytes.length, 8); link.sendHaveChange([held]); } }, context);
-    const out = publicTimeline([{ role: "baseline", value: observation.takePrivate() }]).pages[0];
-    assert.deepEqual(out.rows.map(row => row.phase), retain ? ["origin-key-ready", "have-frame-queued", "have-add-queued"] : ["origin-key-ready"]);
-    assert.equal(sends, Number(retain)); assert.equal(out.unknown, 0);
-    assert.equal(out.rows[0].object, 1); assert.equal(out.rows[0].fragment, 1);
-    link.close();
+  const original = (await readFile(new URL("src/browser/hls-swarm.mjs", ROOT), "utf8")).replaceAll("\r\n", "\n");
+  for (const eol of ["\n", "\r\n"]) {
+    // Transform both checkout formats; normalise only the execution fixture's
+    // substring boundaries. The inverse test still checks exact original bytes.
+    const swarm = transform("swarm", original.replaceAll("\n", eol)).source.replaceAll("\r\n", "\n");
+    const peer = transform("peer", await readFile(new URL("src/browser/peer-link.mjs", ROOT), "utf8")).source
+      .replace(/^import[^\n]+\n/u, "").replace("export class PeerLink", "class PeerLink");
+    const knownStart = swarm.indexOf("              // Publish retained source bytes before Hls synchronously disposes");
+    const unknownStart = swarm.indexOf("                  const key = await keyPromise;");
+    const snippets = [swarm.slice(knownStart, swarm.indexOf("              if (!finishOrigin()) return;", knownStart)),
+      swarm.slice(unknownStart, swarm.indexOf("\n                }\n              });", unknownStart))];
+    for (const known of [true, false]) for (const retain of [true, false]) {
+      let tick = 0, sends = 0;
+      const observation = createObservation(() => tick++, 1000), context = { frag: { sn: 1, cc: 0, level: 0 } };
+      const PeerLink = new Function("availabilityObservation", peer + "\nreturn PeerLink;")(observation);
+      const channel = { readyState: "open", addEventListener() {}, send() { sends++; }, close() {} };
+      const link = new PeerLink({ pubkey: "fixture", pc: { addEventListener() {}, close() {} }, channel, maxSegmentBytes: 1e6 });
+      const body = snippets[known ? 0 : 1].replaceAll("swarm.#hold", "swarm.hold");
+      await new Function("availabilityObservation", "originKey", "keyPromise", "copy", "swarm", "context", `return (async () => {${body}})();`)(
+        observation, key, Promise.resolve(key), retain ? new ArrayBuffer(8) : null,
+        { stopped: false, hold(held, bytes) { assert.equal(held, key); assert.equal(bytes.length, 8); link.sendHaveChange([held]); } }, context);
+      const out = publicTimeline([{ role: "baseline", value: observation.takePrivate() }]).pages[0];
+      assert.deepEqual(out.rows.map(row => row.phase), retain ? ["origin-key-ready", "have-frame-queued", "have-add-queued"] : ["origin-key-ready"]);
+      assert.equal(sends, Number(retain)); assert.equal(out.unknown, 0);
+      assert.equal(out.rows[0].object, 1); assert.equal(out.rows[0].fragment, 1);
+      link.close();
+    }
   }
 });
 test("broadcast availability: Hls events and exact supplied deadline join shared objects without reading context getters", () => {
