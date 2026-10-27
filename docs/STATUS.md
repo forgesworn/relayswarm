@@ -10,6 +10,26 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased explicit startup byte allowance (27 October 2026)
+
+`startupBufferMaxBytes` lets a host explicitly choose an encoded startup
+reservoir between 24 MiB (the unchanged default) and 32 MiB. A source-only
+4K check still missed its late-join deadline after the contiguous-admission
+fix. Its sampled 21,136,364 held bytes match the original fragment plus two
+verified futures; the next signed successor would require 27,195,621 bytes,
+exceeding the old aggregate cap. The exact refusal branch was not captured.
+An audit of the pinned recording's catalogue gives a conservative maximum
+of 30,602,204 bytes for any original plus three contiguous futures, below
+32 MiB. These sizes establish a capacity requirement, not playback success.
+
+The chosen allowance must fit the host's shared held budget before HTTP.
+Future bytes alone retain their separate 24 MiB cap, including reservations,
+so startup cannot leave a larger steady cache after releasing its original.
+Per-object limits, four-object startup residency, serial future loading,
+authority, recovery and deadlines remain unchanged. This is an encoded
+reservoir bound; decoding, transport copies and other browser memory are
+additional. Real-source and physical-device qualification remain open.
+
 ## Unreleased contiguous startup admission (27 October 2026)
 
 After the moving target reaches a selected future window, the admission

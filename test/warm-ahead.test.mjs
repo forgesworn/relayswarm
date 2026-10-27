@@ -92,6 +92,7 @@ async function fixture(t, options = {}) {
     ...(options.onPeerDelivery ? { onPeerDelivery: options.onPeerDelivery } : {}),
     ...(options.startupTarget === undefined ? {} : { startupBufferTarget: options.startupTarget }),
     ...(options.startupCommit === undefined ? {} : { startupBufferCommit: options.startupCommit }),
+    ...(options.startupMaxBytes === undefined ? {} : { startupBufferMaxBytes: options.startupMaxBytes }),
     ...(options.allowance === undefined ? {} : { maxUploadBytesPerSession: options.allowance }) });
   const hls = { config: { loader: Loader, progressive: false }, media, levels: [{ details: { live: true, fragments } }] };
   swarm.attach(hls);
@@ -731,6 +732,7 @@ function startupFixture(t, options = {}) {
   }
   const engine = createWarmAhead({ Loader, steady: options.steady ?? false,
     startupTarget: options.startup === false ? null : () => { state.targetCalls++; return state.target; }, startupCommit: options.commit,
+    startupMaxBytes: options.startupMaxBytes,
     startupRecovery: () => state.recovery,
     allowed: () => state.allowed, next: ctx => {
       options.onNext?.(ctx);
@@ -866,6 +868,113 @@ test('startup expansion keeps cancellation, context, authority and original pare
     assert.equal(first.calls.error + first.calls.abort, terminals); assert.equal(first.calls.success, 0);
     assert.equal(f.requests.length, 4, 'late completion cannot restart the retired plan');
     f.engine.stop();
+  }
+});
+
+test('startup byte budget also rejects unbounded direct helper configuration', () => {
+  for (const value of [null, NaN, Infinity, 24 * 1024 * 1024 - 1, 32 * 1024 * 1024 + 1, 24 * 1024 * 1024 + 0.5])
+    assert.throws(() => createWarmAhead({ Loader: class {}, startupTarget: () => 0, startupMaxBytes: value }), RangeError);
+  assert.throws(() => createWarmAhead({ Loader: class {}, startupMaxBytes: 32 * 1024 * 1024 }), RangeError);
+});
+
+test('startup byte budget validates its explicit range and requires startup for a nondefault allowance', async t => {
+  const lower = 24 * 1024 * 1024, upper = 32 * 1024 * 1024;
+  for (const value of [null, false, true, NaN, Infinity, lower - 1, upper + 1, lower + 0.5, String(upper), {}, Number.MAX_SAFE_INTEGER]) {
+    const f = await fixture(t, { enabled: false, startupTarget: () => 0, startupMaxBytes: value });
+    assert.equal(f.swarm.metrics().disabledReason, 'invalid-startup-buffer-max-bytes', String(value));
+  }
+  const absent = await fixture(t, { enabled: false, startupMaxBytes: upper });
+  assert.equal(absent.swarm.metrics().disabledReason, 'invalid-startup-buffer-max-bytes');
+  for (const value of [lower, lower + 1, upper]) {
+    const f = await fixture(t, { enabled: false, startupTarget: () => 0, startupMaxBytes: value });
+    assert.equal(f.swarm.metrics().disabledReason, null);
+    assert.equal(f.swarm.metrics().startupBuffer.limits.bytes, value);
+  }
+  const ordinary = await fixture(t, { enabled: false });
+  assert.equal(ordinary.swarm.metrics().disabledReason, null); assert.equal(ordinary.swarm.metrics().startupBuffer, null);
+});
+
+test('startup byte budget reserves its chosen allowance against the host cache before first HTTP', async t => {
+  const f = await fixture(t, { enabled: false, startupTarget: () => 1.3,
+    startupMaxBytes: 32 * 1024 * 1024, maxHeldBytes: 24 * 1024 * 1024 });
+  const first = f.load(0);
+  await assert.rejects(first.result, error => error.startupBufferReason === 'reservation-refused');
+  assert.equal(f.requests.length, 0); assert.equal(first.calls.error, 1); assert.equal(first.calls.success, 0);
+});
+
+test('startup byte budget keeps future cache and in-flight reservations within24MiB under a32MiB aggregate', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const bodies = new Map([[0, Uint8Array.of(2, 4, 6, 8)], [1, new Uint8Array(8 * 1024 * 1024)],
+    [2, new Uint8Array(8 * 1024 * 1024)], [3, new Uint8Array(9 * 1024 * 1024)]]);
+  const hashes = new Map([...bodies].map(([sn, body]) => [sn, sha(body)]));
+  const f = startupFixture(t, { startupMaxBytes: 32 * 1024 * 1024,
+    permit: ctx => ({ key: ctx.url, size: bodies.get(ctx.frag.sn)?.length ?? 4,
+      sha256: hashes.get(ctx.frag.sn), current: () => true }) });
+  const first = f.load(0, 8000); await flushStartup();
+  for (const i of [1, 2]) { f.requests[i].finish(false, bodies.get(i)); await flushStartup(); }
+  f.state.target = 3.885; f.state.recovery = 3627.5; f.requests[0].finish(); await flushStartup();
+  t.mock.timers.tick(100); await flushStartup();
+  assert.equal(f.engine.snapshot().rejected, 1, '25MiB of futures is refused even though the aggregate fits32MiB');
+  assert.equal(f.requests.length, 3); assert.equal(f.engine.snapshot().active, 0);
+  assert.equal(f.engine.snapshot().cacheBytes, 16 * 1024 * 1024);
+  assert.equal(f.engine.startupSnapshot().heldBytes, 16 * 1024 * 1024 + 4);
+  assert.equal(first.calls.success, 0); first.loader.abort(); assert.equal(first.calls.abort, 1);
+});
+
+test('startup byte budget keeps the original cancellation, deadline and individual-object bounds', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const ending of ['abort', 'deadline', 'oversized']) {
+    const f = startupFixture(t, { startupMaxBytes: 32 * 1024 * 1024,
+      ...(ending === 'oversized' ? { permitSize: () => 24 * 1024 * 1024 + 1 } : {}) });
+    const first = f.load(0, 200); await flushStartup();
+    if (ending !== 'oversized') f.requests[0].finish(); await flushStartup();
+    if (ending === 'abort') first.loader.abort();
+    else if (ending === 'deadline') { t.mock.timers.tick(200); await flushStartup(); }
+    assert.equal(first.calls.success, 0); assert.equal(first.calls.abort, ending === 'abort' ? 1 : 0);
+    assert.equal(first.calls.error, ending === 'abort' ? 0 : 1);
+    if (ending !== 'abort') assert.equal(first.calls.args[0].startupBufferReason,
+      ending === 'deadline' ? 'deadline' : 'first-authority-refused');
+    for (const row of f.requests) row.finish(true); await flushStartup();
+    assert.equal(first.calls.abort + first.calls.error, 1); assert.equal(first.calls.success, 0);
+  }
+});
+
+test('startup byte budget admits the pinned 4K original plus three contiguous futures only with the opted allowance', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const sizes = new Map([[0, 6471966], [3, 6060338], [4, 8604060], [5, 6059257]]);
+  const bodies = new Map([...sizes].map(([sn, size]) => [sn, new Uint8Array(size).fill(sn)]));
+  const hashes = new Map([...bodies].map(([sn, body]) => [sn, sha(body)]));
+  for (const opted of [false, true]) {
+    const f = startupFixture(t, { startupMaxBytes: opted ? 32 * 1024 * 1024 : undefined,
+      starts: [0, 2, 4, 6, 8, 10.64, 12.64], durations: [2, 2, 2, 2, 2.64, 2, 2],
+      permit: ctx => ({ key: ctx.url, size: sizes.get(ctx.frag.sn) ?? 4,
+        sha256: hashes.get(ctx.frag.sn) ?? sha(Uint8Array.of(2, 4, 6, 8)), current: () => true }) });
+    f.state.target = 4.1; f.state.recovery = 4587.5;
+    const first = f.load(0, 12000); await flushStartup();
+    for (let i = 0; i < 3; i++) { t.mock.timers.tick(100); await flushStartup(); }
+    assert.equal(f.requests[1].context.frag.sn, 3);
+    f.requests[1].finish(false, bodies.get(3)); await flushStartup();
+    assert.equal(f.requests[2].context.frag.sn, 4);
+    f.requests[2].finish(false, bodies.get(4)); await flushStartup();
+    f.state.target = 7.459; f.requests[0].finish(false, bodies.get(0)); await flushStartup();
+    t.mock.timers.tick(100); await flushStartup();
+    if (!opted) {
+      assert.equal(f.requests.length, 3); assert.equal(f.engine.snapshot().rejected, 1);
+      assert.equal(first.calls.success, 0); first.loader.abort(); assert.equal(first.calls.abort, 1);
+      continue;
+    }
+    assert.equal(f.requests[3]?.context.frag.sn, 5, '27,195,621 bytes fit the chosen32MiB aggregate');
+    assert.equal(f.engine.startupSnapshot().heldBytes, 27195621);
+    assert.equal(f.engine.startupSnapshot().limits.bytes, 32 * 1024 * 1024);
+    assert.equal(f.engine.startupSnapshot().limits.futureBytes, 24 * 1024 * 1024);
+    assert.equal(f.state.reservations[0], 32 * 1024 * 1024, 'chosen worst case is reserved before first HTTP');
+    f.requests[3].finish(false, bodies.get(5)); await flushStartup();
+    assert.equal(first.calls.success, 1); assert.equal(first.calls.abort, 0); assert.equal(first.calls.error, 0);
+    assert.equal(first.calls.args[0], f.requests[0].response); assert.equal(first.calls.args[1], f.requests[0].stats);
+    assert.equal(first.calls.args[2], first.context);
+    assert.equal(f.engine.snapshot().limits.bytes, 24 * 1024 * 1024);
+    assert.equal(f.engine.snapshot().cacheBytes, 20723655);
+    assert.equal(f.engine.startupSnapshot().requiredHeadroomMs, 4587.5);
   }
 });
 

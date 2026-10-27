@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add optional `startupBufferMaxBytes`, defaulting to 24 MiB and explicitly
+  bounded to 32 MiB. It includes the retained original response; cached and
+  in-flight future bytes still share a separate 24 MiB limit. The host must
+  reserve the chosen allowance before HTTP. Object limits, per-object limits,
+  recovery headroom and absolute deadlines remain unchanged.
+
 - Preserve the fourth-slot parsed successor when it extends two verified
   startup futures covering the current target. A previous fragment's service-time lead
   must not skip that successor and leave a gap in the reservoir. Forward

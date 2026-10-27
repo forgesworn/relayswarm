@@ -63,6 +63,7 @@ const DEFAULTS = Object.freeze({
   // parsed fragments. Verified bytes share the existing bounded held cache.
   warmAhead: false,
   startupBufferTarget: null,
+  startupBufferMaxBytes: 24 * 1024 * 1024,
   startupBufferCommit: null,
   lateWindowMs: 6_000,
   maxPeers: 6,
@@ -587,6 +588,10 @@ class HlsSwarm {
     if (typeof this.options.warmAhead !== "boolean" || this.options.warmAhead && (mode !== "peer-first" || this.options.serve !== true)) return "invalid-warm-ahead-option";
     if (this.options.startupBufferTarget !== null && (typeof this.options.startupBufferTarget !== 'function' ||
         mode !== 'peer-first' || this.options.serve !== true)) return 'invalid-startup-buffer-target';
+    if (!Number.isSafeInteger(this.options.startupBufferMaxBytes) || this.options.startupBufferMaxBytes < 24 * 1024 * 1024 ||
+        this.options.startupBufferMaxBytes > 32 * 1024 * 1024 ||
+        this.options.startupBufferMaxBytes !== 24 * 1024 * 1024 && typeof this.options.startupBufferTarget !== 'function')
+      return 'invalid-startup-buffer-max-bytes';
     if (this.options.startupBufferCommit !== null && (typeof this.options.startupBufferCommit !== 'function' ||
         typeof this.options.startupBufferTarget !== 'function')) return 'invalid-startup-buffer-commit';
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
@@ -615,6 +620,7 @@ class HlsSwarm {
       if (this.options.warmAhead || this.options.startupBufferTarget) {
         this.warmAhead = createWarmAhead({ Loader: hls.config.fLoader,
           steady: this.options.warmAhead, startupTarget: this.options.startupBufferTarget, startupCommit: this.options.startupBufferCommit,
+          startupMaxBytes: this.options.startupBufferMaxBytes,
           startupRecovery: context => Math.max(this.options.originReserveMs,
             (percentile(this.#originSamples(context), 0.9) || 0) * 1.25 + 100),
           allowed: () => this.#servingAllowed() && hls.media?.paused !== true && !onCellular(),
