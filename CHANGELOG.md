@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Preserve the fourth-slot parsed successor when it extends two verified
+  startup futures covering the current target. A previous fragment's service-time lead
+  must not skip that successor and leave a gap in the reservoir. Forward
+  window selection, release headroom, capacity and deadlines remain bounded.
+
 - Preserve valid startup and cached-media ownership across Hls.js playlist
   refreshes that introduce floating-point round-off. Start/duration comparisons
   tolerate only capped machine precision, at most one nanosecond; immutable

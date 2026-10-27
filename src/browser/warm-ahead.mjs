@@ -316,6 +316,13 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     if (startup.frozenStart !== null && target < startup.frozenStart || startup.plan[0]?.context.frag.start > target) return true;
     const item = queued[0], index = startup.plan.findIndex(future => future.key === item.key);
     if (index < 0) { endStartup('cancelled', 'context-changed'); return false; }
+    // Keep the fourth-slot extension of two verified contiguous futures;
+    // a previous service sample cannot turn their successor into a gap.
+    if (startup.verified) {
+      const covered = coverage(target);
+      if (covered.end !== null && covered.rows.filter(row => row.context !== startup.own.context).length >= 2 &&
+          Math.abs(item.context.frag.start - covered.end) <= 0.001) return true;
+    }
     if (item.context.frag.start + item.context.frag.duration <= target + (recovery + (startup.planningServiceMs ?? 0)) / 1000) {
       if (!startup.hopAvailable) return false;
       startup.hopAvailable = false;

@@ -94,6 +94,8 @@ and fixture checks do not prove decoded playback or device acceptance.
 While the first callback waits, a bounded 100 ms poll plans currently parsed
 future data around measured recovery headroom and a verified future-load timing
 observation when available; this adds no release headroom waiver or rate estimate.
+Admission retains the fourth-slot successor extending two verified futures
+covering the actual target, rather than horizon-skipping it and creating a hole.
 It can skip unrequested metadata
 or reclaim completed unowned coverage, retaining the first response, in-flight
 reservations, pins and original deadline. A future window ahead of the actual

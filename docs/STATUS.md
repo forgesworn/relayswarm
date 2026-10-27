@@ -10,6 +10,18 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased contiguous startup admission (27 October 2026)
+
+After the moving target reaches a selected future window, the admission
+horizon can skip the fourth-slot successor even when it would extend two
+verified futures covering that target. The previous future's measured service
+time can trigger this independently of available buffer capacity. This
+contiguous extension now retains its place; selecting a new forward window still
+uses the existing horizon. Release still requires fresh verified coverage
+and recovery headroom within the same authority, capacity and deadline
+checks. Encoded-loader regressions cover the selection error; sustained
+real-source playback and physical-device acceptance remain separate gates.
+
 ## Unreleased parsed-timestamp round-off (27 October 2026)
 
 A playlist refresh can represent the same fragment start as `10.64` and

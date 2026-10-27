@@ -158,6 +158,9 @@ behind the required recovery horizon, with at most one metadata hop per poll.
 When available, the last verified future fragment's measured whole-load time
 adds a scheduling lead to that admission horizon. This is a time observation,
 not a throughput estimate or a change to the required release headroom.
+The fourth-slot successor extending two contiguous verified futures covering
+the current target is retained instead of being skipped by that horizon. Its
+bytes still pass the existing reservation, verification and final release checks.
 Completed obsolete future data can give its slot to a currently parsed
 successor. If the first body and both planned futures have fully verified,
 and both futures contribute to contiguous coverage of the fresh target but
