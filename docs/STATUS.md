@@ -10,6 +10,19 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased startup buffer capacity (27 October 2026)
+
+A prepared target at zero can need more recovery headroom than three two-second
+objects provide. Startup permits one additional parsed contiguous future
+only after the original three-object window fully verifies and still lacks
+headroom. Startup is bounded to four objects and the same 24 MiB; steady
+warm-ahead stays at three, future requests stay serial, and the original
+eight-second/parent deadline, authority and ACK checks remain unchanged.
+Source fixtures cover feasible completion, byte refusal, cancellation and fresh
+target checks. The additional request must finish within the original deadline;
+byte capacity alone does not guarantee time to complete it. These checks do not
+establish decoded playback, device qualification or a performance benefit.
+
 ## Unreleased accepted-peer stats disposal (27 October 2026)
 
 An accepted verified peer object's known `aborted: false` now survives disposal
