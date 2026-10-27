@@ -2303,6 +2303,35 @@ ID, and each multi-holder scheduler call with its inputs and the commands it
 returned, so a recorded transfer replays against the module offline. Times are
 whole milliseconds from the swarm's creation; holders are session labels, not
 keys. It is kept out of `metrics()`, which receipts snapshot repeatedly.
+Whole HTTP legs have an early numeric load alias, including synchronous cached
+HTTP winners, immediate fallback and the immutable context of a late peer arm.
+Their fixed `leg` is `fallback`, `cached` or `late`. `originStart` observes
+entry into the original loader; `originProgress` is the first positive payload
+callback observed in cached/late races, reusing the existing ownership decision
+without reading the payload again. Ordinary fallback omits this payload-progress
+observation because its SDK path has no such decision. This is not the first
+network packet. `originAbortRequest` observes
+the SDK requesting cancellation, before the inner abort and shared statistics
+are reused for peer delivery. It is not a network-terminal event.
+
+Only an actually observed success/error/timeout/abort callback produces one
+`k: "origin"` terminal row with its existing `outcome` and `bytes` fields.
+One ignored/duplicate callback may produce `originCallback`, with fixed
+`phase: "progress" | "terminal"` (progress has a null outcome). This distinct
+row must not be counted as another terminal. Late observations carry `stale: true`;
+shared loader byte statistics are then `null` without reading them. Otherwise
+`loaderLoadedBytes` and `loaderTotalBytes` are nonnegative safe integers or
+`null`, observed from loader statistics. They are not wire-byte measurements
+or proof of received partial response bodies. In hls.js 1.7.3 XhrLoader these
+statistics can change before a payload callback. Independent browser/network
+instrumentation is needed to determine actual partial HTTP cost.
+
+A late load's `limitMs` is the original parent HTTP lifetime upper bound;
+actual `xfer` deadlines remain authoritative for the later peer arm. Trace
+rows retain the configured capacity/drop policy. With `traceRequests: 0`,
+these observers read no additional loader byte statistics, retain no rows and
+add no queries or timers. Tracing changes no callback forwarding, HTTP request,
+peer eligibility, verification, budget or deadline policy.
 `node scripts/trace-report.mjs file.json...` summarises saved traces (from a
 harness receipt, a demo field receipt, a bare trace or a list of any of them): it replays every
 transfer against the committed module and reports a mismatch, then gives

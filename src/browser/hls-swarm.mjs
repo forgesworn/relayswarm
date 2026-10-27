@@ -825,7 +825,50 @@ class HlsSwarm {
       const integer = (value) => Number.isSafeInteger(value) ? value : null;
       this.#trace({ k: "load", load, at: this.#traceAt(), sn: integer(context.frag?.sn), level: integer(context.frag?.level), cc: integer(context.frag?.cc),
         budgetMs: Math.round(budgetMs), limitMs: Math.round(limitMs), budgetGeometry: { ...budgetGeometry } });
+      return load;
     } catch {}
+  }
+
+  // Opt-in observations of one whole HTTP leg, not network byte accounting.
+  #traceWholeOrigin(load, leg, getStats) {
+    if (!this.options.traceRequests) return null;
+    const started = now(), traceBase = this.traceBase;
+    let terminal = false, progress = false, abortRequested = false, duplicate = false;
+    const snapshot = supplied => {
+      let stats = supplied;
+      try { stats ??= getStats(); } catch {}
+      const count = key => { try { const value = stats?.[key]; return Number.isSafeInteger(value) && value >= 0 ? value : null; } catch { return null; } };
+      return { loaderLoadedBytes: count("loaded"), loaderTotalBytes: count("total") };
+    };
+    const emit = (k, fields) => this.#trace({ k, load, leg, at: this.#traceAt(), ms: Math.round(now() - started), ranged: false, ...fields });
+    emit("originStart", {});
+    return {
+      progress: (stats, hasPayload, stale) => {
+        if (stale) {
+          if (!duplicate) { duplicate = true; emit("originCallback", { phase: "progress", outcome: null, stale: true }); }
+          return;
+        }
+        if (progress || hasPayload !== true) return;
+        progress = true; emit("originProgress", { stale: false, ...snapshot(stats) });
+      },
+      abortRequest: reason => {
+        if (terminal || abortRequested) return;
+        abortRequested = true; emit("originAbortRequest", { reason, ...snapshot() });
+      },
+      terminal: (outcome, bytes = null, stats, stale = false) => observeTerminal(outcome, bytes, stats, stale),
+    };
+    function observeTerminal(outcome, bytes, stats, stale) {
+      if (terminal) {
+        if (!duplicate) { duplicate = true; emit("originCallback", { phase: "terminal", outcome, stale: true }); }
+        return;
+      }
+      terminal = true;
+      // An old arm may share statistics now owned by peer delivery or a new load.
+      // Preserve its observed outcome, never re-label those bytes as HTTP.
+      const statsSnapshot = stale ? { loaderLoadedBytes: null, loaderTotalBytes: null } : snapshot(stats);
+      emit("origin", { at: Math.floor(started) - traceBase, outcome,
+        bytes: Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null, stale, ...statsSnapshot });
+    }
   }
 
   // Native references are deliberately separate from serialisable metrics.
@@ -1101,6 +1144,7 @@ class HlsSwarm {
         this.abort();
         this.releaseFetch = null;
         this.peerStats = null;
+        this.originTrace = null;
         this.peerContext = context;
         if (context?.frag) swarm.peerFragments.delete(context.frag);
         const budgetGeometry = { source: "unobserved", positionSource: null, currentTime: null, bufferedEnd: null, playableEnd: null, fragmentStart: null, originReserveMs: null, uncappedMs: null };
@@ -1130,7 +1174,7 @@ class HlsSwarm {
         Object.assign(this.inner.stats, { aborted: false, loaded: 0, total: 0, chunkCount: 0, bwEstimate: 0,
           loading: { start: t0, first: 0, end: 0 }, parsing: { start: 0, end: 0 }, buffering: { start: 0, first: 0, end: 0 } });
         this.pendingCallbacks = { callbacks, context };
-        let timer;
+        let timer, traceLoad = null;
         const cleanup = () => {
           clearTimeout(timer);
           swarm.lifecycle.signal.removeEventListener("abort", fallback);
@@ -1160,17 +1204,16 @@ class HlsSwarm {
             if (!completed && !swarm.stopped) this.releaseFetch = swarm.#claimOrigin(key);
           }).catch(() => {});
           const finishOrigin = () => { completed = true; this.releaseFetch?.(); this.releaseFetch = null; };
-          const traceOrigin = (outcome, bytes = null) => swarm.options.traceRequests && swarm.#trace({ k: "origin", load: swarm.#traceLoad(context), at: swarm.#traceAt(originStarted),
-            ms: Math.round(now() - originStarted), ranged: false, outcome, bytes });
+          const originTrace = this.originTrace = swarm.#traceWholeOrigin(traceLoad, "fallback", () => this.inner.stats);
           this.inner.load(context, config, {
             ...callbacks,
-            onError: (...args) => { traceOrigin("error"); finishOrigin(); callbacks.onError?.(...args); },
-            onTimeout: (...args) => { traceOrigin("timeout"); finishOrigin(); callbacks.onTimeout?.(...args); },
-            onAbort: (...args) => { traceOrigin("abort"); finishOrigin(); callbacks.onAbort?.(...args); },
+            onError: (...args) => { originTrace?.terminal("error", null, undefined, originTrace !== this.originTrace); finishOrigin(); callbacks.onError?.(...args); },
+            onTimeout: (...args) => { originTrace?.terminal("timeout", null, args[0], originTrace !== this.originTrace); finishOrigin(); callbacks.onTimeout?.(...args); },
+            onAbort: (...args) => { originTrace?.terminal("abort", null, args[0], originTrace !== this.originTrace); finishOrigin(); callbacks.onAbort?.(...args); },
             onSuccess: (response, stats, ctx, details) => {
               const receivedMs = firstByteWallMs(stats);
               const { copy, size } = swarm.#originCopy(response, context);
-              traceOrigin("payload", size || null);
+              originTrace?.terminal("payload", size || null, stats, originTrace !== this.originTrace);
               completed = true;
               pushSample(swarm.originLatencySamples, now() - originStarted);
               swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - originStarted);
@@ -1196,6 +1239,7 @@ class HlsSwarm {
           });
         };
         if (budgetMs === 0) {
+          traceLoad = swarm.#traceBegin(context, 0, 0, budgetGeometry);
           swarm.#peerEligibility(context, budgetMs, "no-budget", null, budgetGeometry);
           return fallback();
         }
@@ -1211,7 +1255,7 @@ class HlsSwarm {
         const ceiling = Math.max(swarm.options.originFallbackMs, swarm.options.maxPeerWaitMs);
         const limitMs = Math.max(budgetMs, Math.min(ceiling, budgetGeometry.uncappedMs ?? budgetMs,
           budgetGeometry.sustainableMs ?? Infinity));
-        swarm.#traceBegin(context, budgetMs, limitMs, budgetGeometry);
+        traceLoad = swarm.#traceBegin(context, budgetMs, limitMs, budgetGeometry);
         // Ranged origin pieces go through the player's loader, as the whole would.
         const origin = { Loader: BaseLoader, config: this.hlsConfig, loaderConfig: config };
         const plan = { deadline: t0 + budgetMs, limit: t0 + limitMs,
@@ -1240,6 +1284,7 @@ class HlsSwarm {
         });
       }
       loadCachedRace(context, config, callbacks, budgetGeometry, cached) {
+        const traceLoad = swarm.#traceBegin(context, 0, swarm.options.maxPeerWaitMs, budgetGeometry);
         const token = {}, controller = new AbortController(), t0 = now();
         let originPending = true, originClaimed = false, timer;
         this.active = token;
@@ -1272,20 +1317,25 @@ class HlsSwarm {
         swarm.counters.originFallbacks += 1;
         swarm.#peerEligibility(context, 0, "no-budget", null, budgetGeometry);
         // Start HTTP before hashing a key or fetching/verifying metadata.
+        const originTrace = this.originTrace = swarm.#traceWholeOrigin(traceLoad, "cached", () => this.inner.stats);
         try { this.inner.load(context, config, {
           ...callbacks,
           onProgress: (...args) => {
-            if (!originPending || this.active !== token) return;
-            if (args[2]?.byteLength > 0) { originClaimed = true; stopPeer(); }
+            if (!originPending || this.active !== token) { originTrace?.progress(undefined, null, true); return; }
+            const hasPayload = args[2]?.byteLength > 0;
+            if (hasPayload) { originClaimed = true; stopPeer(); }
+            originTrace?.progress(args[0], hasPayload, false);
             callbacks.onProgress?.(...args);
           },
-          onError: (...args) => { if (finishOrigin()) callbacks.onError?.(...args); },
-          onTimeout: (...args) => { if (finishOrigin()) callbacks.onTimeout?.(...args); },
-          onAbort: (...args) => { if (finishOrigin()) callbacks.onAbort?.(...args); },
+          onError: (...args) => { originTrace?.terminal("error", null, undefined, !originPending || this.active !== token); if (finishOrigin()) callbacks.onError?.(...args); },
+          onTimeout: (...args) => { originTrace?.terminal("timeout", null, args[0], !originPending || this.active !== token); if (finishOrigin()) callbacks.onTimeout?.(...args); },
+          onAbort: (...args) => { originTrace?.terminal("abort", null, args[0], !originPending || this.active !== token); if (finishOrigin()) callbacks.onAbort?.(...args); },
           onSuccess: (response, stats, ctx, details) => {
+            if (!originPending || this.active !== token) originTrace?.terminal("payload", null, undefined, true);
             if (!finishOrigin()) return;
             const receivedMs = firstByteWallMs(stats);
             const { copy, size } = swarm.#originCopy(response, context);
+            originTrace?.terminal("payload", size || null, stats);
             pushSample(swarm.originLatencySamples, now() - t0);
             swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - t0);
             callbacks.onSuccess(response, stats, ctx, details);
@@ -1304,13 +1354,13 @@ class HlsSwarm {
         const plan = { deadline: t0 + swarm.options.maxPeerWaitMs, limit: t0 + swarm.options.maxPeerWaitMs,
           originReserveMs: 0, expired: false, onDeadline: null, cachedOnly: cached, lateHaveRace: swarm.options.lateHaveRace,
           peerOnly: true, extend: () => false };
-        swarm.#traceBegin(context, 0, swarm.options.maxPeerWaitMs, budgetGeometry);
         swarm.#peerFirst(context, controller.signal, plan, 0, budgetGeometry).then(result => {
           if (!result || !originPending || originClaimed || this.active !== token || controller.signal.aborted || swarm.stopped || now() >= plan.limit) return;
           originPending = false; this.active = null; this.pendingCallbacks = null;
           stopPeer();
           this.releaseFetch?.(); this.releaseFetch = null;
           // The losing HTTP arm must never surface its abort/error callback.
+          originTrace?.abortRequest("peer-won");
           try { this.inner.abort(); } catch {}
           swarm.counters.zeroBudgetPeerRaceWins += 1;
           swarm.#completePeerLoad(this, result, context, callbacks, t0);
@@ -1319,6 +1369,7 @@ class HlsSwarm {
         }).finally(stopPeer);
       }
       loadLatePeerRace(context, config, callbacks, budgetGeometry, parentMs) {
+        const traceLoad = swarm.#traceBegin(context, 0, parentMs, budgetGeometry);
         const token = {}, controller = new AbortController(), t0 = now();
         let originPending = true, originClaimed = false, watch;
         this.active = token; this.pendingCallbacks = { callbacks, context };
@@ -1337,35 +1388,45 @@ class HlsSwarm {
           try { this.inner.abort(); } catch {}
           return pending;
         };
+        let originTrace;
         watch = swarm.#watchLatePeer({ context, controller, entryAt: t0, parentDeadline: t0 + parentMs, current,
-          arm: (peerContext, plan) => swarm.#peerFirst(peerContext, controller.signal, plan, 0, budgetGeometry).then(result => {
-            if (!result || !current() || controller.signal.aborted || now() >= plan.limit || !watch.valid() ||
-                typeof plan.revalidateAuthority !== 'function' || !plan.revalidateAuthority()) return false;
-            originPending = false; this.active = null; this.pendingCallbacks = null;
-            watch.close('peer-won', 'won'); this.releaseFetch?.(); this.releaseFetch = null;
-            try { this.inner.abort(); } catch {}
-            swarm.counters.zeroBudgetPeerRaceWins++;
-            // A promoted warm object keeps its original accounting role; only
-            // the real hls.js consumer later accepts its verified peer bytes.
-            swarm.#completePeerLoad(this, result, context, callbacks, t0);
-            return true;
-          }),
+          arm: (peerContext, plan) => {
+            if (swarm.options.traceRequests) swarm.traceLoads.set(peerContext, traceLoad);
+            return swarm.#peerFirst(peerContext, controller.signal, plan, 0, budgetGeometry).then(result => {
+              if (!result || !current() || controller.signal.aborted || now() >= plan.limit || !watch.valid() ||
+                  typeof plan.revalidateAuthority !== 'function' || !plan.revalidateAuthority()) return false;
+              originPending = false; this.active = null; this.pendingCallbacks = null;
+              watch.close('peer-won', 'won'); this.releaseFetch?.(); this.releaseFetch = null;
+              originTrace?.abortRequest("peer-won");
+              try { this.inner.abort(); } catch {}
+              swarm.counters.zeroBudgetPeerRaceWins++;
+              // A promoted warm object keeps its original accounting role; only
+              // the real hls.js consumer later accepts its verified peer bytes.
+              swarm.#completePeerLoad(this, result, context, callbacks, t0);
+              return true;
+            });
+          },
         });
         swarm.counters.originFallbacks++;
         swarm.#peerEligibility(context, 0, 'no-budget', null, budgetGeometry);
+        originTrace = this.originTrace = swarm.#traceWholeOrigin(traceLoad, "late", () => this.inner.stats);
         try { this.inner.load(context, config, {
           ...callbacks,
           onProgress: (...args) => {
-            if (!originPending || this.active !== token) return;
-            if (args[2]?.byteLength > 0) { originClaimed = true; watch?.close('origin-progress'); }
+            if (!originPending || this.active !== token) { originTrace?.progress(undefined, null, true); return; }
+            const hasPayload = args[2]?.byteLength > 0;
+            if (hasPayload) { originClaimed = true; watch?.close('origin-progress'); }
+            originTrace?.progress(args[0], hasPayload, false);
             callbacks.onProgress?.(...args);
           },
-          onError: (...args) => { if (finishOrigin('origin-error')) callbacks.onError?.(...args); },
-          onTimeout: (...args) => { if (finishOrigin('origin-timeout')) callbacks.onTimeout?.(...args); },
-          onAbort: (...args) => { if (finishOrigin('origin-abort')) callbacks.onAbort?.(...args); },
+          onError: (...args) => { originTrace?.terminal('error', null, undefined, !originPending || this.active !== token); if (finishOrigin('origin-error')) callbacks.onError?.(...args); },
+          onTimeout: (...args) => { originTrace?.terminal('timeout', null, args[0], !originPending || this.active !== token); if (finishOrigin('origin-timeout')) callbacks.onTimeout?.(...args); },
+          onAbort: (...args) => { originTrace?.terminal('abort', null, args[0], !originPending || this.active !== token); if (finishOrigin('origin-abort')) callbacks.onAbort?.(...args); },
           onSuccess: (response, stats, ctx, details) => {
+            if (!originPending || this.active !== token) originTrace?.terminal("payload", null, undefined, true);
             if (!finishOrigin('origin-success')) return;
             const receivedMs = firstByteWallMs(stats), { copy, size } = swarm.#originCopy(response, context);
+            originTrace?.terminal("payload", size || null, stats);
             pushSample(swarm.originLatencySamples, now() - t0);
             swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - t0);
             callbacks.onSuccess(response, stats, ctx, details); swarm.#noteOriginClock(details, receivedMs);
@@ -1382,6 +1443,7 @@ class HlsSwarm {
         }).catch(() => {});
       }
       abort() {
+        this.originTrace?.abortRequest("caller-abort");
         this.releaseFetch?.(); this.releaseFetch = null;
         const pending = this.cancel?.();
         if (pending && this.pendingCallbacks) {
@@ -1392,7 +1454,7 @@ class HlsSwarm {
           callbacks.onAbort?.(this.inner.stats, context, null);
         } else this.inner.abort();
       }
-      destroy() { this.releaseFetch?.(); this.releaseFetch = null; this.cancel?.(); this.pendingCallbacks = null; this.inner.destroy(); }
+      destroy() { this.originTrace?.abortRequest("destroy"); this.releaseFetch?.(); this.releaseFetch = null; this.cancel?.(); this.pendingCallbacks = null; this.inner.destroy(); }
       getCacheAge() { return this.peerStats ? null : this.inner.getCacheAge?.() ?? null; }
       getResponseHeader(name) { return this.peerStats ? null : this.inner.getResponseHeader?.(name) ?? null; }
     };
@@ -1830,7 +1892,7 @@ class HlsSwarm {
     if (this.discovery.hinted(context, (candidate) => this.#discoveryEligible(candidate))) this.discovery.counters.staleBlocked++;
   }
 
-  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry, projection, demand, trial = false) {
+  #peerEligibility(context, budgetMs, reason, matchingHave, budgetGeometry, projection, demand, trial = false, traceLoad) {
     // Observe only decisions already made. In particular a zero budget must
     // not hash a key or inspect HAVE merely to fill this local diagnostic.
     try {
@@ -1859,7 +1921,7 @@ class HlsSwarm {
         this.peerEligibilityDropped = increment(this.peerEligibilityDropped);
       }
       this.peerEligibilityRecords.push(record);
-      if (this.options.traceRequests) this.#trace({ k: "eligibility", load: this.#traceLoad(context), at: this.#traceAt(), ...structuredClone(record) });
+      if (this.options.traceRequests) this.#trace({ k: "eligibility", load: traceLoad === undefined ? this.#traceLoad(context) : traceLoad, at: this.#traceAt(), ...structuredClone(record) });
     } catch {}
   }
 
@@ -2013,6 +2075,7 @@ class HlsSwarm {
   }
 
   async #peerFirst(context, signal, plan, budgetMs, budgetGeometry) {
+    const traceLoad = this.options.traceRequests ? this.#traceLoad(context) : null;
     // The initial deadline; plan.deadline may grow from it. Test availability
     // instrumentation (test/support/broadcast-availability-transform.mjs)
     // reads this binding by name.
@@ -2024,7 +2087,7 @@ class HlsSwarm {
     const discoveryContext = this.discovery.contexts.get(context.frag.type || "main");
     const key = plan.knownKey ?? await this.#segmentKey(context);
     if (signal.aborted || this.stopped || plan.currentValid && !plan.currentValid()) {
-      this.#peerEligibility(context, budgetMs, "aborted-before-eligibility", null, budgetGeometry);
+      this.#peerEligibility(context, budgetMs, "aborted-before-eligibility", null, budgetGeometry, undefined, undefined, false, traceLoad);
       return null;
     }
     if (plan.cachedOnly) {
@@ -2062,7 +2125,7 @@ class HlsSwarm {
     const demand = { key, rendition, context: holderContext, recorded: false, asked: new Set(), row: null };
     const coordinated = ![...this.links.values()].some((peer) => peer.have.has(key));
     if (coordinated && !this.#shouldWaitForOrigin(key, rendition, context)) {
-      this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry, undefined, demand);
+      this.#peerEligibility(context, budgetMs, "no-have-no-wait", false, budgetGeometry, undefined, demand, false, traceLoad);
       return null;
     }
     // Go to origin at once, keeping the buffer, when the holder wait and the
@@ -2087,7 +2150,7 @@ class HlsSwarm {
       entry = "stretch";
     }
     if (entry === "late") {
-      this.#peerEligibility(context, budgetMs, "projected-late", !coordinated, budgetGeometry, this.#projectionDetail("entry", entryTransfer, holderWait, plan), demand);
+      this.#peerEligibility(context, budgetMs, "projected-late", !coordinated, budgetGeometry, this.#projectionDetail("entry", entryTransfer, holderWait, plan), demand, false, traceLoad);
       // Nobody held the key at entry: a miss for every serving link. Otherwise
       // only the serving links that held it take a held miss.
       this.#recordOutcome(demand, { everyServing: true });
@@ -2096,7 +2159,7 @@ class HlsSwarm {
     }
     this.#applyProjection(entry, holderWait + entryTransfer, plan);
     if (coordinated) {
-      this.#peerEligibility(context, budgetMs, "no-have-wait", false, budgetGeometry, undefined, demand);
+      this.#peerEligibility(context, budgetMs, "no-have-wait", false, budgetGeometry, undefined, demand, false, traceLoad);
       this.counters.coordinatedWaits += 1;
     }
     const commitmentRemaining = plan.deadline - now();
@@ -2113,14 +2176,14 @@ class HlsSwarm {
       // loads normally; coordination never moves the HTTP deadline.
       while (!signal.aborted && !this.stopped && now() < plan.deadline && ![...this.links.values()].some((peer) => peer.have.has(key))) {
         if (!this.#shouldWaitForOrigin(key, rendition, context)) {
-          this.#peerEligibility(context, budgetMs, "wait-no-longer-eligible", false, budgetGeometry, undefined, demand);
+          this.#peerEligibility(context, budgetMs, "wait-no-longer-eligible", false, budgetGeometry, undefined, demand, false, traceLoad);
           return null;
         }
         await this.#waitForHave(key, Math.min(100, plan.deadline - now()), signal);
       }
       const cancelled = signal.aborted || this.stopped;
       if (cancelled || now() >= plan.deadline) {
-        this.#peerEligibility(context, budgetMs, cancelled ? "wait-aborted" : "wait-expired", null, budgetGeometry, undefined, demand);
+        this.#peerEligibility(context, budgetMs, cancelled ? "wait-aborted" : "wait-expired", null, budgetGeometry, undefined, demand, false, traceLoad);
         // A miss is the wait reaching its deadline, whether the loop or the
         // fallback timer saw it first. A loader abort or stop says nothing about
         // the holder. Decided by cause (plan.expired), never by comparing clocks.
@@ -2128,7 +2191,7 @@ class HlsSwarm {
         return null;
       }
     }
-    this.#peerEligibility(context, budgetMs, coordinated || plan.lateHaveMatched ? "have-after-wait" : "have-at-entry", true, budgetGeometry, trial ?? undefined, demand, trial !== null);
+    this.#peerEligibility(context, budgetMs, coordinated || plan.lateHaveMatched ? "have-after-wait" : "have-at-entry", true, budgetGeometry, trial ?? undefined, demand, trial !== null, traceLoad);
     // Holding the key is not a delivery: leave every holder entry alone until a
     // verified segment arrives.
     let commitment, authorityEvent;
@@ -2154,7 +2217,7 @@ class HlsSwarm {
     if (!this.renditionSizes.has(rendition) && this.renditionSizes.size >= 16) this.renditionSizes.delete(this.renditionSizes.keys().next().value);
     this.renditionSizes.set(rendition, commitment.size);
     if (commitment.v === 3 && this.options.multiHolder) {
-      const multi = await this.#multiHolder(context, signal, plan, key, commitment, discoveryContext);
+      const multi = await this.#multiHolder(context, signal, plan, key, commitment, discoveryContext, traceLoad);
       if (multi !== undefined) {
         if (multi && coordinated) this.counters.coordinatedPeerLoads += 1;
         return multi ? { ...multi, holderContext } : multi;
@@ -2174,7 +2237,7 @@ class HlsSwarm {
     }
     if (known === "late") {
       // Judged on swarm-wide estimates, not on any link's own: no holder is charged.
-      this.#peerEligibility(context, budgetMs, "projected-late", true, budgetGeometry, this.#projectionDetail("commitment", transfer, 0, plan), demand);
+      this.#peerEligibility(context, budgetMs, "projected-late", true, budgetGeometry, this.#projectionDetail("commitment", transfer, 0, plan), demand, false, traceLoad);
       this.counters.peerProjectedLate += 1;
       return null;
     }
@@ -2226,7 +2289,7 @@ class HlsSwarm {
       let bytes;
       try {
         bytes = await link.request(key, Math.max(1, attemptMs), { signal: attempt.signal, expectedSize: commitment.size, onProgress: attempt.progress,
-          onResult: (result) => this.#peerRequestResult(context, link, remainingMs, result) });
+          onResult: (result) => this.#peerRequestResult(context, link, remainingMs, result, null, traceLoad) });
       } finally { attempt.done(); }
       this.peerSelection.observe(attempt.observation());
       if (attempt.abandoned) {
@@ -2311,7 +2374,7 @@ class HlsSwarm {
   // Schema 3 across framing 2 holders, with origin for a late tail, run by
   // the core's Transfer (CORE-SPEC section 6). Undefined when it does not
   // apply, so the single-holder path runs; null sends the load to origin.
-  async #multiHolder(context, signal, plan, key, commitment, discoveryContext) {
+  async #multiHolder(context, signal, plan, key, commitment, discoveryContext, traceLoad) {
     if (plan.currentValid && !plan.currentValid()) return null;
     const worker = this.options.transferWorkerUrl !== undefined;
     // An explicit worker opt-in must never quietly retry a large transfer on
@@ -2368,7 +2431,7 @@ class HlsSwarm {
     this.multiHolder.transfers += 1;
     // Each scheduler call, with its time, inputs and returned commands, so
     // the trace replays it (times relative to the trace base).
-    const load = this.#traceLoad(context), base = this.traceBase;
+    const load = traceLoad, base = this.traceBase;
     const xfer = (op, input, call) => {
       const at = Math.floor(now());
       const record = state => {
@@ -2454,7 +2517,7 @@ class HlsSwarm {
           };
           link.request(key, remainingMs, { signal: controller.signal, expectedSize: to - from, onProgress,
             range: { start: command.range.start, end: command.range.end, objectSize: commitment.size },
-            onResult: (result) => { report = result; this.#peerRequestResult(context, link, remainingMs, result, command.range); } }).then((bytes) => {
+            onResult: (result) => { report = result; this.#peerRequestResult(context, link, remainingMs, result, command.range, traceLoad); } }).then((bytes) => {
             if (requests.get(command.peer) === controller) requests.delete(command.peer);
             slowestMs = Math.max(slowestMs, now() - startedAt);
             if (finished) return;
@@ -2641,7 +2704,7 @@ class HlsSwarm {
     if (link.closed) this.peerSelection.forget(link);
   }
 
-  #peerRequestResult(context, link, remainingMs, result, range = null) {
+  #peerRequestResult(context, link, remainingMs, result, range = null, traceLoad = null) {
     try {
       if (!PEER_REQUEST_OUTCOMES.includes(result.outcome)) return;
       this.#observeLinkTiming(link, result);
@@ -2664,7 +2727,7 @@ class HlsSwarm {
         this.peerRequestDropped = increment(this.peerRequestDropped);
       }
       this.peerRequestRecords.push(record);
-      this.#trace({ k: "request", load: this.#traceLoad(context), at: this.#traceAt(), range: range ? [range.start, range.end] : null, ...record });
+      this.#trace({ k: "request", load: traceLoad, at: this.#traceAt(), range: range ? [range.start, range.end] : null, ...record });
     } catch {}
   }
 
