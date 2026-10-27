@@ -142,17 +142,19 @@ When available, the last verified future fragment's measured whole-load time
 adds a scheduling lead to that admission horizon. This is a time observation,
 not a throughput estimate or a change to the required release headroom.
 Completed obsolete future data can give its slot to a currently parsed
-successor. When a full verified window has insufficient headroom, its completed,
-unpinned first future can also give up its slot if it contains the target.
-Once the future window starts ahead of the actual target, its start stays fixed;
+successor. If the first body and both planned futures have fully verified,
+and both futures contribute to contiguous coverage of the fresh target but
+still lack recovery headroom, startup retains that useful prefix and may admit
+one additional parsed contiguous future within the same byte reservation.
+The original first interval need not still cover the target: its unchanged
+response continues to occupy one of the four residency slots. Capacity is considered
+before retiring a useful completed prefix. An adequate window or a timeline gap
+does not trigger this extension. Otherwise the existing rolling policy may
+retire its completed, unpinned first future when it contains the target.
+Once a future window starts ahead of the actual target, its start stays fixed;
 release waits for the real target and verified coverage to meet again.
-If the original first body and both planned futures are fully verified and
-contiguous but still cannot meet the fresh recovery requirement, startup may
-admit one additional parsed contiguous future within the same byte reservation.
-The existing rolling policy runs first; an adequate window or a timeline gap
-does not trigger this extension. The first response stays held unchanged; startup
-contains at most four objects and 24 MiB. Future requests remain serial, and
-insufficient capacity still cannot release unsafe media or extend the deadline.
+Startup contains at most four objects and 24 MiB. Future requests remain serial,
+and insufficient capacity cannot release unsafe media or extend the deadline.
 In-flight work and authority pins keep their reservations.
 The rolling plan stores metadata only, without retaining discarded payloads.
 Polling stops on release, failure or cancellation and pauses its target reads

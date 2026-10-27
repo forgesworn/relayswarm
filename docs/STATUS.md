@@ -24,14 +24,16 @@ contribution, smooth playback or physical-device qualification.
 
 ## Unreleased startup buffer capacity (27 October 2026)
 
-A prepared target at zero can need more recovery headroom than three two-second
-objects provide. Startup permits one additional parsed contiguous future
-only after the original three-object window fully verifies and still lacks
-headroom. Startup is bounded to four objects and the same 24 MiB; steady
+A startup target can need more recovery headroom than its verified window
+provides, including when it has passed the original first fragment. After the
+first body and both planned futures verify, startup may retain the useful
+contiguous future prefix and admit one parsed successor before retiring that
+prefix. The original response remains held unchanged even when its interval
+is obsolete. Startup is bounded to four objects and the same 24 MiB; steady
 warm-ahead stays at three, future requests stay serial, and the original
 eight-second/parent deadline, authority and ACK checks remain unchanged.
-Source fixtures cover feasible completion, byte refusal, cancellation and fresh
-target checks. The additional request must finish within the original deadline;
+Source fixtures cover feasible completion, an obsolete first interval, byte
+refusal, cancellation and fresh target checks. The additional request must finish within the original deadline;
 byte capacity alone does not guarantee time to complete it. These checks do not
 establish decoded playback, device qualification or a performance benefit.
 

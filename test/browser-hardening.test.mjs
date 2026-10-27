@@ -4293,25 +4293,49 @@ test("at peerNoFit an untried holder whose own estimate does not fit is charged 
   } finally { await f.close(); }
 });
 
-test("a request skipped because no recent transfer could finish charges no holder", async t => {
-  const f = await staleHolderFixture(t, { originFallbackMs: 1000, serve: { bytes: bytes32, delayMs: 20 } });
-  try {
-    const via = f.candidate();
-    f.holderChannel.bodyDelayMs = 250;
-    await f.deliver(via);
-    // Stay inside the projection's stretch tier using the actual completed
-    // measurement. A fixed 220 ms can cross into projected-late on a busy
-    // runner, before the minimum-completion guard under test is reached.
-    const measured = f.swarm.metrics().peers.deliveryMeasurements.find(row => row.pubkey === f.holderKey).latencyMs;
-    assert.ok(measured > 0);
-    const room = measured * 0.9;
-    f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 12 + room / 1000 } };
-    await f.fail(via);
-    assert.equal(f.swarm.metrics().segments.peerSkippedLate, 1);
-    assert.equal(f.requests.length, 1, "the holder was not asked");
-    assert.equal(f.discovery().heldMiss, 0);
-    assert.ok(f.rows().every(row => !row.heldMissHolders?.length));
-  } finally { await f.close(); }
+test("global timing refusals charge no holder before any new peer request", async t => {
+  for (const branch of ["minimum-skip", "projected-late"]) await t.test(branch, async t => {
+    const realTimer = setTimeout;
+    const f = await staleHolderFixture(t, { originFallbackMs: 1000, serve: { bytes: bytes32, delayMs: 20 } });
+    const clock = virtualClock(t);
+    // Await real cryptographic/relay promises without advancing the loader's
+    // controlled clock or firing its timers. Host scheduling cannot select
+    // a different refusal branch during this second load.
+    const phase = async predicate => {
+      const deadline = process.hrtime.bigint() + 3_000_000_000n;
+      while (!predicate()) {
+        assert(process.hrtime.bigint() < deadline, "controlled refusal did not settle");
+        await new Promise(resolve => realTimer(resolve, 1));
+      }
+    };
+    try {
+      const via = f.candidate(); f.holderChannel.bodyDelayMs = 250;
+      await clock.settle(f.deliver(via), 1000);
+      const measured = f.swarm.metrics().peers.deliveryMeasurements.find(row => row.pubkey === f.holderKey).latencyMs;
+      assert(measured > 0); assert.equal(f.requests.length, 1);
+      const room = measured * (branch === "minimum-skip" ? 0.9 : 0.5);
+      f.hls.media = { currentTime: 10, buffered: { length: 1, start: () => 0, end: () => 12 + room / 1000 } };
+      const segment = f.next(); via.announce(segment.key); f.touch();
+      f.holderChannel.receive(haveFrame(segment.key));
+      const at = clock.now(); let response;
+      const pending = f.load(segment.name).then(value => { response = value; });
+      await phase(() => response !== undefined); await pending;
+      assert.equal(clock.now(), at, "async metadata did not consume the controlled room");
+      sameBytes(new Uint8Array(response.data), bytes32);
+      const metrics = f.swarm.metrics().segments;
+      assert.equal(metrics.peerSkippedLate, branch === "minimum-skip" ? 1 : 0);
+      assert.equal(metrics.peerProjectedLate, branch === "projected-late" ? 1 : 0);
+      if (branch === "projected-late") {
+        assert.equal(f.rows().at(-1).reason, "projected-late");
+        assert.equal(f.rows().at(-1).projection.stage, "entry");
+      }
+      assert.equal(metrics.originFallbacks, 1); assert.equal(metrics.originLoaded, 1);
+      assert.equal(metrics.peerFirstLoaded, 1, "only the calibration was delivered by a peer");
+      assert.equal(f.requests.length, 1, "the refused holder was not asked again");
+      assert.equal(f.discovery().heldMiss, 0);
+      assert(f.rows().every(row => !row.heldMissHolders?.length));
+    } finally { clock.restore(); await f.close(); }
+  });
 });
 
 test("a corrupt payload hashed past the deadline is not charged but an earlier asked link that failed is", async t => {

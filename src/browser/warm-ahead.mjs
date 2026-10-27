@@ -256,11 +256,21 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       if (!startupCurrent() || startup.checking) return;
       drop(item.key);
     }
-    // A completed window which cannot cover the measured recovery horizon
-    // only loses headroom as the room advances. Free its first future once,
-    // then keep the new window start fixed until the actual target enters it.
-    const first = startup.plan[0];
+    // Preserve a fully verified contiguous future prefix when the fourth
+    // startup residency slot can extend it. The original held first body
+    // still owns a slot even after its interval is behind the room target.
+    let futureLimit = 2;
     if (startup.verified && startup.response && startup.plan.length === 2 && cache.size === 2 &&
+        !active && !jobs.size && !demand.size && !promoted.size &&
+        startup.plan.every(item => cache.has(item.key) && !pins.has(cache.get(item.key).permit.key))) {
+      const covered = coverage(target);
+      if (covered.end !== null && startup.plan.every(item => covered.rows.includes(cache.get(item.key))) &&
+          (covered.end - target) * 1000 < recovery) futureLimit = MAX_STARTUP_OBJECTS - 1;
+    }
+    // Without a usable contiguous prefix, preserve the original rolling
+    // policy: free its first future once and wait for the new window start.
+    const first = startup.plan[0];
+    if (futureLimit === 2 && startup.verified && startup.response && startup.plan.length === 2 && cache.size === 2 &&
         !active && !jobs.size && !demand.size && !promoted.size && inside(first, target) &&
         startup.plan.every(item => cache.has(item.key) && !pins.has(cache.get(item.key).permit.key))) {
       const covered = coverage(target);
@@ -268,18 +278,6 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         startup.cursor = first; startup.plan.shift(); drop(first.key);
         startup.frozenStart = startup.plan[0].context.frag.start;
       }
-    }
-    // The existing rolling policy gets first use of obsolete slots. If its
-    // complete verified window still cannot cover recovery, retain that useful
-    // coverage and admit at most one contiguous successor, within the same
-    // byte reservation and original deadline. No extra parallel job is added.
-    let futureLimit = 2;
-    if (startup.verified && startup.response && startup.plan.length === 2 && cache.size === 2 &&
-        !active && !jobs.size && !demand.size && !promoted.size &&
-        startup.plan.every(item => cache.has(item.key) && !pins.has(cache.get(item.key).permit.key))) {
-      const covered = coverage(target);
-      if (covered.rows.length === startup.plan.length + 1 && covered.end !== null &&
-          (covered.end - target) * 1000 < recovery) futureLimit = MAX_STARTUP_OBJECTS - 1;
     }
     while (startup.plan.length < futureLimit) {
       const last = startup.plan.at(-1);
