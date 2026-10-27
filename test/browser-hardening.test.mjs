@@ -8,7 +8,7 @@ import { Readable } from "node:stream";
 import { readFile } from "node:fs/promises";
 import { Worker as WorkerThread } from "node:worker_threads";
 import { generateSecretKey, finalizeEvent, getPublicKey } from "nostr-tools/pure";
-import Hls, { M3U8Parser, LoaderContextType } from 'hls.js';
+import Hls, { M3U8Parser, LoaderContextType, LoadStats } from 'hls.js';
 const { createHlsSwarm } = await import(process.env.TEST_SWARM_MODULE ?? "../src/browser/hls-swarm.mjs");
 import { loadCore } from "../src/browser/core-wasm.mjs";
 import { originClockOffsetMs, originClockSummary } from "../src/browser/origin-clock.mjs";
@@ -7783,4 +7783,175 @@ test("a holder that failed verification as a trial is banned and closed, and is 
     await run("A");
     assert.equal(segments().peerUntestedTrial, trials); assert.equal(f.requests.filter(value => value === "other").length, 1);
   } finally { await f.close(); }
+});
+
+
+// Real signed/encrypted rendezvous and both public factories; only ordered RTC
+// delivery is bridged. No retained relay history or artificial HAVE payloads.
+async function framingPairFixture(t, {omitPresenceCapability=false, capability={}, staleAnswer=false, deniedOffer=false}={}) {
+  const pcs=new Map(),channels=[],presences=[],signals=[],swarms=[],pendingSignals=[];let next=0;
+  class Ordered extends RecordedChannel {
+    readyState='connecting';ordered=true;maxRetransmits=null;maxPacketLifeTime=null;
+    send(data){super.send(data);const copy=typeof data==='string'?data:structuredClone(data);
+      queueMicrotask(()=>{if(this.readyState==='open'&&this.other.readyState==='open')this.other.receive(copy);});}
+    close(){if(this.readyState==='closed')return;super.close();this.other?.close();}
+  }
+  class BridgedPC extends PC {
+    constructor(config){super(config);this.id=String(++next);pcs.set(this.id,this);}
+    createDataChannel(){this.channel=new Ordered();channels.push(this.channel);return this.channel;}
+    async createOffer(){return {type:'offer',sdp:this.id};}
+    async createAnswer(){return {type:'answer',sdp:this.id};}
+    async setLocalDescription(description){this.localDescription=description;}
+    async setRemoteDescription(description){
+      this.remoteDescription=description;const peer=pcs.get(description.sdp);assert(peer,'real paired SDP');
+      if(description.type==='offer'){
+        this.channel=new Ordered();channels.push(this.channel);this.channel.other=peer.channel;peer.channel.other=this.channel;
+        const event=new Event('datachannel');event.channel=this.channel;this.dispatchEvent(event);
+      }else queueMicrotask(()=>{for(const channel of [this.channel,peer.channel]){channel.readyState='open';channel.dispatchEvent(new Event('open'));}});
+    }
+    close(){super.close();this.channel?.close();}
+  }
+  const Memory=memoryRelaySocket();
+  class Socket extends Memory {send(text){const [type,event]=JSON.parse(text);if(type==='EVENT'&&event.kind===24170)presences.push(event);super.send(text);}}
+  const original=RelaySwarmSession.prototype.sendSignal;
+  t.mock.method(RelaySwarmSession.prototype,'sendSignal',function(to,envelope){
+    envelope=structuredClone(envelope);
+    if(staleAnswer&&envelope.type==='answer')original.call(this,to,{...envelope,requestId:'stale-'+envelope.requestId,payload:{...envelope.payload,obj:2}});
+    const denied=deniedOffer&&envelope.type==='offer'?original.call(this,to,{...envelope,requestId:'denied-'+envelope.requestId,payload:{...envelope.payload,obj:2,ticket:'denied'}}):null;
+    if(Object.hasOwn(capability,envelope.type)){
+      if(capability[envelope.type]===null)delete envelope.payload.obj;else envelope.payload.obj=capability[envelope.type];
+    }
+    signals.push({from:this.pubkey,to,...structuredClone(envelope)});
+    if(denied){pendingSignals.push(()=>original.call(this,to,envelope));return denied;}
+    return original.call(this,to,envelope);
+  });
+  if(omitPresenceCapability){
+    const announce=RelaySwarmSession.prototype.announcePresence;
+    t.mock.method(RelaySwarmSession.prototype,'announcePresence',function(payload){return announce.call(this,{...payload,transports:payload.transports.map(({obj,...entry})=>entry)});});
+  }
+  const bytes=new Uint8Array(32).fill(9),key=createHash('sha256').update(`${base.swarmId}\n/media/seg.ts`).digest('hex');
+  const hash=createHash('sha256').update(bytes).digest('hex');
+  const signed=signedFixture({v:3,key,sha256:hash,rendition:'/media/index.m3u8',playlist:'/media/index.m3u8',mediaType:'main',encryption:null,pieceSize:commitmentPieceSize(bytes.length),pieces:[hash]});
+  const make=async({cold=false,delay=0,legacy=false,admit}={})=>{
+    let http=0,bodies=0,aborts=0;class Origin extends Loader {
+      stats=new LoadStats();
+      load(ctx,config,callbacks){http++;const complete=()=>{bodies++;this.stats.loaded=this.stats.total=bytes.length;callbacks.onSuccess({data:bytes.slice().buffer},this.stats,ctx,null);};
+        if(delay)this.timer=setTimeout(complete,delay);else complete();}
+      abort(){aborts++;clearTimeout(this.timer);}destroy(){this.abort();}
+    }
+    const swarm=createHlsSwarm({...base,relays:['wss://memory-relay.example'],WebSocketImpl:Socket,RTCPeerConnectionImpl:BridgedPC,
+      mode:'peer-first',coreWasm:multiCore,multiHolder:true,serve:true,maxPeers:1,getCommitment:()=>signed.event,streamEvent:signed.options.streamEvent,
+      originReserveMs:100,originFallbackMs:1000,maxPeerWaitMs:1500,traceRequests:128,ticket:"granted",
+      ...(legacy?{multiHolder:false}:{}),...(admit?{admit}:{}),
+      ...(cold?{sustainablePeerWait:true,zeroBudgetPeerRace:true,lateHaveRace:true,latePeerRace:true,uploadPacing:true}:{})});swarms.push(swarm);
+    const hls={config:{loader:Origin},media:{currentTime:0,buffered:{length:cold?0:1,start:()=>0,end:()=>8}}};swarm.attach(hls);
+    await until(()=>swarm.metrics().core.state==='ready'&&presences.some(event=>event.pubkey===swarm.metrics().pubkey));
+    const frag=M3U8Parser.parseLevelPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n#EXTINF:2,\nseg.ts\n','https://origin.example/media/index.m3u8',0,'main',0,null).fragments[0];
+    const load=()=>new Promise((resolve,reject)=>{const loader=new hls.config.fLoader({});frag.stats=loader.stats;
+      loader.load({url:frag.url,frag,part:null},{timeout:4000},{onSuccess:r=>resolve(new Uint8Array(r.data)),onError:reject,onTimeout:()=>reject(Error('timeout'))});});
+    return {swarm,hls,load,get http(){return http;},get bodies(){return bodies;},get aborts(){return aborts;},set delay(value){delay=value;}};
+  };
+  return {make,bytes,key,presences,signals,channels,releaseSignals(){for(const send of pendingSignals.splice(0))send();},close(){for(const swarm of swarms)swarm.stop();}};
+}
+
+test('SDP framing: late factory missing the holder presence accepts verified schema3 before heartbeat',async t=>{
+  const f=await framingPairFixture(t);
+  try {
+    const a=await f.make();sameBytes(await a.load(),f.bytes);await until(()=>a.swarm.metrics().bytes.held===f.bytes.length);
+    assert.equal(f.presences.filter(event=>event.pubkey===a.swarm.metrics().pubkey).length,1);
+    const b=await f.make();await until(()=>a.swarm.metrics().peers.connected===1&&b.swarm.metrics().peers.connected===1);
+    await until(()=>f.channels.some(channel=>channel.sent.some(frame=>frame.t==='have'&&(frame.keys??frame.add??[]).includes(f.key))));
+    sameBytes(await b.load(),f.bytes);
+    assert.equal(b.http,0,'late B uses actual A retained cache without waiting for a presence heartbeat');
+    assert.equal(b.swarm.metrics().segments.peerFirstLoaded,1);assert.equal(a.swarm.metrics().bytes.uploaded,f.bytes.length);
+    assert.equal(b.swarm.metrics().core.multiHolder.delivered,1,'missed presence must not force legacy whole-object transfer instead of verified schema3 ranges');
+    assert.equal(f.presences.filter(event=>event.pubkey===a.swarm.metrics().pubkey).length,1,'no reannouncement repaired the missing presence');
+    assert(f.signals.some(row=>row.type==='offer'));assert(f.signals.some(row=>row.type==='answer'));
+  }finally{f.close();}
+});
+
+
+test('SDP framing: cold public races accept held peer bytes before the receiver HTTP body',async t=>{
+  const f=await framingPairFixture(t);let clock;
+  try {
+    const a=await f.make();sameBytes(await a.load(),f.bytes);await until(()=>a.swarm.metrics().bytes.held===f.bytes.length);
+    const b=await f.make({cold:true,delay:300});await until(()=>a.swarm.metrics().peers.connected===1&&b.swarm.metrics().peers.connected===1);
+    await until(()=>f.channels.some(channel=>channel.sent.some(frame=>frame.t==='have'&&(frame.keys??frame.add??[]).includes(f.key))));
+    clock=virtualClock(t);sameBytes(await clock.settle(b.load(),1000),f.bytes);
+    assert.equal(b.http,1,'the ordinary cached race still starts its single HTTP backstop');
+    assert.equal(b.swarm.metrics().bytes.fromPeers,f.bytes.length,'cold B must consume verified held bytes despite missing A presence');
+    assert.equal(b.swarm.metrics().segments.peerFirstLoaded,1);assert.equal(b.bodies,0,'peer result precedes any receiver origin payload');assert(b.aborts>0);
+    await clock.advance(350);assert.equal(b.bodies,0,'cancelled HTTP cannot later deliver');
+    assert.equal(f.presences.filter(event=>event.pubkey===a.swarm.metrics().pubkey).length,1,'no heartbeat repairs eligibility');
+  }finally{clock?.restore();f.close();}
+});
+
+
+test('SDP framing: installed offer and answer enable cold peer races in both directions without presence capability',async t=>{
+  const f=await framingPairFixture(t,{omitPresenceCapability:true});let clock;
+  try{
+    const a=await f.make({cold:true});sameBytes(await a.load(),f.bytes);await until(()=>a.swarm.metrics().bytes.held===32);
+    const b=await f.make({cold:true,delay:300});await until(()=>a.swarm.metrics().peers.connected===1&&b.swarm.metrics().peers.connected===1);
+    clock=virtualClock(t);sameBytes(await clock.settle(b.load(),1000),f.bytes);
+    await clock.advanceUntil(()=>b.swarm.metrics().bytes.held===32,100);a.delay=300;
+    sameBytes(await clock.settle(a.load(),1000),f.bytes);
+    for(const participant of [a,b]){
+      assert.equal(participant.swarm.metrics().bytes.fromPeers,32);assert.equal(participant.swarm.metrics().core.multiHolder.delivered,1);
+      assert.equal(participant.swarm.metrics().bytes.uploaded,32);assert(participant.aborts>0);
+    }
+    assert.equal(a.bodies,1,'only the initial provider HTTP payload');assert.equal(b.bodies,0);
+    assert(f.signals.filter(row=>['offer','answer'].includes(row.type)).every(row=>row.payload.obj===2));
+    assert.equal(f.presences.length,2,'only the initial presence of each factory, neither advertises obj');
+    for(const event of f.presences)assert.equal(JSON.parse(event.content).transports[0].obj,undefined);
+  }finally{clock?.restore();f.close();}
+});
+
+test('SDP framing: absent or invalid offer metadata never infers ranges from PC or HAVE',async t=>{
+  for(const obj of [null,0,1,3,16,2.5,'2',true,{}])await t.test(JSON.stringify(obj),async t=>{
+    const f=await framingPairFixture(t,{capability:{offer:obj}});let clock;
+    try{
+      const a=await f.make();await a.load();await until(()=>a.swarm.metrics().bytes.held===32);
+      const b=await f.make({cold:true,delay:80});await until(()=>b.swarm.metrics().peers.connected===1);
+      clock=virtualClock(t);sameBytes(await clock.settle(b.load(),1000),f.bytes);
+      assert.equal(b.http,1);assert.equal(b.bodies,1);assert.equal(b.swarm.metrics().bytes.fromPeers,0);
+      assert.equal(b.swarm.metrics().core.multiHolder.delivered,0);
+    }finally{clock?.restore();f.close();}
+  });
+});
+
+test('SDP framing: disabled local ranges advertises no signal capability',async t=>{
+  const f=await framingPairFixture(t);let clock;
+  try{
+    const a=await f.make({legacy:true});await a.load();await until(()=>a.swarm.metrics().bytes.held===32);
+    const b=await f.make({cold:true,delay:80});await until(()=>b.swarm.metrics().peers.connected===1);
+    clock=virtualClock(t);await clock.settle(b.load(),1000);
+    assert.equal(f.signals.find(row=>row.type==='offer').payload.obj,undefined);
+    assert.equal(b.swarm.metrics().bytes.fromPeers,0);assert.equal(b.bodies,1);
+  }finally{clock?.restore();f.close();}
+});
+
+test('SDP framing: an unadmitted offer cannot prime the subsequent legacy negotiation',async t=>{
+  const f=await framingPairFixture(t,{deniedOffer:true,capability:{offer:null}});let clock;
+  try{
+    const a=await f.make();await a.load();await until(()=>a.swarm.metrics().bytes.held===32);
+    const b=await f.make({cold:true,delay:80,admit:(_peer,ticket)=>ticket==='granted'});
+    await until(()=>b.swarm.metrics().peers.admitRefused>0);f.releaseSignals();
+    await until(()=>b.swarm.metrics().peers.connected===1);
+    assert(b.swarm.metrics().peers.admitRefused>0);
+    clock=virtualClock(t);await clock.settle(b.load(),1000);
+    assert.equal(b.swarm.metrics().bytes.fromPeers,0);assert.equal(b.bodies,1);
+  }finally{clock?.restore();f.close();}
+});
+
+test('SDP framing: stale answer cannot prime a current answer lacking capability',async t=>{
+  const f=await framingPairFixture(t,{omitPresenceCapability:true,staleAnswer:true,capability:{answer:null}});let clock;
+  try{
+    const a=await f.make({cold:true});await a.load();await until(()=>a.swarm.metrics().bytes.held===32);
+    const b=await f.make({cold:true,delay:300});await until(()=>a.swarm.metrics().peers.connected===1&&b.swarm.metrics().peers.connected===1);
+    clock=virtualClock(t);sameBytes(await clock.settle(b.load(),1000),f.bytes);
+    await clock.advanceUntil(()=>b.swarm.metrics().bytes.held===32,100);a.delay=80;
+    sameBytes(await clock.settle(a.load(),1000),f.bytes);
+    assert.equal(a.swarm.metrics().bytes.fromPeers,0);assert.equal(a.bodies,2);
+    assert.equal(b.swarm.metrics().bytes.fromPeers,32,'the admitted installed offer still authorises the opposite direction');
+  }finally{clock?.restore();f.close();}
 });

@@ -266,20 +266,27 @@ try {
     await pages[1].evaluate(() => window.fixture.start("receiver"));
     await pages[1].waitForFunction(keys => {
       const state = window.fixture.readiness(keys);
-      return state.cached && state.peers.some(peer => peer.pendingPresence > 0);
+      return state.cached;
     }, keys, { timeout: 15_000 });
     const beforePresence = await pages[1].evaluate(keys => ({ ...window.fixture.readiness(keys), ready: window.fixture.ready(keys) }), keys);
     assert.equal(beforePresence.cached, true, "native connection already advertises all cached objects");
-    assert.equal(beforePresence.ready, false, "HAVE alone is insufficient before framing capabilities arrive");
+    assert.equal(beforePresence.ready, false, "the presence observer has received no framing capability");
     assert.ok(beforePresence.peers.every(peer => peer.framing === null));
-    const releasedPresence = await pages[1].evaluate(() => window.fixture.releasePresence());
-    assert.ok(releasedPresence > 0);
-    await pages[1].waitForFunction(keys => window.fixture.ready(keys), keys, { timeout: 15_000 });
-    const afterPresence = await pages[1].evaluate(keys => window.fixture.readiness(keys), keys);
+    let releasedPresence, afterPresence, firstCompletionPresence;
     for (const sn of [1, 2, 3]) {
+      if (sn === 2) {
+        releasedPresence = await pages[1].evaluate(() => window.fixture.releasePresence());
+        await pages[1].waitForFunction(keys => window.fixture.ready(keys), keys, { timeout: 15_000 });
+        afterPresence = await pages[1].evaluate(keys => window.fixture.readiness(keys), keys);
+      }
       const result = await pages[1].evaluate(sn => window.fixture.load(sn), sn);
       // Retain the failing load as well as earlier successes in CI artefacts.
       results.push(result);
+      if (sn === 1) {
+        firstCompletionPresence = await pages[1].evaluate(keys => window.fixture.readiness(keys), keys);
+        assert.equal(firstCompletionPresence.ready, false, "verified first receipt precedes any delivered presence capability");
+        assert.ok(firstCompletionPresence.peers.every(peer => peer.framing === null));
+      }
       assert.equal(result.size, payload.length); assert.equal(result.sha256, expectedHash);
       assert.deepEqual(result.callbacks, { success: 1, error: 0, abort: 0 });
       assert.equal(result.bufferedRanges, 0); assert.equal(result.connected, 1);
@@ -313,7 +320,7 @@ try {
     assert.ok(stopped.flat().every(state => state === "closed")); assert.deepEqual(errors, []);
     return { ok: true, at: new Date().toISOString(), fixture: "Two independent Chrome contexts, local Nostr signalling, native SCTP and WASM; synthetic protocol data, not video/NAT qualification",
       browserVersion: browser.version(), payloadBytes: payload.length, sha256: expectedHash, pieceSize,
-      presenceReadiness: { beforePresence, releasedPresence, afterPresence }, results, requests: requests.map(({ timer, ...record }) => record), stopped, pageErrors: errors };
+      presenceReadiness: { beforePresence, firstCompletionPresence, releasedPresence, afterPresence }, results, requests: requests.map(({ timer, ...record }) => record), stopped, pageErrors: errors };
   };
   const result = await Promise.race([run(), new Promise((_, reject) => { guard = setTimeout(() => reject(new Error("Native cached race fixture exceeded 60 seconds.")), 60_000); })]);
   await saveReceipt(result);

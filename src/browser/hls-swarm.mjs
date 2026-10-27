@@ -425,7 +425,7 @@ class HlsSwarm {
     // CORE_WAIT_MS has passed. Null when no core was requested.
     this.coreWait = null;
     this.coreRelease = null;
-    // Each peer's object framing version from its latest presence.
+    // Explicit object framing from presence or an admitted installed SDP exchange.
     this.remoteFraming = new Map();
     this.transferIds = new WeakMap();
     this.nextTransferId = 1;
@@ -3664,6 +3664,14 @@ class HlsSwarm {
     return check.promise;
   }
 
+  #signalFraming(from, capability) {
+    // Only an explicit supported capability grants ranges; absence keeps the
+    // conservative presence-derived version. Called after current SDP install.
+    if (capability !== 2) return;
+    this.remoteFraming.delete(from); this.remoteFraming.set(from, 2);
+    if (this.remoteFraming.size > 1024) this.remoteFraming.delete(this.remoteFraming.keys().next().value);
+  }
+
   async #onPresence({ from, payload }) {
     if (this.stopped || payload.role !== "viewer") return;
     const transport = payload.transports.find((entry) => entry.type === TRANSPORT);
@@ -3879,6 +3887,7 @@ class HlsSwarm {
         // A saturated holder may use that advice for the same bounded rotation.
         const ticket = this.#ownTicket();
         const sent = this.#sendSignal(pubkey, "offer", requestId, { sdp: pc.localDescription.sdp, peers: this.links.size,
+          ...(this.#rangesEnabled() ? { obj: 2 } : {}),
           ...(dial.discovery ? { requestedKey: dial.discovery.key } : {}), ...(ticket ? { ticket } : {}) });
         this.#transport(pc, sent ? "signal-send" : "signal-failed", "offer");
         if (!sent) this.#failDial(dial, "failed");
@@ -3933,6 +3942,7 @@ class HlsSwarm {
           await dial.pc.setRemoteDescription({ type: "answer", sdp });
           if (!this.#currentNegotiation(dial, negotiation)) return;
           this.#transport(dial.pc, "remote-installed", "answer");
+          this.#signalFraming(from, payload.payload.obj);
           this.#readyDial(dial, negotiation);
         });
       } catch (error) {
@@ -4045,9 +4055,10 @@ class HlsSwarm {
         }
         if (!this.#currentNegotiation(dial, negotiation)) return;
         const ticket = this.#ownTicket();
-        const sent = this.#sendSignal(from, "answer", payload.requestId, { sdp: pc.localDescription.sdp, ...(ticket ? { ticket } : {}) });
+        const sent = this.#sendSignal(from, "answer", payload.requestId, { sdp: pc.localDescription.sdp,
+          ...(this.#rangesEnabled() ? { obj: 2 } : {}), ...(ticket ? { ticket } : {}) });
         this.#transport(pc, sent ? "signal-send" : "signal-failed", "answer");
-        if (sent) { this.counters.offersAccepted += 1; this.#readyDial(dial, negotiation); }
+        if (sent) { this.#signalFraming(from, payload.payload.obj); this.counters.offersAccepted += 1; this.#readyDial(dial, negotiation); }
         else this.#failDial(dial, "failed");
       });
     } catch (error) {

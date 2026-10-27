@@ -51,9 +51,15 @@ decision before spending allowance or sending media. Native Chrome/WASM loopback
 checks retain the same connection through three admission-ticket rotations;
 refusal, timeout and shutdown prevent delivery. Distributed R70 retention, TURN
 renewal and physical-device/public-NAT acceptance remain open.
-Current main's cached-peer native fixture waits for the accepted peer's framing-2
-presence as well as HAVE. A delayed signed-presence control reproduces the old
-readiness error; the v0.4.2 tag's two failed browser attempts remain historical RED.
+The unreleased browser loader also carries explicit object framing 2 in its
+existing encrypted SDP offer/answer when ranges are enabled; admission, current
+negotiation and successful remote SDP installation gate acceptance. Two-factory
+ordered-transport tests cover late presence loss, not physical playback.
+The current cached-peer native fixture completes its first verified peer receipt
+while the receiver holds all signed presence frames, then releases presence for
+the original HTTP-win and reused-peer controls. Native loopback Chrome/WASM
+passes; this is protocol data, not video or device qualification. The v0.4.2
+tag's two failed browser attempts remain historical RED.
 v0.4.3 adds opt-in sustainablePeerWait: serial waits and extensions fit within
 each segment/part duration less measured origin recovery with a 25% and 100 ms
 margin. Independent cached-peer races retain their window beside immediate HTTP.

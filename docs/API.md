@@ -73,6 +73,16 @@ connection is bound to its remote ephemeral signalling key, without an array
 ordering assumption. Records cannot mutate membership and disappear when the
 link closes or the swarm stops. It creates no new network messages.
 
+While range support is enabled, the existing authenticated, encrypted SDP
+offer and answer also carry optional `obj: 2`. The loader records that explicit
+capability only for an admitted, still-current negotiation after successful
+remote SDP installation and before accepting the link. Missing or invalid
+metadata retains conservative presence-derived behaviour; an open connection
+or HAVE alone never proves range support. This avoids requiring a late viewer
+to receive the holder's next presence before using verified schema-3 ranges.
+It adds no signalling event or timer and changes no media verification,
+admission, lease or HTTP deadline rule.
+
 The opt-in `zeroBudgetPeerRace: true` races an already advertised cached
 schema 3 object against immediately started normal HTTP when no safe peer
 wait remains. It requires `coreWasm`/`multiHolder` framing eligibility and the
