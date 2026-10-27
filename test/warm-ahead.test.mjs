@@ -1374,6 +1374,34 @@ test('rolling startup pins coverage across commit without polling the publishing
   assert.equal(f.engine.startupSnapshot().commitCompleted, true);
 });
 
+test('startup parsed metadata refresh tolerates arithmetic roundoff but cancels real geometry changes', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const cases = [['start', 3.552713678800501e-15], ['duration', 3.552713678800501e-15],
+    ['start', 1e-6], ['duration', 1e-6], ['start', 1e-6, 1e9]];
+  for (const [field, delta, offset = 0] of cases) {
+    const starts = [offset, offset + 2, offset + 4], durations = [2, 2, 2];
+    const f = startupFixture(t, { starts, durations }); f.state.target = offset + 1.3;
+    const first = f.load(0, 8000);
+    f.requests[0].finish(); await flushStartup();
+    const response = f.requests[0].response, stats = first.loader.stats;
+    assert.equal(f.requests[1].context.frag[field], field === 'start' ? offset + 2 : 2);
+    // next() returns freshly parsed metadata; the retained request and plan
+    // keep their original geometry, as in an Hls playlist refresh.
+    (field === 'start' ? starts : durations)[1] += delta;
+    t.mock.timers.tick(100); await flushStartup();
+    f.requests[1].finish(true); await flushStartup();
+    if (delta < 1e-9) {
+      assert.equal(f.engine.startupSnapshot().state, 'ready', field);
+      assert.equal(first.calls.success, 1); assert.equal(first.calls.abort, 0); assert.equal(first.calls.error, 0);
+      assert.equal(first.calls.args[0], response); assert.equal(first.calls.args[1], stats); assert.equal(first.calls.args[2], first.context);
+    } else {
+      assert.equal(f.engine.startupSnapshot().state, 'cancelled', field);
+      assert.equal(f.engine.startupSnapshot().reason, 'context-changed');
+      assert.equal(first.calls.success, 0); assert.equal(first.calls.abort, 1); assert.equal(first.calls.error, 0);
+    }
+  }
+});
+
 test('rolling startup rechecks new parsed geometry and signed authority after verification yields', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   for (const action of ['geometry', 'authority']) {

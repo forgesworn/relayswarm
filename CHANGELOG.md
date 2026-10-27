@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve valid startup and cached-media ownership across Hls.js playlist
+  refreshes that introduce floating-point round-off. Start/duration comparisons
+  tolerate only capped machine precision, at most one nanosecond; immutable
+  media identity, meaningful geometry changes, authority and resource limits
+  retain their existing checks.
+
 - Allow the one-shot verified startup reservoir up to twelve seconds from its
   original first-fragment load entry, still constrained by the shorter parent
   deadline. A slow 4K source can otherwise expire while a required fragment is

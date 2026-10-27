@@ -146,6 +146,12 @@ insufficient capacity or expiration fails the loader explicitly; it does not
 release stale media or renew the deadline on automatic HLS retries. A separate
 new adapter may start again after an explicit user retry.
 
+Fresh parsed start/duration values may contain arithmetic round-off after an
+Hls.js playlist refresh. Geometry equality tolerates up to 32 machine epsilons
+scaled to the compared values, capped at one nanosecond. Media key and scope
+remain exact; meaningful geometry changes still cancel the pending operation.
+This does not lower the required recovery headroom or extend its deadline.
+
 While that first callback remains pending, a bounded 100 ms poll reads the
 host's fresh target. Admission can skip an unrequested parsed fragment already
 behind the required recovery horizon, with at most one metadata hop per poll.

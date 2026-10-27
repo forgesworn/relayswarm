@@ -1182,6 +1182,12 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 ## Unreleased
 
+- Preserve valid startup and cached-media ownership across Hls.js playlist
+  refreshes that introduce floating-point round-off. Start/duration comparisons
+  tolerate only capped machine precision, at most one nanosecond; immutable
+  media identity, meaningful geometry changes, authority and resource limits
+  retain their existing checks.
+
 - Allow the one-shot verified startup reservoir up to twelve seconds from its
   original first-fragment load entry, still constrained by the shorter parent
   deadline. A slow 4K source can otherwise expire while a required fragment is
@@ -2140,6 +2146,12 @@ insufficient capacity or expiration fails the loader explicitly; it does not
 release stale media or renew the deadline on automatic HLS retries. A separate
 new adapter may start again after an explicit user retry.
 
+Fresh parsed start/duration values may contain arithmetic round-off after an
+Hls.js playlist refresh. Geometry equality tolerates up to 32 machine epsilons
+scaled to the compared values, capped at one nanosecond. Media key and scope
+remain exact; meaningful geometry changes still cancel the pending operation.
+This does not lower the required recovery headroom or extend its deadline.
+
 While that first callback remains pending, a bounded 100 ms poll reads the
 host's fresh target. Admission can skip an unrequested parsed fragment already
 behind the required recovery horizon, with at most one metadata hop per poll.
@@ -2906,6 +2918,18 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased parsed-timestamp round-off (27 October 2026)
+
+A playlist refresh can represent the same fragment start as `10.64` and
+`10.640000000000004`. Strict equality incorrectly treats that arithmetic noise
+as changed media and cancels pending startup. Geometry comparisons now accept
+only bounded machine precision, with a hard one-nanosecond ceiling. Media keys
+and scope stay exact. Regressions preserve the original response, statistics
+and context exactly once across a harmless refresh, while real start/duration
+changes and a large-timeline case still cancel. Recovery, capacity, authority,
+ACK and absolute deadline checks remain unchanged. This correctness fix alone
+does not establish sustained playback, traffic savings or device acceptance.
 
 ## Unreleased startup load budget (27 October 2026)
 

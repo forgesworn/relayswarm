@@ -10,6 +10,18 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased parsed-timestamp round-off (27 October 2026)
+
+A playlist refresh can represent the same fragment start as `10.64` and
+`10.640000000000004`. Strict equality incorrectly treats that arithmetic noise
+as changed media and cancels pending startup. Geometry comparisons now accept
+only bounded machine precision, with a hard one-nanosecond ceiling. Media keys
+and scope stay exact. Regressions preserve the original response, statistics
+and context exactly once across a harmless refresh, while real start/duration
+changes and a large-timeline case still cancel. Recovery, capacity, authority,
+ACK and absolute deadline checks remain unchanged. This correctness fix alone
+does not establish sustained playback, traffic savings or device acceptance.
+
 ## Unreleased startup load budget (27 October 2026)
 
 The one-shot startup reservoir now has twelve seconds from the original
