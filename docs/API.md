@@ -139,8 +139,9 @@ explicitly. The original first response is handed to HLS unchanged and
 is not retained as an extra shared-cache seed; its reservation is released.
 Release requires a contiguous verified interval covering the
 fresh target plus at least the origin reserve or measured p90 whole-origin
-recovery with its 25% and 100 ms margin, whichever is greater. The original
-eight-second and parent load deadlines remain upper bounds. Invalid ownership,
+recovery with its 25% and 100 ms margin, whichever is greater. Startup is
+bounded to twelve seconds from the original first-fragment load entry, or the shorter parent load deadline. Ordinary speculative requests
+retain their separate eight-second expiry. Invalid ownership,
 insufficient capacity or expiration fails the loader explicitly; it does not
 release stale media or renew the deadline on automatic HLS retries. A separate
 new adapter may start again after an explicit user retry.
@@ -183,8 +184,8 @@ return a promise. For example, a host can prepare a new room locally at zero,
 publish its start after verified media is ready, and await acknowledgement.
 An existing room must retain its advancing clock.
 
-The original eight-second/parent deadline and held reservations remain in force
-while the host acknowledges. Cancellation retires the operation; late resolution
+The original twelve-second/parent startup deadline and held reservations
+remain in force while the host acknowledges. Cancellation retires the operation; late resolution
 or rejection cannot release media. A current hook failure reports
 `commit-refused`. After success, the loader repeats fresh target, authority,
 context, parsed-fragment and resident-coverage checks. Insufficient headroom

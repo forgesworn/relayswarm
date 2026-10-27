@@ -1194,7 +1194,7 @@ test('rolling startup replaces only an obsolete future while retaining the exact
   assert.equal(f.engine.startupSnapshot().verifiedEnd, 8);
   assert.equal(f.engine.startupSnapshot().limits.objects, 4);
   assert.equal(f.engine.startupSnapshot().limits.bytes, 24 * 1024 * 1024);
-  assert.equal(f.engine.startupSnapshot().limits.deadlineMs, 8000);
+  assert.equal(f.engine.startupSnapshot().limits.deadlineMs, 12000);
   const reads = f.state.targetCalls;
   await sleep(125);
   assert.equal(f.state.targetCalls, reads, 'no startup clock remains after release');
@@ -2087,4 +2087,65 @@ test('startup extra-future byte refusal preserves useful coverage after the orig
   assert.equal(f.requests.length, 3); assert.equal(f.engine.snapshot().cacheBytes, 0);
   assert.equal(f.engine.snapshot().reservationBytes, 0);
   t.mock.timers.tick(1000); await flushStartup(); assert.equal(first.calls.error, 1);
+});
+
+
+// Controlled continuation after the saved run cancelled its fourth request;
+// 8700ms is a test completion, not an observed WAN completion or decoder result.
+async function startupBudgetCadence(t, parentMs = 20000) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let elapsed = 0;
+  t.mock.method(performance, 'now', () => 1000 + elapsed);
+  const f = startupFixture(t, { timedStats: true });
+  f.state.target = 0; f.state.recovery = 7718.75;
+  const first = f.load(0, parentMs), samples = [];
+  const capture = () => samples.push({ startup: f.engine.startupSnapshot(), warm: f.engine.snapshot() });
+  const to = async end => {
+    while (elapsed < end) {
+      const step = Math.min(100, end - elapsed);
+      elapsed += step; t.mock.timers.tick(step); await flushStartup();
+    }
+    capture();
+  };
+  await flushStartup(); capture();
+  await to(6000); f.requests[0].finish(); f.requests[1].finish(); await flushStartup(); capture();
+  assert.equal(f.requests[2].context.frag.sn, 2);
+  await to(7000); f.requests[2].finish(); await flushStartup(); capture();
+  await to(7100); // Existing100ms poll admits the fourth verified-coverage successor.
+  assert.equal(f.requests[3].context.frag.sn, 3, 'existing fourth residency slot supplies contiguous[6,8]');
+  return { f, first, samples, to, capture };
+}
+
+test('startup load budget: controlled fourth body at8.7s releases within12s, without changing steady8s', async t => {
+  const { f, first, samples, to, capture } = await startupBudgetCadence(t);
+  await to(8700); f.requests[3].finish(); await flushStartup(); capture();
+  assert.equal(first.calls.success, 1, 'a controlled feasible fourth completion after8s remains within the intentional startup budget');
+  assert.equal(first.calls.error, 0); assert.equal(first.calls.abort, 0);
+  assert.strictEqual(first.calls.args[0], f.requests[0].response);
+  assert.strictEqual(first.calls.args[1], f.requests[0].stats);
+  assert.strictEqual(first.calls.args[2], first.context);
+  assert.equal(f.engine.startupSnapshot().requiredHeadroomMs, 7718.75);
+  assert.equal(f.engine.startupSnapshot().limits.deadlineMs, 12000);
+  assert(samples.some(row => row.startup.state === 'buffering' && row.warm.limits.deadlineMs === 12000));
+  assert(samples.some(row => row.startup.state === 'buffering' && row.startup.heldObjects === 4));
+  assert(samples.every(row => row.startup.heldObjects <= 4 && row.startup.heldBytes <= 24 * 1024 * 1024 && row.warm.active <= 1));
+  assert(f.state.reservations.every(bytes => bytes <= 24 * 1024 * 1024));
+  assert.equal(f.engine.snapshot().limits.deadlineMs, 8000, 'released startup returns to steady request diagnostics');
+  const count = f.requests.length; await to(20000);
+  assert.equal(f.requests.length, count); assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
+});
+
+for (const parent of [20000, 9000]) test(`startup load budget: absolute ${Math.min(parent, 12000)} ms limit cannot renew through retry or late body`, async t => {
+  const { f, first, to } = await startupBudgetCadence(t, parent), limit = Math.min(parent, 12000);
+  await to(limit - 1); assert.equal(first.calls.error, 0, 'no early failure or per-step deadline renewal');
+  assert.equal(f.engine.startupSnapshot().limits.deadlineMs, 12000);
+  assert.equal(f.engine.snapshot().limits.deadlineMs, 12000);
+  await to(limit); assert.equal(first.calls.error, 1);
+  assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+  assert.equal(f.requests[3].aborted, true); assert.equal(f.engine.startupSnapshot().state, 'failed');
+  const count = f.requests.length; f.requests[3].finish(true); await flushStartup();
+  const retry = f.load(0, 20000); assert.equal(retry.calls.error, 1); assert.equal(f.requests.length, count);
+  await to(20000); assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1);
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().cacheBytes, 0);
+  assert.equal(f.engine.snapshot().limits.deadlineMs, 8000);
 });
