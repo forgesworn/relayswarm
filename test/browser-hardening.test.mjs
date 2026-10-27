@@ -8,7 +8,7 @@ import { Readable } from "node:stream";
 import { readFile } from "node:fs/promises";
 import { Worker as WorkerThread } from "node:worker_threads";
 import { generateSecretKey, finalizeEvent, getPublicKey } from "nostr-tools/pure";
-import { M3U8Parser, LoaderContextType } from 'hls.js';
+import Hls, { M3U8Parser, LoaderContextType } from 'hls.js';
 const { createHlsSwarm } = await import(process.env.TEST_SWARM_MODULE ?? "../src/browser/hls-swarm.mjs");
 import { loadCore } from "../src/browser/core-wasm.mjs";
 import { originClockOffsetMs, originClockSummary } from "../src/browser/origin-clock.mjs";
@@ -1520,7 +1520,10 @@ test("peer eligibility preserves origin errors and pending loader aborts without
     const loader = new fixture.hls.config.fLoader({}); let aborts = 0;
     loader.load(context, {}, { onAbort: (stats) => { aborts++; assert.equal(stats.aborted, true); },
       onSuccess: () => assert.fail("aborted load must not deliver"), onError: () => assert.fail("aborted load must not fallback") });
-    loader.abort(); await sleep(20);
+    loader.abort();
+    // Eligibility records cancellation after the asynchronous segment-key
+    // digest resumes; abort callbacks do not wait for that diagnostic.
+    await until(() => fixture.swarm.metrics().peerEligibilityDiagnostics.counters["aborted-before-eligibility"] === 1);
     assert.equal(aborts, 1); assert.equal(errors, 1);
     assert.equal(fixture.swarm.metrics().segments.aborted, 1);
     assert.equal(fixture.swarm.metrics().segments.originFallbacks, 1);
@@ -4821,6 +4824,171 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
   const load = async (context = multiContext) => new Uint8Array((await new Promise((resolve) => new f.hls.config.fLoader(hlsConfig).load(context, loaderConfig, { onSuccess: resolve }))).data);
   return { ...f, bytes, key, channels, load, pieceSize, ranges, rangeLoaders, wholeLoads, hlsConfig, loaderConfig, get commitmentCalls() { return commitmentCalls; } };
 }
+
+// Retain hls.js's real FragmentLoader.resetLoader and XhrLoader.abortInternal.
+// Only XMLHttpRequest is held; no request reaches an origin.
+async function realHlsPeerCleanupFixture(t, { path = 'cached', beforeDestroy } = {}) {
+  assert.equal(Hls.version, '1.7.3', 'exercise the pinned hls.js disposal contract');
+  const globals = new Map(['self', 'XMLHttpRequest', 'document'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const requests = [], destroys = [];
+  const media = Object.assign(new EventTarget(), {
+    currentTime: .1, paused: false, ended: false, seeking: false, readyState: 4, playbackRate: 1,
+    buffered: { length: 1, start: () => 0, end: () => 2 },
+  });
+  class HeldXHR {
+    readyState = 0;
+    status = 200;
+    responseType = 'arraybuffer';
+    responseURL = 'https://origin.example/media/seg.ts';
+    abortCalls = 0;
+    constructor() { requests.push(this); }
+    open() { this.readyState = 1; }
+    setRequestHeader() {}
+    getResponseHeader() { return null; }
+    getAllResponseHeaders() { return ''; }
+    send() { this.savedReady = this.onreadystatechange; }
+    abort() { this.abortCalls++; this.readyState = 0; }
+    complete(bytes, late = false) {
+      this.response = bytes.slice().buffer;
+      this.readyState = 4;
+      (late ? this.savedReady : this.onreadystatechange)?.();
+    }
+  }
+  Object.defineProperty(globalThis, 'self', { configurable: true, value: globalThis });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', { configurable: true, value: HeldXHR });
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: Object.assign(new EventTarget(), { visibilityState: 'visible' }) });
+  let actual, f, closed = false;
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    try { actual?.destroy(); }
+    finally {
+      try { await f?.close(); }
+      finally {
+        for (const [key, descriptor] of globals) {
+          if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+          else delete globalThis[key];
+        }
+      }
+    }
+  };
+  t.after(close);
+  try {
+    actual = new Hls({ autoStartLoad: false, enableWorker: false });
+    const playback = peerPlaybackOptions(500);
+    playback.key = createHash('sha256').update(`${base.swarmId}\n/media/seg.ts`).digest('hex');
+    const hash = createHash('sha256').update(playback.bytes).digest('hex');
+    const signed = signedFixture({
+      v: 3, key: playback.key, sha256: hash, rendition: '/media/index.m3u8', playlist: '/media/index.m3u8',
+      mediaType: 'main', encryption: null, pieceSize: commitmentPieceSize(playback.bytes.length), pieces: [hash],
+    });
+    f = await linkedFixture({
+      ...playback.options, coreWasm: multiCore, multiHolder: true,
+      streamEvent: signed.options.streamEvent, getCommitment: () => signed.event,
+      WebSocketImpl: memoryRelaySocket(), zeroBudgetPeerRace: true,
+      latePeerRace: path === 'late', sustainablePeerWait: true,
+    }, Hls.DefaultConfig.loader, { media });
+    const Wrapped = f.hls.config.fLoader, instances = [];
+    actual.config.fLoader = class extends Wrapped {
+      constructor(config) { super(config); instances.push(this); }
+      destroy() {
+        beforeDestroy?.(this);
+        destroys.push({ stats: this.stats, peer: !!this.peerStats, aborted: this.stats?.aborted });
+        return super.destroy();
+      }
+    };
+    const frag = M3U8Parser.parseLevelPlaylist(
+      '#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2,\nlead.ts\n#EXTINF:2,\nseg.ts\n',
+      'https://origin.example/media/index.m3u8', 0, 'main', 0, null,
+    ).fragments[1];
+    const add = async () => {
+      const channel = await f.addPeer(new RangedChannel(playback.bytes)), peer = f.peers.at(-1);
+      peer.announcePresence({ role: 'viewer', open: true, have: [playback.key], transports: [{ type: 'webrtc', publicKey: peer.pubkey, obj: 2 }] });
+      await until(() => f.swarm.metrics().peers.openPeersKnown === 1);
+      channel.receive(JSON.stringify({ t: 'have', keys: [playback.key] }));
+    };
+    await until(() => f.swarm.metrics().core.state === 'ready');
+    if (path === 'cached') await add();
+    const promise = actual.streamController.fragmentLoader.load(frag);
+    promise.catch(() => {}); // The test observes settlement after transport setup.
+    const stats = frag.stats;
+    await until(() => requests.length === 1);
+    if (path === 'late') await add();
+    return {
+      f, actual, frag, stats, promise, requests, destroys, bytes: playback.bytes, loader: instances[0], close,
+      disposeDirect: () => Wrapped.prototype.destroy.call(instances[0]),
+    };
+  } catch (error) { await close(); throw error; }
+}
+
+for (const path of ['cached', 'late']) test(`accepted peer stats: actual Hls ${path} cleanup preserves verified success and reference`, { timeout: 10_000 }, async t => {
+  const q = await realHlsPeerCleanupFixture(t, { path });
+  try {
+    const result = await q.promise;
+    sameBytes(new Uint8Array(result.payload), q.bytes);
+    assert.equal(result.frag, q.frag);
+    assert.equal(q.frag.stats, q.stats);
+    assert.equal(q.destroys[0].stats, q.stats);
+    assert.equal(q.destroys[0].aborted, false, 'verified peer stats are valid before real Hls synchronous cleanup');
+    assert.ok(q.requests[0].abortCalls >= 2, 'real XhrLoader abort and destroy both dispose the losing pending HTTP');
+    assert.equal(q.stats.aborted, false, 'losing XHR cleanup must not mark the accepted peer object aborted');
+    assert.equal(q.stats.loaded, q.bytes.length);
+    assert.equal(q.stats.total, q.bytes.length);
+    q.requests[0].complete(q.bytes, true);
+    await sleep(5);
+    assert.equal(q.f.swarm.metrics().segments.peerFirstLoaded, 1);
+    assert.equal(q.stats.aborted, false);
+  } finally { await q.close(); }
+});
+
+for (const path of ['http', 'pending-abort']) test(`accepted peer stats: actual Hls ${path} retains its original cleanup semantics`, { timeout: 10_000 }, async t => {
+  const q = await realHlsPeerCleanupFixture(t, { path });
+  try {
+    if (path === 'http') {
+      q.requests[0].complete(q.bytes);
+      const result = await q.promise;
+      sameBytes(new Uint8Array(result.payload), q.bytes);
+      assert.equal(q.stats.aborted, false);
+      assert.equal(q.requests[0].abortCalls, 0);
+      assert.equal(q.destroys[0].peer, false);
+    } else {
+      q.actual.streamController.fragmentLoader.abort();
+      await assert.rejects(q.promise, error => error.data.details === Hls.ErrorDetails.INTERNAL_ABORTED);
+      assert.equal(q.stats.aborted, true);
+    }
+  } finally { await q.close(); }
+});
+
+for (const incoming of [true, null, undefined]) test(`accepted peer stats: cleanup never normalises incoming ${incoming} to success`, { timeout: 10_000 }, async t => {
+  const q = await realHlsPeerCleanupFixture(t, { beforeDestroy: loader => { if (loader.peerStats) loader.peerStats.aborted = incoming; } });
+  try {
+    await q.promise;
+    assert.notEqual(q.stats.aborted, false);
+    assert.equal(q.destroys[0].aborted, incoming);
+  } finally { await q.close(); }
+});
+
+test('accepted peer stats: explicit caller abort before disposal stays aborted', { timeout: 10_000 }, async t => {
+  const q = await realHlsPeerCleanupFixture(t, { beforeDestroy: loader => { if (loader.peerStats) loader.abort(); } });
+  try { await q.promise; assert.equal(q.stats.aborted, true); }
+  finally { await q.close(); }
+});
+
+for (const unreadable of [false, true]) test(`accepted peer stats: ${unreadable ? 'throwing flag getter' : 'cleanup throw'} preserves disposal exception semantics`, { timeout: 10_000 }, async t => {
+  const q = await realHlsPeerCleanupFixture(t);
+  let totalReads = 0, disposed = 0;
+  try {
+    await q.promise;
+    const failure = new Error('fixture-disposal-error');
+    Object.defineProperty(q.stats, 'total', { configurable: true, get() { totalReads++; throw new Error('must-not-read-total'); } });
+    if (unreadable) Object.defineProperty(q.stats, 'aborted', { configurable: true, get() { throw new Error('unreadable-abort-flag'); } });
+    q.loader.inner.destroy = () => { disposed++; if (!unreadable) q.stats.aborted = true; throw failure; };
+    assert.throws(() => q.disposeDirect(), error => error === failure);
+    assert.equal(disposed, 1);
+    assert.equal(totalReads, 0);
+    if (!unreadable) assert.equal(q.stats.aborted, false, 'completed peer flag survives even when disposal throws');
+  } finally { await q.close(); }
+});
 
 async function directLateFixture(t, options = {}) {
   const f = await multiFixture(t, { holders: [], holdWholeOrigin: true, beforeCommitment: options.beforeCommitment,

@@ -808,7 +808,11 @@ the original loader directly. `abort()`, `destroy()` and `stop()` cancel
 pending peer work; stopping also immediately releases a waiting load to its
 original loader. No late peer completion can invoke a second success callback.
 Peer success updates the statistics object retained by hls.js, including loaded
-bytes and timestamps. Aborting a pending peer load invokes `onAbort` once;
+bytes and timestamps. Its known `aborted: false` survives disposal of the losing
+HTTP loader, including hls.js's synchronous success cleanup. This preserves the
+accepted stats reference; it makes no performance claim. Caller aborts and
+unknown or already-aborted flags retain their existing semantics.
+Aborting a pending peer load invokes `onAbort` once;
 destroying it cancels without a completion callback. The playback regression
 checks these behaviours alongside ranges, seeks and discontinuities.
 

@@ -387,7 +387,12 @@ resolves events under an explicit host policy; the loader itself opens no
 discovery query.
 The peer loader updates hls.js's retained statistics object and sends one
 `onAbort` callback for an aborted pending peer load. `destroy` cancels without
-reporting a completed load.
+reporting a completed load. For an accepted verified peer object, disposal of
+the losing HTTP loader preserves the same stats reference and an incoming
+`aborted: false`, including hls.js 1.7.3's synchronous success cleanup. It does
+not normalise caller aborts or true/unknown flags; ordinary HTTP disposal and
+cleanup exceptions retain their semantics. This is a correctness fix, with no
+measured performance benefit.
 
 The optional `onPeerDelivery({ connection, bytes })` callback attributes
 verified peer-first media to its actual `RTCPeerConnection`. A single-holder

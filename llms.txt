@@ -59,6 +59,10 @@ each segment/part duration less measured origin recovery with a 25% and 100 ms
 margin. Independent cached-peer races retain their window beside immediate HTTP.
 Current main requires measured HTTP recovery before allowing a serial wait;
 unknown origin timing keeps HTTP immediate and cached/late-HAVE races parallel.
+Unreleased accepted-peer stats preserve known aborted=false through losing-XHR
+disposal, including hls.js synchronous success cleanup. Actual hls.js 1.7.3
+regressions cover delivery identity, abort/unknown states and cleanup exceptions.
+This correctness fix adds no transfer policy or measured performance benefit.
 Unreleased warmAhead is disabled by default: bounded future main-fragment
 loads share the existing held cache and coalesce with genuine player demand.
 Current signed authority and content hashes gate cache reuse; local reuse,

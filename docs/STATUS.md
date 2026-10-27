@@ -10,6 +10,16 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased accepted-peer stats disposal (27 October 2026)
+
+An accepted verified peer object's known `aborted: false` now survives disposal
+of its losing HTTP loader. The actual hls.js 1.7.3 FragmentLoader and XhrLoader
+regressions reproduce the old mutation during synchronous success cleanup and
+check cached and late peer wins, retained stats identity, late HTTP suppression,
+ordinary HTTP, pending/caller aborts, unsafe flags and disposal exceptions.
+The change adds no transfer policy and claims no performance improvement or
+new physical-device, public-NAT or release qualification.
+
 ## Measured startup and recording wrap (26 October 2026)
 
 The paired site at `a0db0e63`, using SDK `bea813a`, passed real 60-second and
