@@ -10,6 +10,18 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased origin availability handoff (27 October 2026)
+
+When an owned whole-origin response completes and its key is already known,
+the loader retains eligible source bytes and announces HAVE before withdrawing
+its FETCH claim. This preserves the handoff across hls.js's synchronous loader
+disposal in ordinary, cached-race and late-race paths. Playback does not wait
+for another key hash. Cache limits, serving permission, receiver verification,
+wire messages and lease duration remain unchanged. Actual hls.js 1.7.3
+regressions reproduce the old withdrawal-before-availability ordering.
+This correctness change does not establish traffic savings, increased peer
+contribution, smooth playback or physical-device qualification.
+
 ## Unreleased startup buffer capacity (27 October 2026)
 
 A prepared target at zero can need more recovery headroom than three two-second

@@ -1071,6 +1071,14 @@ bytes. Both operations share the loader's deadline. An eligible wait may make
 one commitment request even if availability never arrives. A failed commitment
 request still falls back to origin, without a commitment retry.
 
+For a successful owned whole-origin response whose key is already known, the
+loader retains eligible bytes and announces HAVE before withdrawing FETCH,
+including when hls.js synchronously destroys the completed loader. Abort,
+failure or refusal to retain bytes supplies no new HAVE. This changes neither
+the lease duration nor the receiver's signed-commitment and hash checks, and
+adds no key-hash wait before the player's success callback. Availability is
+not a promise that a peer transfer will fit the receiver's deadline.
+
 If peer work fails or exceeds its budget, the original loader starts and owns
 its usual HTTP retries and errors. Invalid peer bytes are discarded
 and the peer is banned. Init segments and, by default, low-latency parts use
@@ -1174,6 +1182,11 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 ## Unreleased
 
+- Retain eligible whole-origin bytes under their already-known key and announce
+  HAVE before withdrawing FETCH, including synchronous hls.js success disposal.
+  Cover ordinary HTTP, cached-peer racing and late-peer racing with actual
+  hls.js regressions. Keep serving/cache limits, lease duration and receiver
+  verification unchanged; no traffic saving or playback improvement is claimed.
 - Replace UniFFI with a versioned C ABI, thin JNI Kotlin facade and direct
   C-import Swift facade. Public records, enums, objects and functions retain
   their existing shapes; Android packages no longer require JNA.
@@ -2873,6 +2886,18 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased origin availability handoff (27 October 2026)
+
+When an owned whole-origin response completes and its key is already known,
+the loader retains eligible source bytes and announces HAVE before withdrawing
+its FETCH claim. This preserves the handoff across hls.js's synchronous loader
+disposal in ordinary, cached-race and late-race paths. Playback does not wait
+for another key hash. Cache limits, serving permission, receiver verification,
+wire messages and lease duration remain unchanged. Actual hls.js 1.7.3
+regressions reproduce the old withdrawal-before-availability ordering.
+This correctness change does not establish traffic savings, increased peer
+contribution, smooth playback or physical-device qualification.
 
 ## Unreleased startup buffer capacity (27 October 2026)
 

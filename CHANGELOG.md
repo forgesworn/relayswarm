@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Retain eligible whole-origin bytes under their already-known key and announce
+  HAVE before withdrawing FETCH, including synchronous hls.js success disposal.
+  Cover ordinary HTTP, cached-peer racing and late-peer racing with actual
+  hls.js regressions. Keep serving/cache limits, lease duration and receiver
+  verification unchanged; no traffic saving or playback improvement is claimed.
 - Replace UniFFI with a versioned C ABI, thin JNI Kotlin facade and direct
   C-import Swift facade. Public records, enums, objects and functions retain
   their existing shapes; Android packages no longer require JNA.

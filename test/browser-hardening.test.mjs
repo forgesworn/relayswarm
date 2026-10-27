@@ -1398,7 +1398,7 @@ test("peer eligibility distinguishes zero budget with HAVE from positive budget 
       synchronous = true; assert.deepEqual(new Uint8Array(response.data), playback.bytes);
     } });
     assert.equal(synchronous, true, "zero budget preserves immediate origin fallback even with matching HAVE");
-    assert.equal(keyCalls, 2, "only the existing origin claim and origin retention key computations ran");
+    assert.equal(keyCalls, 1, "origin retention reuses the claim's captured key without a second computation");
     await until(() => fixture.swarm.metrics().segments.originLoaded === 1);
     assert.equal(fixture.swarm.metrics().bytes.held, 0, "receive-only fallback does not retain upload media");
     let trace = fixture.swarm.metrics().peerEligibilityDiagnostics;
@@ -1408,7 +1408,7 @@ test("peer eligibility distinguishes zero budget with HAVE from positive budget 
     fixture.hls.media.buffered.end = () => 15;
     await fixture.load();
     trace = fixture.swarm.metrics().peerEligibilityDiagnostics;
-    assert.equal(keyCalls, 5, "positive eligibility adds only its existing key computation, not a diagnostic hash");
+    assert.equal(keyCalls, 3, "positive eligibility adds its key and one captured fallback key, without diagnostic or retention hashes");
     assert.deepEqual(trace.records.at(-1), { atMs: trace.records.at(-1).atMs, cc: 0, level: 0,
       budgetMs: 120, reason: "no-have-no-wait", matchingHave: false, holders: [], haveHolders: [], staleHolders: [], heldMissHolders: [],
       budgetGeometry: { source: "buffer", positionSource: "fragment", currentTime: 10, bufferedEnd: 15, playableEnd: 15, fragmentStart: null, originReserveMs: 2000, uncappedMs: 3000 } });
@@ -1485,7 +1485,7 @@ test("peer eligibility counters survive ring eviction and snapshots cannot mutat
   try {
     fixture.hls.media = { currentTime: 0, buffered: { length: 0 } };
     for (let i = 0; i < 70; i++) await fixture.load();
-    assert.equal(keys, 140, "ring bookkeeping performs no additional key work");
+    assert.equal(keys, 70, "each fallback computes one captured key; ring bookkeeping adds no key work");
     const snapshot = fixture.swarm.metrics().peerEligibilityDiagnostics;
     assert.equal(snapshot.capacity, 64); assert.equal(snapshot.records.length, 64); assert.equal(snapshot.dropped, 6);
     assert.equal(snapshot.counters["no-budget"], 70);
@@ -4827,10 +4827,10 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
 
 // Retain hls.js's real FragmentLoader.resetLoader and XhrLoader.abortInternal.
 // Only XMLHttpRequest is held; no request reaches an origin.
-async function realHlsPeerCleanupFixture(t, { path = 'cached', beforeDestroy } = {}) {
+async function realHlsPeerCleanupFixture(t, { path = 'cached', beforeDestroy, originHandoff = false, originOptions = {} } = {}) {
   assert.equal(Hls.version, '1.7.3', 'exercise the pinned hls.js disposal contract');
   const globals = new Map(['self', 'XMLHttpRequest', 'document'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
-  const requests = [], destroys = [];
+  const requests = [], destroys = [], channels = [];
   const media = Object.assign(new EventTarget(), {
     currentTime: .1, paused: false, ended: false, seeking: false, readyState: 4, playbackRate: 1,
     buffered: { length: 1, start: () => 0, end: () => 2 },
@@ -4852,6 +4852,18 @@ async function realHlsPeerCleanupFixture(t, { path = 'cached', beforeDestroy } =
       this.response = bytes.slice().buffer;
       this.readyState = 4;
       (late ? this.savedReady : this.onreadystatechange)?.();
+    }
+  }
+  class HeldPeerBody extends RangedChannel {
+    constructor(bytes) { super(bytes, { silent: true }); Object.assign(this, { ordered: true, maxRetransmits: null, maxPacketLifeTime: null }); }
+    send(data) {
+      super.send(data);
+      if (typeof data !== 'string') return;
+      const frame = JSON.parse(data);
+      if (frame.t === 'want') {
+        const size = frame.p ? Math.min(frame.p[1] * commitmentPieceSize(this.bytes.length), this.bytes.length) - frame.p[0] * commitmentPieceSize(this.bytes.length) : this.bytes.length;
+        queueMicrotask(() => { if (this.readyState === 'open') this.receive(JSON.stringify({ t: 'meta', id: frame.id, size, ...(frame.p ? { p: frame.p } : {}) })); });
+      } else if (frame.t === 'cancel') queueMicrotask(() => { if (this.readyState === 'open') this.receive(JSON.stringify({ t: 'eof', id: frame.id })); });
     }
   }
   Object.defineProperty(globalThis, 'self', { configurable: true, value: globalThis });
@@ -4885,8 +4897,10 @@ async function realHlsPeerCleanupFixture(t, { path = 'cached', beforeDestroy } =
     f = await linkedFixture({
       ...playback.options, coreWasm: multiCore, multiHolder: true,
       streamEvent: signed.options.streamEvent, getCommitment: () => signed.event,
-      WebSocketImpl: memoryRelaySocket(), zeroBudgetPeerRace: true,
+      WebSocketImpl: memoryRelaySocket(), zeroBudgetPeerRace: path !== 'ordinary',
       latePeerRace: path === 'late', sustainablePeerWait: true,
+      ...(originHandoff ? { serve: true } : {}),
+      ...originOptions,
     }, Hls.DefaultConfig.loader, { media });
     const Wrapped = f.hls.config.fLoader, instances = [];
     actual.config.fLoader = class extends Wrapped {
@@ -4902,24 +4916,112 @@ async function realHlsPeerCleanupFixture(t, { path = 'cached', beforeDestroy } =
       'https://origin.example/media/index.m3u8', 0, 'main', 0, null,
     ).fragments[1];
     const add = async () => {
-      const channel = await f.addPeer(new RangedChannel(playback.bytes)), peer = f.peers.at(-1);
+      const channel = await f.addPeer(originHandoff ? new HeldPeerBody(playback.bytes) : new RangedChannel(playback.bytes)), peer = f.peers.at(-1);
+      channels.push(channel);
       peer.announcePresence({ role: 'viewer', open: true, have: [playback.key], transports: [{ type: 'webrtc', publicKey: peer.pubkey, obj: 2 }] });
       await until(() => f.swarm.metrics().peers.openPeersKnown === 1);
       channel.receive(JSON.stringify({ t: 'have', keys: [playback.key] }));
     };
     await until(() => f.swarm.metrics().core.state === 'ready');
-    if (path === 'cached') await add();
+    if (path === 'cached' || originHandoff && path === 'ordinary') await add();
     const promise = actual.streamController.fragmentLoader.load(frag);
     promise.catch(() => {}); // The test observes settlement after transport setup.
     const stats = frag.stats;
     await until(() => requests.length === 1);
     if (path === 'late') await add();
     return {
-      f, actual, frag, stats, promise, requests, destroys, bytes: playback.bytes, loader: instances[0], close,
+      f, actual, frag, stats, promise, requests, destroys, channels, key: playback.key, bytes: playback.bytes, loader: instances[0], close,
       disposeDirect: () => Wrapped.prototype.destroy.call(instances[0]),
     };
   } catch (error) { await close(); throw error; }
 }
+
+for (const path of ['ordinary', 'cached', 'late']) test(`origin handoff: actual Hls ${path} publishes retained HAVE before withdrawing FETCH`, { timeout: 10_000 }, async t => {
+  const q = await realHlsPeerCleanupFixture(t, { path, originHandoff: true });
+  try {
+    const channel = q.channels[0];
+    await until(() => channel.sent.some(frame => frame.t === 'fetching' && frame.k === q.key && frame.ms > 0));
+    if (path === 'cached') await until(() => channel.wants.length > 0);
+    q.requests[0].complete(q.bytes);
+    assert.equal(q.destroys.length, 1, 'real FragmentLoader reset/destroy remains synchronous with HTTP success');
+    const result = await q.promise;
+    sameBytes(new Uint8Array(result.payload), q.bytes);
+    const advertised = channel.sent.findIndex(frame => frame.t === 'have' && (frame.add ?? frame.keys ?? []).includes(q.key));
+    const withdrawn = channel.sent.findIndex(frame => frame.t === 'fetching' && frame.k === q.key && frame.ms === 0);
+    assert(withdrawn >= 0, 'the completed HTTP claim is withdrawn');
+    assert(advertised >= 0 && advertised < withdrawn, 'retained HAVE must precede FETCH withdrawal on the same ordered channel');
+    assert.equal(q.f.swarm.metrics().bytes.held, q.bytes.length);
+    assert.equal(q.f.swarm.metrics().segments.peerFirstLoaded, 0, 'origin retention creates no accepted peer-media credit');
+  } finally { await q.close(); }
+});
+
+for (const path of ['ordinary', 'cached', 'late']) for (const ending of ['abort', 'error', 'retention-refusal']) {
+  test(`origin handoff: actual Hls ${path} ${ending} never advertises an unretained body`, { timeout: 10_000 }, async t => {
+    const q = await realHlsPeerCleanupFixture(t, { path, originHandoff: true,
+      originOptions: ending === 'retention-refusal' ? { maxHeldBytes: 1 } : {} });
+    try {
+      const channel = q.channels[0];
+      await until(() => channel.sent.some(frame => frame.t === 'fetching' && frame.k === q.key && frame.ms > 0));
+      const old = { callbacks: q.loader.inner.callbacks, context: q.loader.inner.context, stats: q.stats };
+      if (ending === 'abort') {
+        q.actual.streamController.fragmentLoader.abort();
+        await assert.rejects(q.promise, error => error.data.details === Hls.ErrorDetails.INTERNAL_ABORTED);
+      } else if (ending === 'error') {
+        q.requests[0].status = 500; q.requests[0].complete(q.bytes);
+        await assert.rejects(q.promise, error => error.data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR);
+      } else {
+        q.requests[0].complete(q.bytes);
+        sameBytes(new Uint8Array((await q.promise).payload), q.bytes);
+      }
+      if (ending !== 'retention-refusal') {
+        old.callbacks.onSuccess({ data: q.bytes.slice().buffer }, old.stats, old.context, null);
+        assert.equal(q.f.swarm.metrics().segments.originLoaded, 0, 'a retired payload is neither accepted nor retained');
+      }
+      assert.equal(q.f.swarm.metrics().bytes.held, 0);
+      assert.equal(channel.sent.some(frame => frame.t === 'have' && (frame.add ?? frame.keys ?? []).includes(q.key)), false);
+      assert.equal(q.f.swarm.metrics().segments.peerFirstLoaded, 0);
+    } finally { await q.close(); }
+  });
+}
+
+test('origin handoff: actual Hls reset retains the original advertised key', { timeout: 10_000 }, async t => {
+  const q = await realHlsPeerCleanupFixture(t, { path: 'ordinary', originHandoff: true,
+    beforeDestroy: loader => { loader.context.url = 'https://origin.example/media/changed.ts'; } });
+  try {
+    const channel = q.channels[0];
+    await until(() => channel.sent.some(frame => frame.t === 'fetching' && frame.k === q.key && frame.ms > 0));
+    q.requests[0].complete(q.bytes); await q.promise;
+    const advertised = channel.sent.filter(frame => frame.t === 'have').flatMap(frame => frame.add ?? frame.keys ?? []);
+    assert.deepEqual(advertised, [q.key], 'synchronous Hls disposal cannot retarget the source copy to a changed context');
+    assert.equal(q.f.swarm.metrics().bytes.held, q.bytes.length);
+  } finally { await q.close(); }
+});
+
+test('origin handoff: stale ordinary HTTP callbacks cannot retire a new real Hls load', { timeout: 10_000 }, async t => {
+  const q = await realHlsPeerCleanupFixture(t, { path: 'ordinary', originHandoff: true });
+  try {
+    const channel = q.channels[0];
+    await until(() => channel.sent.some(frame => frame.t === 'fetching' && frame.k === q.key && frame.ms > 0));
+    const old = { callbacks: q.loader.inner.callbacks, context: q.loader.inner.context, stats: q.stats };
+    q.actual.streamController.fragmentLoader.abort();
+    await assert.rejects(q.promise, error => error.data.details === Hls.ErrorDetails.INTERNAL_ABORTED);
+    const next = M3U8Parser.parseLevelPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:2\n#EXTINF:2,\nnext.ts\n',
+      'https://origin.example/media/index.m3u8', 0, 'main', 0, null).fragments[0];
+    const nextKey = createHash('sha256').update(`${base.swarmId}\n/media/next.ts`).digest('hex');
+    const pending = q.actual.streamController.fragmentLoader.load(next); pending.catch(() => {});
+    await until(() => q.requests.length === 2 && channel.sent.some(frame => frame.t === 'fetching' && frame.k === nextKey && frame.ms > 0));
+    const active = next.loader;
+    old.callbacks.onSuccess({ data: q.bytes.slice().buffer }, old.stats, old.context, null);
+    old.callbacks.onError({ code: 500, text: 'old-error' }, old.context, null, old.stats);
+    old.callbacks.onTimeout(old.stats, old.context, null); old.callbacks.onAbort(old.stats, old.context, null);
+    assert.equal(next.loader, active, 'old terminals cannot reset the new FragmentLoader');
+    assert.equal(channel.sent.some(frame => frame.t === 'fetching' && frame.k === nextKey && frame.ms === 0), false);
+    assert.equal(q.f.swarm.metrics().bytes.held, 0);
+    q.requests[1].complete(q.bytes);
+    sameBytes(new Uint8Array((await pending).payload), q.bytes);
+    assert.equal(channel.sent.some(frame => frame.t === 'have' && (frame.add ?? frame.keys ?? []).includes(q.key)), false);
+  } finally { await q.close(); }
+});
 
 for (const path of ['cached', 'late']) test(`accepted peer stats: actual Hls ${path} cleanup preserves verified success and reference`, { timeout: 10_000 }, async t => {
   const q = await realHlsPeerCleanupFixture(t, { path });
