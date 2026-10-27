@@ -770,6 +770,152 @@ function startupFixture(t, options = {}) {
   return { engine, state, requests, retained, verified, load };
 }
 const flushStartup = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
+
+test('startup admits one extra verified contiguous future only when dynamic recovery exceeds its full three-object window', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const firstSn of [0, 5]) {
+    let commits = 0;
+    const f = startupFixture(t, { commit: () => { commits++; } });
+    f.state.target = firstSn * 2;
+    const first = f.load(firstSn, 8000); await flushStartup();
+    f.requests[1].finish(); await flushStartup();
+    f.requests[2].finish(); await flushStartup();
+    f.state.recovery = 6550;
+    f.requests[0].finish(); await flushStartup();
+    t.mock.timers.tick(100); await flushStartup();
+    assert.equal(f.requests.length, 4, 'verified six-second coverage must admit its parsed contiguous successor');
+    assert.equal(f.requests[3].context.frag.sn, firstSn + 3);
+    assert.equal(f.engine.snapshot().active, 1); assert.equal(first.calls.success, 0); assert.equal(commits, 0);
+    assert.equal(f.engine.startupSnapshot().heldObjects, 4);
+    assert.equal(f.engine.startupSnapshot().limits.objects, 4);
+    assert.equal(f.engine.snapshot().limits.objects, 4);
+    assert.equal(f.engine.contains(firstSn * 2), true, 'the expanded parsed plan retains the pending first interval');
+    f.requests[3].finish(); await flushStartup();
+    assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(commits, 1);
+    assert.equal(f.engine.startupSnapshot().verifiedEnd, firstSn * 2 + 8);
+    assert.equal(f.requests.length, 4, 'no fifth request is needed');
+    assert.equal(f.engine.snapshot().limits.objects, 3, 'steady warm resource contract stays unchanged');
+    assert.equal(f.engine.contains(firstSn * 2), true, 'the third future remains in the retained initial-seek plan after release');
+    const reuse = f.load(firstSn + 3); await flushStartup();
+    assert.equal(reuse.calls.success, 1); assert.equal(f.engine.snapshot().localReuseBytes, 4);
+    assert.equal(f.requests.length, 5, 'normal reuse still starts its existing recovery request');
+    assert.equal(f.requests[4].aborted, true); assert.equal(f.requests[4].response, undefined);
+    assert.equal(f.requests.filter(row => row.context.frag.sn === firstSn + 3 && row.response).length, 1,
+      'the fourth verified body is reused without a second completed response');
+    assert.ok(f.state.reservations.every(size => size <= 24 * 1024 * 1024));
+    f.engine.stop();
+  }
+});
+
+test('startup expansion leaves a sufficient window unchanged and never admits a fifth held object', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const recovery of [6000, 9000]) {
+    const f = startupFixture(t); f.state.target = 0; const first = f.load(0, 8000); await flushStartup();
+    f.requests[1].finish(); await flushStartup(); f.requests[2].finish(); await flushStartup();
+    f.state.recovery = recovery; f.requests[0].finish(); await flushStartup();
+    t.mock.timers.tick(100); await flushStartup();
+    if (recovery === 6000) {
+      assert.equal(first.calls.success, 1); assert.equal(f.requests.length, 3, 'do not expand an adequate verified window');
+    } else {
+      assert.equal(f.requests.length, 4); f.requests[3].finish(); await flushStartup();
+      t.mock.timers.tick(7800); await flushStartup();
+      assert.equal(f.requests.length, 4); assert.equal(f.engine.startupSnapshot().heldObjects, 4);
+      assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 0);
+      t.mock.timers.tick(100); await flushStartup();
+      assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+    }
+    f.engine.stop();
+  }
+});
+
+test('startup expansion keeps cancellation, context, authority and original parent deadline ownership', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const action of ['abort', 'clear', 'stop', 'scope', 'geometry', 'cc', 'authority', 'corrupt', 'deadline']) {
+    let commits = 0;
+    const f = startupFixture(t, { commit: () => { commits++; }, permit: ctx => {
+      // Match the SDK's full immutable context-bound authority, rather than
+      // the fixture's default URL-only permit (which does not bind CC).
+      const key = warmContext(ctx)?.key, sn = ctx.frag.sn;
+      return { key, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)),
+        current: value => warmContext(value)?.key === key && !f.state.revoked.has(sn) };
+    } }); f.state.target = 0;
+    const first = f.load(0, 500); await flushStartup();
+    f.requests[1].finish(); await flushStartup(); f.requests[2].finish(); await flushStartup();
+    f.state.recovery = 6550; f.requests[0].finish(); await flushStartup();
+    t.mock.timers.tick(100); await flushStartup();
+    assert.equal(f.requests.length, 4); const fourth = f.requests[3];
+    if (action === 'abort') first.loader.abort();
+    else if (action === 'clear') f.engine.clear();
+    else if (action === 'stop') f.engine.stop();
+    else if (action === 'scope') fourth.context.frag.baseurl += '?changed';
+    else if (action === 'geometry') fourth.context.frag.start += 0.25;
+    else if (action === 'cc') fourth.context.frag.cc++;
+    else if (action === 'authority') f.state.revoked.add(3);
+    if (['scope', 'geometry'].includes(action)) { t.mock.timers.tick(100); await flushStartup(); }
+    if (['cc', 'authority', 'corrupt'].includes(action)) fourth.finish(false, action === 'corrupt' ? Uint8Array.of(9, 8, 7, 6) : undefined);
+    await flushStartup();
+    t.mock.timers.tick(399 - (['scope', 'geometry'].includes(action) ? 100 : 0)); await flushStartup();
+    if (action === 'deadline') assert.equal(first.calls.error, 0);
+    t.mock.timers.tick(1); await flushStartup();
+    assert.equal(first.calls.success, 0, action); assert.equal(commits, 0, action);
+    assert.equal(first.calls.error + first.calls.abort, action === 'stop' ? 0 : 1, action);
+    if (action === 'deadline') assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+    assert.equal(f.engine.snapshot().cacheBytes, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+    const terminals = first.calls.error + first.calls.abort;
+    fourth.finish(true); await flushStartup();
+    assert.equal(first.calls.error + first.calls.abort, terminals); assert.equal(first.calls.success, 0);
+    assert.equal(f.requests.length, 4, 'late completion cannot restart the retired plan');
+    f.engine.stop();
+  }
+});
+
+test('startup extra-future admission refuses the same 24MiB byte cap without a source request or unsafe release', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = startupFixture(t, { permitSize: sn => sn === 3 ? 24 * 1024 * 1024 : 4 });
+  f.state.target = 0; const first = f.load(0, 8000); await flushStartup();
+  f.requests[1].finish(); await flushStartup(); f.requests[2].finish(); await flushStartup();
+  f.state.recovery = 6550; f.requests[0].finish(); await flushStartup();
+  t.mock.timers.tick(100); await flushStartup();
+  assert.equal(f.engine.snapshot().rejected, 1, 'the additional signed size exceeds remaining shared bytes');
+  assert.equal(f.requests.length, 3); assert.equal(first.calls.success, 0);
+  assert.equal(f.engine.snapshot().active, 0); assert.ok(f.engine.snapshot().trackedObjects <= 4);
+  t.mock.timers.tick(8000); await flushStartup();
+  assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+  assert.equal(f.engine.snapshot().cacheBytes, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+});
+
+test('startup expansion uses fresh moved targets during its request and final authority wait', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const duringAuthority of [false, true]) {
+    let commits = 0;
+    const f = startupFixture(t, { commit: () => { commits++; } }); f.state.target = 0;
+    const first = f.load(0, 500); await flushStartup();
+    f.requests[1].finish(); await flushStartup(); f.requests[2].finish(); await flushStartup();
+    f.state.recovery = 6550; f.requests[0].finish(); await flushStartup();
+    t.mock.timers.tick(100); await flushStartup();
+    assert.equal(f.requests.length, 4); assert.equal(f.engine.contains(0), true);
+    if (duringAuthority) {
+      f.state.holdRecheck = true; f.state.holdCheckSn = 3;
+      f.requests[3].finish(); await flushStartup();
+      assert.equal(typeof f.state.releaseRecheck, 'function');
+      f.state.target = 1.5; f.state.releaseRecheck(); await flushStartup();
+    } else {
+      f.state.target = 1.4; f.requests[3].finish(); await flushStartup();
+    }
+    assert.equal(first.calls.success, duringAuthority ? 0 : 1);
+    assert.equal(commits, duringAuthority ? 0 : 1);
+    if (!duringAuthority) assert.equal(first.calls.args[0], f.requests[0].response, 'release preserves the original held response');
+    assert.equal(first.context, f.requests[0].context, 'the original held response keeps its caller context');
+    if (duringAuthority) {
+      assert.equal(f.engine.contains(0), true);
+      t.mock.timers.tick(400); await flushStartup();
+      assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+      assert.equal(f.requests.length, 4, 'an infeasible moving target does not admit a fifth held object');
+    }
+    f.engine.stop();
+  }
+});
+
 const fillStartupWindow = async (f, beforeFinish = () => {}) => {
   // Futures can verify before a slower original first body. Admit them with
   // the initial target, then expose the captured full-window deficit only
@@ -1041,7 +1187,7 @@ test('rolling startup replaces only an obsolete future while retaining the exact
   assert.equal(f.engine.snapshot().consumedPeerBytes, 4);
   assert.equal(f.engine.startupSnapshot().verifiedStart, 4);
   assert.equal(f.engine.startupSnapshot().verifiedEnd, 8);
-  assert.equal(f.engine.startupSnapshot().limits.objects, 3);
+  assert.equal(f.engine.startupSnapshot().limits.objects, 4);
   assert.equal(f.engine.startupSnapshot().limits.bytes, 24 * 1024 * 1024);
   assert.equal(f.engine.startupSnapshot().limits.deadlineMs, 8000);
   const reads = f.state.targetCalls;

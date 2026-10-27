@@ -121,8 +121,9 @@ longer current. This enables a one-shot buffer before the first genuine main
 fragment reaches HLS demuxing. The original attached media element and pending
 trusted play request remain owned by the host.
 
-The first held body and verified upcoming fragments share the same three-object,
-24 MiB reservoir. Before first HTTP, the host must admit the worst-case 24 MiB
+The first held body and verified upcoming fragments share a startup reservoir
+of at most four objects and 24 MiB; steady warm-ahead retains its three-object
+limit. Before first HTTP, the host must admit the worst-case 24 MiB
 reservation against its existing held budget; a smaller available budget fails
 explicitly. The original first response is handed to HLS unchanged and
 is not retained as an extra shared-cache seed; its reservation is released.
@@ -145,8 +146,14 @@ successor. When a full verified window has insufficient headroom, its completed,
 unpinned first future can also give up its slot if it contains the target.
 Once the future window starts ahead of the actual target, its start stays fixed;
 release waits for the real target and verified coverage to meet again.
-The first response stays held unchanged; the reservoir still contains at most
-three objects and 24 MiB. In-flight work and authority pins keep their reservations.
+If the original first body and both planned futures are fully verified and
+contiguous but still cannot meet the fresh recovery requirement, startup may
+admit one additional parsed contiguous future within the same byte reservation.
+The existing rolling policy runs first; an adequate window or a timeline gap
+does not trigger this extension. The first response stays held unchanged; startup
+contains at most four objects and 24 MiB. Future requests remain serial, and
+insufficient capacity still cannot release unsafe media or extend the deadline.
+In-flight work and authority pins keep their reservations.
 The rolling plan stores metadata only, without retaining discarded payloads.
 Polling stops on release, failure or cancellation and pauses its target reads
 while the commit hook is pending. It never changes the host's clock or renews

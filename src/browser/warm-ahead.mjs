@@ -3,7 +3,7 @@
 // no media clock, playback command, background holder or alternate rendition
 // is created here. The supplied loader remains the SDK's loader.
 export const WARM_AHEAD = Symbol('relayswarm-warm-ahead');
-const MAX_BYTES = 24 * 1024 * 1024, MAX_OBJECTS = 3, DEADLINE_MS = 8_000, STARTUP_POLL_MS = 100;
+const MAX_BYTES = 24 * 1024 * 1024, MAX_OBJECTS = 3, MAX_STARTUP_OBJECTS = 4, DEADLINE_MS = 8_000, STARTUP_POLL_MS = 100;
 const validInterval = item => {
   const { start, duration } = item?.context?.frag ?? {};
   return Number.isFinite(start) && start >= 0 && Number.isFinite(duration) && duration > 0 && Number.isFinite(start + duration);
@@ -50,6 +50,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     verifiedBytes: 0, verifiedPeerBytes: 0, consumedPeerBytes: 0, cacheBytes: 0, highWaterBytes: 0 };
   const reserved = () => startup.reserved + [...jobs.values()].reduce((sum, row) => sum + row.reserved, 0);
   const tracked = () => new Set([...cache.keys(), ...jobs.keys(), ...(startup.owner ? [startup.own.key] : [])]).size;
+  const objectLimit = () => startup.state === 'buffering' ? MAX_STARTUP_OBJECTS : MAX_OBJECTS;
   const live = row => jobs.get(row.key) === row && !row.finished;
   const drop = key => { const row = cache.get(key); if (row) { counters.cacheBytes -= row.data.byteLength; cache.delete(key); } };
   const finishJob = (row, result) => {
@@ -76,11 +77,11 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     if (startup.state === 'buffering' && !prepareStartupAdmission()) return;
     // A pending bootstrap may replace obsolete future rows, but cannot evict
     // current coverage (or an authority pin) simply to admit another object.
-    if (startup.state === 'buffering' && tracked() >= MAX_OBJECTS) return;
+    if (startup.state === 'buffering' && tracked() >= objectLimit()) return;
     const item = queued.shift();
     if (cache.has(item.key) || jobs.has(item.key)) { queueMicrotask(pump); return; }
     while (tracked() >= MAX_OBJECTS && cache.size && startup.state !== 'buffering') drop(cache.keys().next().value);
-    if (tracked() >= MAX_OBJECTS) return;
+    if (tracked() >= objectLimit()) return;
     const controller = new AbortController(), revision = generation, cfg = config, policy = loaderConfig;
     let loader, timer, finish;
     const row = { ...item, reserved: 0, finished: false, waiters: new Set(), genuineAt: null,
@@ -268,7 +269,19 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         startup.frozenStart = startup.plan[0].context.frag.start;
       }
     }
-    while (startup.plan.length < 2) {
+    // The existing rolling policy gets first use of obsolete slots. If its
+    // complete verified window still cannot cover recovery, retain that useful
+    // coverage and admit at most one contiguous successor, within the same
+    // byte reservation and original deadline. No extra parallel job is added.
+    let futureLimit = 2;
+    if (startup.verified && startup.response && startup.plan.length === 2 && cache.size === 2 &&
+        !active && !jobs.size && !demand.size && !promoted.size &&
+        startup.plan.every(item => cache.has(item.key) && !pins.has(cache.get(item.key).permit.key))) {
+      const covered = coverage(target);
+      if (covered.rows.length === startup.plan.length + 1 && covered.end !== null &&
+          (covered.end - target) * 1000 < recovery) futureLimit = MAX_STARTUP_OBJECTS - 1;
+    }
+    while (startup.plan.length < futureLimit) {
       const last = startup.plan.at(-1);
       const parent = startup.cursor && (!last || startup.cursor.context.frag.start > last.context.frag.start)
         ? startup.cursor : last ?? startup.own;
@@ -732,7 +745,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       requiredHeadroomMs: startup.requiredHeadroomMs, planningServiceMs: startup.planningServiceMs,
       released: startup.released, failures: startup.failures,
       cancellations: startup.cancellations, commitStarted: startup.commitStarted, commitCompleted: startup.commitCompleted,
-      limits: { objects: MAX_OBJECTS, bytes: MAX_BYTES, deadlineMs: DEADLINE_MS } }),
+      limits: { objects: MAX_STARTUP_OBJECTS, bytes: MAX_BYTES, deadlineMs: DEADLINE_MS } }),
     contains(time) {
       if (closed || !allowed() || !Number.isFinite(time)) return false;
       for (const row of [...jobs.values(), ...cache.values()]) {
@@ -758,5 +771,5 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     stop() { closed = true; clear(); }, snapshot: () => ({ ...counters,
       reservationBytes: reserved(), active: Number(Boolean(active)), promoted: promoted.size, trackedObjects: tracked(),
       queued: queued.length, cacheObjects: cache.size,
-      limits: { objects: MAX_OBJECTS, bytes: MAX_BYTES, speculativeWholeRequests: 1, deadlineMs: DEADLINE_MS, revalidationMs: 25 } }) };
+      limits: { objects: objectLimit(), bytes: MAX_BYTES, speculativeWholeRequests: 1, deadlineMs: DEADLINE_MS, revalidationMs: 25 } }) };
 }
