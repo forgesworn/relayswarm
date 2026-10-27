@@ -6500,6 +6500,198 @@ test('multi-holder: slow authority after an ignored range keeps the original 400
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
+test('origin trace: synchronous cached HTTP winner has an early numeric alias and one terminal', async t => {
+  const f = await multiFixture(t, { holders: [{}], traceRequests: 256,
+    swarmOptions: { zeroBudgetPeerRace: true } });
+  f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+  try {
+    const result = await f.load(); assert.equal(result.length, 32);
+    const rows=f.swarm.trace().rows, start=rows.find(row=>row.k==='originStart'), terminal=rows.filter(row=>row.k==='origin');
+    assert.ok(start && Number.isSafeInteger(start.load), 'HTTP start must have its alias even when inner.load completes synchronously');
+    assert.equal(start.leg,'cached');assert.equal(terminal.length,1);assert.equal(terminal[0].load,start.load);assert.equal(terminal[0].outcome,'payload');
+    assert.equal(rows.findIndex(row=>row.k==='load')<rows.findIndex(row=>row.k==='originStart'),true);
+  } finally { await f.close(); }
+});
+
+test('origin trace: immediate fallback captures per-load aliases despite context reuse and late callbacks', async t => {
+  const pending=[];class Held extends Loader { load(ctx,config,callbacks){pending.push({ctx,callbacks,stats:this.stats})} }
+  const f=await linkedFixture({...peerPlaybackOptions().options,traceRequests:256,WebSocketImpl:memoryRelaySocket()},Held,
+    {media:{currentTime:0,buffered:{length:0}}});
+  try {
+    const ctx={...context,frag:{...context.frag}},loader=new f.hls.config.fLoader({}),calls={success:0,error:0,timeout:0};
+    const callbacks={onSuccess:()=>calls.success++,onError:()=>calls.error++,onTimeout:()=>calls.timeout++};
+    loader.load(ctx,{},callbacks);loader.load(ctx,{},callbacks);
+    assert.equal(pending.length,2);
+    pending[0].callbacks.onError({code:500},ctx,null);pending[0].callbacks.onTimeout(pending[0].stats,ctx,null);
+    pending[1].callbacks.onSuccess({data:new ArrayBuffer(7)},pending[1].stats,ctx,null);
+    const rows=f.swarm.trace().rows,starts=rows.filter(row=>row.k==='originStart'),terms=rows.filter(row=>row.k==='origin');
+    assert.equal(starts.length,2);assert.notEqual(starts[0].load,starts[1].load);
+    assert.deepEqual(terms.map(row=>[row.load,row.outcome]),[[starts[0].load,'error'],[starts[1].load,'payload']]);
+    assert.equal(rows.filter(row=>row.k==='originCallback').length,1,'duplicate terminal is distinct from observed terminal schema');
+    assert.equal(terms[0].stale,true);assert.equal(terms[0].loaderLoadedBytes,null);assert.equal(terms[0].loaderTotalBytes,null);
+    assert.deepEqual(calls,{success:1,error:1,timeout:1},'diagnostics preserve the original fallback callback contract');
+  } finally { await f.close(); }
+});
+
+test('origin trace: late copied peer context joins the original HTTP alias', async t => {
+  const f=await directLateFixture(t,{swarmOptions:{traceRequests:4096}});await f.add();
+  const result=await f.outcome;assert.equal(result.kind,'success');
+  const rows=f.swarm.trace().rows,start=rows.find(row=>row.k==='originStart');
+  assert.ok(start && Number.isSafeInteger(start.load));
+  assert.ok(rows.some(row=>row.k==='request'),'actual verified peer work was recorded');
+  assert.ok(rows.filter(row=>['request','xfer'].includes(row.k)).every(row=>row.load===start.load),'copied late context retains original numeric alias');
+  assert.equal(rows.filter(row=>row.k==='originAbortRequest').length,1);
+});
+
+test('origin trace: peer winner snapshots partial HTTP stats before abort and shared stats reuse without fabricating a terminal', async t => {
+  for(const path of ['cached','late']) await t.test(path,async t=>{
+    const f=await multiFixture(t,{holders:path==='cached'?[{}]:[],holdWholeOrigin:true,traceRequests:4096,
+      swarmOptions:{zeroBudgetPeerRace:true,sustainablePeerWait:true,latePeerRace:path==='late'}});
+    f.hls.media=Object.assign(new EventTarget(),{currentTime:0,paused:false,ended:false,buffered:{length:0}});
+    try {
+      const pending=beginCountedMultiLoad(f),whole=f.wholeLoads[0];
+      Object.assign(whole.loader.stats,{loaded:31,total:1000});
+      whole.loader.abort=()=>{whole.loader.aborted=true;whole.loader.stats.loaded=777;};
+      if(path==='late'){
+        const channel=await f.addPeer(new RangedChannel(f.bytes));
+        f.peers.at(-1).announcePresence({role:'viewer',open:true,have:[f.key],transports:[{type:'webrtc',publicKey:f.peers.at(-1).pubkey,obj:2}]});
+        await until(()=>f.swarm.metrics().peers.openPeersKnown===1);channel.receive(JSON.stringify({t:'have',keys:[f.key]}));
+      }
+      sameBytes(await pending.response,f.bytes);
+      const rows=f.swarm.trace().rows,abort=rows.filter(row=>row.k==='originAbortRequest');
+      assert.equal(abort.length,1);assert.equal(abort[0].reason,'peer-won');
+      assert.deepEqual([abort[0].loaderLoadedBytes,abort[0].loaderTotalBytes],[31,1000]);
+      assert.equal(whole.loader.stats.loaded,f.bytes.length,'the original shared stats have since become accepted peer stats');
+      assert.equal(rows.some(row=>row.k==='origin'),false,'abort request alone is not an observed HTTP terminal');
+      let staleStatReads=0;for(const key of ['loaded','total'])Object.defineProperty(whole.loader.stats,key,{configurable:true,get(){staleStatReads++;return f.bytes.length}});
+      whole.callbacks.onProgress(whole.loader.stats,whole.context,{get byteLength(){throw new Error('private-body-secret')}},null);
+      whole.callbacks.onProgress(whole.loader.stats,whole.context,new ArrayBuffer(1),null);
+      whole.callbacks.onAbort(whole.loader.stats,whole.context,null);
+      let staleBodyReads=0;whole.callbacks.onSuccess({get data(){staleBodyReads++;throw new Error('private-response-secret')}},whole.loader.stats,whole.context,null);
+      assert.equal(staleBodyReads,0,'stale success observations do not inspect ignored response bodies');
+      assert.equal(staleStatReads,0,'stale progress and terminal observations never read shared peer statistics');
+      assert.equal(f.swarm.trace().rows.some(row=>row.k==='originProgress'),false,'ignored progress has no observed positive payload');
+      assert.equal(f.swarm.trace().rows.find(row=>row.k==='originCallback').phase,'progress');
+      whole.callbacks.onError({code:500},whole.context,null);whole.callbacks.onTimeout(whole.loader.stats,whole.context,null);
+      const after=f.swarm.trace().rows;assert.equal(after.filter(row=>row.k==='origin').length,1);
+      assert.equal(after.find(row=>row.k==='origin').outcome,'abort');assert.equal(after.find(row=>row.k==='origin').stale,true);
+      assert.deepEqual([after.find(row=>row.k==='origin').loaderLoadedBytes,after.find(row=>row.k==='origin').loaderTotalBytes],[null,null],
+        'late abort callbacks cannot re-credit mutated peer statistics as HTTP');
+      assert.equal(after.filter(row=>row.k==='originCallback').length,1,'duplicate late callbacks have one bounded separate observation');
+      assert.deepEqual([pending.calls.success.length,pending.calls.abort.length,pending.calls.error.length],[1,0,0]);
+    } finally {await f.close()}
+  });
+});
+
+test('origin trace: actual error timeout and abort callbacks retain one terminal per HTTP leg', async t => {
+  for(const path of ['fallback','cached','late'])for(const outcome of ['error','timeout','abort'])await t.test(path+' '+outcome,async t=>{
+    const f=await multiFixture(t,{holders:path==='cached'?[{}]:[],holdWholeOrigin:true,traceRequests:256,
+      swarmOptions:{zeroBudgetPeerRace:path!=='fallback',latePeerRace:path==='late'}});
+    f.hls.media={currentTime:0,buffered:{length:0}};
+    try {
+      const calls={error:0,timeout:0,abort:0};new f.hls.config.fLoader(f.hlsConfig).load(multiContext,f.loaderConfig,{
+        onError:()=>calls.error++,onTimeout:()=>calls.timeout++,onAbort:()=>calls.abort++});
+      const whole=f.wholeLoads[0];Object.assign(whole.loader.stats,{loaded:11,total:99});
+      const method={error:'onError',timeout:'onTimeout',abort:'onAbort'}[outcome];
+      whole.callbacks[method](outcome==='error'?{code:500}:whole.loader.stats,whole.context,null);
+      const rows=f.swarm.trace().rows,terminals=rows.filter(row=>row.k==='origin');
+      assert.equal(terminals.length,1);assert.equal(terminals[0].outcome,outcome);assert.equal(calls[outcome],1);
+      assert.deepEqual([terminals[0].loaderLoadedBytes,terminals[0].loaderTotalBytes],[11,99]);
+      assert.equal(terminals[0].load,rows.find(row=>row.k==='originStart').load);
+    } finally {await f.close()}
+  });
+});
+
+test('origin trace: only the first positive callback progress is sampled and invalid stats stay unknown', async t=>{
+  const f=await multiFixture(t,{holders:[{}],holdWholeOrigin:true,traceRequests:256,swarmOptions:{zeroBudgetPeerRace:true}});
+  f.hls.media={currentTime:0,buffered:{length:0}};
+  try {
+    const pending=beginCountedMultiLoad(f),whole=f.wholeLoads[0],stats=whole.loader.stats;
+    whole.callbacks.onProgress(stats,whole.context,new ArrayBuffer(0),null);
+    Object.assign(stats,{loaded:12,total:99});whole.callbacks.onProgress(stats,whole.context,new ArrayBuffer(3),null);
+    Object.assign(stats,{loaded:40,total:99});whole.callbacks.onProgress(stats,whole.context,new ArrayBuffer(8),null);
+    Object.defineProperty(stats,'loaded',{get(){throw new Error('private-stat-secret')}});stats.total=Infinity;
+    whole.callbacks.onError({code:500},whole.context,null);
+    const rows=f.swarm.trace().rows,progress=rows.filter(row=>row.k==='originProgress'),terminal=rows.find(row=>row.k==='origin');
+    assert.equal(progress.length,1);assert.equal(progress[0].loaderLoadedBytes,12);assert.equal(progress[0].loaderTotalBytes,99);
+    assert.equal(terminal.loaderLoadedBytes,null);assert.equal(terminal.loaderTotalBytes,null);assert.equal(pending.calls.progress.length,3);
+    assert.equal(JSON.stringify(rows).includes('private-stat-secret'),false);
+  } finally {await f.close()}
+});
+
+test('origin trace: a stateful progress payload getter cannot change the existing HTTP ownership decision', async t=>{
+  for(const path of ['cached','late'])for(const traceRequests of [0,256])await t.test(path+' trace='+traceRequests,async t=>{
+    let metadataSignal,releaseMetadata;
+    const f=await multiFixture(t,{holders:path==='cached'?[{}]:[],holdWholeOrigin:true,traceRequests,
+      beforeCommitment:(_context,{signal})=>{metadataSignal=signal;return new Promise(resolve=>{releaseMetadata=resolve})},
+      swarmOptions:{zeroBudgetPeerRace:true,latePeerRace:path==='late'}});
+    f.hls.media=Object.assign(new EventTarget(),{currentTime:0,paused:false,ended:false,buffered:{length:0}});
+    try {
+      const pending=beginCountedMultiLoad(f),whole=f.wholeLoads[0];
+      if(path==='late'){
+        const channel=await f.addPeer(new RangedChannel(f.bytes));
+        f.peers.at(-1).announcePresence({role:'viewer',open:true,have:[f.key],transports:[{type:'webrtc',publicKey:f.peers.at(-1).pubkey,obj:2}]});
+        await until(()=>f.swarm.metrics().peers.openPeersKnown===1);channel.receive(JSON.stringify({t:'have',keys:[f.key]}));
+      }
+      await until(()=>metadataSignal);let reads=0;
+      whole.callbacks.onProgress(whole.loader.stats,whole.context,{get byteLength(){return ++reads===1?1:0}},null);
+      assert.equal(metadataSignal.aborted,true,'a positive HTTP progress callback must retain the original HTTP winner with tracing on or off');
+      assert.equal(reads,1,'only the existing policy may inspect the payload getter');
+      whole.callbacks.onSuccess({data:f.bytes.slice().buffer},whole.loader.stats,whole.context,null);
+      sameBytes(await pending.response,f.bytes);assert.equal(f.swarm.metrics().bytes.peerFirst,0);
+    } finally {releaseMetadata?.();await f.close()}
+  });
+});
+
+test('origin trace: held key completion retains its original eligibility alias after context reuse',async t=>{
+  const f=await multiFixture(t,{holders:[{}],traceRequests:256});let releaseKey,held=false;
+  const subtle=globalThis.crypto.subtle,digest=subtle.digest.bind(subtle),known=Buffer.from(`${base.swarmId}\n/media/seg.ts`);
+  t.mock.method(subtle,'digest',(algorithm,input)=>{
+    if(!held&&algorithm==='SHA-256'&&input instanceof Uint8Array&&Buffer.from(input).equals(known)){
+      held=true;const bytes=createHash('sha256').update(input).digest();
+      return new Promise(resolve=>{releaseKey=()=>resolve(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength))});
+    }
+    return digest(algorithm,input);
+  });
+  const ctx={...multiContext,frag:{...multiContext.frag}},loader=new f.hls.config.fLoader(f.hlsConfig);
+  try {
+    loader.load(ctx,f.loaderConfig,{onSuccess(){},onAbort(){}});await until(()=>releaseKey);
+    loader.load(ctx,f.loaderConfig,{onSuccess(){},onAbort(){}});releaseKey();
+    await until(()=>f.swarm.trace().rows.some(row=>row.k==='eligibility'&&row.reason==='aborted-before-eligibility'));
+    const rows=f.swarm.trace().rows,loads=rows.filter(row=>row.k==='load'),retired=rows.find(row=>row.k==='eligibility'&&row.reason==='aborted-before-eligibility');
+    assert.equal(loads.length,2);assert.notEqual(loads[0].load,loads[1].load);
+    assert.equal(retired.load,loads[0].load,'retired async eligibility must never acquire the new load alias from a reused context');
+  } finally {releaseKey?.();loader.abort();await f.close()}
+});
+
+test('origin trace: custom loader payload sizes cannot inject nonnumeric trace fields', async t=>{
+  let value;class Custom extends Loader {load(ctx,config,callbacks){callbacks.onSuccess({data:{byteLength:value}},this.stats,ctx,null)}}
+  const f=await linkedFixture({...peerPlaybackOptions().options,traceRequests:256,WebSocketImpl:memoryRelaySocket()},Custom,
+    {media:{currentTime:0,buffered:{length:0}}});
+  try {
+    for(value of ['private-size-secret',-1,NaN,Infinity,1.5,Number.MAX_SAFE_INTEGER+1,7]){
+      await new Promise(resolve=>new f.hls.config.fLoader({}).load(context,{}, {onSuccess:resolve}));
+      assert.equal(f.swarm.trace().rows.filter(row=>row.k==='origin').at(-1).bytes,value===7?7:null);
+    }
+    assert.equal(JSON.stringify(f.swarm.trace()).includes('private-size-secret'),false);
+  } finally {await f.close()}
+});
+
+test('origin trace: disabled tracing reads no additional loader byte getters or retains rows', async t=>{
+  for(const path of ['fallback','cached','late'])await t.test(path,async t=>{
+    const f=await multiFixture(t,{holders:path==='cached'?[{}]:[],holdWholeOrigin:true,
+      swarmOptions:{zeroBudgetPeerRace:path!=='fallback',latePeerRace:path==='late'}});
+    f.hls.media={currentTime:0,buffered:{length:0}};
+    try {
+      new f.hls.config.fLoader(f.hlsConfig).load(multiContext,f.loaderConfig,{onError(){}});
+      const whole=f.wholeLoads[0];let reads=0;
+      for(const key of ['loaded','total'])Object.defineProperty(whole.loader.stats,key,{configurable:true,get(){reads++;return 5}});
+      whole.callbacks.onError({code:500},whole.context,null);
+      assert.equal(reads,0);assert.deepEqual(f.swarm.trace(),{v:1,capacity:0,dropped:0,rows:[]});
+    } finally {await f.close()}
+  });
+});
+
 test("trace: off by default, bounded, and refused when invalid", async (t) => {
   const f = await multiFixture(t, { holders: [{}, {}] });
   try {
