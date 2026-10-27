@@ -10,6 +10,23 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased SDP object capability (27 October 2026)
+
+The existing encrypted offer/answer exchange advertises optional object framing
+2 while range support is enabled. An admitted current negotiation records it
+after remote SDP installation. A two-factory signed-session fixture reproduces
+a late viewer missing the holder's initial presence: the old positive-budget
+whole-object peer path still works, but the cold cached-range race falls back
+to HTTP. With the capability, verified peer bytes win the unchanged single HTTP
+backstop before its payload; both directions work without another presence.
+Missing/invalid capability, unadmitted offers and stale answers do not grant
+range eligibility. These are committed-Core tests with ordered transport
+substitutes. A separate native loopback Chrome/WASM check completes its first
+verified 6 MiB peer receipt while signed presence remains withheld, aborting
+the one partially received HTTP backstop. After presence release, the original
+HTTP-win and reused-peer cases still pass. This is synthetic protocol evidence,
+not real 4K startup, traffic savings or device qualification.
+
 ## Unreleased origin availability handoff (27 October 2026)
 
 When an owned whole-origin response completes and its key is already known,

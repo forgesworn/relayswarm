@@ -2060,6 +2060,16 @@ connection is bound to its remote ephemeral signalling key, without an array
 ordering assumption. Records cannot mutate membership and disappear when the
 link closes or the swarm stops. It creates no new network messages.
 
+While range support is enabled, the existing authenticated, encrypted SDP
+offer and answer also carry optional `obj: 2`. The loader records that explicit
+capability only for an admitted, still-current negotiation after successful
+remote SDP installation and before accepting the link. Missing or invalid
+metadata retains conservative presence-derived behaviour; an open connection
+or HAVE alone never proves range support. This avoids requiring a late viewer
+to receive the holder's next presence before using verified schema-3 ranges.
+It adds no signalling event or timer and changes no media verification,
+admission, lease or HTTP deadline rule.
+
 The opt-in `zeroBudgetPeerRace: true` races an already advertised cached
 schema 3 object against immediately started normal HTTP when no safe peer
 wait remains. It requires `coreWasm`/`multiHolder` framing eligibility and the
@@ -2888,6 +2898,23 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased SDP object capability (27 October 2026)
+
+The existing encrypted offer/answer exchange advertises optional object framing
+2 while range support is enabled. An admitted current negotiation records it
+after remote SDP installation. A two-factory signed-session fixture reproduces
+a late viewer missing the holder's initial presence: the old positive-budget
+whole-object peer path still works, but the cold cached-range race falls back
+to HTTP. With the capability, verified peer bytes win the unchanged single HTTP
+backstop before its payload; both directions work without another presence.
+Missing/invalid capability, unadmitted offers and stale answers do not grant
+range eligibility. These are committed-Core tests with ordered transport
+substitutes. A separate native loopback Chrome/WASM check completes its first
+verified 6 MiB peer receipt while signed presence remains withheld, aborting
+the one partially received HTTP backstop. After presence release, the original
+HTTP-win and reused-peer cases still pass. This is synthetic protocol evidence,
+not real 4K startup, traffic savings or device qualification.
 
 ## Unreleased origin availability handoff (27 October 2026)
 
