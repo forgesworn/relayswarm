@@ -40,6 +40,14 @@ jobs:
         shell: bash
         run: |
           E2E_NATIVE_BINDING="$PWD/target/realtime-native/native-addon.node" python3 -B test/native-turn-lifecycle.py > target/native-turn-lifecycle.json
+      - name: Retain failed synthetic TURN lifecycle diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: realtime-native-failure-diagnostics-${{ runner.os }}-${{ runner.arch }}
+          path: target/native-turn-lifecycle.json
+          if-no-files-found: warn
+          retention-days: 14
       - run: npx playwright-core install --with-deps chromium
       - name: Actual browser DCEP and binary interoperability
         shell: bash
