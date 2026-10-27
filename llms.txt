@@ -76,9 +76,10 @@ Source tests do not qualify cold-cache 4K or physical devices.
 Unreleased startupBufferTarget is null by default. A host-provided fresh raw
 HLS target enables one-shot verified startup buffering within the existing
 startup-only four-object/24 MiB and eight-second/parent limits; steady warm-ahead
-stays at three objects. A fully verified contiguous initial window may add one
-parsed future if measured recovery still exceeds its headroom. Future loads stay
-serial and byte-cap refusal never lowers recovery or renews time. With warmAhead false,
+stays at three objects. A fully verified contiguous future prefix may add one
+parsed successor if measured recovery still exceeds its headroom, retaining useful
+coverage even after the unchanged held first interval is obsolete. Future loads
+stay serial and byte-cap refusal never lowers recovery or renews time. With warmAhead false,
 speculation stops after startup. It preserves the pending trusted play and
 never changes the player, rate or room clock; failure is explicit. Source
 and fixture checks do not prove decoded playback or device acceptance.
