@@ -1199,11 +1199,17 @@ class HlsSwarm {
           // Fallback delegates errors, retries and progressive loading to the
           // host's original loader. Only one path can call the player back.
           const originStarted = now();
-          let completed = false;
-          swarm.#segmentKey(context).then((key) => {
-            if (!completed && !swarm.stopped) this.releaseFetch = swarm.#claimOrigin(key);
+          let completed = false, originKey = null;
+          const keyPromise = swarm.#segmentKey(context);
+          keyPromise.then((key) => {
+            if (!completed && !swarm.stopped) { originKey = key; this.releaseFetch = swarm.#claimOrigin(key); }
           }).catch(() => {});
-          const finishOrigin = () => { completed = true; this.releaseFetch?.(); this.releaseFetch = null; };
+          const finishOrigin = () => {
+            if (completed) return false;
+            completed = true; this.releaseFetch?.(); this.releaseFetch = null; return true;
+          };
+          const cancelPeer = this.cancel;
+          this.cancel = () => { finishOrigin(); return cancelPeer(); };
           const originTrace = this.originTrace = swarm.#traceWholeOrigin(traceLoad, "fallback", () => this.inner.stats);
           this.inner.load(context, config, {
             ...callbacks,
@@ -1211,10 +1217,16 @@ class HlsSwarm {
             onTimeout: (...args) => { originTrace?.terminal("timeout", null, args[0], originTrace !== this.originTrace); finishOrigin(); callbacks.onTimeout?.(...args); },
             onAbort: (...args) => { originTrace?.terminal("abort", null, args[0], originTrace !== this.originTrace); finishOrigin(); callbacks.onAbort?.(...args); },
             onSuccess: (response, stats, ctx, details) => {
+              if (completed) return;
               const receivedMs = firstByteWallMs(stats);
               const { copy, size } = swarm.#originCopy(response, context);
+              if (completed) return;
+              // Publish retained source bytes before Hls synchronously disposes
+              // the loader and withdraws its already-advertised FETCH claim.
+              if (originKey && copy) swarm.#hold(originKey, new Uint8Array(copy));
+              if (!finishOrigin()) return;
+              this.pendingCallbacks = null;
               originTrace?.terminal("payload", size || null, stats, originTrace !== this.originTrace);
-              completed = true;
               pushSample(swarm.originLatencySamples, now() - originStarted);
               swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - originStarted);
               if (swarm.options.peerSupplyHint && size) {
@@ -1229,12 +1241,11 @@ class HlsSwarm {
               if (size && !swarm.stopped) swarm.#guard("peer-first-origin", async () => {
                 swarm.counters.originLoaded += 1;
                 swarm.counters.bytesFromOrigin += size;
-                try {
-                  const key = await swarm.#segmentKey(context);
+                if (!originKey) {
+                  const key = await keyPromise;
                   if (copy && !swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
-                } finally { finishOrigin(); }
+                }
               });
-              else finishOrigin();
             },
           });
         };
@@ -1286,7 +1297,7 @@ class HlsSwarm {
       loadCachedRace(context, config, callbacks, budgetGeometry, cached) {
         const traceLoad = swarm.#traceBegin(context, 0, swarm.options.maxPeerWaitMs, budgetGeometry);
         const token = {}, controller = new AbortController(), t0 = now();
-        let originPending = true, originClaimed = false, timer;
+        let originPending = true, originClaimed = false, originKey = null, keyPromise, timer;
         this.active = token;
         this.pendingCallbacks = { callbacks, context };
         Object.assign(this.inner.stats, { aborted: false, loaded: 0, total: 0, chunkCount: 0,
@@ -1332,9 +1343,12 @@ class HlsSwarm {
           onAbort: (...args) => { originTrace?.terminal("abort", null, args[0], !originPending || this.active !== token); if (finishOrigin()) callbacks.onAbort?.(...args); },
           onSuccess: (response, stats, ctx, details) => {
             if (!originPending || this.active !== token) originTrace?.terminal("payload", null, undefined, true);
-            if (!finishOrigin()) return;
+            if (!originPending || this.active !== token) return;
             const receivedMs = firstByteWallMs(stats);
             const { copy, size } = swarm.#originCopy(response, context);
+            if (!originPending || this.active !== token) return;
+            if (originKey && copy) swarm.#hold(originKey, new Uint8Array(copy));
+            if (!finishOrigin()) return;
             originTrace?.terminal("payload", size || null, stats);
             pushSample(swarm.originLatencySamples, now() - t0);
             swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - t0);
@@ -1342,14 +1356,17 @@ class HlsSwarm {
             swarm.#noteOriginClock(details, receivedMs);
             if (size && !swarm.stopped) swarm.#guard("cached-race-origin", async () => {
               swarm.counters.originLoaded += 1; swarm.counters.bytesFromOrigin += size;
-              const key = await swarm.#segmentKey(context);
-              if (copy && !swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
+              if (!originKey) {
+                const key = await (keyPromise ?? swarm.#segmentKey(context));
+                if (copy && !swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
+              }
             });
           },
         }); } catch (error) { finishOrigin(); throw error; }
         if (!originPending) return;
-        swarm.#segmentKey(context).then(key => {
-          if (originPending && !swarm.stopped) this.releaseFetch = swarm.#claimOrigin(key);
+        keyPromise = swarm.#segmentKey(context);
+        keyPromise.then(key => {
+          if (originPending && !swarm.stopped) { originKey = key; this.releaseFetch = swarm.#claimOrigin(key); }
         }).catch(() => {});
         const plan = { deadline: t0 + swarm.options.maxPeerWaitMs, limit: t0 + swarm.options.maxPeerWaitMs,
           originReserveMs: 0, expired: false, onDeadline: null, cachedOnly: cached, lateHaveRace: swarm.options.lateHaveRace,
@@ -1371,7 +1388,7 @@ class HlsSwarm {
       loadLatePeerRace(context, config, callbacks, budgetGeometry, parentMs) {
         const traceLoad = swarm.#traceBegin(context, 0, parentMs, budgetGeometry);
         const token = {}, controller = new AbortController(), t0 = now();
-        let originPending = true, originClaimed = false, watch;
+        let originPending = true, originClaimed = false, originKey = null, watch;
         this.active = token; this.pendingCallbacks = { callbacks, context };
         Object.assign(this.inner.stats, { aborted: false, loaded: 0, total: 0, chunkCount: 0, loading: { start: 0, first: 0, end: 0 } });
         const current = () => originPending && !originClaimed && this.active === token && !swarm.stopped;
@@ -1424,22 +1441,27 @@ class HlsSwarm {
           onAbort: (...args) => { originTrace?.terminal('abort', null, args[0], !originPending || this.active !== token); if (finishOrigin('origin-abort')) callbacks.onAbort?.(...args); },
           onSuccess: (response, stats, ctx, details) => {
             if (!originPending || this.active !== token) originTrace?.terminal("payload", null, undefined, true);
-            if (!finishOrigin('origin-success')) return;
+            if (!originPending || this.active !== token) return;
             const receivedMs = firstByteWallMs(stats), { copy, size } = swarm.#originCopy(response, context);
+            if (!originPending || this.active !== token) return;
+            if (originKey && copy) swarm.#hold(originKey, new Uint8Array(copy));
+            if (!finishOrigin('origin-success')) return;
             originTrace?.terminal("payload", size || null, stats);
             pushSample(swarm.originLatencySamples, now() - t0);
             swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - t0);
             callbacks.onSuccess(response, stats, ctx, details); swarm.#noteOriginClock(details, receivedMs);
             if (size && !swarm.stopped) swarm.#guard('late-race-origin', async () => {
               swarm.counters.originLoaded++; swarm.counters.bytesFromOrigin += size;
-              const key = await swarm.#segmentKey(context);
-              if (copy && !swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
+              if (!originKey) {
+                const key = await (watch?.keyPromise ?? swarm.#segmentKey(context));
+                if (copy && !swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
+              }
             });
           },
         }); } catch (error) { finishOrigin('origin-throw'); throw error; }
         if (!originPending) return;
         watch?.keyPromise.then(key => {
-          if (originPending && this.active === token && !swarm.stopped) this.releaseFetch = swarm.#claimOrigin(key);
+          if (originPending && this.active === token && !swarm.stopped) { originKey = key; this.releaseFetch = swarm.#claimOrigin(key); }
         }).catch(() => {});
       }
       abort() {

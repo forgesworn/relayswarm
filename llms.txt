@@ -63,6 +63,11 @@ Unreleased accepted-peer stats preserve known aborted=false through losing-XHR
 disposal, including hls.js synchronous success cleanup. Actual hls.js 1.7.3
 regressions cover delivery identity, abort/unknown states and cleanup exceptions.
 This correctness fix adds no transfer policy or measured performance benefit.
+Unreleased whole-origin completion retains eligible bytes under its already-known
+key and announces HAVE before withdrawing FETCH, including synchronous hls.js
+disposal. Actual hls.js regressions cover ordinary, cached-race and late-race
+ordering. No lease extension, new receiver trust or measured traffic saving is
+claimed.
 Unreleased warmAhead is disabled by default: bounded future main-fragment
 loads share the existing held cache and coalesce with genuine player demand.
 Current signed authority and content hashes gate cache reuse; local reuse,

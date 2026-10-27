@@ -801,6 +801,14 @@ bytes. Both operations share the loader's deadline. An eligible wait may make
 one commitment request even if availability never arrives. A failed commitment
 request still falls back to origin, without a commitment retry.
 
+For a successful owned whole-origin response whose key is already known, the
+loader retains eligible bytes and announces HAVE before withdrawing FETCH,
+including when hls.js synchronously destroys the completed loader. Abort,
+failure or refusal to retain bytes supplies no new HAVE. This changes neither
+the lease duration nor the receiver's signed-commitment and hash checks, and
+adds no key-hash wait before the player's success callback. Availability is
+not a promise that a peer transfer will fit the receiver's deadline.
+
 If peer work fails or exceeds its budget, the original loader starts and owns
 its usual HTTP retries and errors. Invalid peer bytes are discarded
 and the peer is banned. Init segments and, by default, low-latency parts use
