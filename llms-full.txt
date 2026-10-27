@@ -1078,7 +1078,11 @@ the original loader directly. `abort()`, `destroy()` and `stop()` cancel
 pending peer work; stopping also immediately releases a waiting load to its
 original loader. No late peer completion can invoke a second success callback.
 Peer success updates the statistics object retained by hls.js, including loaded
-bytes and timestamps. Aborting a pending peer load invokes `onAbort` once;
+bytes and timestamps. Its known `aborted: false` survives disposal of the losing
+HTTP loader, including hls.js's synchronous success cleanup. This preserves the
+accepted stats reference; it makes no performance claim. Caller aborts and
+unknown or already-aborted flags retain their existing semantics.
+Aborting a pending peer load invokes `onAbort` once;
 destroying it cancels without a completion callback. The playback regression
 checks these behaviours alongside ranges, seeks and discontinuities.
 
@@ -2357,7 +2361,12 @@ resolves events under an explicit host policy; the loader itself opens no
 discovery query.
 The peer loader updates hls.js's retained statistics object and sends one
 `onAbort` callback for an aborted pending peer load. `destroy` cancels without
-reporting a completed load.
+reporting a completed load. For an accepted verified peer object, disposal of
+the losing HTTP loader preserves the same stats reference and an incoming
+`aborted: false`, including hls.js 1.7.3's synchronous success cleanup. It does
+not normalise caller aborts or true/unknown flags; ordinary HTTP disposal and
+cleanup exceptions retain their semantics. This is a correctness fix, with no
+measured performance benefit.
 
 The optional `onPeerDelivery({ connection, bytes })` callback attributes
 verified peer-first media to its actual `RTCPeerConnection`. A single-holder
@@ -2857,6 +2866,16 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased accepted-peer stats disposal (27 October 2026)
+
+An accepted verified peer object's known `aborted: false` now survives disposal
+of its losing HTTP loader. The actual hls.js 1.7.3 FragmentLoader and XhrLoader
+regressions reproduce the old mutation during synchronous success cleanup and
+check cached and late peer wins, retained stats identity, late HTTP suppression,
+ordinary HTTP, pending/caller aborts, unsafe flags and disposal exceptions.
+The change adds no transfer policy and claims no performance improvement or
+new physical-device, public-NAT or release qualification.
 
 ## Measured startup and recording wrap (26 October 2026)
 

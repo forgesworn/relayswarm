@@ -1454,7 +1454,18 @@ class HlsSwarm {
           callbacks.onAbort?.(this.inner.stats, context, null);
         } else this.inner.abort();
       }
-      destroy() { this.originTrace?.abortRequest("destroy"); this.releaseFetch?.(); this.releaseFetch = null; this.cancel?.(); this.pendingCallbacks = null; this.inner.destroy(); }
+      destroy() {
+        // Hls destroys synchronously inside onSuccess. Disposing the losing
+        // XHR must not invalidate the accepted peer stats it shares with Hls.
+        let acceptedPeerStats;
+        try { const stats = this.peerStats; if (stats?.aborted === false) acceptedPeerStats = stats; } catch {}
+        try {
+          this.originTrace?.abortRequest("destroy"); this.releaseFetch?.(); this.releaseFetch = null;
+          this.cancel?.(); this.pendingCallbacks = null; this.inner.destroy();
+        } finally {
+          try { if (acceptedPeerStats && acceptedPeerStats.aborted !== false) acceptedPeerStats.aborted = false; } catch {}
+        }
+      }
       getCacheAge() { return this.peerStats ? null : this.inner.getCacheAge?.() ?? null; }
       getResponseHeader(name) { return this.peerStats ? null : this.inner.getResponseHeader?.(name) ?? null; }
     };
