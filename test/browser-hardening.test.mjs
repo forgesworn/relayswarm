@@ -1520,7 +1520,10 @@ test("peer eligibility preserves origin errors and pending loader aborts without
     const loader = new fixture.hls.config.fLoader({}); let aborts = 0;
     loader.load(context, {}, { onAbort: (stats) => { aborts++; assert.equal(stats.aborted, true); },
       onSuccess: () => assert.fail("aborted load must not deliver"), onError: () => assert.fail("aborted load must not fallback") });
-    loader.abort(); await sleep(20);
+    loader.abort();
+    // Eligibility records cancellation after the asynchronous segment-key
+    // digest resumes; abort callbacks do not wait for that diagnostic.
+    await until(() => fixture.swarm.metrics().peerEligibilityDiagnostics.counters["aborted-before-eligibility"] === 1);
     assert.equal(aborts, 1); assert.equal(errors, 1);
     assert.equal(fixture.swarm.metrics().segments.aborted, 1);
     assert.equal(fixture.swarm.metrics().segments.originFallbacks, 1);
