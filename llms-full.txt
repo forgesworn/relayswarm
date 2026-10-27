@@ -360,7 +360,7 @@ decision is not cached as permission for later upload requests.
 | `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
 | `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-object origin time with a 25% and 100 ms recovery margin. Substantial origin ranges update this estimate after scaling by their actual byte count. Unknown origin timing or duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. Independent cached/late-HAVE races keep their window beside immediate HTTP. |
 | `warmAhead` | `false` | Experimental peer-first option, requiring `serve: true`: use the same player's next two parsed, unencrypted, whole main-media fragments for bounded speculative loading. A warmed object promoted to genuine demand frees the sole speculative slot. Existing demand/range limits are unchanged. Verified future objects share the held cache; at most three distinct cached/in-flight objects and 24 MiB of warm data plus all reservations fit within `maxHeldBytes`. Fresh cache permission may wait only within actual buffer headroom, up to 25 ms, before ordinary source recovery proceeds independently. |
-| `startupBufferTarget` | `null` | Experimental one-shot startup buffer for peer-first serving: a synchronous function returns the current player's fresh raw HLS target time in seconds, or `null` when its ownership/epoch is invalid. Hold the first main-fragment callback until verified contiguous upcoming media covers that target and measured origin-recovery headroom. While pending, a 100 ms poll advances a bounded parsed future window toward that horizon, skipping unrequested near-tip work and reclaiming completed unowned coverage only when needed. A window ahead of the actual target waits for it; in-flight work and authority pins retain their reservations. When both verified futures contribute to contiguous coverage of the current target but still lack recovery headroom, preserve that useful prefix and admit one additional parsed successor, even if the held original first interval is obsolete. Startup permits at most four objects within the same 24 MiB budget; steady warm-ahead remains at three. Future requests remain serial and the original eight-second/parent deadline remains unchanged. Works with `warmAhead: false` to stop speculative fetching after startup. It never pauses, plays, seeks or changes the room clock; bounded failure reports a loader error instead of releasing unsafe media. |
+| `startupBufferTarget` | `null` | Experimental one-shot startup buffer for peer-first serving: a synchronous function returns the current player's fresh raw HLS target time in seconds, or `null` when its ownership/epoch is invalid. Hold the first main-fragment callback until verified contiguous upcoming media covers that target and measured origin-recovery headroom. While pending, a 100 ms poll advances a bounded parsed future window toward that horizon, skipping unrequested near-tip work and reclaiming completed unowned coverage only when needed. A window ahead of the actual target waits for it; in-flight work and authority pins retain their reservations. When both verified futures contribute to contiguous coverage of the current target but still lack recovery headroom, preserve that useful prefix and admit one additional parsed successor, even if the held original first interval is obsolete. Startup permits at most four objects within the same 24 MiB budget; steady warm-ahead remains at three. Future requests remain serial. The startup deadline is twelve seconds from the original first-fragment load entry, or the shorter parent load deadline; retries do not renew it. Ordinary speculative requests retain their separate eight-second expiry. Works with `warmAhead: false` to stop speculative fetching after startup. It never pauses, plays, seeks or changes the room clock; bounded failure reports a loader error instead of releasing unsafe media. |
 | `startupBufferCommit` | `null` | Optional async host hook, requiring `startupBufferTarget`, called once with frozen `{ signal }` after verified reservoir readiness and before releasing HLS callbacks. The host may acknowledge a new room start here. The original startup deadline and resource limits continue; cancellation ignores late settlement. Fresh target, authority, context and resident coverage are checked again afterwards. The SDK never creates or reanchors the room clock. |
 | `uploadPacing` | `false` | Experimental canonical-piece upload refill deferral: one FIFO waiter per link, at most `min(maxUploadPeers, maxPeers)` waiters, and a fixed 250 ms queue deadline. The existing per-second rate, twice-rate burst, session allowance and wire remain unchanged. Whole-object deficits still refuse immediately. Queue rows contain identity and numeric geometry; held bytes and current host permission are checked after waiting. |
 | `latePeerRace` | `false` | Experimental peer-first option requiring `zeroBudgetPeerRace`: permit the first peer arm of still-running whole-main-fragment HTTP with no prior peer plan to use a newly accepted, current exact-HAVE holder. Warm work needs a genuine consumer or an owned pending startup-buffer dependency. Genuine demand keeps its earliest demand window; startup dependencies keep the original HTTP-entry window and first startup deadline. Both retain `min(lateWindowMs, 4000)`, arming plus `min(maxPeerWaitMs, 2500)`, and the known original HTTP load deadline. Same HTTP request/timers, fresh authority and current immutable identity; no retries or extra GET. Dormant watchers share `maxConcurrentRaces`; lifecycle changes retire them. Numeric `latePeerRace` metrics do not create delivery credit. |
@@ -1181,6 +1181,13 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 # RelaySwarm changelog
 
 ## Unreleased
+
+- Allow the one-shot verified startup reservoir up to twelve seconds from its
+  original first-fragment load entry, still constrained by the shorter parent
+  deadline. A slow 4K source can otherwise expire while a required fragment is
+  arriving. Keep ordinary speculative expiry at eight seconds, four startup
+  objects within 24 MiB, recovery headroom, authority checks and ACK ownership.
+  Automatic retries do not renew the deadline.
 
 - Retain eligible whole-origin bytes under their already-known key and announce
   HAVE before withdrawing FETCH, including synchronous hls.js success disposal.
@@ -2126,8 +2133,9 @@ explicitly. The original first response is handed to HLS unchanged and
 is not retained as an extra shared-cache seed; its reservation is released.
 Release requires a contiguous verified interval covering the
 fresh target plus at least the origin reserve or measured p90 whole-origin
-recovery with its 25% and 100 ms margin, whichever is greater. The original
-eight-second and parent load deadlines remain upper bounds. Invalid ownership,
+recovery with its 25% and 100 ms margin, whichever is greater. Startup is
+bounded to twelve seconds from the original first-fragment load entry, or the shorter parent load deadline. Ordinary speculative requests
+retain their separate eight-second expiry. Invalid ownership,
 insufficient capacity or expiration fails the loader explicitly; it does not
 release stale media or renew the deadline on automatic HLS retries. A separate
 new adapter may start again after an explicit user retry.
@@ -2170,8 +2178,8 @@ return a promise. For example, a host can prepare a new room locally at zero,
 publish its start after verified media is ready, and await acknowledgement.
 An existing room must retain its advancing clock.
 
-The original eight-second/parent deadline and held reservations remain in force
-while the host acknowledges. Cancellation retires the operation; late resolution
+The original twelve-second/parent startup deadline and held reservations
+remain in force while the host acknowledges. Cancellation retires the operation; late resolution
 or rejection cannot release media. A current hook failure reports
 `commit-refused`. After success, the loader repeats fresh target, authority,
 context, parsed-fragment and resident-coverage checks. Insufficient headroom
@@ -2899,6 +2907,22 @@ the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased startup load budget (27 October 2026)
+
+The one-shot startup reservoir now has twelve seconds from the original
+first-fragment load entry, clipped to the shorter parent load deadline.
+Ordinary speculative requests still expire after eight seconds. A cold browser
+4K check of the preceding eight-second policy decoded no frames: its initial
+two overlapping fragment requests took about six seconds each, and the fourth
+fragment was still arriving at expiry. All four pinned catalogue object sizes fit the
+existing 24 MiB budget. The cancelled response's eventual completion time is
+unknown; allowing a longer bounded wait does not establish that it would have
+succeeded. Four startup objects, serial future requests, measured recovery
+headroom, fresh authority checks and the original ACK deadline are retained.
+Source regression checks distinguish safe completion after eight seconds,
+absolute expiry and a shorter parent deadline. Real-source startup, sustained
+playback and physical-device qualification remain separate acceptance gates.
+
 ## Unreleased SDP object capability (27 October 2026)
 
 The existing encrypted offer/answer exchange advertises optional object framing
@@ -2936,8 +2960,8 @@ first body and both planned futures verify, startup may retain the useful
 contiguous future prefix and admit one parsed successor before retiring that
 prefix. The original response remains held unchanged even when its interval
 is obsolete. Startup is bounded to four objects and the same 24 MiB; steady
-warm-ahead stays at three, future requests stay serial, and the original
-eight-second/parent deadline, authority and ACK checks remain unchanged.
+warm-ahead stays at three, future requests stay serial, and the then-current
+eight-second/parent deadline, authority and ACK checks were unchanged.
 Source fixtures cover feasible completion, an obsolete first interval, byte
 refusal, cancellation and fresh target checks. The additional request must finish within the original deadline;
 byte capacity alone does not guarantee time to complete it. These checks do not

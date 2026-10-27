@@ -3,7 +3,7 @@
 // no media clock, playback command, background holder or alternate rendition
 // is created here. The supplied loader remains the SDK's loader.
 export const WARM_AHEAD = Symbol('relayswarm-warm-ahead');
-const MAX_BYTES = 24 * 1024 * 1024, MAX_OBJECTS = 3, MAX_STARTUP_OBJECTS = 4, DEADLINE_MS = 8_000, STARTUP_POLL_MS = 100;
+const MAX_BYTES = 24 * 1024 * 1024, MAX_OBJECTS = 3, MAX_STARTUP_OBJECTS = 4, DEADLINE_MS = 8_000, STARTUP_DEADLINE_MS = 12_000, STARTUP_POLL_MS = 100;
 const validInterval = item => {
   const { start, duration } = item?.context?.frag ?? {};
   return Number.isFinite(start) && start >= 0 && Number.isFinite(duration) && duration > 0 && Number.isFinite(start + duration);
@@ -528,7 +528,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     Object.assign(startup, { state: 'buffering', owner, terminal, own, revision: generation, reserved: MAX_BYTES, entryAt: at,
       identity: { key: own.key, scope: own.scope, context: { frag: { start: own.context.frag.start, duration: own.context.frag.duration } } },
       contextUrl: terminal.context.url, fragUrl: terminal.context.frag.url,
-      controller: new AbortController(), deadline: at + Math.min(DEADLINE_MS, Number.isFinite(parent) && parent > 0 ? parent : DEADLINE_MS) });
+      controller: new AbortController(), deadline: at + Math.min(STARTUP_DEADLINE_MS, Number.isFinite(parent) && parent > 0 ? parent : STARTUP_DEADLINE_MS) });
     startup.plan = (latestDemand?.upcoming ?? []).map(item => planFuture(item, own));
     if (latestDemand?.owner === terminal.id) latestDemand.rolling = startup.plan;
     startup.cursor = null;
@@ -743,7 +743,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       requiredHeadroomMs: startup.requiredHeadroomMs, planningServiceMs: startup.planningServiceMs,
       released: startup.released, failures: startup.failures,
       cancellations: startup.cancellations, commitStarted: startup.commitStarted, commitCompleted: startup.commitCompleted,
-      limits: { objects: MAX_STARTUP_OBJECTS, bytes: MAX_BYTES, deadlineMs: DEADLINE_MS } }),
+      limits: { objects: MAX_STARTUP_OBJECTS, bytes: MAX_BYTES, deadlineMs: STARTUP_DEADLINE_MS } }),
     contains(time) {
       if (closed || !allowed() || !Number.isFinite(time)) return false;
       for (const row of [...jobs.values(), ...cache.values()]) {
@@ -769,5 +769,5 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     stop() { closed = true; clear(); }, snapshot: () => ({ ...counters,
       reservationBytes: reserved(), active: Number(Boolean(active)), promoted: promoted.size, trackedObjects: tracked(),
       queued: queued.length, cacheObjects: cache.size,
-      limits: { objects: objectLimit(), bytes: MAX_BYTES, speculativeWholeRequests: 1, deadlineMs: DEADLINE_MS, revalidationMs: 25 } }) };
+      limits: { objects: objectLimit(), bytes: MAX_BYTES, speculativeWholeRequests: 1, deadlineMs: startup.state === 'buffering' ? STARTUP_DEADLINE_MS : DEADLINE_MS, revalidationMs: 25 } }) };
 }

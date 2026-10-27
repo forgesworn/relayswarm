@@ -10,6 +10,22 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased startup load budget (27 October 2026)
+
+The one-shot startup reservoir now has twelve seconds from the original
+first-fragment load entry, clipped to the shorter parent load deadline.
+Ordinary speculative requests still expire after eight seconds. A cold browser
+4K check of the preceding eight-second policy decoded no frames: its initial
+two overlapping fragment requests took about six seconds each, and the fourth
+fragment was still arriving at expiry. All four pinned catalogue object sizes fit the
+existing 24 MiB budget. The cancelled response's eventual completion time is
+unknown; allowing a longer bounded wait does not establish that it would have
+succeeded. Four startup objects, serial future requests, measured recovery
+headroom, fresh authority checks and the original ACK deadline are retained.
+Source regression checks distinguish safe completion after eight seconds,
+absolute expiry and a shorter parent deadline. Real-source startup, sustained
+playback and physical-device qualification remain separate acceptance gates.
+
 ## Unreleased SDP object capability (27 October 2026)
 
 The existing encrypted offer/answer exchange advertises optional object framing
@@ -47,8 +63,8 @@ first body and both planned futures verify, startup may retain the useful
 contiguous future prefix and admit one parsed successor before retiring that
 prefix. The original response remains held unchanged even when its interval
 is obsolete. Startup is bounded to four objects and the same 24 MiB; steady
-warm-ahead stays at three, future requests stay serial, and the original
-eight-second/parent deadline, authority and ACK checks remain unchanged.
+warm-ahead stays at three, future requests stay serial, and the then-current
+eight-second/parent deadline, authority and ACK checks were unchanged.
 Source fixtures cover feasible completion, an obsolete first interval, byte
 refusal, cancellation and fresh target checks. The additional request must finish within the original deadline;
 byte capacity alone does not guarantee time to complete it. These checks do not

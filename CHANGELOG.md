@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Allow the one-shot verified startup reservoir up to twelve seconds from its
+  original first-fragment load entry, still constrained by the shorter parent
+  deadline. A slow 4K source can otherwise expire while a required fragment is
+  arriving. Keep ordinary speculative expiry at eight seconds, four startup
+  objects within 24 MiB, recovery headroom, authority checks and ACK ownership.
+  Automatic retries do not renew the deadline.
+
 - Retain eligible whole-origin bytes under their already-known key and announce
   HAVE before withdrawing FETCH, including synchronous hls.js success disposal.
   Cover ordinary HTTP, cached-peer racing and late-peer racing with actual
