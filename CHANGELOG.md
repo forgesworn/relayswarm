@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Preserve eligible current-transfer physical peer usefulness when that loader's
+  successful positive binary HTTP response cancels its losing peer-only arm.
+  Only fresh verified pieces from the same guarded transfer/link qualify, using
+  their actual credit timestamp. No Hls credit or throughput sample is invented;
+  zero-fresh aborts, failures, expired or invalid ownership retain their existing
+  handling. Existing observation floors, cooldown durations and deadlines remain.
+
 - Add bounded `core.multiHolder.peerFlow` diagnostics for verified short-flow
   batches and the existing link-model fit decisions. Counters and latest numeric
   snapshots expose no peer identities or payloads. Peer policy, usefulness,

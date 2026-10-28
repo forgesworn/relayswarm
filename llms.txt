@@ -89,6 +89,14 @@ and existing fit/useful-unknown/refresh/cooldown-blocked/known-slow model
 evaluations. Latest numeric snapshots and no-model candidate counts are copied,
 without peer IDs or payloads. These diagnostics change no usefulness, cooldown,
 admission or deadline policy and establish no playback performance improvement.
+An unreleased correction retains current-transfer fresh verified-piece
+usefulness only across an explicitly owned successful positive binary HTTP winner,
+before releasing its guarded lease and anchored to actual credit time. It can
+permit existing unknown-flow admission, without Hls credit or a fitted rate.
+Newer zero-fresh aborts, stop/seek/replacement, expiry, failure and invalid ownership
+remain excluded; observation floors, cooldown durations and deadlines stay fixed.
+The cumulative partialUsefulnessPreserved counter counts actual applications.
+No field cancellation-owner or playback-performance claim is established.
 Unreleased startupBufferTarget is null by default. A host-provided fresh raw
 HLS target enables one-shot verified startup buffering within the existing
 startup-only four-object and twelve-second/parent limits. startupBufferMaxBytes

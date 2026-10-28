@@ -10,6 +10,26 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased partial-usefulness correction (28 October 2026)
+
+The correction retains physical usefulness from fresh verified pieces in the
+current peer-only transfer when its own successful positive binary HTTP response
+wins. Proof binds the transfer, link, request controller and current authority,
+connection, media, generation and worker state. It is consumed before releasing
+the still-owned lease; no usefulness is restored afterwards. The timestamp is
+anchored to actual verified credit, and a newer zero-credit abort still clears it.
+The bounded `core.multiHolder.peerFlow.partialUsefulnessPreserved` counter records
+actual applications without identities or new timing fields.
+
+This changes which later genuine demands can use the existing unknown-flow
+continuation. It adds no Hls credit or rate, lowers no observation floor, extends
+no deadline and changes no cooldown duration or initial unknown-flow piece bound.
+Stop, seek/replacement, expiry, failure, corruption and stale worker results do
+not qualify. The prior capture measured partial credit followed by refusals, but
+did not record each transfer's cancellation owner. Local checks passed 702 swarm
+tests, 31 focused regressions and 20 Core integration checks. Field-causality
+and playback-performance qualification remain open.
+
 ## Unreleased peer-flow and fit-model diagnostics (28 October 2026)
 
 `metrics().core.multiHolder.peerFlow` now counts emitted verified short-flow
