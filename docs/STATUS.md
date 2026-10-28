@@ -10,6 +10,25 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased XHR progress/success ownership compatibility (28 October 2026)
+
+The installed hls.js 1.7.3 XhrLoader calls final body progress before synchronous
+HTTP success. Immediate peer cancellation at progress disposed of the partial
+usefulness proof before that success could validate it. The wrapper now claims
+HTTP immediately and queues one guarded microtask for genuine binary progress's
+unproven peer retirement. Positive nonbinary progress still cancels immediately,
+even after an earlier binary claim; the payload length decision is read once.
+Owned positive-body success observed before queued retirement can validate
+before lease release, including a success already queued before progress.
+Nonterminal progress, failure or success after retirement cannot. Late proof validation
+retains every existing context/admission/deadline predicate while distinguishing
+HTTP ownership from peer-handoff eligibility.
+
+This corrects a callback-order compatibility gap. It creates no rate or Hls peer
+credit and extends no peer window or deadline. Actual-XhrLoader and committed-Core
+fixtures exercise the callback sequence; they do not qualify sustained playback,
+source savings or explain each cancellation in the previous failed field run.
+
 ## Unreleased partial-usefulness correction (28 October 2026)
 
 The correction retains physical usefulness from fresh verified pieces in the

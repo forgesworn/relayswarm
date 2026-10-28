@@ -4809,7 +4809,7 @@ function sameBytes(actual, expected, message) {
     message ?? `got ${actual.length} bytes, expected ${expected.length}`);
 }
 
-async function multiFixture(t, { holders, size = 200_000, multiHolder = true, framing = 2, commitmentVersion = 3, originFallbackMs = 3_000, originDelayMs = 0, wholeOriginDelayMs = 0, holdWholeOrigin = false, ignoreRanges = false, traceRequests = 0, peerSupplyHint = false, onPlayerHint = null, beforeCommitment = null, onPeerDelivery = null, swarmOptions = {} }) {
+async function multiFixture(t, { holders, OriginLoader = null, size = 200_000, multiHolder = true, framing = 2, commitmentVersion = 3, originFallbackMs = 3_000, originDelayMs = 0, wholeOriginDelayMs = 0, holdWholeOrigin = false, ignoreRanges = false, traceRequests = 0, peerSupplyHint = false, onPlayerHint = null, beforeCommitment = null, onPeerDelivery = null, swarmOptions = {} }) {
   const bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
   // The player's loader. It answers a range from the same object; its whole
   // segment is different bytes, so a whole-segment fallback shows.
@@ -4841,7 +4841,7 @@ async function multiFixture(t, { holders, size = 200_000, multiHolder = true, fr
   const signed = signedFixture({ v: commitmentVersion, key, rendition: commitmentVersion === 1 ? "0" : "/media/index.m3u8", playlist: "/media/index.m3u8", mediaType: "main", encryption: null,
     sha256: createHash("sha256").update(bytes).digest("hex"), size, pieceSize, pieces });
   const f = await linkedFixture({ mode: "peer-first", streamEvent: signed.options.streamEvent, getCommitment: async (...args) => { commitmentCalls++; await beforeCommitment?.(...args); return signed.event; }, originFallbackMs,
-    segmentKey: (url) => new URL(url).pathname, coreWasm: multiCore, multiHolder, traceRequests, peerSupplyHint, onPlayerHint, onPeerDelivery, WebSocketImpl: memoryRelaySocket(), ...swarmOptions }, RangeLoader);
+    segmentKey: (url) => new URL(url).pathname, coreWasm: multiCore, multiHolder, traceRequests, peerSupplyHint, onPlayerHint, onPeerDelivery, WebSocketImpl: memoryRelaySocket(), ...swarmOptions }, OriginLoader ?? RangeLoader);
   await until(() => f.swarm.metrics().core.state === "ready");
   const channels = [];
   for (const options of holders) {
@@ -5246,15 +5246,15 @@ for (const ending of ['pause', 'ticket', 'timeout', 'prefix']) test(`latePeerRac
   assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
 });
 
-function beginCountedMultiLoad(f) {
+function beginCountedMultiLoad(f, context = multiContext, onProgress = null) {
   const calls = { success: [], abort: [], error: [], progress: [] };
   let resolve;
   const response = new Promise(done => { resolve = done; });
   const loader = new f.hls.config.fLoader(f.hlsConfig);
-  loader.load(multiContext, f.loaderConfig, {
+  loader.load(context, f.loaderConfig, {
     onSuccess: (...args) => { calls.success.push(args); resolve(new Uint8Array(args[0].data)); },
     onAbort: (...args) => calls.abort.push(args), onError: (...args) => calls.error.push(args),
-    onProgress: (...args) => calls.progress.push(args),
+    onProgress: (...args) => { calls.progress.push(args); onProgress?.(...args); },
   });
   return { loader, response, calls };
 }
@@ -6605,6 +6605,185 @@ class PartialFlowChannel extends PhasedFlowChannel {
     return super.send(data);
   }
 }
+
+function heldRealXhrSource(t) {
+  assert.equal(Hls.version, '1.7.3');
+  const globals = new Map(['self', 'XMLHttpRequest'].map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
+  const requests = [], instances = [], order = [];
+  class HeldXHR {
+    readyState = 0; status = 200; responseType = 'arraybuffer'; abortCalls = 0;
+    constructor() { requests.push(this); }
+    open(_method, url) { this.readyState = 1; this.responseURL = url; }
+    setRequestHeader() {}
+    getResponseHeader() { return null; }
+    getAllResponseHeaders() { return ''; }
+    send() {}
+    abort() { this.abortCalls++; this.readyState = 0; }
+    complete(body, status = 200) { this.status = status; this.response = body; this.readyState = 4; this.onreadystatechange?.(); }
+  }
+  class OriginLoader extends Hls.DefaultConfig.loader {
+    constructor(config) { super(config); instances.push(this); }
+    load(context, config, callbacks) {
+      return super.load(context, config, { ...callbacks,
+        onProgress: (...args) => { order.push('progress'); callbacks.onProgress?.(...args); },
+        onSuccess: (...args) => { order.push('success'); callbacks.onSuccess?.(...args); },
+      });
+    }
+  }
+  Object.defineProperty(globalThis, 'self', { configurable: true, value: globalThis });
+  Object.defineProperty(globalThis, 'XMLHttpRequest', { configurable: true, value: HeldXHR });
+  t.after(() => { for (const [name, descriptor] of globals) {
+    if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete globalThis[name];
+  } });
+  return { OriginLoader, requests, instances, order };
+}
+
+for (const late of [false, true]) test(`actual XHR ${late ? 'late' : 'cached'} completion preserves fresh partial usefulness after its final progress`, async t => {
+  const xhr = heldRealXhrSource(t), clock = virtualClock(t); let f, next;
+  const context = { ...multiContext, responseType: 'arraybuffer' };
+  try {
+    f = await clock.settle(multiFixture(t, { OriginLoader: xhr.OriginLoader,
+      holders: [{ Channel: PartialFlowChannel, firstByteMs: 20, flowMs: 20 }], size: 2 * 1024 * 1024,
+      traceRequests: 4096, swarmOptions: { zeroBudgetPeerRace: true, latePeerRace: late, maxPeerWaitMs: 1000 } }));
+    f.hls.media = { currentTime: 0, paused: false, ended: false, seeking: false, buffered: { length: 0 } };
+    if (late) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    const first = beginCountedMultiLoad(f, context);
+    if (late) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [f.key] }));
+    await clock.advanceUntil(() => f.swarm.metrics().core.multiHolder.peerBytes > 0, 500);
+    const creditedAt = performance.now();
+    assert.equal(f.swarm.metrics().core.multiHolder.peerBytes, f.pieceSize);
+    await clock.advanceUntil(() => f.channels[0].wants.length >= 2, 100);
+    await clock.advance(100);
+    if (late) assert.ok(f.swarm.metrics().latePeerRace.records.some(row => row.outcome === 'armed'));
+    const schedule = queueMicrotask; let scheduled = 0;
+    const microtask = t.mock.method(globalThis, 'queueMicrotask', callback => { scheduled++; schedule(callback); });
+    xhr.requests[0].complete(f.bytes.slice().buffer); microtask.mock.restore();
+    assert.equal(scheduled, 1, 'only one progress retirement is pending for this race');
+    sameBytes(await clock.settle(first.response), f.bytes);
+    assert.deepEqual(xhr.order, ['progress', 'success'], 'the installed XhrLoader itself emits final progress before success');
+    assert.equal(first.calls.success[0][3], xhr.requests[0], 'the Hls callback receives the real HTTP winner');
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaceWins, 0);
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.partialUsefulnessPreserved, 1);
+    await clock.advance(3);
+    const before = f.channels[0].wants.length;
+    f.channels[0].partial = false; f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+    next = beginCountedMultiLoad(f, context); await clock.advance(50);
+    const flow = f.swarm.metrics().core.multiHolder.peerFlow;
+    assert.equal(flow.lastModel.decision, 'useful-unknown'); assert.equal(flow.lastModel.rateBytesPerSecond, null);
+    assert.ok(flow.lastModel.usefulAgeMs >= 100 && flow.lastModel.usefulAgeMs <= performance.now() - creditedAt + 1);
+    assert.equal(f.channels[0].wants[before][1] - f.channels[0].wants[before][0], 1);
+  } finally { next?.loader.abort(); if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('actual XHR success prequeued before progress can validate before queued retirement', async t => {
+  const xhr = heldRealXhrSource(t), clock = virtualClock(t); let f, first;
+  const context = { ...multiContext, responseType: 'arraybuffer' };
+  try {
+    f = await clock.settle(multiFixture(t, { OriginLoader: xhr.OriginLoader,
+      holders: [{ Channel: PartialFlowChannel, firstByteMs: 20, flowMs: 20 }], size: 2 * 1024 * 1024,
+      swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 1000 } }));
+    f.hls.media = { currentTime: 0, paused: false, ended: false, seeking: false, buffered: { length: 0 } };
+    first = beginCountedMultiLoad(f, context);
+    await clock.advanceUntil(() => f.swarm.metrics().core.multiHolder.peerBytes > 0, 500);
+    await clock.advanceUntil(() => f.channels[0].wants.length >= 2, 100); await clock.advance(1);
+    queueMicrotask(() => xhr.requests[0].complete(f.bytes.slice().buffer));
+    const source = xhr.instances[0];
+    source.callbacks.onProgress(source.stats, context, f.bytes.slice(0, 16384).buffer, xhr.requests[0]);
+    sameBytes(await clock.settle(first.response), f.bytes);
+    assert.deepEqual(xhr.order, ['progress', 'progress', 'success']);
+    assert.equal(first.calls.success.length, 1);
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.partialUsefulnessPreserved, 1,
+      'the contract is owned success before retirement, including an already queued success');
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaceWins, 0);
+  } finally { first?.loader.abort(); if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const late of [false, true]) test(`actual XHR ${late ? 'late' : 'cached'} progress cannot preserve on failure or retired ownership`, async t => {
+  for (const ending of ['progress-only', 'later-error', 'later-success', 'error', 'abort', 'stop', 'replacement', 'expiry', 'throw'])
+    await t.test(ending, async t => {
+      const xhr = heldRealXhrSource(t), clock = virtualClock(t); let f, first, replacement;
+      const context = { ...multiContext, responseType: 'arraybuffer' }, thrown = new Error('host progress callback');
+      try {
+        f = await clock.settle(multiFixture(t, { OriginLoader: xhr.OriginLoader,
+          holders: [{ Channel: PartialFlowChannel, firstByteMs: 20, flowMs: 20 }], size: 2 * 1024 * 1024,
+          swarmOptions: { zeroBudgetPeerRace: true, latePeerRace: late, maxPeerWaitMs: 1000 } }));
+        f.hls.media = { currentTime: 0, paused: false, ended: false, seeking: false, buffered: { length: 0 } };
+        if (late) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+        first = beginCountedMultiLoad(f, context, () => {
+          if (ending === 'abort') first.loader.abort();
+          if (ending === 'stop') f.swarm.stop();
+          if (ending === 'replacement') { first.loader.abort(); replacement = beginCountedMultiLoad(f, context); }
+          if (ending === 'throw') throw thrown;
+        });
+        if (late) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [f.key] }));
+        await clock.advanceUntil(() => f.swarm.metrics().core.multiHolder.peerBytes > 0, 500);
+        await clock.advanceUntil(() => f.channels[0].wants.length >= 2, 100); await clock.advance(1);
+        if (ending === 'expiry') await clock.advance(1001);
+        if (['progress-only', 'later-error', 'later-success'].includes(ending)) {
+          // A generic nonterminal chunk is not XhrLoader's synchronous terminal
+          // pair. Exercise the supplied callback, then let the microtask retire it.
+          const source = xhr.instances[0];
+          source.callbacks.onProgress(source.stats, context, f.bytes.slice(0, 16384).buffer, xhr.requests[0]);
+          source.callbacks.onProgress(source.stats, context, f.bytes.slice(0, 16384).buffer, xhr.requests[0]);
+          if (ending === 'progress-only') {
+            // A real native peer response racing after the claim cannot win Hls.
+            const want = f.channels[0].sent.findLast(frame => frame.t === 'want');
+            const body = f.bytes.slice(want.p[0] * f.pieceSize, Math.min(want.p[1] * f.pieceSize, f.bytes.length));
+            for (let at = 0; at < body.length; at += 16384) f.channels[0].receive(body.slice(at, at + 16384).buffer);
+            f.channels[0].receive(JSON.stringify({ t: 'eof', id: want.id }));
+          }
+          await clock.advance(5);
+          assert.equal(first.calls.success.length, 0, 'progress alone cannot complete the HTTP owner or hand off peer media');
+          if (ending === 'later-error') xhr.requests[0].complete(f.bytes.slice().buffer, 500);
+          if (ending === 'later-success') { xhr.requests[0].complete(f.bytes.slice().buffer); await clock.settle(first.response); }
+        } else if (ending === 'throw') assert.throws(() => xhr.requests[0].complete(f.bytes.slice().buffer), error => error === thrown);
+        else xhr.requests[0].complete(f.bytes.slice().buffer, ending === 'error' ? 500 : 200);
+        await clock.advance(5);
+        if (ending === 'replacement') {
+          await clock.advanceUntil(() => xhr.requests.length === 2, 100);
+          xhr.requests[1].complete(f.bytes.slice().buffer); await clock.settle(replacement.response);
+          assert.equal(replacement.calls.success.length, 1);
+          assert.equal(replacement.calls.abort.length, 0, 'the old deferred retirement cannot abort the replacement owner');
+        }
+        assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.partialUsefulnessPreserved, 0);
+        assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+        assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaceWins, 0);
+        if (['error', 'later-error'].includes(ending)) assert.equal(first.calls.error.length, 1);
+        if (['stop', 'expiry', 'later-success'].includes(ending)) assert.equal(first.calls.success.length, 1, 'source playback remains authoritative');
+      } finally { first?.loader.abort(); replacement?.loader.abort(); if (f) await clock.settle(f.close()); clock.restore(); }
+    });
+});
+
+test('actual XHR mixed binary then nonbinary progress retires immediately after the source claim', async t => {
+  for (const late of [false, true]) await t.test(late ? 'late' : 'cached', async t => {
+    const xhr = heldRealXhrSource(t), clock = virtualClock(t); let f, first;
+    const context = { ...multiContext, responseType: 'arraybuffer' };
+    try {
+      f = await clock.settle(multiFixture(t, { OriginLoader: xhr.OriginLoader,
+        holders: [{ Channel: PartialFlowChannel, firstByteMs: 20, flowMs: 20 }], size: 2 * 1024 * 1024,
+        swarmOptions: { zeroBudgetPeerRace: true, latePeerRace: late, maxPeerWaitMs: 1000 } }));
+      f.hls.media = { currentTime: 0, paused: false, ended: false, seeking: false, buffered: { length: 0 } };
+      if (late) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+      first = beginCountedMultiLoad(f, context);
+      if (late) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [f.key] }));
+      await clock.advanceUntil(() => f.swarm.metrics().core.multiHolder.peerBytes > 0, 500);
+      await clock.advanceUntil(() => f.channels[0].wants.length >= 2, 100); await clock.advance(1);
+      const source = xhr.instances[0];
+      source.callbacks.onProgress(source.stats, context, f.bytes.slice(0, 16384).buffer, xhr.requests[0]);
+      assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 1, 'binary progress leaves only its one pending retirement');
+      let reads = 0;
+      source.callbacks.onProgress(source.stats, context, { get byteLength() { reads++; return 1; } }, xhr.requests[0]);
+      assert.equal(reads, 1);
+      assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 0, 'nonbinary progress cancels synchronously even after binary progress claimed HTTP');
+      await clock.advance(3);
+      xhr.requests[0].complete(f.bytes.slice().buffer); sameBytes(await clock.settle(first.response), f.bytes);
+      assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.partialUsefulnessPreserved, 0, 'later success cannot restore released usefulness');
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    } finally { first?.loader.abort(); if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
 
 test('owned HTTP winner retains only this transfer’s fresh verified partial usefulness without a rate or Hls credit', async t => {
   for (const late of [false, true]) await t.test(late ? 'late HAVE owner' : 'cached owner', async t => {
