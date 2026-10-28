@@ -1183,6 +1183,12 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 ## Unreleased
 
+- Let the browser loader's verified short-piece flows refresh a stale peer
+  throughput estimate by accumulating bounded observations within one transfer
+  and connection. The same 300 ms and 32 KiB floors apply; elapsed time includes intervening gaps
+  and verification. Origin bytes, duplicate credit and other links are excluded.
+  Existing qualifying long-piece observations and delivery deadlines remain.
+
 - Add optional `startupBufferMaxBytes`, defaulting to 24 MiB and explicitly
   bounded to 32 MiB. It includes the retained original response; cached and
   in-flight future bytes still share a separate 24 MiB limit. The host must
@@ -2263,8 +2269,15 @@ Steady speculative work receives no such role, and accepted-byte counters still
 wait for the actual HLS callback.
 
 Verified peer reception updates physical link usefulness independently from
-player consumption. Fast short transfers keep an unknown rate below the
-unchanged 300 ms observation floor; no rate is invented. Discovery delivery,
+player consumption. An individual flow below the unchanged 300 ms floor
+does not train a rate. Newly verified short pieces may form a bounded batch
+within the same transfer and connection.
+Both 300 ms and 32 KiB must be observed before a flow-only rate sample is
+recorded. The elapsed interval includes gaps and verification time. Origin
+bytes, duplicate credit and other transfers or connections cannot train it;
+an emitted batch never reuses its bytes. Cancellation, failure or invalidation
+discards pending batches. Existing qualifying long-piece handling is retained,
+and batching does not create a first-byte timing observation. Discovery delivery,
 consumed bytes and external delivery notifications still require actual player
 acceptance. This avoids using deferred playback credit as a prerequisite for
 the next startup transfer.
@@ -2937,6 +2950,26 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased verified short-piece flow observations (28 October 2026)
+
+A slow qualifying piece can leave a pessimistic throughput estimate in place
+when every later piece is individually faster than the 300 ms observation
+floor. Recording those completions alone does not provide a new rate sample.
+The browser loader now accumulates newly verified peer bytes separately for
+each existing transfer and connection. A batch qualifies only after both the
+unchanged 300 ms and 32 KiB floors. It includes elapsed gaps and verification
+time, excludes origin and duplicate bytes, and never combines other links or
+transfers. Published batches do not reuse bytes; failure, cancellation or
+invalidation discards pending observations. Existing qualifying long-piece
+handling remains unchanged, and no first-byte timing sample is invented.
+
+This changes host measurement inputs through existing JavaScript and committed
+WASM APIs. It adds no requests, timers, wire messages or playback credit, and
+does not change the Rust/WASM binary. Source regressions establish estimator
+behaviour; sustained 4K playback, traffic savings and device qualification
+remain separate gates. The preceding deployed 330-second two-browser check
+still recorded stalls and is not reclassified by this correction.
 
 ## Unreleased explicit startup byte allowance (27 October 2026)
 

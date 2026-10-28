@@ -89,6 +89,18 @@ test("repeated calls give the same answers", () => {
 const compiled = await WebAssembly.compile(bytes);
 const coreSelection = async () => (await loadCore(compiled, { onFailure: () => { throw new Error("core selection trapped"); } })).peerSelection();
 
+test('rate-only observations preserve absent and existing first-byte evidence in JS and committed WASM', async () => {
+  for (const first of [null, 7]) for (const selection of [new PeerSelection(), await coreSelection()]) {
+    if (first !== null) selection.observe({ firstByteMs: first });
+    selection.observe({ bytes: 393216, flowMs: 447.70000076293945 });
+    assert.equal(selection.firstByteMs(), first);
+    assert.equal(Math.round(selection.rate() * 1000), 878302);
+    selection.observe({ bytes: 786432, flowMs: 320 });
+    assert.equal(selection.firstByteMs(), first, 'a batch adds no synthetic zero or repeated RTT');
+    assert.equal(selection.rate(), 786432 / 320);
+  }
+});
+
 test("seeded selection sequences match the JavaScript through WebAssembly", async () => {
   for (let seed = 1; seed <= 24; seed++) {
     const ops = selectionOps(seed, 300);

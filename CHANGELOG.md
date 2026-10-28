@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Let the browser loader's verified short-piece flows refresh a stale peer
+  throughput estimate by accumulating bounded observations within one transfer
+  and connection. The same 300 ms and 32 KiB floors apply; elapsed time includes intervening gaps
+  and verification. Origin bytes, duplicate credit and other links are excluded.
+  Existing qualifying long-piece observations and delivery deadlines remain.
+
 - Add optional `startupBufferMaxBytes`, defaulting to 24 MiB and explicitly
   bounded to 32 MiB. It includes the retained original response; cached and
   in-flight future bytes still share a separate 24 MiB limit. The host must

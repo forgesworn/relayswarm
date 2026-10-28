@@ -31,6 +31,7 @@ import { generateSecretKey } from "nostr-tools/pure";
 import { RelayPool, RelaySwarmSession, validTicket } from "../relay-session.mjs";
 import { PeerLink } from "./peer-link.mjs";
 import { PeerSelection } from "./peer-selection.mjs";
+import { VerifiedPieceFlow } from "./verified-piece-flow.mjs";
 import { NeighbourDiscovery } from "./neighbour-discovery.mjs";
 import { boundedOperation } from "./bounded-operation.mjs";
 import { commitmentPieceSize, validStreamAuthorisation, verifySegmentCommitment, segmentMediaContext } from "./segment-commitment.mjs";
@@ -2493,6 +2494,39 @@ class HlsSwarm {
     return await new Promise((resolve) => {
       const requests = new Map(), originRequests = new Set(), abandoned = new WeakSet(), contributions = new Map(), shortRefreshes = new Map();
       let finished = false, tickTimer = null, backstop = null, releaseOrigin = null, originShare = 0, verified = 0;
+      const flowGeneration = this.latePeerGeneration, flowStream = this.options.streamEvent?.id;
+      const flowHls = this.hls, flowMedia = this.hls?.media, flowWorker = this.transferWorker;
+      // Scalar evidence only, owned by this transfer and its captured connections.
+      const shortFlows = new Map(holders.map(link => [link, { connection: link.pc, channel: link.channel,
+        flow: new VerifiedPieceFlow() }]));
+      const discardShortFlow = link => {
+        const batch = shortFlows.get(link);
+        batch?.flow.discard(now());
+      };
+      const observeVerifiedShortFlow = (link, controller, startedAt, report, fresh) => {
+        const batch = shortFlows.get(link), at = now(), first = report?.firstByteMs, elapsed = report?.elapsedMs;
+        const flowMs = elapsed - first;
+        if (!batch) return;
+        if (finished || this.stopped || signal.aborted || controller.signal.aborted || at >= hardDeadline ||
+            !eligible(link) || this.peerLeases.get(link) !== lease || link.pc !== batch.connection || link.channel !== batch.channel ||
+            this.latePeerGeneration !== flowGeneration || this.options.streamEvent?.id !== flowStream ||
+            this.hls !== flowHls || this.hls?.media !== flowMedia || worker && this.transferWorker !== flowWorker ||
+            report?.outcome !== 'payload' || !Number.isFinite(first) || first < 0 || !Number.isFinite(elapsed) || flowMs < 0 ||
+            !Number.isFinite(startedAt) || !Number.isSafeInteger(fresh) || fresh < 0 ||
+            !Number.isSafeInteger(report.receivedBytes) || fresh > report.receivedBytes || flowMs >= MIN_LINK_FLOW_MS) {
+          discardShortFlow(link); return;
+        }
+        if (!fresh) return;
+        // The outer request starts before the link's clock: this is an early,
+        // conservative payload boundary, never the later verification time.
+        const sample = batch.flow.record({ freshBytes: fresh, startAt: startedAt + first, endAt: at });
+        if (!sample) return;
+        // Include all request/worker gaps; do not add another first-byte sample.
+        this.peerSelection.observe(sample);
+        const timing = this.#linkTimingState(link);
+        timing.flows.push({ value: Math.min(1_000_000, sample.bytes / sample.flowMs), flowMs: sample.flowMs, at });
+        if (timing.flows.length > LINK_TIMING_SAMPLES) timing.flows.shift();
+      };
       // A source is credited only with the bytes its delivery newly
       // verified: a holder and origin can both send a piece, and the first
       // verified copy wins. The rest is counted as unused.
@@ -2507,7 +2541,7 @@ class HlsSwarm {
       const clear = (timer) => { if (timer !== null) { clearTimeout(timer); this.timers.delete(timer); } return null; };
       const finish = (result) => {
         if (finished) return;
-        finished = true;
+        finished = true; shortFlows.clear();
         tickTimer = clear(tickTimer); backstop = clear(backstop);
         // Only a hopeless holder counts as abandoned; leftovers are plain aborts.
         for (const controller of [...requests.values(), ...originRequests]) controller.abort();
@@ -2556,11 +2590,13 @@ class HlsSwarm {
           };
           link.request(key, remainingMs, { signal: controller.signal, expectedSize: to - from, onProgress,
             range: { start: command.range.start, end: command.range.end, objectSize: commitment.size },
-            onResult: (result) => { report = result; this.#peerRequestResult(context, link, remainingMs, result, command.range, traceLoad); } }).then((bytes) => {
+            onResult: (result) => { report = result; if (result.outcome !== 'payload') discardShortFlow(link);
+              this.#peerRequestResult(context, link, remainingMs, result, command.range, traceLoad); } }).then((bytes) => {
             if (requests.get(command.peer) === controller) requests.delete(command.peer);
             slowestMs = Math.max(slowestMs, now() - startedAt);
             if (finished) return;
             if (report?.firstByteMs !== null && report?.elapsedMs !== null && report?.receivedBytes) {
+              if (report.elapsedMs - report.firstByteMs >= MIN_LINK_FLOW_MS && report.receivedBytes >= MIN_LINK_FLOW_BYTES) discardShortFlow(link);
               this.peerSelection.observe({ firstByteMs: report.firstByteMs, bytes: report.receivedBytes, flowMs: report.elapsedMs - report.firstByteMs });
             }
             if (bytes) {
@@ -2568,6 +2604,11 @@ class HlsSwarm {
               submit("delivered", { source: command.peer, p: [command.range.start, command.range.end], bytes: bytes.byteLength },
                 (at) => transfer.delivered(at, command.peer, command.range, bytes), state => {
               const fresh = credit(state, bytes.byteLength);
+              // Valid pieces may coexist with a corrupt piece in this response.
+              // Fence measurement before apply handles its rejection commands.
+              if (state.commands.some(next => next.t === 'fail' ||
+                  ['ban', 'cancel', 'abandon'].includes(next.t) && next.peer === command.peer)) discardShortFlow(link);
+              else observeVerifiedShortFlow(link, controller, startedAt, report, fresh);
               this.multiHolder.peerBytes += fresh;
               if (fresh > 0) contributions.set(link.pc, (contributions.get(link.pc) ?? 0) + fresh);
               const flowMs = report?.elapsedMs - report?.firstByteMs;
@@ -2578,10 +2619,11 @@ class HlsSwarm {
               apply(state);
               });
             } else {
+              discardShortFlow(link);
               if (!controller.signal.aborted || abandoned.has(controller)) this.#recordSelection(link, now() - startedAt);
               submit("failed", { source: command.peer }, (at) => transfer.failed(at, command.peer));
             }
-          }, () => { if (!finished) submit("failed", { source: command.peer }, (at) => transfer.failed(at, command.peer)); });
+          }, () => { discardShortFlow(link); if (!finished) submit("failed", { source: command.peer }, (at) => transfer.failed(at, command.peer)); });
         } else if (command.t === "origin") {
           // The explicit mode must never emit an origin command. Fail closed
           // if an incompatible module violates it; never ignore fake work.
@@ -2619,6 +2661,7 @@ class HlsSwarm {
             });
           });
         } else if (command.t === "cancel" || command.t === "abandon") {
+          discardShortFlow(ids.get(command.peer));
           const controller = requests.get(command.peer);
           if (command.t === "abandon") {
             this.multiHolder.abandoned += 1;
@@ -2627,6 +2670,7 @@ class HlsSwarm {
           controller?.abort(command.t === "abandon" ? PeerLink.ABANDON_REASON : undefined);
         } else if (command.t === "ban") {
           const link = ids.get(command.peer);
+          discardShortFlow(link);
           this.multiHolder.bans += 1;
           this.counters.peerCorrupt += 1;
           this.banned.add(link.pubkey);

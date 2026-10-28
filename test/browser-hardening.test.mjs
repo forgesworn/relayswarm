@@ -21,6 +21,7 @@ import { WARM_AHEAD } from "../src/browser/warm-ahead.mjs";
 import { NeighbourDiscovery } from "../src/browser/neighbour-discovery.mjs";
 import { CoreNeighbourDiscovery } from "../src/browser/core-discovery.mjs";
 import { PeerSelection } from "../src/browser/peer-selection.mjs";
+import { VerifiedPieceFlow } from "../src/browser/verified-piece-flow.mjs";
 import { createOperatorControls } from "../demo/operator.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -4724,7 +4725,7 @@ test("a caller abort during the wait is not a miss", async t => {
 
 const multiCore = await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url)));
 
-function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false, holdNew = false, onFree } = {}) {
+function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false, holdNew = false, holdBan = false, onFree } = {}) {
   const workers = [];
   class WorkerImpl extends EventTarget {
     constructor() {
@@ -4733,6 +4734,7 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
       this.exit = new Promise(resolve => this.thread.once("exit", resolve));
       this.thread.on("message", data => {
         if (holdNew && this.newIds?.delete(data.id)) { (this.newRequests ??= []).push({ data }); return; }
+        if (holdBan && data.result?.commands?.some(command => command.t === "ban")) { this.banReply = data; return; }
         if (holdFinal && data.result?.commands?.some(command => command.t === "deliver")) { this.finalReply = data; return; }
         this.dispatchEvent(new MessageEvent("message", { data }));
       });
@@ -4749,6 +4751,7 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
     releaseInit() { this.thread.postMessage(this.init); }
     releaseNew() { const { data } = this.newRequests.shift(); this.dispatchEvent(new MessageEvent('message', { data })); }
     releaseFinal() { this.dispatchEvent(new MessageEvent("message", { data: this.finalReply })); }
+    releaseBan() { this.dispatchEvent(new MessageEvent("message", { data: this.banReply })); }
     terminate() { this.terminated = true; return this.thread.terminate(); }
   }
   t.after(async () => { await Promise.all(workers.map(worker => worker.terminate())); await Promise.all(workers.map(worker => worker.exit)); });
@@ -5521,6 +5524,170 @@ class PhasedFlowChannel extends RangedChannel {
   }
 }
 
+test('verified piece flow scalar batches include gaps and only fresh credited fractions', () => {
+  const flow = new VerifiedPieceFlow();
+  assert.equal(flow.record({ freshBytes: 10000, startAt: 1000, endAt: 1100 }), null);
+  assert.equal(flow.record({ freshBytes: 10000, startAt: 1150, endAt: 1230 }), null);
+  assert.deepEqual(flow.record({ freshBytes: 12768, startAt: 1300, endAt: 1400 }), { bytes: 32768, flowMs: 400 });
+  assert.equal(flow.record({ freshBytes: 0, startAt: 0, endAt: 9999 }), null, 'duplicates add neither bytes nor a new anchor');
+  assert.deepEqual(flow.record({ freshBytes: 32768, startAt: 1400, endAt: 1700 }), { bytes: 32768, flowMs: 300 }, 'emitted bytes never enter another batch');
+});
+
+test('verified piece flow preserves earlier out-of-order starts and rejects overlap with an emitted window', () => {
+  const flow = new VerifiedPieceFlow();
+  assert.equal(flow.record({ freshBytes: 16384, startAt: 200, endAt: 300 }), null);
+  assert.deepEqual(flow.record({ freshBytes: 16384, startAt: 100, endAt: 400 }), { bytes: 32768, flowMs: 300 });
+  assert.equal(flow.record({ freshBytes: 65536, startAt: 399, endAt: 700 }), null, 'a late range is discarded, never clamped while counting its bytes');
+  assert.deepEqual(flow.record({ freshBytes: 32768, startAt: 700, endAt: 1000 }), { bytes: 32768, flowMs: 300 });
+});
+
+test('verified piece flow keeps the byte and wall-time floors and discards pending failure evidence', () => {
+  const flow = new VerifiedPieceFlow();
+  assert.equal(flow.record({ freshBytes: 32767, startAt: 0, endAt: 300 }), null);
+  flow.discard(300);
+  assert.equal(flow.record({ freshBytes: 32768, startAt: 300, endAt: 599.999 }), null);
+  assert.equal(flow.record({ freshBytes: 0, startAt: 300, endAt: 600 }), null);
+  assert.deepEqual(flow.record({ freshBytes: 1, startAt: 600, endAt: 600 }), { bytes: 32769, flowMs: 300 });
+  assert.equal(flow.record({ freshBytes: 20000, startAt: 700, endAt: 900 }), null);
+  flow.discard(900);
+  assert.equal(flow.record({ freshBytes: 20000, startAt: 950, endAt: 1100 }), null);
+  assert.deepEqual(flow.record({ freshBytes: 12768, startAt: 1150, endAt: 1250 }), { bytes: 32768, flowMs: 300 });
+});
+
+test('verified piece flow never pools separate transfers, connections or time to first byte', async t => {
+  const selection = Object.getPrototypeOf((await loadCore(multiCore)).peerSelection()), observe = selection.observe;
+  const batches = [];
+  t.mock.method(selection, 'observe', function (input = {}) {
+    if (!Number.isFinite(input.firstByteMs)) batches.push({ ...input });
+    return observe.call(this, input);
+  });
+  const clock = virtualClock(t); let f;
+  try {
+    f = await clock.settle(multiFixture(t, { size: 65536, holders: [{ delayMs: 100 }],
+      wholeOriginDelayMs: 10000, originDelayMs: 10000, originFallbackMs: 1000 }));
+    for (let i = 0; i < 4; i++) sameBytes(await clock.settle(f.load()), f.bytes);
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, 4);
+    assert.deepEqual(batches, [], 'four sub-floor transfers on the same connection never become one sample');
+    await clock.settle(f.close()); f = null;
+    f = await clock.settle(multiFixture(t, { size: 2 * 65536, holders: [
+      { Channel: PhasedFlowChannel, firstByteMs: 100, flowMs: 50 },
+      { Channel: PhasedFlowChannel, firstByteMs: 400, flowMs: 50 }],
+      wholeOriginDelayMs: 10000, originDelayMs: 10000, originFallbackMs: 1000 }));
+    sameBytes(await clock.settle(f.load()), f.bytes);
+    assert.equal(f.channels.filter(channel => channel.wants.length > 0).length, 2, JSON.stringify(f.channels.map(channel => channel.wants)));
+    assert.deepEqual(batches, [], 'two different 50ms connection flows 350ms apart never pool');
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('verified piece flow waits for real worker verification and rejects invalidated replies', async t => {
+  for (const invalidation of ['none', 'closed-link', 'media-replaced', 'deadline']) await t.test(invalidation, async t => {
+    const { WorkerImpl, workers } = transferWorkerFixture(t, { holdFinal: true });
+    const record = VerifiedPieceFlow.prototype.record, credited = [];
+    t.mock.method(VerifiedPieceFlow.prototype, 'record', function (input) {
+      credited.push({ ...input }); return record.call(this, input);
+    });
+    const f = await multiFixture(t, { size: 65536,
+      holders: [{ Channel: PhasedFlowChannel, firstByteMs: 2, flowMs: 80 }],
+      originFallbackMs: 1000, originDelayMs: 1000, wholeOriginDelayMs: 5,
+      swarmOptions: { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl } });
+    let shift = 0;
+    try {
+      await until(() => f.swarm.metrics().core.transferWorker.state === 'ready');
+      const actualNow = performance.now.bind(performance);
+      t.mock.method(performance, 'now', () => actualNow() + shift);
+      const pending = f.load();
+      await until(() => workers[0].finalReply);
+      assert.deepEqual(credited, [], 'received bytes cannot train before the real Core verifies them');
+      shift = invalidation === 'deadline' ? 10000 : 350;
+      if (invalidation === 'closed-link') f.channels[0].close();
+      if (invalidation === 'media-replaced') f.hls.media = { currentTime: 0, buffered: { length: 0 } };
+      workers[0].releaseFinal();
+      sameBytes(await pending, f.bytes);
+      if (invalidation === 'none') {
+        assert.equal(credited.length, 1);
+        assert.equal(credited[0].freshBytes, 65536);
+        assert.ok(credited[0].endAt - credited[0].startAt >= 350,
+          'the interval starts at payload arrival and includes worker latency');
+      } else assert.deepEqual(credited, [], 'invalidated or late verification contributes no flow evidence');
+    } finally { shift = 0; await f.close(); }
+  });
+});
+
+test('verified piece flow rejects fresh valid bytes from a response that also bans its source', async t => {
+  const { WorkerImpl, workers } = transferWorkerFixture(t, { holdBan: true });
+  const selection = Object.getPrototypeOf((await loadCore(multiCore)).peerSelection()), observe = selection.observe;
+  const batches = [];
+  t.mock.method(selection, 'observe', function (input = {}) {
+    if (!Number.isFinite(input.firstByteMs)) batches.push({ ...input });
+    return observe.call(this, input);
+  });
+  class MixedCorruptChannel extends PhasedFlowChannel {
+    send(data) {
+      const frame = typeof data === 'string' ? JSON.parse(data) : null;
+      if (!this.corruptNext || frame?.t !== 'want' || frame.p[1] - frame.p[0] < 2) return super.send(data);
+      // One corrupt piece alongside valid pieces in the same real range.
+      const at = frame.p[0] * commitmentPieceSize(this.bytes.length), saved = this.bytes[at];
+      this.bytes[at] ^= 0xff;
+      try { return super.send(data); } finally { this.bytes[at] = saved; }
+    }
+  }
+  const f = await multiFixture(t, { size: 4 * 65536,
+    holders: [{ Channel: MixedCorruptChannel, firstByteMs: 2, flowMs: 350 }],
+    originFallbackMs: 2000, originDelayMs: 1000, wholeOriginDelayMs: 5,
+    swarmOptions: { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl } });
+  let shift = 0;
+  try {
+    await until(() => f.swarm.metrics().core.transferWorker.state === 'ready');
+    sameBytes(await f.load(), f.bytes);
+    assert.ok(f.swarm.metrics().peerRequestDiagnostics.records.some(row => row.elapsedMs - row.firstByteMs >= 300),
+      'a real qualifying long piece establishes the multi-piece range model');
+    const basePeer = f.swarm.metrics().core.multiHolder.peerBytes;
+    batches.length = 0; f.channels[0].corruptNext = true; f.channels[0].firstByteMs = 20; f.channels[0].flowMs = 20;
+    const actualNow = performance.now.bind(performance);
+    t.mock.method(performance, 'now', () => actualNow() + shift);
+    const pending = f.load();
+    await until(() => workers[0].banReply);
+    const before = f.swarm.metrics().core.multiHolder.peerBytes - basePeer;
+    assert.ok(workers[0].banReply.result.verified > before, 'the real Core accepted fresh valid pieces alongside the corrupt piece');
+    assert.deepEqual(batches, []);
+    shift = 400; workers[0].releaseBan();
+    sameBytes(await pending, f.bytes);
+    assert.equal(f.swarm.metrics().core.multiHolder.bans, 1);
+    assert.deepEqual(batches, [], 'a rejected source cannot publish a qualifying batch before its ban is applied');
+  } finally { shift = 0; await f.close(); }
+});
+
+test('verified piece flow replaces the captured stale rate using one connection and real short ranges', async t => {
+  const selection = Object.getPrototypeOf((await loadCore(multiCore)).peerSelection()), observe = selection.observe;
+  const samples = [], seeded = new WeakSet();
+  t.mock.method(selection, 'observe', function (input = {}) {
+    if (!seeded.has(this)) {
+      // Actual captured startup piece:393216 bytes over447.700ms of flow.
+      observe.call(this, { firstByteMs: 2, bytes: 393216, flowMs: 447.70000076293945 }); seeded.add(this);
+      assert.equal(Math.round(this.rate() * 1000), 878302);
+    }
+    samples.push({ ...input }); return observe.call(this, input);
+  });
+  const clock = virtualClock(t); let f;
+  try {
+    f = await clock.settle(multiFixture(t, { size: 6 * 1024 * 1024,
+      holders: [{ Channel: PhasedFlowChannel, firstByteMs: 2, flowMs: 80 }], originFallbackMs: 3000,
+      originDelayMs: 10000, wholeOriginDelayMs: 10000, traceRequests: 4096 }));
+    sameBytes(await clock.settle(f.load(), 4000), f.bytes);
+    const short = samples.filter(row => Number.isFinite(row.firstByteMs));
+    assert(short.length > 4); assert(short.every(row => row.flowMs < 300));
+    const batches = samples.filter(row => !Number.isFinite(row.firstByteMs));
+    assert(batches.length > 0, 'verified short ranges spanning 300ms must replace the stale startup flow');
+    assert(batches.every(row => row.bytes >= 32768 && row.flowMs >= 300));
+    assert(batches.reduce((sum, row) => sum + row.bytes, 0) <= f.swarm.metrics().core.multiHolder.peerBytes,
+      'each fresh verified byte can enter at most one batch');
+    sameBytes(await clock.settle(f.load(), 4000), f.bytes);
+    const start = f.swarm.trace().rows.filter(row => row.k === 'xfer' && row.op === 'start').at(-1);
+    assert(start.sharedRate > 2 * 878.3024331693287, 'shared prediction uses later measured flow');
+    assert(start.peers[0][2] > 2 * 878.3024331693287, 'the same connection learns its measured flow too');
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
 test("mixed planning keeps each holder's first byte and payload flow separate after cold startup", async t => {
   const clock = virtualClock(t);
   let f;
@@ -5608,15 +5775,23 @@ test("large ranged HTTP deliveries refresh byte-scaled origin recovery and susta
 });
 
 test("an origin-winning abort invalidates unknown-flow continuation without charging a holder failure", async t => {
+  const selection = Object.getPrototypeOf((await loadCore(multiCore)).peerSelection()), observe = selection.observe;
+  const aggregateSamples = [], rates = [];
+  t.mock.method(selection, 'observe', function (input = {}) {
+    if (!Number.isFinite(input.firstByteMs)) aggregateSamples.push({ ...input });
+    const result = observe.call(this, input); rates.push(this.rate()); return result;
+  });
   const clock = virtualClock(t);
   let f;
   try {
-    f = await clock.settle(multiFixture(t, { size: 6 * 1024 * 1024,
+    f = await clock.settle(multiFixture(t, { size: 4 * 65536,
       holders: [{ Channel: PhasedFlowChannel, firstByteMs: 20, flowMs: 20 }],
       originFallbackMs: 1800, wholeOriginDelayMs: 100, originDelayMs: 400,
       swarmOptions: { maxPeerWaitMs: 1800, zeroBudgetPeerRace: true } }));
     sameBytes(await clock.settle(f.load(), 3000), f.bytes);
     assert.ok(f.swarm.metrics().bytes.peerFirst > 0, "the short-flow link first proves useful with verified media");
+    assert.deepEqual(aggregateSamples, [], 'the complete initial transfer stays below the aggregate time floor');
+    assert.equal(rates.at(-1), null, 'the aborted continuation must begin with genuinely unknown flow');
     f.channels[0].firstByteMs = 1000;
     f.hls.media = { currentTime: 10, buffered: { length: 0 } };
     const beforeAbort = f.channels[0].wants.length;
