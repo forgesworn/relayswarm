@@ -93,6 +93,8 @@ async function fixture(t, options = {}) {
     ...(options.startupTarget === undefined ? {} : { startupBufferTarget: options.startupTarget }),
     ...(options.startupCommit === undefined ? {} : { startupBufferCommit: options.startupCommit }),
     ...(options.startupMaxBytes === undefined ? {} : { startupBufferMaxBytes: options.startupMaxBytes }),
+    ...(options.startupConcurrency === undefined ? {} : { startupBufferConcurrency: options.startupConcurrency }),
+    ...(options.bufferedMixedRanges === undefined ? {} : { bufferedMixedRanges: options.bufferedMixedRanges }),
     ...(options.allowance === undefined ? {} : { maxUploadBytesPerSession: options.allowance }) });
   const hls = { config: { loader: Loader, progressive: false }, media, levels: [{ details: { live: true, fragments } }] };
   swarm.attach(hls);
@@ -733,6 +735,7 @@ function startupFixture(t, options = {}) {
   const engine = createWarmAhead({ Loader, steady: options.steady ?? false,
     startupTarget: options.startup === false ? null : () => { state.targetCalls++; return state.target; }, startupCommit: options.commit,
     startupMaxBytes: options.startupMaxBytes,
+    startupConcurrency: options.startupConcurrency,
     startupRecovery: () => state.recovery,
     allowed: () => state.allowed, next: ctx => {
       options.onNext?.(ctx);
@@ -740,6 +743,7 @@ function startupFixture(t, options = {}) {
     },
     authorise: async ctx => {
       state.authCalls++;
+      if (options.beforeAuthorise) await options.beforeAuthorise(ctx);
       const permit = options.permit ? options.permit(ctx) : {
         key: ctx.url, size: options.permitSize?.(ctx.frag.sn) ?? bytes.length,
         sha256: sha(bytes), current: () => !state.revoked.has(ctx.frag.sn),
@@ -2384,4 +2388,220 @@ test('retired warm rows outside a new demand plan do not invalidate its actual s
   assert.equal(f.engine.contains(9), true, 'the current genuine8–10s demand remains valid despite an old canceled2–4s row');
   assert.equal(f.engine.contains(2.5), false);
   release(); await flushStartup(); assert.equal(f.engine.snapshot().reservationBytes, 0);
+});
+
+test('startup concurrency admits two pending future HTTP requests only for its explicit opt-in', async t => {
+  const f = startupFixture(t, { startupConcurrency: 2, startupMaxBytes: 32 * 1024 * 1024 });
+  const first = f.load(0, 12000); await flushStartup();
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2],
+    'two independent pending futures must start before either body completes');
+  assert.equal(first.calls.success, 0); assert.equal(f.engine.snapshot().active, 2);
+  assert.equal(f.engine.snapshot().limits.speculativeWholeRequests, 2);
+  assert.equal(f.engine.startupSnapshot().heldObjects, 3);
+});
+
+test('startup concurrency defaults to serial and returns to one steady future after out-of-order verification', async t => {
+  const ordinary = startupFixture(t);
+  ordinary.load(0, 12000); await flushStartup();
+  assert.deepEqual(ordinary.requests.map(row => row.context.frag.sn), [0, 1]);
+  assert.equal(ordinary.engine.snapshot().active, 1);
+  ordinary.engine.stop();
+  const f = startupFixture(t, { startupConcurrency: 2, steady: true });
+  const first = f.load(0, 12000); await flushStartup();
+  f.requests[0].finish(); f.requests[2].finish(); await flushStartup();
+  assert.equal(first.calls.success, 0, 'an out-of-order future cannot bridge an unverified gap');
+  f.requests[1].finish(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(f.engine.startupSnapshot().state, 'ready');
+  assert.equal(f.engine.snapshot().limits.speculativeWholeRequests, 1);
+  f.load(3, 12000); await flushStartup();
+  const pending = f.requests.filter(row => !row.aborted && row.response === undefined);
+  assert.equal(pending.filter(row => row.context.frag.sn > 3).length, 1, 'steady speculation never inherits two startup slots');
+  assert.equal(f.engine.snapshot().active, 1);
+});
+
+test('startup concurrency validates strict opt-in and requires startup ownership', async t => {
+  for (const value of [null, false, true, 0, 3, 1.5, NaN, Infinity, '2', {}]) {
+    assert.throws(() => createWarmAhead({ Loader: class {}, startupTarget: () => 0, startupConcurrency: value }), RangeError);
+    const f = await fixture(t, { enabled: false, startupTarget: () => 0, startupConcurrency: value });
+    assert.equal(f.swarm.metrics().disabledReason, 'invalid-startup-buffer-concurrency');
+  }
+  assert.throws(() => createWarmAhead({ Loader: class {}, startupConcurrency: 2 }), RangeError);
+  const absent = await fixture(t, { enabled: false, startupConcurrency: 2 });
+  assert.equal(absent.swarm.metrics().disabledReason, 'invalid-startup-buffer-concurrency');
+  const valid = await fixture(t, { enabled: false, startupTarget: () => 0, startupConcurrency: 2 });
+  assert.equal(valid.swarm.metrics().disabledReason, null);
+  assert.equal(valid.swarm.metrics().startupBuffer.limits.futureRequests, 2);
+});
+
+test('startup concurrency keeps independent aggregate and future reservations before second HTTP', async t => {
+  for (const [firstBytes, futureBytes, reason] of [[16 * 1024 * 1024, 12 * 1024 * 1024, 'aggregate32MiB'],
+      [4, 13 * 1024 * 1024, 'future24MiB']]) {
+    const f = startupFixture(t, { startupConcurrency: 2, startupMaxBytes: 32 * 1024 * 1024,
+      permitSize: sn => sn === 0 ? firstBytes : futureBytes });
+    const first = f.load(0, 12000); await flushStartup();
+    assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1], reason);
+    assert.equal(f.engine.snapshot().reservationBytes, firstBytes + futureBytes);
+    assert.equal(f.engine.startupSnapshot().heldObjects, 2);
+    assert.equal(first.calls.success, 0); assert(f.state.reservations.every(bytes => bytes <= 32 * 1024 * 1024));
+    f.engine.stop();
+  }
+  const shared = await fixture(t, { enabled: false, startupTarget: () => 1.3, startupConcurrency: 2,
+    startupMaxBytes: 32 * 1024 * 1024, maxHeldBytes: 24 * 1024 * 1024 });
+  const first = shared.load(0);
+  await assert.rejects(first.result, error => error.startupBufferReason === 'reservation-refused');
+  assert.equal(shared.requests.length, 0, 'opt-in cannot borrow unavailable shared held capacity');
+});
+
+test('startup concurrency cancellation retains both awaited verifier bodies until actual settlement', async t => {
+  const releases = new Map(); t.after(() => { for (const resolve of releases.values()) resolve(); });
+  const f = startupFixture(t, { startupConcurrency: 2,
+    beforeVerify: ctx => ctx.frag.sn > 0 ? new Promise(resolve => releases.set(ctx.frag.sn, resolve)) : undefined });
+  const first = f.load(0, 12000); await flushStartup();
+  f.requests[1].finish(); f.requests[2].finish(); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 2); assert.equal(f.engine.snapshot().reservationBytes, 12);
+  first.loader.abort(); await flushStartup();
+  assert.equal(first.calls.abort, 1); assert.equal(f.engine.snapshot().active, 2);
+  assert.equal(f.engine.snapshot().reservationBytes, 8, 'aborted verifiers still own both complete future bodies');
+  releases.get(2)(); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 1); assert.equal(f.engine.snapshot().reservationBytes, 4);
+  releases.get(1)(); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  for (const row of f.requests) row.finish(true); await flushStartup();
+  assert.equal(f.retained.length, 0); assert.equal(first.calls.success, 0); assert.equal(first.calls.abort, 1);
+});
+
+test('startup concurrency claims authorisation slots before awaiting and fences cancellation before HTTP', async t => {
+  const releases = new Map(); t.after(() => { for (const resolve of releases.values()) resolve(); });
+  const f = startupFixture(t, { startupConcurrency: 2,
+    beforeAuthorise: ctx => ctx.frag.sn > 0 ? new Promise(resolve => releases.set(ctx.frag.sn, resolve)) : undefined });
+  const first = f.load(0, 12000); await flushStartup();
+  assert.equal(releases.size, 2); assert.equal(f.requests.length, 1); assert.equal(f.engine.snapshot().active, 2);
+  first.loader.abort(); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 2); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  releases.get(1)(); releases.get(2)(); await flushStartup();
+  assert.equal(f.requests.length, 1); assert.equal(f.engine.snapshot().active, 0); assert.equal(first.calls.abort, 1);
+});
+
+test('startup concurrency cannot recycle an expired verifier body into a third future while the room moves', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let release; t.after(() => release?.());
+  const f = startupFixture(t, { startupConcurrency: 2,
+    beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
+  const first = f.load(0, 12000); await flushStartup();
+  f.requests[1].finish(); await flushStartup();
+  f.state.target = 4.1; t.mock.timers.tick(8000); await flushStartup();
+  assert.equal(f.requests.length, 3, 'no new body may borrow an expired pending verification slot');
+  assert.equal(f.engine.snapshot().active, 1); assert.equal(f.engine.snapshot().reservationBytes, 8);
+  assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 0);
+  release(); await flushStartup(); t.mock.timers.tick(100); await flushStartup();
+  assert.equal(f.retained.length, 0, 'expired verification cannot become cached or advertised');
+  assert(f.engine.snapshot().trackedObjects <= 4); assert(f.engine.snapshot().active <= 2);
+  t.mock.timers.tick(4000); await flushStartup();
+  assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+  assert.equal(first.calls.success, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+});
+
+test('startup concurrency never fills a gap with a corrupt parallel future', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = startupFixture(t, { startupConcurrency: 2 }); f.state.recovery = 4000;
+  const first = f.load(0, 12000); await flushStartup();
+  f.requests[2].finish(false, Uint8Array.of(9, 9, 9, 9)); f.requests[1].finish(); f.requests[0].finish(); await flushStartup();
+  assert.equal(f.retained.length, 1); assert.equal(first.calls.success, 0);
+  assert.equal(f.engine.snapshot().consumedPeerBytes, 0);
+  t.mock.timers.tick(12000); await flushStartup();
+  assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().cacheBytes, 0);
+});
+
+test('startup concurrency rechecks all parallel future authority after another check yields', async t => {
+  const f = startupFixture(t, { startupConcurrency: 2 });
+  const first = f.load(0, 12000); await flushStartup();
+  f.state.holdRecheck = true; f.state.holdCheckSn = 1;
+  f.requests[2].finish(); f.requests[0].finish(); f.requests[1].finish(); await flushStartup();
+  assert.equal(typeof f.state.releaseRecheck, 'function'); assert.equal(first.calls.success, 0);
+  f.state.revoked.add(2); f.state.releaseRecheck(); await flushStartup();
+  assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1);
+  assert.equal(first.calls.args[0].startupBufferReason, 'authority-changed');
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().cacheBytes, 0);
+});
+
+test('startup concurrency retains the original commit deadline and ignores a late ACK', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let ack; const f = startupFixture(t, { startupConcurrency: 2, commit: () => new Promise(resolve => { ack = resolve; }) });
+  const first = f.load(0, 12000); await flushStartup();
+  f.requests[0].finish(); f.requests[2].finish(); f.requests[1].finish(); await flushStartup();
+  assert.equal(typeof ack, 'function'); assert.equal(first.calls.success, 0);
+  assert.equal(f.engine.startupSnapshot().commitStarted, true); assert.equal(f.engine.snapshot().consumedPeerBytes, 0);
+  t.mock.timers.tick(12000); await flushStartup();
+  assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+  ack(); await flushStartup();
+  assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1);
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().cacheBytes, 0);
+});
+
+test('startup concurrency preserves the fourth-slot contiguous extension without admitting a fifth object', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = startupFixture(t, { startupConcurrency: 2, startupMaxBytes: 32 * 1024 * 1024 });
+  const first = f.load(0, 12000); await flushStartup();
+  f.state.target = 3.9; f.state.recovery = 2500;
+  f.requests[0].finish(); f.requests[2].finish(); f.requests[1].finish(); await flushStartup();
+  assert.equal(first.calls.success, 0);
+  t.mock.timers.tick(100); await flushStartup();
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2, 3]);
+  assert.equal(f.engine.startupSnapshot().heldObjects, 4); assert.equal(f.engine.snapshot().active, 1);
+  assert(f.state.reservations.every(bytes => bytes <= 32 * 1024 * 1024));
+  t.mock.timers.tick(100); await flushStartup(); assert.equal(f.requests.length, 4);
+  f.requests[3].finish(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(f.requests.length, 4);
+  assert.equal(f.engine.snapshot().limits.speculativeWholeRequests, 1);
+});
+
+test('startup concurrency retires surplus work immediately when the original body already releases steady startup', async t => {
+  const f = startupFixture(t, { startupConcurrency: 2, steady: true }); f.state.target = 0;
+  const first = f.load(0, 12000); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 2);
+  f.requests[0].finish(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(f.engine.startupSnapshot().state, 'ready');
+  assert.equal(f.engine.snapshot().limits.speculativeWholeRequests, 1);
+  assert.equal(f.requests.filter(row => row.context.frag.sn > 0 && !row.aborted).length, 1);
+  assert.equal(f.requests[2].aborted, true, 'the extra startup slot cannot survive as steady speculation');
+  assert.equal(f.engine.snapshot().active, 1);
+});
+
+
+test('startup concurrency keeps a canceled surplus verifier owned after transition to one steady request', async t => {
+  let release; t.after(() => release?.());
+  const f = startupFixture(t, { startupConcurrency: 2, steady: true,
+    beforeVerify: ctx => ctx.frag.sn === 2 ? new Promise(resolve => { release = resolve; }) : undefined });
+  f.state.target = 0;
+  const first = f.load(0, 12000); await flushStartup();
+  f.requests[2].finish(); await flushStartup();
+  assert.equal(typeof release, 'function'); assert.equal(f.engine.snapshot().active, 2);
+  f.requests[0].finish(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(f.engine.startupSnapshot().state, 'ready');
+  assert.equal(f.engine.snapshot().limits.speculativeWholeRequests, 1);
+  assert.equal(f.requests.filter(row => row.context.frag.sn > 0 && !row.aborted).length, 1);
+  assert.equal(f.engine.snapshot().active, 2, 'the surplus canceled verifier still owns memory and its row');
+  assert.equal(f.engine.snapshot().retiring, 1); assert.equal(f.engine.snapshot().reservationBytes, 8);
+  const requests = f.requests.length; await flushStartup(); assert.equal(f.requests.length, requests, 'no replacement borrows a retained slot');
+  release(); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 1); assert.equal(f.engine.snapshot().reservationBytes, 4);
+});
+
+test('startup concurrency composes with opt-in mixed ranges without bypassing its verified startup barrier', async t => {
+  const f = await fixture(t, { enabled: false, rangePeer: true, startupTarget: () => .1,
+    startupConcurrency: 2, startupMaxBytes: 32 * 1024 * 1024, bufferedMixedRanges: true, held: [0, 1, 2] });
+  Object.assign(f.hls.media, { ended: false, seeking: false, readyState: 4, playbackRate: 1 });
+  const first = f.load(0);
+  await until(() => f.requests.length === 3);
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2]);
+  assert(f.requests.every(row => row.context[STARTUP_MARKER]), 'both startup demand and future bodies retain their exclusion marker');
+  assert(f.requests.every(row => !row.context.rangeEnd), 'startup still owns whole bodies');
+  f.requests[0].finish(); f.requests[2].finish(); await sleep(10);
+  assert.equal(first.calls.success, 0, 'out-of-order verified data cannot bridge the missing future');
+  f.requests[1].finish(); assert.deepEqual(await first.result, f.bytes);
+  assert.equal(first.calls.success, 1); assert.equal(f.swarm.metrics().startupBuffer.state, 'ready');
+  assert.equal(f.swarm.metrics().startupBuffer.limits.futureRequests, 2);
+  assert.equal(f.swarm.metrics().warmAhead.limits.speculativeWholeRequests, 1);
+  assert.equal(f.swarm.metrics().config.bufferedMixedRanges, true);
 });

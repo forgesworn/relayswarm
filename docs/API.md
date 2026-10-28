@@ -199,7 +199,7 @@ does not trigger this extension. Otherwise the existing rolling policy may
 retire its completed, unpinned first future when it contains the target.
 Once a future window starts ahead of the actual target, its start stays fixed;
 release waits for the real target and verified coverage to meet again.
-Startup contains at most four objects within its chosen byte allowance. Future requests remain serial,
+Startup contains at most four objects within its chosen byte allowance. Future requests are serial by default,
 and insufficient capacity cannot release unsafe media or extend the deadline.
 In-flight work and authority pins keep their reservations.
 The rolling plan stores metadata only, without retaining discarded payloads.
@@ -231,6 +231,16 @@ The signal also ends after successful HLS handoff. A host must detach its
 pending-acknowledgement listener once acknowledged, so normal operation cleanup
 does not cancel an established room. The final authority verdict and HLS
 callback share one synchronous turn; success cleanup follows actual delivery.
+
+The unreleased `startupBufferConcurrency` option accepts exactly `1` (default)
+or `2`. Choosing `2` requires `startupBufferTarget` and permits two future jobs
+only while the startup barrier is buffering. The original first-fragment load
+has its own owner. Cancelled jobs awaiting authorisation or verification still
+occupy their slots and byte reservations until that work settles. Handoff
+retires surplus work and restores the steady limit of one future job.
+The same four-object startup limit, chosen aggregate allowance, 24 MiB future
+budget, shared held-cache budget and original deadlines apply. This controls
+concurrency; it does not establish field startup speed or network capacity.
 
 With `warmAhead: false`, startup may preload the parsed upcoming fragments and
 retain them for genuine consumption, then stops speculative fetching. Peer
