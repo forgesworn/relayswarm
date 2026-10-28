@@ -6756,6 +6756,35 @@ for (const late of [false, true]) test(`actual XHR ${late ? 'late' : 'cached'} p
     });
 });
 
+test('actual XHR mixed binary then nonbinary progress retires immediately after the source claim', async t => {
+  for (const late of [false, true]) await t.test(late ? 'late' : 'cached', async t => {
+    const xhr = heldRealXhrSource(t), clock = virtualClock(t); let f, first;
+    const context = { ...multiContext, responseType: 'arraybuffer' };
+    try {
+      f = await clock.settle(multiFixture(t, { OriginLoader: xhr.OriginLoader,
+        holders: [{ Channel: PartialFlowChannel, firstByteMs: 20, flowMs: 20 }], size: 2 * 1024 * 1024,
+        swarmOptions: { zeroBudgetPeerRace: true, latePeerRace: late, maxPeerWaitMs: 1000 } }));
+      f.hls.media = { currentTime: 0, paused: false, ended: false, seeking: false, buffered: { length: 0 } };
+      if (late) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+      first = beginCountedMultiLoad(f, context);
+      if (late) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [f.key] }));
+      await clock.advanceUntil(() => f.swarm.metrics().core.multiHolder.peerBytes > 0, 500);
+      await clock.advanceUntil(() => f.channels[0].wants.length >= 2, 100); await clock.advance(1);
+      const source = xhr.instances[0];
+      source.callbacks.onProgress(source.stats, context, f.bytes.slice(0, 16384).buffer, xhr.requests[0]);
+      assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 1, 'binary progress leaves only its one pending retirement');
+      let reads = 0;
+      source.callbacks.onProgress(source.stats, context, { get byteLength() { reads++; return 1; } }, xhr.requests[0]);
+      assert.equal(reads, 1);
+      assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 0, 'nonbinary progress cancels synchronously even after binary progress claimed HTTP');
+      await clock.advance(3);
+      xhr.requests[0].complete(f.bytes.slice().buffer); sameBytes(await clock.settle(first.response), f.bytes);
+      assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.partialUsefulnessPreserved, 0, 'later success cannot restore released usefulness');
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    } finally { first?.loader.abort(); if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
 test('owned HTTP winner retains only this transfer’s fresh verified partial usefulness without a rate or Hls credit', async t => {
   for (const late of [false, true]) await t.test(late ? 'late HAVE owner' : 'cached owner', async t => {
   const clock = virtualClock(t); let f, next;

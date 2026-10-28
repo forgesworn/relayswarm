@@ -1184,8 +1184,9 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 ## Unreleased
 
 - Handle hls.js XhrLoader's final progress callback before its synchronous
-  source success. Claim HTTP immediately and defer unproven peer retirement by
-  one guarded microtask, allowing only owned positive-body success to preserve
+  source success. Claim HTTP immediately and defer genuine binary progress's
+  unproven peer retirement by one guarded microtask. Other positive progress
+  retains immediate cancellation. Only owned positive-body success can preserve
   verified partial usefulness before lease release. Progress without that success
   still retires the peer arm; no peer window or deadline is extended.
 
@@ -2301,7 +2302,10 @@ parent/peer deadline remain. This admission change is not a measured playback
 improvement or an explanation of previously captured partial-transfer endings.
 hls.js XhrLoader reports its complete body through `onProgress` immediately
 before `onSuccess`. The SDK claims HTTP immediately, blocking peer handoff,
-and schedules unproven peer retirement once at the next microtask checkpoint.
+and, for an actual `ArrayBuffer` or view, schedules unproven peer retirement once
+at the next microtask checkpoint. Other positive progress retains immediate
+cancellation, including after an earlier binary progress claim. The existing
+payload `byteLength` decision is read once.
 Owned positive-body success observed before that queued retirement can produce
 the proof before lease release, including an already queued success. Success in
 a later task after retirement cannot restore it. It
@@ -3030,7 +3034,9 @@ Earlier release and pilot evidence below retains its date and source.
 The installed hls.js 1.7.3 XhrLoader calls final body progress before synchronous
 HTTP success. Immediate peer cancellation at progress disposed of the partial
 usefulness proof before that success could validate it. The wrapper now claims
-HTTP immediately and queues one guarded microtask for unproven peer retirement.
+HTTP immediately and queues one guarded microtask for genuine binary progress's
+unproven peer retirement. Positive nonbinary progress still cancels immediately,
+even after an earlier binary claim; the payload length decision is read once.
 Owned positive-body success observed before queued retirement can validate
 before lease release, including a success already queued before progress.
 Nonterminal progress, failure or success after retirement cannot. Late proof validation

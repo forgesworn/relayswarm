@@ -3,8 +3,9 @@
 ## Unreleased
 
 - Handle hls.js XhrLoader's final progress callback before its synchronous
-  source success. Claim HTTP immediately and defer unproven peer retirement by
-  one guarded microtask, allowing only owned positive-body success to preserve
+  source success. Claim HTTP immediately and defer genuine binary progress's
+  unproven peer retirement by one guarded microtask. Other positive progress
+  retains immediate cancellation. Only owned positive-body success can preserve
   verified partial usefulness before lease release. Progress without that success
   still retires the peer arm; no peer window or deadline is extended.
 

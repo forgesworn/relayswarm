@@ -1356,12 +1356,13 @@ class HlsSwarm {
           ...callbacks,
           onProgress: (...args) => {
             if (!originPending || this.active !== token) { originTrace?.progress(undefined, null, true); return; }
-            const hasPayload = args[2]?.byteLength > 0;
-            if (hasPayload && !originClaimed) {
-              originClaimed = true;
-              // XhrLoader reports its completed body here before onSuccess.
-              // Claim HTTP now; success may prove ownership before queued retirement.
-              retireAfterProgress();
+            const payload = args[2], hasPayload = payload?.byteLength > 0;
+            if (hasPayload) {
+              const firstClaim = !originClaimed; originClaimed = true;
+              // Only genuine binary progress can be XhrLoader's final body.
+              // Other positive progress keeps its existing immediate retirement.
+              if (!(payload instanceof ArrayBuffer || ArrayBuffer.isView(payload))) stopPeer();
+              else if (firstClaim) retireAfterProgress();
             }
             originTrace?.progress(args[0], hasPayload, false);
             callbacks.onProgress?.(...args);
@@ -1468,8 +1469,12 @@ class HlsSwarm {
           ...callbacks,
           onProgress: (...args) => {
             if (!originPending || this.active !== token) { originTrace?.progress(undefined, null, true); return; }
-            const hasPayload = args[2]?.byteLength > 0;
-            if (hasPayload && !originClaimed) { originClaimed = true; retireAfterProgress(); }
+            const payload = args[2], hasPayload = payload?.byteLength > 0;
+            if (hasPayload) {
+              const firstClaim = !originClaimed; originClaimed = true;
+              if (!(payload instanceof ArrayBuffer || ArrayBuffer.isView(payload))) watch?.close('origin-progress');
+              else if (firstClaim) retireAfterProgress();
+            }
             originTrace?.progress(args[0], hasPayload, false);
             callbacks.onProgress?.(...args);
           },

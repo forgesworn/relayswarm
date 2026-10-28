@@ -15,7 +15,9 @@ Earlier release and pilot evidence below retains its date and source.
 The installed hls.js 1.7.3 XhrLoader calls final body progress before synchronous
 HTTP success. Immediate peer cancellation at progress disposed of the partial
 usefulness proof before that success could validate it. The wrapper now claims
-HTTP immediately and queues one guarded microtask for unproven peer retirement.
+HTTP immediately and queues one guarded microtask for genuine binary progress's
+unproven peer retirement. Positive nonbinary progress still cancels immediately,
+even after an earlier binary claim; the payload length decision is read once.
 Owned positive-body success observed before queued retirement can validate
 before lease release, including a success already queued before progress.
 Nonterminal progress, failure or success after retirement cannot. Late proof validation

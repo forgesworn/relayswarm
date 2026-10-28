@@ -265,7 +265,10 @@ parent/peer deadline remain. This admission change is not a measured playback
 improvement or an explanation of previously captured partial-transfer endings.
 hls.js XhrLoader reports its complete body through `onProgress` immediately
 before `onSuccess`. The SDK claims HTTP immediately, blocking peer handoff,
-and schedules unproven peer retirement once at the next microtask checkpoint.
+and, for an actual `ArrayBuffer` or view, schedules unproven peer retirement once
+at the next microtask checkpoint. Other positive progress retains immediate
+cancellation, including after an earlier binary progress claim. The existing
+payload `byteLength` decision is read once.
 Owned positive-body success observed before that queued retirement can produce
 the proof before lease release, including an already queued success. Success in
 a later task after retirement cannot restore it. It
