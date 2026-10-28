@@ -84,6 +84,11 @@ Wall-time gaps and verification remain in the interval; origin and duplicate
 bytes are excluded. This creates neither first-byte timing nor playback credit,
 and uses the existing JavaScript/WASM APIs without changing the core binary.
 Source tests do not qualify cold-cache 4K or physical devices.
+Bounded core.multiHolder.peerFlow metrics count emitted verified short batches
+and existing fit/useful-unknown/refresh/cooldown-blocked/known-slow model
+evaluations. Latest numeric snapshots and no-model candidate counts are copied,
+without peer IDs or payloads. These diagnostics change no usefulness, cooldown,
+admission or deadline policy and establish no playback performance improvement.
 Unreleased startupBufferTarget is null by default. A host-provided fresh raw
 HLS target enables one-shot verified startup buffering within the existing
 startup-only four-object and twelve-second/parent limits. startupBufferMaxBytes

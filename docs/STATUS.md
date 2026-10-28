@@ -10,6 +10,19 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased peer-flow and fit-model diagnostics (28 October 2026)
+
+`metrics().core.multiHolder.peerFlow` now counts emitted verified short-flow
+batches and the existing link-model decisions, with only the latest numeric
+model and no-model rejection snapshot. Model evaluations are not requests;
+verified estimator samples are not consumed Hls media or traffic savings.
+Snapshots are copied and contain no peer identity or payload. The field exposes
+whether the estimator trained and why a candidate model was retained or refused;
+it does not change usefulness, cooldowns, admission, callbacks or deadlines.
+This diagnostic addition is not a performance fix or a new playback qualification.
+Previously captured reports that omit it cannot establish short-batch training
+or the exact cause of a per-load model refusal.
+
 ## Unreleased verified short-piece flow observations (28 October 2026)
 
 A slow qualifying piece can leave a pessimistic throughput estimate in place
