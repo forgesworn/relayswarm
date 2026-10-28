@@ -2310,3 +2310,78 @@ for (const parent of [20000, 9000]) test(`startup load budget: absolute ${Math.m
   assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().cacheBytes, 0);
   assert.equal(f.engine.snapshot().limits.deadlineMs, 8000);
 });
+
+test('a canceled warm verifier retains its default slot and body reservation until actual settlement', async t => {
+  let release; t.after(() => release?.());
+  const f = startupFixture(t, {
+    beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
+  const first = f.load(0, 12000); await flushStartup();
+  f.requests[1].finish(); await flushStartup();
+  first.loader.abort(); await flushStartup();
+  assert.equal(first.calls.abort, 1); assert.equal(f.engine.snapshot().active, 1);
+  assert.equal(f.engine.snapshot().reservationBytes, 4, 'the default path cannot hide a still-owned whole body either');
+  release(); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  assert.equal(f.retained.length, 0); assert.equal(first.calls.success, 0);
+});
+
+test('canceled warm authorisation retains its slot until rejection without starting HTTP', async t => {
+  let reject; t.after(() => reject?.(new Error('fixture retired')));
+  const bytes = Uint8Array.of(2, 4, 6, 8);
+  const f = startupFixture(t, { permit: ctx => ctx.frag.sn === 1
+    ? new Promise((_resolve, fail) => { reject = fail; })
+    : { key: ctx.url, size: bytes.length, sha256: sha(bytes), current: () => true } });
+  const first = f.load(0, 12000); await flushStartup();
+  assert.equal(typeof reject, 'function');
+  first.loader.abort(); await flushStartup();
+  assert.equal(first.calls.abort, 1);
+  assert.equal(f.engine.snapshot().active, 1);
+  assert.equal(f.engine.snapshot().reservationBytes, 0);
+  assert.equal(f.requests.length, 1, 'cancelled authorisation cannot create a future HTTP request');
+  reject(new Error('fixture refusal')); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 0);
+  assert.equal(f.engine.snapshot().reservationBytes, 0);
+  assert.equal(f.requests.length, 1); assert.equal(first.calls.success, 0);
+});
+
+test('a canceled warm verifier releases its retained body on rejection without delivery', async t => {
+  let reject; t.after(() => reject?.(new Error('fixture retired')));
+  const f = startupFixture(t, {
+    beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise((_resolve, fail) => { reject = fail; }) : undefined });
+  const first = f.load(0, 12000); await flushStartup();
+  f.requests[1].finish(); await flushStartup();
+  first.loader.abort(); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 1);
+  assert.equal(f.engine.snapshot().reservationBytes, 4);
+  reject(new Error('fixture refusal')); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  assert.equal(f.retained.length, 0); assert.equal(first.calls.success, 0);
+});
+
+test('retired warm rows keep ownership but cannot cover a seek position', async t => {
+  let release; t.after(() => release?.());
+  const f = startupFixture(t, {
+    beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
+  const first = f.load(0, 12000); await flushStartup();
+  f.requests[1].finish(); await flushStartup();
+  first.loader.abort(); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 1);
+  assert.equal(f.engine.snapshot().reservationBytes, 4);
+  assert.equal(f.engine.contains(2.5), false, 'retired data is retained memory, not current media coverage');
+  release(); await flushStartup(); assert.equal(f.engine.snapshot().reservationBytes, 0);
+});
+
+test('retired warm rows outside a new demand plan do not invalidate its actual seek position', async t => {
+  let release; t.after(() => release?.());
+  const f = startupFixture(t, { startup: false, steady: true,
+    beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
+  f.load(0, 12000); await flushStartup();
+  f.requests[1].finish(); await flushStartup();
+  const current = f.load(4, 12000); await flushStartup();
+  assert.equal(current.calls.abort, 0); assert.equal(current.calls.error, 0);
+  assert.equal(f.engine.snapshot().active, 1);
+  assert.equal(f.engine.snapshot().reservationBytes, 4);
+  assert.equal(f.engine.contains(9), true, 'the current genuine8–10s demand remains valid despite an old canceled2–4s row');
+  assert.equal(f.engine.contains(2.5), false);
+  release(); await flushStartup(); assert.equal(f.engine.snapshot().reservationBytes, 0);
+});

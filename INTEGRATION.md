@@ -134,6 +134,12 @@ decision is not cached as permission for later upload requests.
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` / `WorkerImpl` | globals | Constructor injection points for tests; the worker remains explicitly configured through `transferWorkerUrl`. |
 
+Cancelled warm jobs retain their speculative slot and any byte reservation while
+an awaited authorisation or verifier still owns the work. Late settlement cannot
+publish or deliver cancelled data; the slot and reservation are released when
+that operation settles. Cancelled rows do not count as current playback coverage
+or reusable pending data. Cancellation does not increase the existing limits.
+
 Offer and answer gathering retain the 1.2-second soft cap when the local SDP
 already contains a candidate. If it is still empty at that point, gathering
 waits for the first candidate or native completion, within the same negotiation
