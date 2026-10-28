@@ -60,10 +60,11 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     counters.cacheBytes + reserved() + size <= byteLimit();
   const tracked = () => new Set([...cache.keys(), ...jobs.keys(), ...(startup.owner ? [startup.own.key] : [])]).size;
   const objectLimit = () => startup.state === 'buffering' ? MAX_STARTUP_OBJECTS : MAX_OBJECTS;
-  const live = row => jobs.get(row.key) === row && !row.finished;
+  const owns = row => jobs.get(row.key) === row && !row.finished;
+  const live = row => owns(row) && !row.cancelled;
   const drop = key => { const row = cache.get(key); if (row) { counters.cacheBytes -= row.data.byteLength; cache.delete(key); } };
   const finishJob = (row, result) => {
-    if (!live(row)) return;
+    if (!owns(row)) return;
     row.finished = true; jobs.delete(row.key); promoted.delete(row);
     if (active === row) active = null;
     row.reserved = 0; row.finish(result);
@@ -71,7 +72,13 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     void checkStartup();
     queueMicrotask(pump);
   };
-  const cancelJob = row => { if (live(row)) { counters.cancelled++; row.cancel(); finishJob(row, null); } };
+  const cancelJob = row => {
+    if (!live(row)) return;
+    counters.cancelled++; row.cancelled = true; row.cancel();
+    // An awaited validator may still own its body. Do not lend that slot or
+    // reservation to replacement work until the actual await settles.
+    if (!row.validating) finishJob(row, null);
+  };
   const clear = () => {
     if (startup.state === 'idle' || startup.state === 'buffering') endStartup('cancelled', 'cleared', !closed);
     startup.planningServiceMs = null;
@@ -112,13 +119,17 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     timer = setTimeout(() => cancelJob(row), DEADLINE_MS);
     void (async () => {
       try {
-        const permit = await authorise(item.context, controller.signal);
+        let permit;
+        row.validating = true;
+        try { permit = await authorise(item.context, controller.signal); }
+        finally { row.validating = false; }
         if (controller.signal.aborted || closed || revision !== generation || !live(row) || !allowed()) return null;
         if (!permit || !Number.isSafeInteger(permit.size) || permit.size < 1 || permit.size > MAX_BYTES) { counters.rejected++; return null; }
         while (!bytesFit(permit.size) && cache.size && startup.state !== 'buffering') drop(cache.keys().next().value);
         if (!bytesFit(permit.size)) { counters.rejected++; return null; }
         row.reserved = permit.size;
         if (!reserve(reserved())) { row.reserved = 0; counters.rejected++; return null; }
+        if (controller.signal.aborted || closed || revision !== generation || !live(row)) return null;
         counters.highWaterBytes = Math.max(counters.highWaterBytes, counters.cacheBytes + reserved());
         const warm = item.context[WARM_AHEAD] = { peerBytes: 0, genuine: () => row.genuine(),
           startupDependency: () => {
@@ -144,8 +155,12 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
           if (controller.signal.aborted || closed || revision !== generation || !live(row)) return null;
           counters.rejected++; return response;
         }
-        if (!response || controller.signal.aborted || closed || revision !== generation || !live(row) ||
-            !await verify(permit, response.response.data, item.context, controller.signal)) { counters.rejected++; return null; }
+        if (!response || controller.signal.aborted || closed || revision !== generation || !live(row)) return null;
+        let valid;
+        row.validating = true;
+        try { valid = await verify(permit, response.response.data, item.context, controller.signal); }
+        finally { row.validating = false; }
+        if (!valid) { counters.rejected++; return null; }
         if (controller.signal.aborted || closed || revision !== generation || !live(row)) return null;
         const data = response.response.data;
         if (data.byteLength !== permit.size) { counters.rejected++; return null; }
@@ -605,7 +620,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         callbacks[name] = (...args) => this.complete(terminal, name, args);
       const token = ++this.token, own = noteDemand(context, this.config, policy, terminal.id), cached = own && cache.get(own.key);
       if (!beginStartup(this, terminal, own, policy)) return;
-      const pending = !cached && own && jobs.get(own.key), existing = cached ?? pending?.promise;
+      const pendingRow = !cached && own && jobs.get(own.key);
+      const pending = pendingRow && live(pendingRow) ? pendingRow : null, existing = cached ?? pending?.promise;
       if (existing) {
         if (pending) {
           counters.coalesced++;
@@ -762,7 +778,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       limits: { objects: MAX_STARTUP_OBJECTS, bytes: startupMaxBytes, futureBytes: MAX_BYTES, deadlineMs: STARTUP_DEADLINE_MS } }),
     contains(time) {
       if (closed || !allowed() || !Number.isFinite(time)) return false;
-      for (const row of [...jobs.values(), ...cache.values()]) {
+      const currentJobs = [...jobs].filter(([, row]) => live(row));
+      for (const row of [...currentJobs.map(([, row]) => row), ...cache.values()]) {
         if (row.scope === scope && inside(row, time)) return true;
       }
       const latest = latestDemand;
@@ -772,7 +789,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         const planned = new Map([latest.own, ...upcoming].map(item => [item.key, item]));
         if ((latest.rolling ? upcoming.some(item => !plannedCurrent(item)) :
           upcoming.length !== latest.upcoming.length || upcoming.some((item, i) => !samePosition(item, latest.upcoming[i]))) ||
-            [...jobs, ...cache].some(([key, row]) => !samePosition({ ...row, key }, planned.get(key)))) {
+            [...currentJobs, ...cache].some(([key, row]) => !samePosition({ ...row, key }, planned.get(key)))) {
           latestDemand = null; return false;
         }
         // Successful HTTP can precede the first append. Retain only that last
