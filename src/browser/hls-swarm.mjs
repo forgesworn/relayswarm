@@ -1325,6 +1325,9 @@ class HlsSwarm {
           controller.abort(proof?.[OWNED_HTTP_WINNER] === partial ? proof : undefined);
           partial.dispose();
         };
+        const retireAfterProgress = () => queueMicrotask(() => {
+          if (originPending && this.active === token && !controller.signal.aborted) stopPeer();
+        });
         swarm.cachedRaces.add(controller);
         swarm.lifecycle.signal.addEventListener("abort", stopPeer, { once: true });
         this.cancel = () => {
@@ -1354,7 +1357,12 @@ class HlsSwarm {
           onProgress: (...args) => {
             if (!originPending || this.active !== token) { originTrace?.progress(undefined, null, true); return; }
             const hasPayload = args[2]?.byteLength > 0;
-            if (hasPayload) { originClaimed = true; stopPeer(); }
+            if (hasPayload && !originClaimed) {
+              originClaimed = true;
+              // XhrLoader reports its completed body here before onSuccess.
+              // Claim HTTP now; success may prove ownership before queued retirement.
+              retireAfterProgress();
+            }
             originTrace?.progress(args[0], hasPayload, false);
             callbacks.onProgress?.(...args);
           },
@@ -1413,6 +1421,10 @@ class HlsSwarm {
         this.active = token; this.pendingCallbacks = { callbacks, context };
         Object.assign(this.inner.stats, { aborted: false, loaded: 0, total: 0, chunkCount: 0, loading: { start: 0, first: 0, end: 0 } });
         const current = () => originPending && !originClaimed && this.active === token && !swarm.stopped;
+        const ownsOrigin = () => originPending && this.active === token && !swarm.stopped;
+        const retireAfterProgress = () => queueMicrotask(() => {
+          if (originPending && this.active === token && !controller.signal.aborted) watch?.close('origin-progress');
+        });
         const finishOrigin = (reason, positiveBody = false) => {
           if (!originPending || this.active !== token) return false;
           let proof = null;
@@ -1430,7 +1442,7 @@ class HlsSwarm {
           return pending;
         };
         let originTrace;
-        watch = swarm.#watchLatePeer({ context, controller, partial, entryAt: t0, parentDeadline: t0 + parentMs, current,
+        watch = swarm.#watchLatePeer({ context, controller, partial, entryAt: t0, parentDeadline: t0 + parentMs, current, ownsOrigin,
           arm: (peerContext, plan) => {
             plan[OWNED_HTTP_WINNER] = partial;
             if (swarm.options.traceRequests) swarm.traceLoads.set(peerContext, traceLoad);
@@ -1457,7 +1469,7 @@ class HlsSwarm {
           onProgress: (...args) => {
             if (!originPending || this.active !== token) { originTrace?.progress(undefined, null, true); return; }
             const hasPayload = args[2]?.byteLength > 0;
-            if (hasPayload) { originClaimed = true; watch?.close('origin-progress'); }
+            if (hasPayload && !originClaimed) { originClaimed = true; retireAfterProgress(); }
             originTrace?.progress(args[0], hasPayload, false);
             callbacks.onProgress?.(...args);
           },
@@ -1553,10 +1565,10 @@ class HlsSwarm {
   }
 
   #partialHttpWinner(controller) {
-    const watching = new AbortController(), slot = { signal: controller.signal, prepare: null, revalidate: null, valid: true };
+    const watching = new AbortController(), slot = { signal: controller.signal, prepare: null, revalidate: null, winnerValid: null, valid: true };
     slot.dispose = () => {
       watching.abort(); controller.signal.removeEventListener('abort', slot.dispose);
-      slot.prepare = null; slot.revalidate = null;
+      slot.prepare = null; slot.revalidate = null; slot.winnerValid = null;
     };
     try {
       for (const name of ['seeking', 'pause', 'ended', 'emptied']) this.hls?.media?.addEventListener?.(name,
@@ -1597,11 +1609,16 @@ class HlsSwarm {
       if (!current || !Number.isFinite(current.at) || warmContext(current.context)?.key !== identity.key) return null;
       return warm ? { ...current.context, [WARM_AHEAD]: warm } : current.context;
     };
-    owner.valid = () => !owner.closed && input.current() && !this.stopped && owner.generation === this.latePeerGeneration &&
+    const valid = isCurrent => !owner.closed && isCurrent() && !this.stopped && owner.generation === this.latePeerGeneration &&
       owner.streamId === this.options.streamEvent?.id && currentContext() !== null && !media?.paused && !media?.ended &&
       now() < (owner.peerLimit ?? owner.windowEnd ?? input.parentDeadline) &&
       [...(owner.validatedPeers ?? [])].every(([link, ticket]) => this.links.get(link.pubkey) === link && !link.closed &&
         !this.banned.has(link.pubkey) && (!this.options.admit || this.admitted.get(link.pubkey)?.ticket === ticket));
+    owner.valid = () => valid(input.current);
+    // This private proof retains every validity predicate; only an already
+    // claimed HTTP response is allowed to validate its still-current owner.
+    if (input.partial?.signal === owner.controller.signal && typeof input.ownsOrigin === 'function')
+      input.partial.winnerValid = () => valid(input.ownsOrigin);
     owner.refresh = () => {
       if (owner.closed) return;
       if (!input.current() || this.stopped || owner.generation !== this.latePeerGeneration || owner.streamId !== this.options.streamEvent?.id) return owner.close('inactive');
@@ -2564,7 +2581,8 @@ class HlsSwarm {
           if (finished || signal.aborted || !freshAt.size || !flowMedia || partialSlot?.signal !== signal ||
               !partialSlot.valid || partialSlot.prepare !== preparePartial) return null;
           partialSlot.preparing = true;
-          if (plan.currentValid && !plan.currentValid() || typeof authority !== 'function' || !authority()) return null;
+          const winnerValid = partialSlot.winnerValid ?? plan.currentValid;
+          if (winnerValid && !winnerValid() || typeof authority !== 'function' || !authority()) return null;
           const identity = warmContext(context);
           if (!flowIdentity || !identity || identity.key !== flowIdentity.key) return null;
           const at = now();

@@ -97,6 +97,10 @@ Newer zero-fresh aborts, stop/seek/replacement, expiry, failure and invalid owne
 remain excluded; observation floors, cooldown durations and deadlines stay fixed.
 The cumulative partialUsefulnessPreserved counter counts actual applications.
 No field cancellation-owner or playback-performance claim is established.
+XHR final body progress can precede synchronous success. HTTP is claimed
+immediately; one guarded microtask retires the peer arm unless owned positive
+success validates before that queued retirement, including an already queued success. Progress alone never proves usefulness, peer handoff
+remains blocked, and no deadline or peer wait budget is extended.
 Unreleased startupBufferTarget is null by default. A host-provided fresh raw
 HLS target enables one-shot verified startup buffering within the existing
 startup-only four-object and twelve-second/parent limits. startupBufferMaxBytes

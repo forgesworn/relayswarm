@@ -263,6 +263,18 @@ authority or ownership cannot preserve it. The 30-second usefulness age, existin
 10-second refresh cooldown, unknown-flow one-piece initial bound and every
 parent/peer deadline remain. This admission change is not a measured playback
 improvement or an explanation of previously captured partial-transfer endings.
+hls.js XhrLoader reports its complete body through `onProgress` immediately
+before `onSuccess`. The SDK claims HTTP immediately, blocking peer handoff,
+and schedules unproven peer retirement once at the next microtask checkpoint.
+Owned positive-body success observed before that queued retirement can produce
+the proof before lease release, including an already queued success. Success in
+a later task after retirement cannot restore it. It
+never derives proof from progress or restores usefulness after release. A late
+HTTP winner uses the same context, admission, generation and deadline predicates
+with stable HTTP ownership; ordinary peer validity still excludes a source that
+has claimed playback. Stop, error, abort, replacement and expiry keep their
+existing guards. No HTTP request, timer, wait budget or deadline is added.
+
 An individual flow below the unchanged 300 ms floor
 does not train a rate. Newly verified short pieces may form a bounded batch
 within the same transfer and connection.

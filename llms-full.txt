@@ -1183,6 +1183,12 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 ## Unreleased
 
+- Handle hls.js XhrLoader's final progress callback before its synchronous
+  source success. Claim HTTP immediately and defer unproven peer retirement by
+  one guarded microtask, allowing only owned positive-body success to preserve
+  verified partial usefulness before lease release. Progress without that success
+  still retires the peer arm; no peer window or deadline is extended.
+
 - Preserve eligible current-transfer physical peer usefulness when that loader's
   successful positive binary HTTP response cancels its losing peer-only arm.
   Only fresh verified pieces from the same guarded transfer/link qualify, using
@@ -2293,6 +2299,18 @@ authority or ownership cannot preserve it. The 30-second usefulness age, existin
 10-second refresh cooldown, unknown-flow one-piece initial bound and every
 parent/peer deadline remain. This admission change is not a measured playback
 improvement or an explanation of previously captured partial-transfer endings.
+hls.js XhrLoader reports its complete body through `onProgress` immediately
+before `onSuccess`. The SDK claims HTTP immediately, blocking peer handoff,
+and schedules unproven peer retirement once at the next microtask checkpoint.
+Owned positive-body success observed before that queued retirement can produce
+the proof before lease release, including an already queued success. Success in
+a later task after retirement cannot restore it. It
+never derives proof from progress or restores usefulness after release. A late
+HTTP winner uses the same context, admission, generation and deadline predicates
+with stable HTTP ownership; ordinary peer validity still excludes a source that
+has claimed playback. Stop, error, abort, replacement and expiry keep their
+existing guards. No HTTP request, timer, wait budget or deadline is added.
+
 An individual flow below the unchanged 300 ms floor
 does not train a rate. Newly verified short pieces may form a bounded batch
 within the same transfer and connection.
@@ -3006,6 +3024,23 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased XHR progress/success ownership compatibility (28 October 2026)
+
+The installed hls.js 1.7.3 XhrLoader calls final body progress before synchronous
+HTTP success. Immediate peer cancellation at progress disposed of the partial
+usefulness proof before that success could validate it. The wrapper now claims
+HTTP immediately and queues one guarded microtask for unproven peer retirement.
+Owned positive-body success observed before queued retirement can validate
+before lease release, including a success already queued before progress.
+Nonterminal progress, failure or success after retirement cannot. Late proof validation
+retains every existing context/admission/deadline predicate while distinguishing
+HTTP ownership from peer-handoff eligibility.
+
+This corrects a callback-order compatibility gap. It creates no rate or Hls peer
+credit and extends no peer window or deadline. Actual-XhrLoader and committed-Core
+fixtures exercise the callback sequence; they do not qualify sustained playback,
+source savings or explain each cancellation in the previous failed field run.
 
 ## Unreleased partial-usefulness correction (28 October 2026)
 
