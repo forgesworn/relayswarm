@@ -134,6 +134,14 @@ decision is not cached as permission for later upload requests.
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` / `WorkerImpl` | globals | Constructor injection points for tests; the worker remains explicitly configured through `transferWorkerUrl`. |
 
+Offer and answer gathering retain the 1.2-second soft cap when the local SDP
+already contains a candidate. If it is still empty at that point, gathering
+waits for the first candidate or native completion, within the same negotiation
+and original absolute `dialTimeoutMs` deadline. Native completion without a
+candidate fails the dial rather than publishing empty SDP. Cancellation and
+admission checks retain their existing ownership; this adds no hard timer,
+trickle messages, public option or default change.
+
 The pending glare-reuse correction keeps the existing lower-public-key offer
 when both peers dial simultaneously. The yielding peer may adopt only its
 still-pending outgoing connection for the winning admitted offer. Native

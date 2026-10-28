@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Keep waiting for the first ICE candidate when local offer or answer SDP is
+  empty at the existing 1.2-second gathering soft cap. SDP that already contains
+  a candidate keeps that cap. The wait shares the original negotiation and dial
+  deadline; native completion without a candidate fails closed. No new hard
+  timer, trickle message, admission rule or public default is introduced.
+
 - Handle hls.js XhrLoader's final progress callback before its synchronous
   source success. Claim HTTP immediately and defer genuine binary progress's
   unproven peer retirement by one guarded microtask. Other positive progress

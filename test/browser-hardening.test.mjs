@@ -46,7 +46,7 @@ class Channel extends EventTarget {
 class PC extends EventTarget {
   static instances = [];
   iceGatheringState = "complete";
-  localDescription = { sdp: "address-bearing-sdp" };
+  localDescription = { sdp: "address-bearing-sdp\r\na=candidate:fixture 1 udp 1 fixture.local 9 typ host\r\n" };
   constructor(configuration) { super(); this.configuration = configuration; PC.instances.push(this); }
   close() { this.closed = true; }
   createDataChannel() { return new Channel(); }
@@ -2205,7 +2205,7 @@ test("transport diagnostics retain bounded redacted real session phases and deta
     assert.ok(events.indexOf("remote-installed") < events.indexOf("local-answer"));
     assert.ok(events.indexOf("local-answer") < events.indexOf("signal-send"));
     assert.equal(before.records.find((r) => r.event === "local-answer").detail, "complete");
-    assert.equal(before.records.find((r) => r.event === "local-answer").candidates, 0);
+    assert.equal(before.records.find((r) => r.event === "local-answer").candidates, 1);
     for (let i = 0; i < 90; i++) {
       pc.iceConnectionState = i % 2 ? "checking" : "private-address-and-ticket";
       pc.dispatchEvent(new Event("iceconnectionstatechange"));
@@ -2307,7 +2307,7 @@ test("transport trace keeps rejected admission separate from an authenticated an
   } finally { await timeout.close(); }
 });
 
-test("gather cap and lifecycle abort are observed without extending the native1200ms envelope", async () => {
+test("candidate-bearing gather cap and lifecycle abort retain the1200ms soft envelope", async () => {
   for (const abort of [false, true]) {
     const f = await transportFixture({ gathering: "gathering" });
     try {
@@ -2525,7 +2525,7 @@ class GlareChannel extends EventTarget {
   close() { if (this.readyState === "closed") return; this.readyState = "closed"; this.dispatchEvent(new Event("close")); }
   open() { this.readyState = "open"; this.dispatchEvent(new Event("open")); }
 }
-async function glareFixture(t, { polite = true, hold, gathering = false, rollbackSupported = true, timeout = 12000 } = {}) {
+async function glareFixture(t, { polite = true, hold, gathering = false, emptyCandidates = false, rollbackSupported = true, timeout = 12000 } = {}) {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const secretKeys = [1, 2].map(value => { const key = new Uint8Array(32); key[31] = value; return key; })
     .sort((a, b) => getPublicKey(a) < getPublicKey(b) ? -1 : 1);
@@ -2543,7 +2543,13 @@ async function glareFixture(t, { polite = true, hold, gathering = false, rollbac
     trace = [];
     closes = 0;
     busy = 0;
+    listeners = new Map();
     constructor() { super(); connections.push(this); }
+    addEventListener(type, callback, options) {
+      if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+      this.listeners.get(type).add(callback); super.addEventListener(type, callback, options);
+    }
+    removeEventListener(type, callback, options) { this.listeners.get(type)?.delete(callback); super.removeEventListener(type, callback, options); }
     async native(name, operation) {
       this.trace.push(name); assert.equal(++this.busy, 1, "Native negotiation operations must never overlap");
       try {
@@ -2559,9 +2565,15 @@ async function glareFixture(t, { polite = true, hold, gathering = false, rollbac
       return this.native(`local:${description.type}`, () => {
         if (description.type === "rollback") { assert.ok(rollbackSupported, "Native rollback unavailable"); assert.equal(this.signalingState, "have-local-offer"); this.signalingState = "stable"; this.localDescription = null; }
         else if (description.type === "offer") { assert.equal(this.signalingState, "stable"); this.signalingState = "have-local-offer"; this.localDescription = description; }
-        else { assert.equal(description.type, "answer"); assert.equal(this.signalingState, "have-remote-offer"); this.signalingState = "stable"; this.localDescription = description; this.iceGatheringState = "complete"; }
+        else { assert.equal(description.type, "answer"); assert.equal(this.signalingState, "have-remote-offer"); this.signalingState = "stable"; this.localDescription = description; if (!emptyCandidates) this.iceGatheringState = "complete"; }
+        if (description.type !== "rollback" && !emptyCandidates) this.localDescription = { ...description, sdp: `${description.sdp}\r\na=candidate:fixture 1 udp 1 fixture.local 9 typ host\r\n` };
       });
     }
+    candidate() {
+      this.localDescription = { ...this.localDescription, sdp: `${this.localDescription.sdp}\r\na=candidate:fixture 1 tcp 1 fixture.local 9 typ relay\r\n` };
+      this.dispatchEvent(new Event("icecandidate"));
+    }
+    complete() { this.iceGatheringState = "complete"; this.dispatchEvent(new Event("icegatheringstatechange")); }
     setRemoteDescription(description) {
       return this.native(`remote:${description.type}`, () => {
         assert.equal(this.signalingState, description.type === "offer" ? "stable" : "have-local-offer");
@@ -2599,6 +2611,78 @@ async function glareFixture(t, { polite = true, hold, gathering = false, rollbac
   return { swarm, peer, state, connections, received, signal, offer, start,
     release(name) { gates.get(name)?.release(); }, async tick(ms) { t.mock.timers.tick(ms); await glareFlush(); } };
 }
+
+for (const type of ["offer", "answer"]) test(`candidate-free ${type} waits beyond the soft gather cap for a real local candidate`, async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 });
+  let pc;
+  if (type === "offer") pc = await f.start();
+  else { f.offer(); await glareFlush(); pc = f.connections[0]; }
+  assert.ok(pc.localDescription); assert.equal(pc.iceGatheringState, "gathering");
+  await f.tick(1200);
+  assert.equal(f.received.length, 0, "the soft cap must never publish candidate-free SDP");
+  await f.tick(983);
+  assert.equal(f.received.length, 0); assert.equal(pc.closes, 0);
+  pc.candidate(); await glareFlush();
+  const sent = f.received.filter(value => value.type === type);
+  assert.equal(sent.length, 1, "the first late candidate permits the original authenticated signal");
+  assert.match(sent[0].payload.sdp, /^a=candidate:/m);
+  assert.equal(pc.listeners.get("icecandidate")?.size ?? 0, 0, "the gather listener is retired after signalling");
+  if (type === "offer") { f.signal("answer", sent[0].requestId); await glareFlush(); pc.localChannel.open(); }
+  else pc.incoming().open();
+  await glareFlush(); assert.deepEqual(f.swarm.peerConnections(), [pc]);
+});
+
+for (const type of ["offer", "answer"]) test(`candidate-free ${type} retains the original dial deadline and clears gathering listeners`, async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 });
+  let pc;
+  if (type === "offer") pc = await f.start();
+  else { f.offer(); await glareFlush(); pc = f.connections[0]; }
+  await f.tick(7999);
+  assert.equal(f.received.length, 0); assert.equal(pc.closes, 0);
+  await f.tick(1);
+  assert.equal(pc.closes, 1); assert.equal(f.swarm.metrics().peers.dialsTimedOut, 1);
+  assert.equal(f.swarm.metrics().peers.dialling, 0);
+  assert.equal(pc.listeners.get("icecandidate")?.size ?? 0, 0);
+  assert.equal(pc.listeners.get("icegatheringstatechange")?.size ?? 0, 0);
+  pc.candidate(); pc.complete(); await f.tick(1000);
+  assert.equal(f.received.length, 0, "late native events cannot revive an expired negotiation");
+});
+
+for (const type of ["offer", "answer"]) test(`completed candidate-free ${type} fails closed without waiting for the dial deadline`, async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 });
+  let pc;
+  if (type === "offer") pc = await f.start();
+  else { f.offer(); await glareFlush(); pc = f.connections[0]; }
+  pc.complete(); await glareFlush();
+  assert.equal(f.received.length, 0); assert.equal(pc.closes, 1);
+  assert.equal(f.swarm.metrics().peers.dialsFailed, 1);
+  assert.equal(f.swarm.metrics().peers.dialsTimedOut, 0);
+  assert.equal(pc.listeners.get("icecandidate")?.size ?? 0, 0);
+  assert.equal(pc.listeners.get("icegatheringstatechange")?.size ?? 0, 0);
+});
+
+test("stop retires candidate-free gathering before a late candidate can signal", async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true }), pc = await f.start();
+  await f.tick(1200); f.swarm.stop(); await glareFlush();
+  assert.equal(pc.closes, 1);
+  assert.equal(pc.listeners.get("icecandidate")?.size ?? 0, 0);
+  assert.equal(pc.listeners.get("icegatheringstatechange")?.size ?? 0, 0);
+  pc.candidate(); pc.complete(); await f.tick(12000);
+  assert.equal(f.received.length, 0); assert.equal(f.swarm.metrics().peers.dialsTimedOut, 0);
+});
+
+test("glare retires the candidate-free offer wait and signals only the adopted answer", async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true }), pc = await f.start();
+  await f.tick(1200); f.offer(); await glareFlush();
+  assert.equal(pc.trace.filter(value => value === "local:rollback").length, 1);
+  assert.equal(pc.localDescription.type, "answer"); assert.equal(f.received.length, 0);
+  await f.tick(1200); pc.candidate(); await glareFlush();
+  assert.deepEqual(f.received.map(value => value.type), ["answer"]);
+  assert.equal(f.received[0].requestId, "winning-offer");
+  assert.equal(pc.closes, 0); assert.equal(pc.listeners.get("icecandidate")?.size ?? 0, 0);
+  pc.incoming().open(); await glareFlush();
+  assert.deepEqual(f.swarm.peerConnections(), [pc]);
+});
 
 test("polite glare reuses the pending PC and original slot with one winning channel and request ID", async t => {
   const f = await glareFixture(t), pc = await f.start();
@@ -8371,11 +8455,12 @@ async function framingPairFixture(t, {omitPresenceCapability=false, capability={
   class BridgedPC extends PC {
     constructor(config){super(config);this.id=String(++next);pcs.set(this.id,this);}
     createDataChannel(){this.channel=new Ordered();channels.push(this.channel);return this.channel;}
-    async createOffer(){return {type:'offer',sdp:this.id};}
-    async createAnswer(){return {type:'answer',sdp:this.id};}
+    description(type){return {type,sdp:`v=0\r\na=fixture-pc:${this.id}\r\na=candidate:fixture 1 udp 1 fixture.local 9 typ host\r\n`};}
+    async createOffer(){return this.description('offer');}
+    async createAnswer(){return this.description('answer');}
     async setLocalDescription(description){this.localDescription=description;}
     async setRemoteDescription(description){
-      this.remoteDescription=description;const peer=pcs.get(description.sdp);assert(peer,'real paired SDP');
+      this.remoteDescription=description;const peer=pcs.get(/^a=fixture-pc:(\d+)\r?$/m.exec(description.sdp)?.[1]);assert(peer,'real paired SDP');
       if(description.type==='offer'){
         this.channel=new Ordered();channels.push(this.channel);this.channel.other=peer.channel;peer.channel.other=this.channel;
         const event=new Event('datachannel');event.channel=this.channel;this.dispatchEvent(event);

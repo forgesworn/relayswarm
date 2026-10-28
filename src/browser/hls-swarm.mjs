@@ -243,11 +243,22 @@ const UPLOAD_REFUSAL_REASONS = Object.freeze([
 
 function gathered(pc, capMs = 1_200, signal, observed) {
   return new Promise((resolve) => {
-    const done = (outcome) => { try { observed?.(outcome); } catch {} resolve(outcome); };
+    const hasCandidate = () => {
+      try { const sdp = pc.localDescription?.sdp; return typeof sdp === "string" && /^a=candidate:/m.test(sdp); }
+      catch { return false; }
+    };
+    const done = (outcome) => {
+      const ready = outcome !== "aborted" && hasCandidate();
+      try { observed?.(outcome); } catch {} resolve(ready);
+    };
     if (pc.iceGatheringState === "complete" || signal?.aborted) return done(signal?.aborted ? "aborted" : "complete");
+    let capped = false, settled = false;
     const finish = () => {
+      if (settled) return;
+      settled = true;
       clearTimeout(cap);
       pc.removeEventListener("icegatheringstatechange", changed);
+      pc.removeEventListener("icecandidate", candidate);
       signal?.removeEventListener("abort", finish);
       // Classification is diagnostic only. A getter failure must not prevent
       // the original timer/abort completion from resolving its wait.
@@ -256,8 +267,13 @@ function gathered(pc, capMs = 1_200, signal, observed) {
       done(outcome);
     };
     const changed = () => { if (pc.iceGatheringState === "complete") finish(); };
-    const cap = setTimeout(finish, capMs);
+    const candidate = () => { if (capped && hasCandidate()) finish(); };
+    // The soft cap may send an incomplete candidate set, never an empty one.
+    // With no trickle signalling, the existing dial lifetime owns the wait
+    // for a first candidate, native completion or negotiation cancellation.
+    const cap = setTimeout(() => { capped = true; candidate(); }, capMs);
     pc.addEventListener("icegatheringstatechange", changed);
+    pc.addEventListener("icecandidate", candidate);
     signal?.addEventListener("abort", finish, { once: true });
   });
 }
@@ -4053,8 +4069,9 @@ class HlsSwarm {
         if (!this.#currentNegotiation(dial, negotiation)) return;
         await pc.setLocalDescription(offer);
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "offer", outcome); });
+        const ready = await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "offer", outcome); });
         if (!this.#currentNegotiation(dial, negotiation)) return;
+        if (!ready) { this.#failDial(dial, "failed"); return; }
         if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket, "offerBeforeSend"))) {
           if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
           return;
@@ -4225,8 +4242,9 @@ class HlsSwarm {
         if (!this.#currentNegotiation(dial, negotiation)) return;
         await pc.setLocalDescription(answer);
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "answer", outcome); });
+        const ready = await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "answer", outcome); });
         if (!this.#currentNegotiation(dial, negotiation)) return;
+        if (!ready) { this.#failDial(dial, "failed"); return; }
         if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null, "answerBeforeSend"))) {
           if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
           return;

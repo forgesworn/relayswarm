@@ -404,6 +404,14 @@ decision is not cached as permission for later upload requests.
 | `segmentKey` | URL pathname | Maps a fragment URL to the key peers index by. Must agree across viewers, so strip per-viewer query strings and CDN tokens. |
 | `RTCPeerConnectionImpl` / `WebSocketImpl` / `WorkerImpl` | globals | Constructor injection points for tests; the worker remains explicitly configured through `transferWorkerUrl`. |
 
+Offer and answer gathering retain the 1.2-second soft cap when the local SDP
+already contains a candidate. If it is still empty at that point, gathering
+waits for the first candidate or native completion, within the same negotiation
+and original absolute `dialTimeoutMs` deadline. Native completion without a
+candidate fails the dial rather than publishing empty SDP. Cancellation and
+admission checks retain their existing ownership; this adds no hard timer,
+trickle messages, public option or default change.
+
 The pending glare-reuse correction keeps the existing lower-public-key offer
 when both peers dial simultaneously. The yielding peer may adopt only its
 still-pending outgoing connection for the winning admitted offer. Native
@@ -1182,6 +1190,12 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 # RelaySwarm changelog
 
 ## Unreleased
+
+- Keep waiting for the first ICE candidate when local offer or answer SDP is
+  empty at the existing 1.2-second gathering soft cap. SDP that already contains
+  a candidate keeps that cap. The wait shares the original negotiation and dial
+  deadline; native completion without a candidate fails closed. No new hard
+  timer, trickle message, admission rule or public default is introduced.
 
 - Handle hls.js XhrLoader's final progress callback before its synchronous
   source success. Claim HTTP immediately and defer genuine binary progress's
@@ -3028,6 +3042,26 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased first-candidate SDP gathering (28 October 2026)
+
+The browser loader retains its 1.2-second gathering soft cap when local offer
+or answer SDP already contains a candidate. An empty description at that cap
+keeps waiting for the first candidate or native completion, bounded by the
+existing negotiation cancellation and original dial deadline. Native completion
+without a candidate fails closed. Admission and publication ownership remain;
+there is no new hard timer, trickle message or public default.
+
+A passive browser diagnostic observed an answer with no candidates at the
+1.2-second boundary, followed by a relay candidate about 982 ms later. This
+identifies a publication-order problem; it does not establish successful media
+delivery after the change. The earlier failed 4K attempt remains failed and is
+not rescored. Eight focused signalling cases failed on the previous runtime
+and pass after the correction. The local JavaScript loader suite passes 736
+tests; the committed WASM-backed hardening suite passes 524, with one
+JavaScript-prototype-specific case skipped there and covered by the JavaScript
+suite. These are local correctness checks. Renewed sustained playback and
+physical-phone qualification remain pending.
 
 ## Unreleased XHR progress/success ownership compatibility (28 October 2026)
 
