@@ -739,7 +739,8 @@ function startupFixture(t, options = {}) {
     startupRecovery: () => state.recovery,
     allowed: () => state.allowed, next: ctx => {
       options.onNext?.(ctx);
-      return [context(ctx.frag.sn + 1), context(ctx.frag.sn + 2)];
+      const upcoming = [context(ctx.frag.sn + 1), context(ctx.frag.sn + 2)];
+      return options.next ? options.next(ctx, upcoming) : upcoming;
     },
     authorise: async ctx => {
       state.authCalls++;
@@ -2604,4 +2605,128 @@ test('startup concurrency composes with opt-in mixed ranges without bypassing it
   assert.equal(f.swarm.metrics().startupBuffer.limits.futureRequests, 2);
   assert.equal(f.swarm.metrics().warmAhead.limits.speculativeWholeRequests, 1);
   assert.equal(f.swarm.metrics().config.bufferedMixedRanges, true);
+});
+
+for (const concurrency of [1, 2]) test(`startup full verified deficit rotates its unexpired head only with concurrency${concurrency}`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 0; t.mock.method(performance, 'now', () => clock);
+  const f = startupFixture(t, { startupConcurrency: concurrency, startupMaxBytes: 32 * 1024 * 1024 });
+  const first = f.load(0, 12000); await flushStartup();
+  f.requests.find(row => row.context.frag.sn === 1).finish(); await flushStartup();
+  f.requests.find(row => row.context.frag.sn === 2).finish(); await flushStartup();
+  f.state.target = 3.9; f.state.recovery = 4500;
+  f.requests[0].finish(); await flushStartup();
+  clock += 100; t.mock.timers.tick(100); await flushStartup();
+  const third = f.requests.find(row => row.context.frag.sn === 3);
+  assert(third, 'the existing fourth residency slot fills a verified deficit');
+  clock += 50; third.finish(); await flushStartup();
+  assert.equal(first.calls.success, 0); assert.equal(f.engine.startupSnapshot().verifiedStart, 2);
+  assert.equal(f.engine.startupSnapshot().verifiedEnd, 8);
+  assert.equal(f.engine.startupSnapshot().heldObjects, 4);
+  assert.equal(f.engine.snapshot().active, 0);
+  const before = f.engine.snapshot().reservationBytes + f.engine.snapshot().cacheBytes;
+  clock += 100; t.mock.timers.tick(100); await flushStartup();
+  const successor = f.requests.find(row => row.context.frag.sn === 4);
+  if (concurrency === 1) {
+    assert.equal(successor, undefined, 'the existing default waits for the unexpired head');
+    assert.equal(f.engine.snapshot().cacheObjects, 3); assert.equal(first.calls.success, 0);
+    return;
+  }
+  assert(successor, 'full verified [2,8] with target3.9 and recovery4.5s must refill before head4 expires');
+  assert(f.state.target < 4); assert.equal(f.engine.snapshot().active, 1);
+  assert.equal(f.engine.snapshot().cacheObjects, 2); assert.equal(f.engine.startupSnapshot().heldObjects, 4);
+  assert.equal(f.engine.snapshot().reservationBytes + f.engine.snapshot().cacheBytes, before, 'rotation reuses the existing byte allowance');
+  assert.equal(f.engine.startupSnapshot().limits.deadlineMs, 12000);
+  f.state.target = 3.95; clock += 50; successor.finish(); await flushStartup();
+  assert.equal(first.calls.success, 0, 'a verified ahead window cannot release before the actual target reaches it');
+  assert.equal(f.engine.startupSnapshot().verifiedEnd, null);
+  f.state.target = 4.1; clock += 100; t.mock.timers.tick(100); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
+  assert.equal(first.calls.args[0], f.requests[0].response);
+  assert.equal(f.engine.startupSnapshot().verifiedStart, 4); assert.equal(f.engine.startupSnapshot().verifiedEnd, 10);
+  assert.equal(f.engine.startupSnapshot().requiredHeadroomMs, 4500);
+  assert.equal(f.requests.length, 5, 'only the direct parsed successor was requested');
+});
+
+async function fullVerifiedWindow(t, options = {}) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 0; t.mock.method(performance, 'now', () => clock);
+  const f = startupFixture(t, { startupConcurrency: 2, startupMaxBytes: 32 * 1024 * 1024, ...options });
+  const first = f.load(0, options.parentMs ?? 12000); await flushStartup();
+  f.requests.find(row => row.context.frag.sn === 1).finish(); await flushStartup();
+  f.requests.find(row => row.context.frag.sn === 2).finish(); await flushStartup();
+  f.state.target = 3.9; f.state.recovery = 4500; f.requests[0].finish(); await flushStartup();
+  const advance = async ms => { clock += ms; t.mock.timers.tick(ms); await flushStartup(); };
+  await advance(100);
+  const third = f.requests.find(row => row.context.frag.sn === 3); assert(third);
+  clock += 50; options.beforeThirdFinish?.(f); third.finish(); await flushStartup();
+  return { ...f, first, advance };
+}
+
+for (const unavailable of ['missing', 'gap', 'noncurrent']) test(`startup full verified rotation preserves its reservoir when the immediate successor is ${unavailable}`, async t => {
+  let reads = 0;
+  const f = await fullVerifiedWindow(t, { next: (ctx, upcoming) => {
+    if (ctx.frag.sn !== 3) return upcoming;
+    reads++;
+    if (unavailable === 'missing') return [];
+    if (unavailable === 'gap' || reads > 1) upcoming[0].frag.start += .2;
+    return upcoming;
+  } });
+  await f.advance(100);
+  assert(reads > 0, 'the successor is checked before releasing any verified row');
+  if (unavailable === 'noncurrent') assert(reads >= 2, 'a fresh parsed read invalidates the captured candidate');
+  assert.equal(f.requests.length, 4); assert.equal(f.engine.snapshot().cacheObjects, 3);
+  assert.equal(f.engine.snapshot().active, 0); assert.equal(f.engine.startupSnapshot().heldObjects, 4);
+  assert.equal(f.engine.startupSnapshot().state, 'buffering'); assert.equal(f.first.calls.success, 0); assert.equal(f.first.calls.error, 0);
+  assert.equal(f.engine.startupSnapshot().verifiedStart, 2); assert.equal(f.engine.startupSnapshot().verifiedEnd, 8);
+});
+
+test('startup full verified rotation starts no extra source work when fresh recovery is already covered', async t => {
+  const f = await fullVerifiedWindow(t, { beforeThirdFinish: f => { f.state.recovery = 4000; } });
+  await f.advance(100);
+  assert.equal(f.first.calls.success, 1); assert.equal(f.first.calls.error, 0);
+  assert.equal(f.requests.length, 4); assert.equal(f.engine.snapshot().cacheObjects, 3);
+  assert.equal(f.engine.startupSnapshot().verifiedStart, 2); assert.equal(f.engine.startupSnapshot().verifiedEnd, 8);
+  assert.equal(f.engine.startupSnapshot().requiredHeadroomMs, 4000);
+});
+
+test('startup full verified rotation waits for actual authority pins to retire before reusing the head slot', async t => {
+  const f = await fullVerifiedWindow(t, { beforeThirdFinish: f => {
+    f.state.recovery = 4000; f.state.holdRecheck = true; f.state.holdCheckSn = 1;
+  } });
+  assert.equal(typeof f.state.releaseRecheck, 'function');
+  assert.equal(f.engine.pinned('https://origin.example/media/s1.m4s'), true);
+  f.state.recovery = 4500; await f.advance(100);
+  assert.equal(f.requests.length, 4); assert.equal(f.engine.snapshot().cacheObjects, 3); assert.equal(f.first.calls.success, 0);
+  f.state.releaseRecheck(); await flushStartup();
+  assert.equal(f.engine.pinned('https://origin.example/media/s1.m4s'), false);
+  await f.advance(100);
+  assert(f.requests.find(row => row.context.frag.sn === 4)); assert.equal(f.engine.snapshot().cacheObjects, 2);
+  assert.equal(f.first.calls.success, 0, 'unpinning cannot manufacture actual target coverage');
+});
+
+for (const ending of ['authority', 'parent', 'cancel']) test(`startup full verified successor retains ${ending} fencing across its source load`, async t => {
+  const f = await fullVerifiedWindow(t, ending === 'parent' ? { parentMs: 400 } : {});
+  await f.advance(100);
+  const successor = f.requests.find(row => row.context.frag.sn === 4); assert(successor);
+  if (ending === 'authority') {
+    f.state.revoked.add(2); f.state.target = 4.1; successor.finish(); await flushStartup();
+    assert.equal(f.first.calls.error, 1); assert.equal(f.first.calls.args[0].startupBufferReason, 'authority-changed');
+  } else if (ending === 'parent') {
+    await f.advance(150); assert.equal(f.first.calls.error, 1); assert.equal(f.first.calls.args[0].startupBufferReason, 'deadline');
+  } else { f.first.loader.abort(); assert.equal(f.first.calls.abort, 1); }
+  successor.finish(true); await flushStartup();
+  assert.equal(f.first.calls.success, 0); assert.equal(f.first.calls.error + f.first.calls.abort, 1);
+  assert.equal(f.engine.snapshot().cacheBytes, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  assert.equal(f.engine.snapshot().consumedPeerBytes, 0);
+});
+
+test('startup full verified rotation cannot borrow extra future bytes for its successor', async t => {
+  const f = await fullVerifiedWindow(t, { permitSize: sn => sn === 4 ? 24 * 1024 * 1024 : 4 });
+  await f.advance(100);
+  assert.equal(f.requests.length, 4, 'the oversized aggregate is refused before successor HTTP');
+  assert.equal(f.engine.snapshot().rejected, 1); assert.equal(f.engine.snapshot().cacheObjects, 2);
+  assert.equal(f.engine.snapshot().reservationBytes, 4); assert.equal(f.engine.snapshot().active, 0);
+  assert.equal(f.first.calls.success, 0); assert.equal(f.first.calls.error, 0);
+  assert(f.state.reservations.every(size => size <= 32 * 1024 * 1024));
 });

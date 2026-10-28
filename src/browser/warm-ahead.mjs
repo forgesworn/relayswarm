@@ -289,13 +289,41 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     // Preserve a fully verified contiguous future prefix when the fourth
     // startup residency slot can extend it. The original held first body
     // still owns a slot even after its interval is behind the room target.
-    let futureLimit = 2;
+    let futureLimit = 2, verifiedExtension = null;
     if (startup.verified && startup.response && startup.plan.length === 2 && cache.size === 2 &&
         !active.size && !jobs.size && !demand.size && !promoted.size &&
         startup.plan.every(item => cache.has(item.key) && !pins.has(cache.get(item.key).permit.key))) {
       const covered = coverage(target);
       if (covered.end !== null && startup.plan.every(item => covered.rows.includes(cache.get(item.key))) &&
           (covered.end - target) * 1000 < recovery) futureLimit = MAX_STARTUP_OBJECTS - 1;
+    }
+    // A full verified window cannot gain headroom merely by waiting. The
+    // opt-in two-job mode may recycle its unowned head before expiry, while
+    // keeping the next start fixed and readiness based on actual coverage.
+    if (startupConcurrency === 2 && startup.verified && startup.response && startup.plan.length === MAX_STARTUP_OBJECTS - 1) {
+      const rows = startup.plan.map(item => cache.get(item.key));
+      const resident = () => startup.plan.length === rows.length && cache.size === rows.length &&
+        !active.size && !jobs.size && !demand.size && !promoted.size &&
+        startup.plan.every((item, i) => cache.get(item.key) === rows[i] && rows[i] &&
+          !pins.has(rows[i].permit.key) && samePosition(warmContext(rows[i].context), item.identity));
+      const head = startup.plan[0];
+      if (resident() && inside(head, target)) {
+        const covered = coverage(target);
+        if (covered.end !== null && rows.every(row => covered.rows.includes(row)) && (covered.end - target) * 1000 < recovery) {
+          try {
+            const last = startup.plan.at(-1), item = parsedNext(last)[0];
+            if (item && Math.abs(item.context.frag.start - (last.context.frag.start + last.context.frag.duration)) <= 0.001 &&
+                item.key !== startup.own.key && !startup.plan.some(future => future.key === item.key) &&
+                plannedCurrent(planFuture(item, last))) verifiedExtension = item;
+          } catch { /* An unavailable successor must not destroy verified coverage. */ }
+          if (!startupCurrent() || startup.checking) return;
+          if (verifiedExtension && resident()) {
+            startup.cursor = head; startup.plan.shift(); drop(head.key);
+            startup.frozenStart = startup.plan[0].context.frag.start;
+            futureLimit = MAX_STARTUP_OBJECTS - 1;
+          } else verifiedExtension = null;
+        }
+      }
     }
     // Without a usable contiguous prefix, preserve the original rolling
     // policy: free its first future once and wait for the new window start.
@@ -314,7 +342,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       const parent = startup.cursor && (!last || startup.cursor.context.frag.start > last.context.frag.start)
         ? startup.cursor : last ?? startup.own;
       let item;
-      try { item = parsedNext(parent)[0]; } catch { return endStartup('cancelled', 'context-changed'); }
+      try { item = verifiedExtension ?? parsedNext(parent)[0]; verifiedExtension = null; } catch { return endStartup('cancelled', 'context-changed'); }
       if (!item) return;
       const boundary = parent.context.frag.start + parent.context.frag.duration;
       if (Math.abs(item.context.frag.start - boundary) > 0.001 || item.key === startup.own.key ||

@@ -242,6 +242,15 @@ The same four-object startup limit, chosen aggregate allowance, 24 MiB future
 budget, shared held-cache budget and original deadlines apply. This controls
 concurrency; it does not establish field startup speed or network capacity.
 
+In that two-job mode, a full three-future verified window covering the actual
+target may still lack recovery headroom. With no active jobs or pinned consumers,
+the planner can retire its earliest unowned verified row before expiry and
+request the direct parsed successor. It checks that successor before retiring
+the row, preserves the other two rows and original first response, and fixes
+the retained window's start. Playback waits for the actual target and verified
+coverage to meet the unchanged readiness check. The same object, byte and
+deadline limits apply; pending requests never count as ready media.
+
 With `warmAhead: false`, startup may preload the parsed upcoming fragments and
 retain them for genuine consumption, then stops speculative fetching. Peer
 consumption credit is deferred until the corresponding genuine callback is
