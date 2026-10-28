@@ -251,8 +251,15 @@ Steady speculative work receives no such role, and accepted-byte counters still
 wait for the actual HLS callback.
 
 Verified peer reception updates physical link usefulness independently from
-player consumption. Fast short transfers keep an unknown rate below the
-unchanged 300 ms observation floor; no rate is invented. Discovery delivery,
+player consumption. An individual flow below the unchanged 300 ms floor
+does not train a rate. Newly verified short pieces may form a bounded batch
+within the same transfer and connection.
+Both 300 ms and 32 KiB must be observed before a flow-only rate sample is
+recorded. The elapsed interval includes gaps and verification time. Origin
+bytes, duplicate credit and other transfers or connections cannot train it;
+an emitted batch never reuses its bytes. Cancellation, failure or invalidation
+discards pending batches. Existing qualifying long-piece handling is retained,
+and batching does not create a first-byte timing observation. Discovery delivery,
 consumed bytes and external delivery notifications still require actual player
 acceptance. This avoids using deferred playback credit as a prerequisite for
 the next startup transfer.

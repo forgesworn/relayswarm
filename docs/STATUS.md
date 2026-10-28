@@ -10,6 +10,26 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased verified short-piece flow observations (28 October 2026)
+
+A slow qualifying piece can leave a pessimistic throughput estimate in place
+when every later piece is individually faster than the 300 ms observation
+floor. Recording those completions alone does not provide a new rate sample.
+The browser loader now accumulates newly verified peer bytes separately for
+each existing transfer and connection. A batch qualifies only after both the
+unchanged 300 ms and 32 KiB floors. It includes elapsed gaps and verification
+time, excludes origin and duplicate bytes, and never combines other links or
+transfers. Published batches do not reuse bytes; failure, cancellation or
+invalidation discards pending observations. Existing qualifying long-piece
+handling remains unchanged, and no first-byte timing sample is invented.
+
+This changes host measurement inputs through existing JavaScript and committed
+WASM APIs. It adds no requests, timers, wire messages or playback credit, and
+does not change the Rust/WASM binary. Source regressions establish estimator
+behaviour; sustained 4K playback, traffic savings and device qualification
+remain separate gates. The preceding deployed 330-second two-browser check
+still recorded stalls and is not reclassified by this correction.
+
 ## Unreleased explicit startup byte allowance (27 October 2026)
 
 `startupBufferMaxBytes` lets a host explicitly choose an encoded startup
