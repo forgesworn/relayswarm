@@ -10,6 +10,26 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased first-candidate SDP gathering (28 October 2026)
+
+The browser loader retains its 1.2-second gathering soft cap when local offer
+or answer SDP already contains a candidate. An empty description at that cap
+keeps waiting for the first candidate or native completion, bounded by the
+existing negotiation cancellation and original dial deadline. Native completion
+without a candidate fails closed. Admission and publication ownership remain;
+there is no new hard timer, trickle message or public default.
+
+A passive browser diagnostic observed an answer with no candidates at the
+1.2-second boundary, followed by a relay candidate about 982 ms later. This
+identifies a publication-order problem; it does not establish successful media
+delivery after the change. The earlier failed 4K attempt remains failed and is
+not rescored. Eight focused signalling cases failed on the previous runtime
+and pass after the correction. The local JavaScript loader suite passes 736
+tests; the committed WASM-backed hardening suite passes 524, with one
+JavaScript-prototype-specific case skipped there and covered by the JavaScript
+suite. These are local correctness checks. Renewed sustained playback and
+physical-phone qualification remain pending.
+
 ## Unreleased XHR progress/success ownership compatibility (28 October 2026)
 
 The installed hls.js 1.7.3 XhrLoader calls final body progress before synchronous

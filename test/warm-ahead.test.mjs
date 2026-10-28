@@ -58,7 +58,7 @@ async function fixture(t, options = {}) {
   }
   const connections = [];
   class PC extends EventTarget {
-    iceGatheringState = 'complete'; localDescription = { sdp: 'fixture-sdp' };
+    iceGatheringState = 'complete'; localDescription = { sdp: 'fixture-sdp\r\na=candidate:fixture 1 udp 1 fixture.local 9 typ host\r\n' };
     constructor() { super(); connections.push(this); }
     close() {} async createAnswer() { return { type: 'answer', sdp: 'fixture-sdp' }; }
     async setLocalDescription() {} async setRemoteDescription() {}

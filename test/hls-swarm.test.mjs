@@ -476,7 +476,7 @@ async function rememberedAdmissionFixture(t, { phase = null, admit, ...options }
     createDataChannel() { this.channel = new AdmissionChannel(); return this.channel; }
     async createOffer() {
       if (phase === "createOffer") { entered.resolve(); await release.promise; }
-      return { type: "offer", sdp: "v=0\r\na=fixture-offer\r\n" };
+      return { type: "offer", sdp: "v=0\r\na=fixture-offer\r\na=candidate:fixture 1 udp 1 fixture.local 9 typ host\r\n" };
     }
     async setLocalDescription(description) {
       if (phase === "setLocalDescription") { entered.resolve(); await release.promise; }
