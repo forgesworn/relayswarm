@@ -24,7 +24,7 @@ import { PeerSelection } from "../src/browser/peer-selection.mjs";
 import { VerifiedPieceFlow } from "../src/browser/verified-piece-flow.mjs";
 import { createOperatorControls } from "../demo/operator.mjs";
 
-const initialPeerFlow = () => ({ verifiedShortBatches: 0, verifiedShortBytes: 0, lastVerifiedShortBatch: null,
+const initialPeerFlow = () => ({ partialUsefulnessPreserved: 0, verifiedShortBatches: 0, verifiedShortBytes: 0, lastVerifiedShortBatch: null,
   modelEvaluations: { fit: 0, 'useful-unknown': 0, refresh: 0, 'cooldown-blocked': 0, 'known-slow': 0 },
   lastModel: null, noModelTransfers: 0, lastNoModel: null });
 
@@ -4729,7 +4729,7 @@ test("a caller abort during the wait is not a miss", async t => {
 
 const multiCore = await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url)));
 
-function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false, holdNew = false, holdBan = false, onFree } = {}) {
+function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false, holdNew = false, holdBan = false, holdDelivered = false, onFree } = {}) {
   const workers = [];
   class WorkerImpl extends EventTarget {
     constructor() {
@@ -4737,6 +4737,7 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
       this.thread = new WorkerThread(new URL("./support/core-transfer-worker-thread.mjs", import.meta.url));
       this.exit = new Promise(resolve => this.thread.once("exit", resolve));
       this.thread.on("message", data => {
+        if (holdDelivered && this.deliveredIds?.delete(data.id)) { (this.deliveredReplies ??= []).push(data); return; }
         if (holdNew && this.newIds?.delete(data.id)) { (this.newRequests ??= []).push({ data }); return; }
         if (holdBan && data.result?.commands?.some(command => command.t === "ban")) { this.banReply = data; return; }
         if (holdFinal && data.result?.commands?.some(command => command.t === "deliver")) { this.finalReply = data; return; }
@@ -4745,6 +4746,7 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
       this.thread.on("error", () => this.dispatchEvent(new Event("error")));
     }
     postMessage(data, transfer) {
+      if (holdDelivered && data.op === 'delivered') (this.deliveredIds ??= new Set()).add(data.id);
       if (data.op === 'new') this.newCount = (this.newCount ?? 0) + 1;
       if (data.op === 'free') onFree?.();
       if (pauseInit && data.op === "init") { this.init = data; return; }
@@ -4756,6 +4758,7 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
     releaseNew() { const { data } = this.newRequests.shift(); this.dispatchEvent(new MessageEvent('message', { data })); }
     releaseFinal() { this.dispatchEvent(new MessageEvent("message", { data: this.finalReply })); }
     releaseBan() { this.dispatchEvent(new MessageEvent("message", { data: this.banReply })); }
+    releaseDelivered() { this.dispatchEvent(new MessageEvent('message', { data: this.deliveredReplies.shift() })); }
     terminate() { this.terminated = true; return this.thread.terminate(); }
   }
   t.after(async () => { await Promise.all(workers.map(worker => worker.terminate())); await Promise.all(workers.map(worker => worker.exit)); });
@@ -6592,6 +6595,179 @@ test("zero-budget cached peer-only ranges cannot be stranded by earlier fast who
     assert.ok(f.swarm.trace().rows.filter(row => row.k === "xfer").every(row => !row.out?.c.some(command => command.t === "origin")));
     assert.ok(f.channels[0].wants.length >= 17 && f.channels[0].wants.every(range => Array.isArray(range) && range[1] - range[0] <= 4));
   } finally { releaseMetadata?.(); if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+class PartialFlowChannel extends PhasedFlowChannel {
+  partial = true;
+  send(data) {
+    const frame = typeof data === 'string' ? JSON.parse(data) : null;
+    if (frame?.t === 'want') this.firstByteMs = this.partial && this.wants.length > 0 ? 1000 : 20;
+    return super.send(data);
+  }
+}
+
+test('owned HTTP winner retains only this transfer’s fresh verified partial usefulness without a rate or Hls credit', async t => {
+  for (const late of [false, true]) await t.test(late ? 'late HAVE owner' : 'cached owner', async t => {
+  const clock = virtualClock(t); let f, next;
+  try {
+    f = await clock.settle(multiFixture(t, { holders: [{ Channel: PartialFlowChannel, firstByteMs: 20, flowMs: 20 }], size: 2 * 1024 * 1024,
+      holdWholeOrigin: true, traceRequests: 4096, swarmOptions: { zeroBudgetPeerRace: true, latePeerRace: late, maxPeerWaitMs: 1000 } }));
+    f.hls.media = { currentTime: 0, paused: false, ended: false, seeking: false, buffered: { length: 0 } };
+    if (late) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    const first = beginCountedMultiLoad(f);
+    if (late) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [f.key] }));
+    await clock.advanceUntil(() => f.swarm.metrics().core.multiHolder.peerBytes > 0, 500);
+    const creditedAt = performance.now(), credited = f.swarm.metrics().core.multiHolder.peerBytes;
+    assert.equal(credited, f.pieceSize, 'a real Core-verified piece preceded the whole-source winner');
+    await clock.advanceUntil(() => f.channels[0].wants.length >= 2, 100);
+    await clock.advance(100);
+    const origin = f.wholeLoads[0];
+    origin.callbacks.onSuccess({ data: f.bytes.slice().buffer }, origin.loader.stats, multiContext, null);
+    sameBytes(await clock.settle(first.response), f.bytes);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.equal(f.swarm.metrics().core.multiHolder.delivered, 0);
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.partialUsefulnessPreserved, 1);
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.verifiedShortBatches, 0);
+    assert.equal(f.swarm.metrics().peerRequestDiagnostics.records.at(-1).outcome, 'abort');
+    await clock.advance(3); // The holder acknowledges the cancelled range EOF before reuse.
+    const before = f.channels[0].wants.length;
+    f.channels[0].partial = false;
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+    next = beginCountedMultiLoad(f);
+    await clock.advance(50);
+    const flow = f.swarm.metrics().core.multiHolder.peerFlow;
+    assert.equal(flow.lastModel.decision, 'useful-unknown', 'fresh partial verification must avoid unknown-flow cooldown refusal');
+    assert.ok(f.channels[0].wants.length > before, 'fresh partial verification permits an unknown-flow continuation inside cooldown');
+    assert.equal(flow.lastModel.rateBytesPerSecond, null);
+    assert.ok(flow.lastModel.usefulAgeMs >= 100, 'usefulness is anchored to actual fresh credit, not HTTP cancellation');
+    assert.ok(flow.lastModel.usefulAgeMs <= performance.now() - creditedAt + 1);
+    const start = f.swarm.trace().rows.filter(row => row.k === 'xfer' && row.op === 'start').at(-1);
+    assert.equal(start.peers[0][2], null);
+    assert.deepEqual(start.probePeers, [start.peers[0][0]]);
+    assert.equal(f.channels[0].wants[before][1] - f.channels[0].wants[before][0], 1, 'unknown flow retains its one-piece initial bound');
+  } finally { next?.loader.abort(); if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+test('partial usefulness is not retained across nonwinning or invalidated ownership', async t => {
+  for (const ending of ['caller-abort', 'deadline', 'seek', 'replacement', 'stop', 'empty', 'unsupported', 'error', 'closed-link', 'throwing-media', 'reentrant-context', 'unknown-playback-flags'])
+    await t.test(ending, async t => {
+      const clock = virtualClock(t); let f, first, descriptor;
+      try {
+        f = await clock.settle(multiFixture(t, { holders: [{ Channel: PartialFlowChannel, firstByteMs: 20, flowMs: 20 }],
+          size: 2 * 1024 * 1024, holdWholeOrigin: true, swarmOptions: { serve: false, zeroBudgetPeerRace: true, maxPeerWaitMs: 1000 } }));
+        f.hls.media = Object.assign(new EventTarget(), { currentTime: 0, paused: false, ended: false, seeking: false, buffered: { length: 0 } });
+        if (ending === 'unknown-playback-flags') { delete f.hls.media.ended; delete f.hls.media.seeking; }
+        first = beginCountedMultiLoad(f);
+        await clock.advanceUntil(() => f.swarm.metrics().core.multiHolder.peerBytes > 0, 500);
+        assert.equal(f.swarm.metrics().core.multiHolder.peerBytes, f.pieceSize);
+        await clock.advanceUntil(() => f.channels[0].wants.length >= 2, 100);
+        const origin = f.wholeLoads[0];
+        if (ending === 'caller-abort') first.loader.abort();
+        else if (ending === 'deadline') await clock.advance(1001);
+        else if (ending === 'seek') f.hls.media.dispatchEvent(new Event('seeking'));
+        else if (ending === 'replacement') f.hls.media = { currentTime: 0, paused: false, ended: false, seeking: false, buffered: { length: 0 } };
+        else if (ending === 'stop') f.swarm.stop();
+        else if (ending === 'closed-link') f.channels[0].close();
+        else if (ending === 'throwing-media') Object.defineProperty(f.hls.media, 'paused', { configurable: true, get() { throw new Error('private guard cannot consume source success'); } });
+        else if (ending === 'reentrant-context') {
+          descriptor = Object.getOwnPropertyDescriptor(multiContext.frag, 'sn'); let armed = true;
+          Object.defineProperty(multiContext.frag, 'sn', { configurable: true, get() {
+            if (armed) { armed = false; first.loader.abort(); }
+            return 1;
+          } });
+        }
+        if (ending === 'error') origin.callbacks.onError({ code: 500 }, multiContext, null);
+        else origin.callbacks.onSuccess({ data: ending === 'empty' ? new ArrayBuffer(0) : ending === 'unsupported' ?
+          { byteLength: 8, slice() { return new ArrayBuffer(8); } } : f.bytes.slice().buffer }, origin.loader.stats, multiContext, null);
+        await clock.advance(5);
+        assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.partialUsefulnessPreserved, 0);
+        assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+        assert.equal(f.swarm.metrics().core.multiHolder.delivered, 0);
+        if (['empty', 'unsupported', 'throwing-media'].includes(ending)) assert.equal(first.calls.success.length, 1, 'guard refusal does not alter source callback delivery');
+      } finally { if (descriptor) Object.defineProperty(multiContext.frag, 'sn', descriptor); first?.loader.abort(); if (f) await clock.settle(f.close()); clock.restore(); }
+    });
+});
+
+test('partial usefulness never accepts a real worker verification after its HTTP owner has retired', async t => {
+  const { WorkerImpl, workers } = transferWorkerFixture(t, { holdDelivered: true });
+  const clock = virtualClock(t); let f;
+  try {
+    f = await clock.settle(multiFixture(t, { holders: [{ Channel: PartialFlowChannel, firstByteMs: 20, flowMs: 20 }],
+      size: 2 * 1024 * 1024, holdWholeOrigin: true,
+      swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 1000, transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl } }));
+    await clock.advanceUntil(() => f.swarm.metrics().core.transferWorker.state === 'ready', 1000);
+    f.hls.media = { currentTime: 0, paused: false, ended: false, seeking: false, buffered: { length: 0 } };
+    const first = beginCountedMultiLoad(f);
+    await clock.advanceUntil(() => workers[0].deliveredReplies?.length > 0, 500);
+    assert.equal(workers[0].deliveredReplies[0].result.verified, f.pieceSize, 'the committed worker really verified the held range');
+    assert.equal(f.swarm.metrics().core.multiHolder.peerBytes, 0, 'unaccepted worker replies provide no physical credit');
+    const origin = f.wholeLoads[0];
+    origin.callbacks.onSuccess({ data: f.bytes.slice().buffer }, origin.loader.stats, multiContext, null);
+    sameBytes(await clock.settle(first.response), f.bytes);
+    workers[0].releaseDelivered(); await clock.advance(10);
+    assert.equal(f.swarm.metrics().core.multiHolder.peerBytes, 0);
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.partialUsefulnessPreserved, 0);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('a later corrupt piece discards earlier fresh partial usefulness before the HTTP winner', async t => {
+  class CorruptLaterFlow extends PhasedFlowChannel {
+    send(data) {
+      const frame = typeof data === 'string' ? JSON.parse(data) : null;
+      if (frame?.t !== 'want' || !this.wants.length) return super.send(data);
+      const at = frame.p[0] * commitmentPieceSize(this.bytes.length), saved = this.bytes[at];
+      this.bytes[at] ^= 0xff;
+      try { return super.send(data); } finally { this.bytes[at] = saved; }
+    }
+  }
+  const clock = virtualClock(t); let f;
+  try {
+    f = await clock.settle(multiFixture(t, { holders: [{ Channel: CorruptLaterFlow, firstByteMs: 20, flowMs: 20 }],
+      size: 2 * 1024 * 1024, holdWholeOrigin: true, swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 1000 } }));
+    f.hls.media = { currentTime: 0, paused: false, ended: false, seeking: false, buffered: { length: 0 } };
+    const first = beginCountedMultiLoad(f);
+    await clock.advanceUntil(() => f.swarm.metrics().core.multiHolder.peerBytes > 0, 500);
+    const earlier = f.swarm.metrics().core.multiHolder.peerBytes;
+    assert.equal(earlier, f.pieceSize, 'the first real response verified before the corrupt response');
+    await clock.advanceUntil(() => f.swarm.metrics().core.multiHolder.bans === 1, 500);
+    assert.ok(f.swarm.metrics().core.multiHolder.peerBytes >= earlier && f.swarm.metrics().core.multiHolder.peerBytes < f.bytes.length,
+      'a corrupt multi-piece response may also contain fresh valid pieces, without completing the object');
+    const origin = f.wholeLoads[0];
+    origin.callbacks.onSuccess({ data: f.bytes.slice().buffer }, origin.loader.stats, multiContext, null);
+    sameBytes(await clock.settle(first.response), f.bytes);
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.partialUsefulnessPreserved, 0);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('a newer zero-credit HTTP-winning abort invalidates previously preserved partial usefulness', async t => {
+  const clock = virtualClock(t); let f, second, third;
+  try {
+    f = await clock.settle(multiFixture(t, { holders: [{ Channel: PartialFlowChannel, firstByteMs: 20, flowMs: 20 }],
+      size: 2 * 1024 * 1024, holdWholeOrigin: true, swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 1000 } }));
+    f.hls.media = { currentTime: 0, paused: false, ended: false, seeking: false, buffered: { length: 0 } };
+    const first = beginCountedMultiLoad(f);
+    await clock.advanceUntil(() => f.swarm.metrics().core.multiHolder.peerBytes > 0, 500);
+    const original = f.wholeLoads[0];
+    original.callbacks.onSuccess({ data: f.bytes.slice().buffer }, original.loader.stats, multiContext, null);
+    await clock.settle(first.response); await clock.advance(3);
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.partialUsefulnessPreserved, 1);
+    const before = f.swarm.metrics().core.multiHolder.peerBytes;
+    second = beginCountedMultiLoad(f); await clock.advance(30);
+    const newer = f.wholeLoads[1];
+    newer.callbacks.onSuccess({ data: f.bytes.slice().buffer }, newer.loader.stats, multiContext, null);
+    await clock.settle(second.response); await clock.advance(3);
+    assert.equal(f.swarm.metrics().core.multiHolder.peerBytes, before, 'the newer attempt received no new verified payload');
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.partialUsefulnessPreserved, 1);
+    const requests = f.channels[0].wants.length;
+    f.channels[0].partial = false; f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+    third = beginCountedMultiLoad(f); await clock.advance(50);
+    assert.equal(f.channels[0].wants.length, requests, 'a newer zero-credit abort still enforces the original cooldown');
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.lastModel.decision, 'cooldown-blocked');
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.lastModel.usefulAgeMs, null);
+  } finally { second?.loader.abort(); third?.loader.abort(); if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
 test("zero-budget cached race discards verified partial pieces when HTTP wins the whole object", async t => {

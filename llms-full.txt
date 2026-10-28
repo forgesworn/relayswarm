@@ -1183,6 +1183,13 @@ Source: [CHANGELOG.md](https://raw.githubusercontent.com/forgesworn/relayswarm/m
 
 ## Unreleased
 
+- Preserve eligible current-transfer physical peer usefulness when that loader's
+  successful positive binary HTTP response cancels its losing peer-only arm.
+  Only fresh verified pieces from the same guarded transfer/link qualify, using
+  their actual credit timestamp. No Hls credit or throughput sample is invented;
+  zero-fresh aborts, failures, expired or invalid ownership retain their existing
+  handling. Existing observation floors, cooldown durations and deadlines remain.
+
 - Add bounded `core.multiHolder.peerFlow` diagnostics for verified short-flow
   batches and the existing link-model fit decisions. Counters and latest numeric
   snapshots expose no peer identities or payloads. Peer policy, usefulness,
@@ -2273,8 +2280,20 @@ The startup abort signal retires the role immediately on release or cancellation
 Steady speculative work receives no such role, and accepted-byte counters still
 wait for the actual HLS callback.
 
-Verified peer reception updates physical link usefulness independently from
-player consumption. An individual flow below the unchanged 300 ms floor
+Complete verified peer objects update physical link usefulness independently
+from player consumption. A losing peer-only arm can also retain usefulness from
+its current transfer's fresh verified pieces when the same loader owns a
+successful, nonempty binary HTTP response. A private ownership proof is checked
+before its still-owned link lease is released. The saved usefulness timestamp is
+the actual fresh-credit time, never cancellation time. This permits the existing
+unknown-flow continuation; it does not invent a rate, consumed bytes or Hls
+success. Newer zero-fresh aborts still invalidate usefulness. Caller stop,
+seek/replacement, deadlines, errors, corruption, stale worker replies and invalid
+authority or ownership cannot preserve it. The 30-second usefulness age, existing
+10-second refresh cooldown, unknown-flow one-piece initial bound and every
+parent/peer deadline remain. This admission change is not a measured playback
+improvement or an explanation of previously captured partial-transfer endings.
+An individual flow below the unchanged 300 ms floor
 does not train a rate. Newly verified short pieces may form a bounded batch
 within the same transfer and connection.
 Both 300 ms and 32 KiB must be observed before a flow-only rate sample is
@@ -2391,6 +2410,9 @@ deadline/reserve bounds; the committed core module is unchanged.
 
 `metrics().core.multiHolder.peerFlow` adds bounded local diagnostics:
 
+- `partialUsefulnessPreserved` counts actual applications of that guarded
+  saved timestamp, once per transfer/link. It is not a received-byte, consumed-media
+  or throughput counter. It starts at zero and saturates at the safe-integer bound.
 - `verifiedShortBatches` and `verifiedShortBytes` count emitted verified short-flow
   samples; `lastVerifiedShortBatch` is `null` or `{ bytes, spanMs }`. These are
   estimator inputs, not requests, consumed media or source savings.
@@ -2984,6 +3006,26 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased partial-usefulness correction (28 October 2026)
+
+The correction retains physical usefulness from fresh verified pieces in the
+current peer-only transfer when its own successful positive binary HTTP response
+wins. Proof binds the transfer, link, request controller and current authority,
+connection, media, generation and worker state. It is consumed before releasing
+the still-owned lease; no usefulness is restored afterwards. The timestamp is
+anchored to actual verified credit, and a newer zero-credit abort still clears it.
+The bounded `core.multiHolder.peerFlow.partialUsefulnessPreserved` counter records
+actual applications without identities or new timing fields.
+
+This changes which later genuine demands can use the existing unknown-flow
+continuation. It adds no Hls credit or rate, lowers no observation floor, extends
+no deadline and changes no cooldown duration or initial unknown-flow piece bound.
+Stop, seek/replacement, expiry, failure, corruption and stale worker results do
+not qualify. The prior capture measured partial credit followed by refusals, but
+did not record each transfer's cancellation owner. Local checks passed 702 swarm
+tests, 31 focused regressions and 20 Core integration checks. Field-causality
+and playback-performance qualification remain open.
 
 ## Unreleased peer-flow and fit-model diagnostics (28 October 2026)
 

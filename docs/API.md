@@ -250,8 +250,20 @@ The startup abort signal retires the role immediately on release or cancellation
 Steady speculative work receives no such role, and accepted-byte counters still
 wait for the actual HLS callback.
 
-Verified peer reception updates physical link usefulness independently from
-player consumption. An individual flow below the unchanged 300 ms floor
+Complete verified peer objects update physical link usefulness independently
+from player consumption. A losing peer-only arm can also retain usefulness from
+its current transfer's fresh verified pieces when the same loader owns a
+successful, nonempty binary HTTP response. A private ownership proof is checked
+before its still-owned link lease is released. The saved usefulness timestamp is
+the actual fresh-credit time, never cancellation time. This permits the existing
+unknown-flow continuation; it does not invent a rate, consumed bytes or Hls
+success. Newer zero-fresh aborts still invalidate usefulness. Caller stop,
+seek/replacement, deadlines, errors, corruption, stale worker replies and invalid
+authority or ownership cannot preserve it. The 30-second usefulness age, existing
+10-second refresh cooldown, unknown-flow one-piece initial bound and every
+parent/peer deadline remain. This admission change is not a measured playback
+improvement or an explanation of previously captured partial-transfer endings.
+An individual flow below the unchanged 300 ms floor
 does not train a rate. Newly verified short pieces may form a bounded batch
 within the same transfer and connection.
 Both 300 ms and 32 KiB must be observed before a flow-only rate sample is
@@ -368,6 +380,9 @@ deadline/reserve bounds; the committed core module is unchanged.
 
 `metrics().core.multiHolder.peerFlow` adds bounded local diagnostics:
 
+- `partialUsefulnessPreserved` counts actual applications of that guarded
+  saved timestamp, once per transfer/link. It is not a received-byte, consumed-media
+  or throughput counter. It starts at zero and saturates at the safe-integer bound.
 - `verifiedShortBatches` and `verifiedShortBytes` count emitted verified short-flow
   samples; `lastVerifiedShortBatch` is `null` or `{ bytes, spanMs }`. These are
   estimator inputs, not requests, consumed media or source savings.
