@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add bounded `core.multiHolder.peerFlow` diagnostics for verified short-flow
+  batches and the existing link-model fit decisions. Counters and latest numeric
+  snapshots expose no peer identities or payloads. Peer policy, usefulness,
+  cooldowns, requests and deadlines remain unchanged; this is not a performance fix.
+
 - Let the browser loader's verified short-piece flows refresh a stale peer
   throughput estimate by accumulating bounded observations within one transfer
   and connection. The same 300 ms and 32 KiB floors apply; elapsed time includes intervening gaps

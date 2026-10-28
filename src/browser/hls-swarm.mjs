@@ -432,6 +432,9 @@ class HlsSwarm {
     this.transferIds = new WeakMap();
     this.nextTransferId = 1;
     this.multiHolder = { transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0 };
+    this.peerFlow = { verifiedShortBatches: 0, verifiedShortBytes: 0, lastVerifiedShortBatch: null,
+      modelEvaluations: { fit: 0, 'useful-unknown': 0, refresh: 0, 'cooldown-blocked': 0, 'known-slow': 0 },
+      lastModel: null, noModelTransfers: 0, lastNoModel: null };
     this.originRangeOutcomes = Object.fromEntries(["payload", "invalid-request", "wrong-size", "error", "timeout", "abort", "exception"].map(outcome => [outcome, 0]));
     // Origins (scheme, host and port) that answered a range with something
     // else; multi-holder transfer skips their segments for the session.
@@ -1060,6 +1063,10 @@ class HlsSwarm {
       core: { state: this.coreState, verifier: this.coreVerifier ? "wasm" : "js", selection: this.peerSelection.kind ?? "js", discovery: this.discovery.kind ?? "js", links: { ...this.coreLinks }, fallbacks: this.coreFallbacks, decided: { ...this.coreDecided },
         transferWorker: { ...(this.transferWorker?.snapshot() ?? {}), state: this.transferWorkerState, reason: this.transferWorkerReason },
         multiHolder: { enabled: this.#rangesEnabled(), ...this.multiHolder, originRangeOutcomes: { ...this.originRangeOutcomes },
+          peerFlow: { ...this.peerFlow, modelEvaluations: { ...this.peerFlow.modelEvaluations },
+            lastVerifiedShortBatch: this.peerFlow.lastVerifiedShortBatch && { ...this.peerFlow.lastVerifiedShortBatch },
+            lastModel: this.peerFlow.lastModel && { ...this.peerFlow.lastModel },
+            lastNoModel: this.peerFlow.lastNoModel && { ...this.peerFlow.lastNoModel, model: { ...this.peerFlow.lastNoModel.model } } },
           timings: { durationMs: percentiles(this.multiHolderTimings.map((row) => row[0])), slowestRequestMs: percentiles(this.multiHolderTimings.map((row) => row[1])),
             requests: percentiles(this.multiHolderTimings.map((row) => row[2])) } } },
       config: {
@@ -2042,10 +2049,19 @@ class HlsSwarm {
     // demand-bound refresh per link per ten seconds, with an explicit one-piece
     // core allowance. No timer or speculative media fetch is added.
     const usefulUnknown = rate === null && (firstByteMs ?? 0) < availableMs && at - state.usefulAt <= LINK_TIMING_TTL_MS;
+    // Observe the existing branch once; model evaluations are not requests.
+    const record = decision => {
+      const numeric = value => Number.isFinite(value) && value >= 0 ? value : null;
+      this.peerFlow.modelEvaluations[decision] = increment(this.peerFlow.modelEvaluations[decision]);
+      this.peerFlow.lastModel = { decision, availableMs: numeric(availableMs), pieceSize: numeric(pieceSize),
+        firstByteMs: numeric(firstByteMs), rateBytesPerSecond: rate === null ? null : numeric(rate * 1000),
+        probeAgeMs: numeric(at - state.probeAt), usefulAgeMs: numeric(at - state.usefulAt) };
+    };
     if (!fits && !usefulUnknown) {
-      if (at - state.probeAt >= LINK_REFRESH_MS) return { state, firstByteMs: null, rate: null, refresh: true };
-      if (rate === null) return null;
-    }
+      if (at - state.probeAt >= LINK_REFRESH_MS) { record('refresh'); return { state, firstByteMs: null, rate: null, refresh: true }; }
+      if (rate === null) { record('cooldown-blocked'); return null; }
+      record('known-slow');
+    } else record(fits ? 'fit' : 'useful-unknown');
     return { state, firstByteMs, rate, refresh: false };
   }
 
@@ -2439,7 +2455,11 @@ class HlsSwarm {
     if (!candidates.length) return worker ? null : undefined;
     const models = new Map(candidates.map(link => [link, this.#linkTransferEstimate(link, Math.max(0, plan.limit - now()), commitment.pieceSize)])
       .filter(([, model]) => model !== null));
-    if (!models.size) { this.counters.peerNoFit += 1; return null; }
+    if (!models.size) {
+      this.peerFlow.noModelTransfers = increment(this.peerFlow.noModelTransfers);
+      this.peerFlow.lastNoModel = { candidateCount: candidates.length, model: { ...this.peerFlow.lastModel } };
+      this.counters.peerNoFit += 1; return null;
+    }
     const holders = [...models.keys()];
     const lease = {};
     for (const link of holders) this.peerLeases.set(link, lease);
@@ -2523,6 +2543,9 @@ class HlsSwarm {
         if (!sample) return;
         // Include all request/worker gaps; do not add another first-byte sample.
         this.peerSelection.observe(sample);
+        this.peerFlow.verifiedShortBatches = increment(this.peerFlow.verifiedShortBatches);
+        this.peerFlow.verifiedShortBytes = Math.min(Number.MAX_SAFE_INTEGER, this.peerFlow.verifiedShortBytes + sample.bytes);
+        this.peerFlow.lastVerifiedShortBatch = { bytes: sample.bytes, spanMs: sample.flowMs };
         const timing = this.#linkTimingState(link);
         timing.flows.push({ value: Math.min(1_000_000, sample.bytes / sample.flowMs), flowMs: sample.flowMs, at });
         if (timing.flows.length > LINK_TIMING_SAMPLES) timing.flows.shift();

@@ -366,6 +366,35 @@ coordination. The current player level does not override the demand's level.
 These changes preserve the estimator floor, integrity checks and existing
 deadline/reserve bounds; the committed core module is unchanged.
 
+`metrics().core.multiHolder.peerFlow` adds bounded local diagnostics:
+
+- `verifiedShortBatches` and `verifiedShortBytes` count emitted verified short-flow
+  samples; `lastVerifiedShortBatch` is `null` or `{ bytes, spanMs }`. These are
+  estimator inputs, not requests, consumed media or source savings.
+- `modelEvaluations` counts existing model evaluations under fixed decisions
+  `fit`, `useful-unknown`, `refresh`, `cooldown-blocked` and `known-slow`.
+  `fit` means a measured piece fits; `useful-unknown` retains recently useful
+  unknown flow. `refresh` grants the existing bounded probe. `cooldown-blocked`
+  returns no model while unknown flow is inside its probe cooldown;
+  `known-slow` retains a known model that did not pass the piece fit check.
+- `lastModel` is `null` or `{ decision, availableMs, pieceSize, firstByteMs,
+  rateBytesPerSecond, probeAgeMs, usefulAgeMs }`. It describes the latest
+  evaluated candidate's inputs, including before `refresh` returns an unknown
+  probe model. Ages are captured at evaluation, not updated by metrics reads.
+  Numeric fields are finite nonnegative numbers or `null`; piece size is bytes,
+  rate is bytes/second, and all time fields are milliseconds.
+- `noModelTransfers` counts attempts rejected before transfer creation because
+  no candidate model remained. `lastNoModel` is `null` or `{ candidateCount,
+  model }`, where `model` copies only the latest candidate's model snapshot,
+  not every candidate. A later evaluation does not rewrite that rejection.
+
+Counters start at zero and saturate at the safe-integer bound; last snapshots
+start at `null`. Returned snapshots and nested counters are copies. No peer IDs,
+keys, URLs, payloads or per-peer arrays are retained in this field. It observes
+existing decisions without changing policy, usefulness, cooldowns, callbacks,
+requests, timers, deadlines or JavaScript/WASM selection behaviour. These
+receipts alone do not establish sustained playback or a performance improvement.
+
 `trace()` returns `{ v: 1, capacity, dropped, rows }`, the rows kept under
 `traceRequests` (none by default): each peer-first load, eligibility
 decision, peer request and origin request (whole or ranged), joined by a load

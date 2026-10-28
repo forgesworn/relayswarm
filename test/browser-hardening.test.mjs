@@ -24,6 +24,10 @@ import { PeerSelection } from "../src/browser/peer-selection.mjs";
 import { VerifiedPieceFlow } from "../src/browser/verified-piece-flow.mjs";
 import { createOperatorControls } from "../demo/operator.mjs";
 
+const initialPeerFlow = () => ({ verifiedShortBatches: 0, verifiedShortBytes: 0, lastVerifiedShortBatch: null,
+  modelEvaluations: { fit: 0, 'useful-unknown': 0, refresh: 0, 'cooldown-blocked': 0, 'known-slow': 0 },
+  lastModel: null, noModelTransfers: 0, lastNoModel: null });
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(predicate, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
@@ -1299,7 +1303,7 @@ test("the Rust core verifies peer-first commitments, and its rejection stands", 
     const metrics = fixture.swarm.metrics();
     assert.equal(metrics.segments.commitmentRejected, 1);
     assert.equal(metrics.segments.peerFirstLoaded, 1);
-    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", discovery: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 }, transferWorker: { state: "off", reason: null }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+    assert.deepEqual(metrics.core, { state: "ready", verifier: "wasm", selection: "wasm", discovery: "wasm", links: { wasm: 1, js: 0 }, fallbacks: 0, decided: { wasm: 2, js: 0 }, transferWorker: { state: "off", reason: null }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, peerFlow: initialPeerFlow(), originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
   } finally { await fixture.close(); }
 });
 
@@ -1315,7 +1319,7 @@ test("a trapping or unloadable core hands its links and verification to JavaScri
       const metrics = fixture.swarm.metrics();
       assert.equal(metrics.segments.peerFirstLoaded, 1);
       // The trapping core fails on the first link it opens, which then runs in JavaScript.
-      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 }, transferWorker: { state: "off", reason: null }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+      assert.deepEqual(metrics.core, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 1 }, fallbacks, decided: { wasm: 0, js: 1 }, transferWorker: { state: "off", reason: null }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, peerFlow: initialPeerFlow(), originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
       assert.equal(metrics.errors.byStage.core, 1);
     } finally { await fixture.close(); }
   }
@@ -1331,7 +1335,7 @@ test("a core that answers malformed results retires and the loader carries on in
     const channel = await fixture.addPeer(new ServingChannel(playback.bytes, 5, [], "holder")).catch(() => null);
     await until(() => fixture.swarm.metrics().core.state === "failed");
     const { core, errors } = fixture.swarm.metrics();
-    assert.deepEqual({ ...core, links: core.links.wasm + core.links.js }, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: 1, fallbacks: 1, decided: { wasm: 0, js: 0 }, transferWorker: { state: "off", reason: null }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+    assert.deepEqual({ ...core, links: core.links.wasm + core.links.js }, { state: "failed", verifier: "js", selection: "js", discovery: "js", links: 1, fallbacks: 1, decided: { wasm: 0, js: 0 }, transferWorker: { state: "off", reason: null }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, peerFlow: initialPeerFlow(), originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
     assert.equal(errors.byStage.core, 1);
     if (channel && core.links.js === 1) {
       channel.receive(JSON.stringify({ t: "have", keys: [playback.key] }));
@@ -1374,7 +1378,7 @@ test("the core option is checked and ignored outside peer-first", () => {
     assert.equal(createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm }).metrics().disabledReason, "invalid-core-wasm");
   }
   const swarm = createHlsSwarm({ ...base, relays: ["wss://relay.example"], coreWasm });
-  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 }, transferWorker: { state: "off", reason: null }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
+  assert.deepEqual(swarm.metrics().core, { state: "off", verifier: "js", selection: "js", discovery: "js", links: { wasm: 0, js: 0 }, fallbacks: 0, decided: { wasm: 0, js: 0 }, transferWorker: { state: "off", reason: null }, multiHolder: { enabled: false, transfers: 0, delivered: 0, late: 0, failed: 0, bans: 0, abandoned: 0, peerBytes: 0, originBytes: 0, unusedBytes: 0, originRanges: 0, originRangesIgnored: 0, peerFlow: initialPeerFlow(), originRangeOutcomes: { payload: 0, "invalid-request": 0, "wrong-size": 0, error: 0, timeout: 0, abort: 0, exception: 0 }, timings: { durationMs: { p50: null, p90: null }, slowestRequestMs: { p50: null, p90: null }, requests: { p50: null, p90: null } } } });
   swarm.stop();
 });
 
@@ -5681,10 +5685,27 @@ test('verified piece flow replaces the captured stale rate using one connection 
     assert(batches.every(row => row.bytes >= 32768 && row.flowMs >= 300));
     assert(batches.reduce((sum, row) => sum + row.bytes, 0) <= f.swarm.metrics().core.multiHolder.peerBytes,
       'each fresh verified byte can enter at most one batch');
+    const flow = f.swarm.metrics().core.multiHolder.peerFlow;
+    assert.equal(flow.verifiedShortBatches, batches.length);
+    assert.equal(flow.verifiedShortBytes, batches.reduce((sum, row) => sum + row.bytes, 0));
+    assert.deepEqual(flow.lastVerifiedShortBatch, { bytes: batches.at(-1).bytes, spanMs: batches.at(-1).flowMs });
+    assert.equal(flow.modelEvaluations.refresh, 1);
+    assert.equal(flow.lastModel.decision, 'refresh');
+    flow.lastVerifiedShortBatch.bytes = -1; flow.modelEvaluations.refresh = -1; flow.lastModel.pieceSize = -1;
+    const freshFlow = f.swarm.metrics().core.multiHolder.peerFlow;
+    assert.equal(freshFlow.lastVerifiedShortBatch.bytes, batches.at(-1).bytes);
+    assert.equal(freshFlow.modelEvaluations.refresh, 1);
+    assert.equal(freshFlow.lastModel.pieceSize, f.pieceSize);
     sameBytes(await clock.settle(f.load(), 4000), f.bytes);
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.lastModel.decision, 'fit');
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.modelEvaluations.fit, 1);
     const start = f.swarm.trace().rows.filter(row => row.k === 'xfer' && row.op === 'start').at(-1);
     assert(start.sharedRate > 2 * 878.3024331693287, 'shared prediction uses later measured flow');
     assert(start.peers[0][2] > 2 * 878.3024331693287, 'the same connection learns its measured flow too');
+    const model = f.swarm.metrics().core.multiHolder.peerFlow.lastModel;
+    assert.equal(model.rateBytesPerSecond, start.peers[0][2] * 1000, 'diagnostics copy the model actually sent to Core');
+    assert.equal(model.firstByteMs, start.peers[0][1]);
+    assert.equal(model.pieceSize, start.pieceSize);
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
@@ -5798,6 +5819,7 @@ test("an origin-winning abort invalidates unknown-flow continuation without char
     sameBytes(await clock.settle(f.load(), 1000), f.bytes);
     assert.ok(f.channels[0].wants.length > beforeAbort, "the cancelled request must actually have reached the native channel");
     assert.equal(f.swarm.metrics().peerRequestDiagnostics.records.at(-1).outcome, "abort");
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.lastModel.decision, 'useful-unknown');
     assert.equal(f.swarm.metrics().peers.deliveryMeasurements[0].consecutiveFailures, 0,
       "a faster HTTP winner is not a delivery failure charged to the holder");
     await clock.advance(2);
@@ -5807,9 +5829,29 @@ test("an origin-winning abort invalidates unknown-flow continuation without char
     sameBytes(await clock.settle(f.load(), 1500), f.bytes);
     assert.equal(f.channels[0].wants.length, cancelled,
       "unknown-rate usefulness cannot keep bypassing the refresh bound after a newer cancelled attempt");
+    const flow = f.swarm.metrics().core.multiHolder.peerFlow;
+    assert.equal(flow.verifiedShortBatches, 0);
+    assert.equal(flow.modelEvaluations['useful-unknown'], 1);
+    assert.equal(flow.modelEvaluations['cooldown-blocked'], 1);
+    assert.equal(flow.noModelTransfers, 1);
+    assert.equal(flow.lastModel.decision, 'cooldown-blocked');
+    assert.equal(flow.lastModel.rateBytesPerSecond, null);
+    assert.ok(flow.lastModel.probeAgeMs >= 0 && flow.lastModel.probeAgeMs < 10000);
+    assert.equal(flow.lastModel.usefulAgeMs, null, 'invalidated usefulness has no finite age');
+    assert.deepEqual(flow.lastNoModel, { candidateCount: 1, model: flow.lastModel });
+    assert.notStrictEqual(flow.lastNoModel.model, flow.lastModel);
+    flow.lastNoModel.model.decision = 'fit'; flow.lastNoModel.candidateCount = 999;
+    flow.lastModel.probeAgeMs = -1; flow.modelEvaluations['cooldown-blocked'] = -1;
+    const freshFlow = f.swarm.metrics().core.multiHolder.peerFlow;
+    assert.equal(freshFlow.lastNoModel.model.decision, 'cooldown-blocked');
+    assert.equal(freshFlow.lastNoModel.candidateCount, 1);
+    assert.ok(freshFlow.lastModel.probeAgeMs >= 0);
+    assert.equal(freshFlow.modelEvaluations['cooldown-blocked'], 1);
     await clock.advance(10_001);
     sameBytes(await clock.settle(f.load(), 3000), f.bytes);
     assert.ok(f.channels[0].wants.length > cancelled, "a later real HAVE demand can still re-probe after the bound");
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.lastModel.decision, 'refresh');
+    assert.equal(f.swarm.metrics().core.multiHolder.peerFlow.modelEvaluations.refresh, 2);
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
