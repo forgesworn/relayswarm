@@ -96,6 +96,28 @@ Normal HTTP never waits for metadata; stopping the swarm cancels its peer
 arm while that pending HTTP request continues. Progressive hls.js loads skip
 the race. See the [options and lifecycle contract](../INTEGRATION.md#options).
 
+The unreleased `bufferedMixedRanges: true` option permits concurrent peer and
+source ranges for a genuine, unencrypted whole main fragment when the original
+exclusive peer-wait budget is zero. It excludes speculative/startup work,
+parts, progressive loading and underflow. Admission requires healthy buffered
+playback at normal speed, a ready range core, an exact entry-snapshot HAVE on
+a connected framing 2 link, fresh measured first-byte and payload timing on
+that link, and measured source recovery. Unknown links retain existing
+calibration behaviour. Setup has at most 25 ms from load entry to invoke the
+host's original source loader; this is not a wire-dispatch guarantee.
+
+The source range starts before any peer request. Each range and ordinary
+fallback keeps the captured absolute parent and playback-recovery deadlines;
+the concurrent peer window is additionally bounded by
+`min(maxPeerWaitMs, 2500)`. A whole source request never runs beside an active
+mixed transfer. After that peer window closes, source ranges may finish the
+missing pieces within the same original recovery interval. Media handoff
+requires a complete verified object and current
+authority. Count accepted peer media separately from actual HTTP bodies,
+including partial, duplicate and ignored-range traffic. Controlled fixtures do
+not establish field continuity, throughput or savings. The option defaults to
+`false`; see the [loading contract](../INTEGRATION.md#options).
+
 The additional experimental `lateHaveRace: true` observes actual matching
 HAVE on those connections accepted at load entry when no initial cached
 snapshot matches. HTTP starts immediately. At most one later holder snapshot

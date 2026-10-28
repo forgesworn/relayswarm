@@ -42,7 +42,7 @@ function reportRange(onResult, outcome, from, to, receivedBytes = null, httpStat
   } catch {}
 }
 
-export function loadOriginRange(origin, context, from, to, { signal, onIgnored, onResult } = {}) {
+export function loadOriginRange(origin, context, from, to, { signal, onIgnored, onResult, beforeLoad } = {}) {
   const range = originRangeFor(context, from, to);
   if (!range || typeof origin?.Loader !== "function" || typeof context?.url !== "string" || signal?.aborted) {
     reportRange(onResult, signal?.aborted ? "abort" : "invalid-request", from, to);
@@ -67,7 +67,9 @@ export function loadOriginRange(origin, context, from, to, { signal, onIgnored, 
     try {
       loader = new origin.Loader(origin.config);
       signal?.addEventListener("abort", onAbort, { once: true });
-      loader.load({ ...context, responseType: "arraybuffer", rangeStart: range.first, rangeEnd: range.last + 1 }, origin.loaderConfig ?? {}, {
+      const load = loader.load, loadContext = { ...context, responseType: "arraybuffer", rangeStart: range.first, rangeEnd: range.last + 1 };
+      const loadConfig = origin.loaderConfig ?? {};
+      const callbacks = {
         onSuccess: (response) => {
           if (signal?.aborted) return settle(null, "abort");
           const bytes = exact(response?.data);
@@ -76,7 +78,9 @@ export function loadOriginRange(origin, context, from, to, { signal, onIgnored, 
         },
         onError: error => settle(null, signal?.aborted ? "abort" : "error", null, error?.code),
         onTimeout: () => settle(null, signal?.aborted ? "abort" : "timeout"), onAbort: () => settle(null, "abort"),
-      });
+      };
+      if (beforeLoad && beforeLoad() !== true || signal?.aborted) return settle(null, "abort");
+      load.call(loader, loadContext, loadConfig, callbacks);
     } catch { settle(null, "exception"); }
   });
 }
