@@ -8807,7 +8807,23 @@ for (const knownFlow of [true, false]) for (const worker of [false, true]) test(
       'established rate must come from real prior qualifying peer payload');
     else assert.equal(before.peerRequestDiagnostics.records.length, 0, 'source calibration must not ask the untrained holder');
     sameBytes(await f.load(ctx), bytes, 'the real Core must verify and assemble the complete object');
-    const start = f.swarm.trace().rows.filter(row => row.k === 'xfer' && row.op === 'start').at(-1);
+    const trace = f.swarm.trace(), start = trace.rows.filter(row => row.k === 'xfer' && row.op === 'start').at(-1);
+    if (!start) {
+      const m = f.swarm.metrics();
+      assert.ok(start, JSON.stringify({ message: 'mixed transfer did not record a Core start', knownFlow, worker,
+        traceDropped: trace.dropped, trace: trace.rows.slice(-16).map(({ k, load, at, op, leg, ms, budgetMs, limitMs, reason, outcome, ranged, stale }) =>
+          ({ k, load, at, op, leg, ms, budgetMs, limitMs, reason, outcome, ranged, stale })),
+        counters: { originFallbacks: m.segments.originFallbacks, peerNoFit: m.segments.peerNoFit,
+          commitmentRequests: m.segments.commitmentRequests, commitmentRejected: m.segments.commitmentRejected,
+          commitmentUnavailable: m.segments.commitmentUnavailable, coreFallbacks: m.core?.fallbacks ?? null,
+          transfers: m.core?.multiHolder?.transfers ?? null, noModelTransfers: m.core?.multiHolder?.peerFlow?.noModelTransfers ?? null },
+        workerState: m.core?.transferWorker?.state ?? null,
+        http: { requests: requests.length, wholeGets: requests.filter(row => !row.range).length,
+          rangeGets: requests.filter(row => row.range).length, completed: received.filter(row => row.complete).length,
+          aborted: received.filter(row => row.aborted).length,
+          serverSubmittedBytes: requests.reduce((total, row) => total + row.sent, 0),
+          clientReceivedBytes: received.reduce((total, row) => total + row.bytes, 0) } }));
+    }
     assert.equal(start.exclusiveOrigin, true, 'only the opted mixed plan requests exclusive Core origin ownership');
     if (knownFlow) {
       assert.deepEqual(start.probePeers, [], 'known mixed ownership uses real measured same-link holders');
