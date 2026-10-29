@@ -3132,6 +3132,17 @@ The focused eight-control selection passes with the correct Core environment;
 direct warm-engine controls remain JavaScript policy tests. This is not a new
 full-suite run or mixed-transfer performance qualification.
 
+A further actual-Core overlap control waits for the exact future object's peer
+request before completing HTTP. On an explicitly ordered, reliable fixture
+channel it verifies one HTTP success, the matching peer cancellation and drain
+boundary, continued HAVE advertisement and local reuse without peer credit.
+The focused nine-control selection passes. A separate unknown-reliability
+fixture closes deliberately when its active request is aborted: HTTP warming
+still verifies, but that closed link cannot receive HAVE. This explains the
+controlled diagnostic's missing announcement; the original timing is not
+retained, and its failed result remains unchanged. No runtime change or field
+performance improvement is established by these controls.
+
 When the original fragment is obsolete, merely selecting metadata ahead of the
 room target no longer freezes a window before it passes the existing recovery
 and verified-service projection. Freezing follows successful reservation and

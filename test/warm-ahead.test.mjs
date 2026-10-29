@@ -672,6 +672,37 @@ test('combined steady warming and buffered mixed options serve a verified future
   assert.equal(f.swarm.metrics().warmAhead.cacheBytes, 0);
 });
 
+test('an ordered reliable silent peer keeps the verified warm HTTP winner after an active WANT', { timeout: 20000 }, async t => {
+  const f = await fixture(t, { rangePeer: true, silentPeer: true, held: [1], bufferedMixedRanges: true, traceRequests: 128 });
+  assert.equal(f.swarm.metrics().core.state, 'ready');
+  Object.assign(f.media, { readyState: 4, playbackRate: 1, ended: false, seeking: false });
+  const peer = await f.addPeer();
+  Object.assign(peer.channel, { ordered: true, maxRetransmits: null, maxPacketLifeTime: null });
+  f.connections[0].connectionState = 'connected'; peer.have(1);
+  const key = sha('warm-ahead-fixture\n/media/s1.m4s');
+  const first = f.load(0); assert.deepEqual(await first.result, f.bytes);
+  await until(() => peer.sent.some(row => row?.t === 'want' && row.k === key));
+  const want = peer.sent.find(row => row?.t === 'want' && row.k === key);
+  const future = f.requests.find(row => row.context.frag.sn === 1); assert(future && !future.completed && !future.aborted);
+  let httpSuccess = 0; const onSuccess = future.callbacks.onSuccess;
+  future.callbacks.onSuccess = function (...args) { httpSuccess++; return onSuccess.apply(this, args); };
+  future.finish();
+  await until(() => peer.sent.some(row => row?.t === 'have' && (row.keys ?? row.add ?? []).includes(key)));
+  await until(() => peer.sent.some(row => row?.t === 'cancel' && row.id === want.id));
+  // A reliable cancelled response owns its drain until this exact holder's
+  // matching range metadata/EOF arrives; cancellation does not waive it.
+  peer.channel.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ t: 'meta', id: want.id, size: f.bytes.length, p: want.p }) }));
+  peer.channel.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ t: 'eof', id: want.id }) }));
+  assert.equal(peer.channel.readyState, 'open'); assert.equal(f.swarm.metrics().peers.connected, 1);
+  assert.equal(httpSuccess, 1); assert(future.completed); assert.equal(future.aborted, false);
+  assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 0); assert.equal(f.swarm.metrics().peerAdmission.waiting, 0);
+  assert.equal(f.swarm.metrics().warmAhead.rejected, 0); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  assert.equal(first.calls.success, 1); assert.equal(f.swarm.metrics().warmAhead.reservationBytes, 0);
+  const consumed = f.load(1); assert.deepEqual(await consumed.result, f.bytes);
+  assert.equal(consumed.calls.success, 1); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+});
+
 test('exhausting the upload allowance also withdraws warm references and reservations', async t => {
   const f = await fixture(t, { allowance: 1024 });
   const peer = await f.addPeer();
