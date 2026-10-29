@@ -24,12 +24,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # The three model regressions take about 287s on Windows because each
-  # virtual millisecond yields to a real host timer. Keep both subsets required.
-  WINDOWS_MODEL_TEST_PATTERN: >-
-    ^(?:mixed planning keeps each holder's first byte and payload flow separate after cold startup|short or stale holder evidence receives bounded demand-bound refresh and can recover|an origin-winning abort invalidates unknown-flow continuation without charging a holder failure)$
-
 jobs:
   docs:
     if: ${{ !inputs.core_packages }}
@@ -169,11 +163,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     # macOS can spend nine minutes on the swarm suite; publisher fixtures
-    # also require a real 121-second idle-socket check. Windows needs the
-    # same allowance for its complementary swarm suite and publisher checks.
+    # also require a real 121-second idle-socket check.
     timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 10 || 15 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -186,11 +179,25 @@ jobs:
       - run: node --test test/fixture-ice.test.mjs
       - run: npm run test:native
       - run: npm run test:swarm
-        if: runner.os != 'Windows'
-      - name: Swarm tests outside the Windows model subset
-        if: runner.os == 'Windows'
-        shell: bash
-        run: node --test --test-skip-pattern "$WINDOWS_MODEL_TEST_PATTERN" test/hls-swarm.test.mjs test/browser-hardening.test.mjs test/stream-discovery.test.mjs test/origin-range.test.mjs
+      - run: npm run test:publisher
+
+  native-windows-base:
+    if: ${{ !inputs.core_packages }}
+    name: native Windows base and publisher
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: node --test --test-reporter=tap test/fixture-ice.test.mjs
+      - run: npm run test:native
+      - name: Complement of the required Windows model and mixed partitions
+        run: node scripts/windows-swarm-tests.mjs base
       - run: npm run test:publisher
 
   windows-model:
@@ -205,9 +212,45 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Three measured long-running model regressions
-        shell: bash
-        run: node --test --test-name-pattern "$WINDOWS_MODEL_TEST_PATTERN" test/browser-hardening.test.mjs
+      # Six model controls use virtual clocks that yield to real host timers.
+      # The original three-model job took 311s; the additional measured cases
+      # took 132s in the cancelled complement. Keep the existing ten-minute cap.
+      - name: Six measured long-running model regressions
+        run: node scripts/windows-swarm-tests.mjs models
+
+  windows-mixed:
+    if: ${{ !inputs.core_packages }}
+    name: native Windows mixed (${{ matrix.partition }})
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [mixed-a, mixed-b, mixed-c]
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Required mixed-transfer partition with immediate failure details
+        run: node scripts/windows-swarm-tests.mjs ${{ matrix.partition }}
+
+  native-windows:
+    if: ${{ !inputs.core_packages && always() }}
+    name: native (windows-latest)
+    needs: [native-windows-base, windows-model, windows-mixed]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      # needs.windows-mixed covers ALL three matrix jobs; skipped, failed or
+      # cancelled dependencies must not turn the required Windows gate green.
+      - name: Require every Windows partition
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module -e 'const results = Object.values(JSON.parse(process.env.RESULTS)); if (results.length !== 3 || results.some(job => job.result !== "success")) process.exit(1);'
 
   rust-core:
     if: ${{ !inputs.core_packages }}
@@ -313,7 +356,7 @@ jobs:
   live-relays:
     if: ${{ !inputs.core_packages }}
     name: browser transport against live relays
-    needs: [native, windows-model]
+    needs: [native, native-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
