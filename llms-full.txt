@@ -374,7 +374,7 @@ decision is not cached as permission for later upload requests.
 | `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
 | `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-object origin time with a 25% and 100 ms recovery margin. Substantial origin ranges update this estimate after scaling by their actual byte count. Unknown origin timing or duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. Independent cached/late-HAVE races keep their window beside immediate HTTP. |
 | `warmAhead` | `false` | Experimental peer-first option, requiring `serve: true`: use the same player's next two parsed, unencrypted, whole main-media fragments for bounded speculative loading. With `bufferedMixedRanges` and explicit main VOD, current connected contributors rank each future by object key and public key, skipping optional duplicate whole-source work when a peer owns the lower rank. Exact holders remain eligible for mixed loading; startup and genuine demand retain immediate loading. A warmed object promoted to genuine demand before its original eight-second expiry frees the sole speculative slot; a delayed timer cannot let a later demand revive expired work. Existing demand/range limits are unchanged. Verified future objects share the held cache; at most three distinct cached/in-flight objects and 24 MiB of warm data plus all reservations fit within `maxHeldBytes`. Fresh cache permission may wait only within actual buffer headroom, up to 25 ms, before ordinary source recovery proceeds independently. |
-| `startupBufferTarget` | `null` | Experimental one-shot startup buffer for peer-first serving: a synchronous function returns the current player's fresh raw HLS target time in seconds, or `null` when its ownership/epoch is invalid. Hold the first main-fragment callback until verified contiguous upcoming media covers that target and measured origin-recovery headroom. While pending, a 100 ms poll advances a bounded parsed future window toward that horizon, skipping unrequested near-tip work and reclaiming completed unowned coverage only when needed. A window ahead of the actual target waits for it; in-flight work and authority pins retain their reservations. When both verified futures contribute to contiguous coverage of the current target but still lack recovery headroom, preserve that useful prefix and admit one additional parsed successor, even if the held original first interval is obsolete. Startup permits at most four objects within `startupBufferMaxBytes` (24 MiB by default); steady warm-ahead remains at three. Future requests remain serial. An ahead-only window without verified target coverage passes the recovery/service projection before admission; skipped metadata cannot freeze it. Once reserved and admitted, the window stays fixed until the target reaches its start. The startup deadline is twelve seconds from the original first-fragment load entry, or the shorter parent load deadline; retries do not renew it. Ordinary speculative requests retain their separate eight-second expiry. Works with `warmAhead: false` to stop speculative fetching after startup. It never pauses, plays, seeks or changes the room clock; bounded failure reports a loader error instead of releasing unsafe media. |
+| `startupBufferTarget` | `null` | Experimental one-shot startup buffer for peer-first serving: a synchronous function returns the current player's fresh raw HLS target time in seconds, or `null` when its ownership/epoch is invalid. Hold the first main-fragment callback until verified contiguous upcoming media covers that target and measured origin-recovery headroom. While pending, a 100 ms poll advances a bounded parsed future window toward that horizon, skipping unrequested near-tip work and reclaiming completed unowned coverage only when needed. A window ahead of the actual target waits for it; in-flight work and authority pins retain their reservations. When both verified futures contribute to contiguous coverage of the current target but still lack recovery headroom, preserve that useful prefix and admit one additional parsed successor, even if the held original first interval is obsolete. Startup permits at most four objects within `startupBufferMaxBytes` (24 MiB by default); steady warm-ahead remains at three. Future requests remain serial. For an ahead-only window, forecast skipping preserves the last parsed future reachable within the original remaining lifetime at normal room-clock speed. Two verified contiguous ahead futures may use the fourth slot if their start remains reachable and their span is shorter than recovery. These estimates affect admission only; release still requires fresh actual-target coverage and authority. Skipped metadata cannot freeze a window. Once reserved and admitted, the window stays fixed until the target reaches its start. The startup deadline is twelve seconds from the original first-fragment load entry, or the shorter parent load deadline; retries do not renew it. Ordinary speculative requests retain their separate eight-second expiry. Works with `warmAhead: false` to stop speculative fetching after startup. It never pauses, plays, seeks or changes the room clock; bounded failure reports a loader error instead of releasing unsafe media. |
 | `startupBufferMaxBytes` | `25165824` | Encoded startup aggregate including the retained original response. Safe integer from 24 MiB through 32 MiB; a non-default value requires `startupBufferTarget`. Reserve the full chosen allowance against the shared held budget before HTTP. Cached/in-flight future bytes separately remain within 24 MiB, as do existing per-object checks. Object limits, recovery and deadlines are unchanged; this is not total browser memory. |
 | `startupBufferCommit` | `null` | Optional async host hook, requiring `startupBufferTarget`, called once with frozen `{ signal }` after verified reservoir readiness and before releasing HLS callbacks. Before publication, coverage must strictly exceed measured recovery headroom, including after awaited authority checks; exact equality remains sufficient without a hook and for fresh post-acknowledgement validation. The host may acknowledge a new room start here. The original startup deadline and resource limits continue; cancellation ignores late settlement. Fresh target, authority, context and resident coverage are checked again afterwards. The SDK never creates or reanchors the room clock. |
 | `uploadPacing` | `false` | Experimental canonical-piece upload refill deferral: one FIFO waiter per link, at most `min(maxUploadPeers, maxPeers)` waiters, and a fixed 250 ms queue deadline. The existing per-second rate, twice-rate burst, session allowance and wire remain unchanged. Whole-object deficits still refuse immediately. Queue rows contain identity and numeric geometry; held bytes and current host permission are checked after waiting. |
@@ -3210,6 +3210,30 @@ the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased reachable startup window (29 October 2026)
+
+Startup forecast skipping now preserves the last parsed future reachable within
+the original remaining lifetime at normal room-clock speed. Two already
+verified contiguous futures ahead of the target can use the existing fourth
+slot when their start remains reachable and their span is shorter than measured
+recovery. Admission estimates never substitute for fresh actual-target coverage
+and authority at release. Byte limits, serial requests and the original
+twelve-second/shorter-parent deadline remain unchanged. A host lookahead that
+changes the queued context cancels before authorisation or source loading.
+
+A logical scheduling regression first fails on the preceding source in all
+three feasible cases. It retains the later private test's observed geometry,
+SN1/4/8/9 service scalars and recovery requirement. Only the previously
+unrequested SN7 completion is hypothetical; the bodies are four-byte fixtures,
+not decoded media. Slow SN7 cases must still fail at the original deadline.
+All 216 warm/startup checks pass, including unverified/gapped/unreachable
+windows, aggregate byte and reservation refusal, and callback cancellation.
+Two earlier scheduling expectations now describe the intentional reachable
+window/fourth-slot behaviour while retaining their original parent limits
+and explicit actual-target recovery assertions.
+These controller checks do not establish a field remedy, throughput, useful
+peer contribution or physical-device playback. A new field result is required.
+
 ## Setup-proof and native CI scheduling correction (29 October 2026)
 
 The `a007c07` hosted run passed its reciprocal future-owner and existing
@@ -3232,9 +3256,13 @@ Publisher tests now run separately on each original Ubuntu/macOS platform.
 The required per-platform checks require both the original native suite and
 publisher job to succeed, rejecting failed, cancelled, skipped or missing jobs.
 Original commands, platform coverage and job caps are retained; Windows
-partitions remain unchanged. Static coverage/dependency controls pass; a new
-hosted run must establish the corrected configuration's result. None of these
-CI controls qualifies public operation, physical phones or field performance.
+partitions remain unchanged. In the `897927f` hosted run, Ubuntu and Windows
+required gates passed, along with both publisher jobs, browser playback,
+Core/package checks and realtime transport. The overall e2e verdict failed:
+one macOS warm/Worker positive required mixed admission even though its
+optional 25 ms setup timer had already selected whole-source recovery. That
+capture lacks enough timer and invocation metadata to prove a protected
+decline; it remains failed. No field result is qualified by these CI checks.
 
 ## Unreleased cooperative VOD futures (29 October 2026)
 
@@ -3259,6 +3287,20 @@ including existing framing and main/Worker mixed positives. These local checks
 are not a field-throughput or public/physical-device qualification.
 
 ## Latest private playback and contribution result (29 October 2026)
+
+The later `a007c07` cooperative-futures candidate failed its fresh private
+two-browser test during startup. Viewer A reached a trusted 3840x2160 frame in
+4.51 seconds. Viewer B exhausted its original twelve-second startup barrier
+without presenting a frame; the required 340-second observation never began.
+Its source GETs completed, but verified media did not safely cover the moving
+target plus recovery headroom. The cooperative owner policy is excluded while
+startup is buffering, so this is not evidence that source ownership caused the
+failure. The immutable capture and strict audit remain failed. Temporary
+credentials, profiles and services were cleaned; the paired private relay was
+preserved. No sustained contribution, TURN-route or physical-phone acceptance
+is claimed for that run.
+
+### Earlier sustained private test
 
 The `f5c0760` runtime candidate completed a real two-browser private test with
 340.001 seconds of wall observation and 340.001 seconds of monotonic observation

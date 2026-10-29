@@ -370,6 +370,17 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       const covered = coverage(target);
       if (covered.end !== null && startup.plan.every(item => covered.rows.includes(cache.get(item.key))) &&
           (covered.end - target) * 1000 < recovery) futureLimit = MAX_STARTUP_OBJECTS - 1;
+      else if (covered.end === null) {
+        // Fill a verified ahead window that the advancing target can reach
+        // before the original deadline. This estimates admission only;
+        // release still requires fresh coverage of the actual target.
+        const [first, last] = startup.plan, begin = first.context.frag.start;
+        const boundary = begin + first.context.frag.duration, end = last.context.frag.start + last.context.frag.duration;
+        const remaining = startup.deadline - performance.now();
+        if (remaining > 0 && begin > target && begin < target + remaining / 1000 &&
+            Math.abs(last.context.frag.start - boundary) <= 0.001 && (end - begin) * 1000 < recovery)
+          futureLimit = MAX_STARTUP_OBJECTS - 1;
+      }
     }
     // Without a usable contiguous prefix, preserve the original rolling
     // policy: free its first future once and wait for the new window start.
@@ -427,6 +438,22 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
           Math.abs(item.context.frag.start - covered.end) <= 0.001) return true;
     }
     if (item.context.frag.start + item.context.frag.duration <= target + (recovery + (startup.planningServiceMs ?? 0)) / 1000) {
+      const remaining = startup.deadline - performance.now(), reachableEnd = target + remaining / 1000;
+      const planned = startup.plan[index], context = item.context, fragment = context.frag;
+      let successor;
+      try { successor = parsedNext(item)[0]; }
+      catch { if (startupCurrent()) endStartup('cancelled', 'context-changed'); return false; }
+      if (!startupCurrent() || queued[0] !== item || startup.plan[index] !== planned) return false;
+      // next() is host code; a changed live item must not be authorised or
+      // loaded under the queued key, including on a later poll.
+      if (item.context !== context || context.frag !== fragment || context.url !== planned.context.url ||
+          fragment.url !== planned.context.frag.url || !samePosition(warmContext(context), planned.identity)) {
+        endStartup('cancelled', 'context-changed'); return false;
+      }
+      // Keep the last parsed future reachable at normal room-clock speed
+      // rather than projecting past the remaining startup lifetime.
+      if (remaining > 0 && item.context.frag.start < reachableEnd && successor &&
+          successor.context.frag.start >= reachableEnd) return true;
       if (!startup.hopAvailable) return false;
       startup.hopAvailable = false;
       startup.cursor = startup.plan[index]; startup.plan.splice(index, 1); queued.shift();

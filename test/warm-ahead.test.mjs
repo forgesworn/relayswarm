@@ -893,6 +893,167 @@ function startupFixture(t, options = {}) {
 }
 const flushStartup = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
 
+// Logical scheduling only: four-byte authorised bodies, not media throughput.
+// Geometry is from manifest ad78fc006bc131da3dcbf10656d4b8023e3fde71cbe5dba7a39a1f3af7ae238c.
+// Known SN1/4/8/9 services and recovery are retained scalar observations;
+// SN7 is explicitly hypothetical. No service is invented for skipped SN5/6.
+async function startupReachableReplay(t, sn7ServiceMs, options = {}) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let elapsed = 0; t.mock.method(performance, 'now', () => 1000 + elapsed);
+  const starts = [0, 2, 4, 6, 8, 10.64, 12.64, 14.56, 16.56, 18.56, 20.56, 22.56];
+  const durations = [2, 2, 2, 2, 2.64, 2, 1.92, 2, 2, 2, 2, 2];
+  const services = { 1: 2917, 4: 3713, 7: sn7ServiceMs, 8: 1266, 9: 1120 };
+  const f = startupFixture(t, { timedStats: true, starts, durations, startupMaxBytes: 32 * 1024 * 1024, ...options,
+    onNext: ctx => options.onNext?.(ctx, f, elapsed),
+    beforeVerify: ctx => options.beforeVerify?.(ctx, f, elapsed),
+    reserve: size => options.reserve?.(size, f, elapsed) ?? true });
+  f.state.target = 2.851; // Derived from observed deadline target 14.851 minus 12 seconds.
+  const first = f.load(1, 120000); await flushStartup();
+  const samples = [], completions = [];
+  while (elapsed < 12000 && !first.calls.success && !first.calls.error && !first.calls.abort) {
+    const active = f.requests.find(row => !row.response && !row.aborted);
+    const sn = active?.context.frag.sn;
+    if (active) assert(Number.isFinite(services[sn]), `unobserved source service for SN${sn}`);
+    const due = active ? active.stats.loading.start - 1000 + services[sn] : Infinity;
+    const step = Math.min(10, 12000 - elapsed, Math.max(1, due - elapsed));
+    elapsed += step; f.state.target = 2.851 + elapsed / 1000;
+    t.mock.timers.tick(step);
+    if (active && !active.aborted && elapsed >= due) {
+      if (sn === 1) f.state.recovery = 3748.75;
+      if (sn === 4) f.state.recovery = 4745;
+      completions.push({ sn, elapsed }); active.finish();
+    }
+    await flushStartup();
+    samples.push({ elapsed, target: f.state.target, startup: f.engine.startupSnapshot(), warm: f.engine.snapshot() });
+  }
+  const summary = { hypotheticalSn7ServiceMs: sn7ServiceMs, elapsed,
+    requests: f.requests.map(row => row.context.frag.sn), completions,
+    calls: { success: first.calls.success, error: first.calls.error, abort: first.calls.abort },
+    startup: f.engine.startupSnapshot(), target: f.state.target, recoveryMs: f.state.recovery };
+  return { f, first, samples, summary, elapsed };
+}
+
+for (const sn7ServiceMs of [500, 1120, 1266, 3500, 5000]) {
+  test(`startup reachable window with hypothetical SN7 ${sn7ServiceMs}ms preserves recovery`, async t => {
+    const { f, first, samples, summary, elapsed } = await startupReachableReplay(t, sn7ServiceMs);
+    console.log(JSON.stringify({ fixture: 'startup-reachable-window-logical', ...summary }));
+    assert(samples.every(({ startup, warm }) => startup.heldObjects <= 4 &&
+      startup.heldBytes <= 32 * 1024 * 1024 && warm.cacheBytes + warm.reservationBytes <= 24 * 1024 * 1024 && warm.active <= 1));
+    assert.equal(f.engine.startupSnapshot().limits.deadlineMs, 12000);
+    assert.equal(f.state.recovery, 4745, 'the observed recovery requirement is never reduced');
+    if (sn7ServiceMs <= 1266) {
+      assert.equal(first.calls.success, 1, 'a reachable verified window must release before the original deadline');
+      assert.equal(first.calls.error, 0); assert.equal(first.calls.abort, 0); assert(elapsed < 12000);
+      assert.deepEqual(summary.requests, [1, 4, 7, 8, 9]);
+      const ready = f.engine.startupSnapshot();
+      assert(ready.verifiedStart <= f.state.target && ready.verifiedEnd > f.state.target);
+      assert((ready.verifiedEnd - f.state.target) * 1000 >= f.state.recovery);
+      assert.equal(first.calls.args[2], first.context); assert.equal(first.calls.args[0].data.byteLength, 4);
+      assert.equal(samples.some(({ startup }) => startup.heldObjects === 4), true);
+    } else {
+      assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1); assert.equal(elapsed, 12000);
+      assert.equal(f.engine.startupSnapshot().reason, 'deadline');
+      assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+      t.mock.timers.tick(20000); await flushStartup();
+      assert.equal(first.calls.success, 0, 'a late body cannot renew or resurrect the failed startup');
+    }
+  });
+}
+
+test('startup reachable window cannot extend an unverified ahead prefix', async t => {
+  let release;
+  t.after(() => release?.());
+  const { f, first, summary } = await startupReachableReplay(t, 1120, {
+    beforeVerify: ctx => ctx.frag.sn === 8 ? new Promise(resolve => { release = resolve; }) : undefined,
+  });
+  assert(release, 'SN8 body reached the real verification boundary');
+  assert.deepEqual(summary.requests, [1, 4, 7, 8]);
+  assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1);
+  assert.equal(f.engine.startupSnapshot().reason, 'deadline');
+  assert.equal(f.engine.snapshot().reservationBytes, 4, 'pending verification retains its reservation');
+  release(); await flushStartup();
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().active, 0);
+  assert.equal(first.calls.success, 0); assert.equal(f.requests.length, 4);
+});
+
+for (const refusal of ['reservation', 'future-bytes']) {
+  test(`startup reachable window preserves exhausted ${refusal} admission`, async t => {
+    let refused = 0;
+    const { f, first, summary } = await startupReachableReplay(t, 1120, refusal === 'reservation' ? {
+      reserve: (_size, engine) => {
+        if (engine.engine.snapshot().cacheObjects === 2) { refused++; return false; }
+        return true;
+      },
+    } : { permitSize: sn => sn === 9 ? 24 * 1024 * 1024 : 4 });
+    if (refusal === 'reservation') assert(refused > 0);
+    assert.deepEqual(summary.requests, [1, 4, 7, 8]);
+    assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1);
+    assert.equal(f.engine.startupSnapshot().reason, 'deadline');
+    assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().active, 0);
+  });
+}
+
+test('startup reachable window cannot extend a gapped parsed prefix', async t => {
+  const starts = [0, 2, 4, 6, 8, 10.64, 12.64, 14.56, 16.66, 18.66, 20.66, 22.66];
+  const { f, first, summary } = await startupReachableReplay(t, 1120, { starts });
+  assert.equal(summary.requests.includes(8), false); assert.equal(summary.requests.includes(9), false);
+  assert.equal(first.calls.success, 0);
+  assert(first.calls.error === 1 || first.calls.abort === 1);
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().active, 0);
+});
+
+for (const boundary of ['unreachable', 'sufficient-span']) {
+  test(`startup reachable window does not extend an ahead ${boundary} pair`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let elapsed = 0; t.mock.method(performance, 'now', () => 1000 + elapsed);
+    // Explicit metadata rejection vectors, not observed body services.
+    const f = startupFixture(t, { timedStats: true, starts: [11, 13, 15, 17], durations: [2, 2, 2, 2] });
+    f.state.target = boundary === 'unreachable' ? 0.1 : 2.851;
+    f.state.recovery = boundary === 'unreachable' ? 4745 : 3500;
+    const first = f.load(0, 120000); await flushStartup();
+    for (const sn of [0, 1, 2]) {
+      const row = f.requests.find(item => item.context.frag.sn === sn);
+      assert(row, `ordinary bounded admission starts SN${sn}`);
+      elapsed++; t.mock.timers.tick(1); row.finish(); await flushStartup();
+    }
+    t.mock.timers.tick(200); await flushStartup();
+    assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2]);
+    assert.equal(f.engine.snapshot().cacheObjects, 2); assert.equal(f.engine.startupSnapshot().verifiedEnd, null);
+    assert.equal(f.engine.startupSnapshot().heldObjects, 3);
+    assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 0);
+    first.loader.abort(); await flushStartup();
+    assert.equal(first.calls.abort, 1); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  });
+}
+
+for (const mutation of ['url', 'sn', 'start', 'mutate-throw', 'clear', 'stop']) {
+  test(`startup reachable lookahead cancels reentrant ${mutation} before authority or source`, async t => {
+    let changed = false, authAtMutation;
+    const { f, first, summary } = await startupReachableReplay(t, 1120, {
+      onNext: (ctx, engine) => {
+        if (changed || ctx.frag.sn !== 7) return;
+        changed = true; authAtMutation = engine.state.authCalls;
+        if (mutation === 'clear' || mutation === 'stop') engine.engine[mutation]();
+        else if (mutation === 'sn') ctx.frag.sn = 999;
+        else if (mutation === 'start') ctx.frag.start += 0.5;
+        else {
+          ctx.url = ctx.frag.url = 'https://origin.example/media/changed.m4s';
+          if (mutation === 'mutate-throw') throw new Error('test callback changed metadata');
+        }
+      },
+    });
+    assert(changed, 'the actual parsed lookahead callback was reached');
+    assert.equal(f.state.authCalls, authAtMutation, 'changed scope is rejected before authorisation');
+    assert.deepEqual(summary.requests, [1, 4]);
+    assert.equal(first.calls.success, 0); assert.equal(first.calls.abort, mutation === 'stop' ? 0 : 1,
+      'engine stop is intentionally quiet; other cancellations notify the current caller');
+    if (mutation !== 'clear' && mutation !== 'stop') assert.equal(f.engine.startupSnapshot().reason, 'context-changed');
+    t.mock.timers.tick(20000); await flushStartup();
+    assert.equal(f.state.authCalls, authAtMutation); assert.equal(f.requests.length, 2);
+    assert.equal(first.calls.success, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  });
+}
+
 test('warm work ownership appears only after authority and reservation with exact fresh descriptors', async t => {
   let authorised, release, reserved = false;
   const f = startupFixture(t, { startup: false, steady: true, permit: ctx => {
@@ -1841,9 +2002,17 @@ test('startup horizon planner freezes an ahead window instead of skipping every 
   future.finish(); await flushStartup();
   const next = f.requests.find(row => row.context.frag.sn === 4); assert.ok(next); next.finish(); await flushStartup();
   t.mock.timers.tick(1000); await flushStartup();
-  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 3, 4]);
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 3, 4, 5],
+    'the verified [6,10.64] prefix needs the fourth slot for its unchanged five-second recovery');
   assert.equal(first.calls.success, 0);
-  assert.equal(f.engine.startupSnapshot().heldObjects, 3);
+  assert.equal(f.engine.startupSnapshot().heldObjects, 4);
+  f.requests[3].finish(); await flushStartup();
+  assert.equal(first.calls.success, 0, 'an ahead-only complete window cannot release at actual target3.1');
+  f.state.target = 6.05; t.mock.timers.tick(100); await flushStartup();
+  assert.equal(first.calls.success, 1);
+  assert.equal(f.engine.startupSnapshot().verifiedStart, 6);
+  assert((f.engine.startupSnapshot().verifiedEnd - f.state.target) * 1000 >= 5000);
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 3, 4, 5], 'filling the prefix never skips its selected start');
 });
 
 for (const recovery of [3500, 1500]) test(`startup horizon planner freezes a selected successor behind a cached prefix (${recovery}ms)`, async t => {
@@ -1908,24 +2077,28 @@ test('rolling startup replaces only an obsolete future while retaining the exact
   assert.equal(f.requests.length, 4, 'steady warming is still disabled');
 });
 
-test('rolling startup advances from its bounded cursor when both old futures are obsolete', async t => {
+test('rolling startup cursor retains the last reachable future under its short parent deadline', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = startupFixture(t), first = f.load();
   await fillStartupWindow(f);
   f.state.target = 6.1;
   for (let i = 0; i < 2; i++) { t.mock.timers.tick(100); await flushStartup(); }
   assert.equal(f.requests.length, 4);
-  assert.equal(f.requests[3].context.frag.sn, 4, 'advance one unrequested short hop after the last obsolete parsed future');
+  assert.equal(f.requests[3].context.frag.sn, 3,
+    'after obsolete futures, [6,8] is reachable; skipping to8 would exceed the unchanged one-second parent');
   assert.ok(f.engine.startupSnapshot().heldObjects <= 3);
   f.requests[3].finish(); await flushStartup();
   assert.equal(first.calls.success, 0);
-  assert.equal(f.requests[4].context.frag.sn, 5);
+  assert.equal(f.requests[4].context.frag.sn, 4);
   assert.ok(f.engine.startupSnapshot().heldObjects <= 3);
   f.requests[4].finish(); await flushStartup();
-  assert.equal(first.calls.success, 0, 'actual target6.1 is still before the selected start8');
-  f.state.target = 8.05; t.mock.timers.tick(100); await flushStartup();
-  assert.equal(first.calls.success, 1);
-  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2, 4, 5]);
+  assert.equal(first.calls.success, 1, 'verified [6,10] safely covers actual target6.1 plus unchanged recovery');
+  assert.equal(f.engine.startupSnapshot().verifiedStart, 6);
+  assert((f.engine.startupSnapshot().verifiedEnd - f.state.target) * 1000 >= f.state.recovery);
+  assert.equal(f.requests[0].config.loadPolicy.maxLoadTimeMs, 1000);
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2, 3, 4]);
+  t.mock.timers.tick(1000); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
 });
 
 test('rolling startup metadata snapshots cannot retain runtime markers or response back-references', async t => {

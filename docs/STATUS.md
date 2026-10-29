@@ -10,6 +10,30 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased reachable startup window (29 October 2026)
+
+Startup forecast skipping now preserves the last parsed future reachable within
+the original remaining lifetime at normal room-clock speed. Two already
+verified contiguous futures ahead of the target can use the existing fourth
+slot when their start remains reachable and their span is shorter than measured
+recovery. Admission estimates never substitute for fresh actual-target coverage
+and authority at release. Byte limits, serial requests and the original
+twelve-second/shorter-parent deadline remain unchanged. A host lookahead that
+changes the queued context cancels before authorisation or source loading.
+
+A logical scheduling regression first fails on the preceding source in all
+three feasible cases. It retains the later private test's observed geometry,
+SN1/4/8/9 service scalars and recovery requirement. Only the previously
+unrequested SN7 completion is hypothetical; the bodies are four-byte fixtures,
+not decoded media. Slow SN7 cases must still fail at the original deadline.
+All 216 warm/startup checks pass, including unverified/gapped/unreachable
+windows, aggregate byte and reservation refusal, and callback cancellation.
+Two earlier scheduling expectations now describe the intentional reachable
+window/fourth-slot behaviour while retaining their original parent limits
+and explicit actual-target recovery assertions.
+These controller checks do not establish a field remedy, throughput, useful
+peer contribution or physical-device playback. A new field result is required.
+
 ## Setup-proof and native CI scheduling correction (29 October 2026)
 
 The `a007c07` hosted run passed its reciprocal future-owner and existing
@@ -32,9 +56,13 @@ Publisher tests now run separately on each original Ubuntu/macOS platform.
 The required per-platform checks require both the original native suite and
 publisher job to succeed, rejecting failed, cancelled, skipped or missing jobs.
 Original commands, platform coverage and job caps are retained; Windows
-partitions remain unchanged. Static coverage/dependency controls pass; a new
-hosted run must establish the corrected configuration's result. None of these
-CI controls qualifies public operation, physical phones or field performance.
+partitions remain unchanged. In the `897927f` hosted run, Ubuntu and Windows
+required gates passed, along with both publisher jobs, browser playback,
+Core/package checks and realtime transport. The overall e2e verdict failed:
+one macOS warm/Worker positive required mixed admission even though its
+optional 25 ms setup timer had already selected whole-source recovery. That
+capture lacks enough timer and invocation metadata to prove a protected
+decline; it remains failed. No field result is qualified by these CI checks.
 
 ## Unreleased cooperative VOD futures (29 October 2026)
 
@@ -59,6 +87,20 @@ including existing framing and main/Worker mixed positives. These local checks
 are not a field-throughput or public/physical-device qualification.
 
 ## Latest private playback and contribution result (29 October 2026)
+
+The later `a007c07` cooperative-futures candidate failed its fresh private
+two-browser test during startup. Viewer A reached a trusted 3840x2160 frame in
+4.51 seconds. Viewer B exhausted its original twelve-second startup barrier
+without presenting a frame; the required 340-second observation never began.
+Its source GETs completed, but verified media did not safely cover the moving
+target plus recovery headroom. The cooperative owner policy is excluded while
+startup is buffering, so this is not evidence that source ownership caused the
+failure. The immutable capture and strict audit remain failed. Temporary
+credentials, profiles and services were cleaned; the paired private relay was
+preserved. No sustained contribution, TURN-route or physical-phone acceptance
+is claimed for that run.
+
+### Earlier sustained private test
 
 The `f5c0760` runtime candidate completed a real two-browser private test with
 340.001 seconds of wall observation and 340.001 seconds of monotonic observation

@@ -123,6 +123,11 @@ future data around measured recovery headroom and a verified future-load timing
 observation when available; this adds no release headroom waiver or rate estimate.
 Admission retains the fourth-slot successor extending two verified futures
 covering the actual target, rather than horizon-skipping it and creating a hole.
+An ahead-only verified contiguous window may also use that fourth slot when
+its start is reachable before the original deadline at normal room-clock speed
+and its span is shorter than recovery. Forecast skipping retains the last
+parsed window reachable within that lifetime. These admission estimates never
+replace fresh actual-target coverage, authority or the original release deadline.
 It can skip unrequested metadata
 or reclaim completed unowned coverage, retaining the first response, in-flight
 reservations, pins and original deadline. A future window ahead of the actual
