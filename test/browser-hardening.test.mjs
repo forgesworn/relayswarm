@@ -9331,6 +9331,115 @@ for (const [knownFlow, worker, forceSetupExpiry = false, forceScopeExpiry = fals
   } finally { try { await f.close(); } finally { timers.restore(); } }
 });
 
+test('real Core contrasts an owned warm whole source with otherwise eligible genuine mixed ranges', { timeout: 25000 }, async t => {
+  const size = 6 * 1024 * 1024, bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
+  const secret = generateSecretKey(), seconds = Math.floor(Date.now() / 1000);
+  const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds, tags: [['d', 'contrast'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
+  const pieceSize = commitmentPieceSize(size), pieces = [];
+  for (let at = 0; at < size; at += pieceSize) pieces.push(createHash('sha256').update(bytes.subarray(at, at + pieceSize)).digest('hex'));
+  const sha256 = createHash('sha256').update(bytes).digest('hex'), observations = [];
+  // Explicit synthetic pacing, not a transport benchmark or a measured WAN rate.
+  class ContrastPeer extends PhasedFlowChannel {
+    send(data) {
+      const frame = typeof data === 'string' ? JSON.parse(data) : null;
+      if (frame?.t === 'want') {
+        const from = frame.p ? frame.p[0] * pieceSize : 0, to = frame.p ? Math.min(size, frame.p[1] * pieceSize) : size;
+        this.firstByteMs = 10; this.flowMs = (to - from) / (.3 * 1024 * 1024) * 1000;
+      }
+      return super.send(data);
+    }
+  }
+  for (const warming of [true, false]) {
+    const origin = await mixedHttpOrigin(t, bytes, Loader), { received, requests, url } = origin;
+    class AccountedHTTP extends origin.HttpLoader {
+      load(ctx, config, callbacks) {
+        const index = received.length, result = super.load(ctx, config, callbacks);
+        Object.assign(received[index], { path: new URL(ctx.url).pathname, sn: ctx.frag.sn, warm: Boolean(ctx[WARM_AHEAD]) });
+        return result;
+      }
+    }
+    const getCommitment = ctx => finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds,
+      tags: [['x', base.swarmId], ['e', streamEvent.id]], content: commitmentContent({ v: 3,
+        streamEventId: streamEvent.id, swarmId: base.swarmId,
+        key: createHash('sha256').update(`${base.swarmId}\n${new URL(ctx.url).pathname}`).digest('hex'),
+        rendition: '/media/index.m3u8', playlist: '/media/index.m3u8', mediaType: 'main', encryption: null,
+        sequence: ctx.frag.sn, discontinuity: ctx.frag.cc, part: null, sha256, size, pieceSize, pieces, expiresAt: seconds + 60 }) }, secret);
+    const f = await multiFixture(t, { size, OriginLoader: AccountedHTTP, holders: [{ Channel: ContrastPeer }], traceRequests: 4096,
+      swarmOptions: { streamEvent, getCommitment, serve: true, warmAhead: warming, bufferedMixedRanges: true,
+        zeroBudgetPeerRace: true, sustainablePeerWait: true, maxPeerWaitMs: 2500 } });
+    const invoke = ctx => {
+      const loader = new f.hls.config.fLoader(f.hlsConfig), calls = { success: 0, error: 0, abort: 0, timeout: 0 };
+      ctx.frag.stats = loader.stats;
+      const response = new Promise((resolve, reject) => loader.load(ctx, f.loaderConfig, {
+        onSuccess: value => { calls.success++; resolve(new Uint8Array(value.data)); },
+        onError: () => { calls.error++; reject(new Error('contrast source error')); },
+        onAbort: () => { calls.abort++; reject(new Error('contrast source abort')); },
+        onTimeout: () => { calls.timeout++; reject(new Error('contrast source timeout')); },
+      }));
+      return { response, calls, loader };
+    };
+    try {
+      assert.equal(f.swarm.metrics().core.state, 'ready');
+      const details = M3U8Parser.parseLevelPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nlead.ts\n#EXTINF:2,\nseg.ts\n#EXT-X-ENDLIST\n',
+        new URL('index.m3u8', url).href, 0, 'main', 0, null);
+      const contextFor = frag => ({ url: frag.url, frag, responseType: 'arraybuffer', type: LoaderContextType.MEDIA_FRAGMENT, headers: {}, part: null, rangeStart: 0, rangeEnd: 0 });
+      const target = contextFor(details.fragments[1]), lead = contextFor(details.fragments[0]);
+      f.hls.media = Object.assign(new EventTarget(), { currentTime: 10, paused: false, ended: false, seeking: false,
+        readyState: 4, playbackRate: 1, buffered: { length: 0 } });
+      // Neither arm has a future map during identical genuine calibration.
+      sameBytes(await invoke(target).response, bytes);
+      await sleep(2);
+      assert(f.swarm.metrics().peerRequestDiagnostics.records.some(row => row.outcome === 'payload' && row.elapsedMs - row.firstByteMs >= 300),
+        'the holder model comes from actual Core-verified qualifying payload');
+      for (const pc of f.connections) pc.connectionState = 'connected';
+      f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+      f.hls.levels = [{ details }];
+      const before = f.swarm.metrics(), beforeReceived = received.length, beforeRequests = requests.length;
+      const previous = invoke(lead); previous.response.catch(() => {});
+      await until(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/lead.ts'));
+      if (warming) await until(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/seg.ts' && row.warm));
+      const demand = invoke(target); demand.response.catch(() => {});
+      if (warming) {
+        assert.equal(f.swarm.metrics().warmAhead.coalesced, before.warmAhead.coalesced + 1);
+        assert.equal(f.swarm.metrics().warmAhead.promotions, before.warmAhead.promotions + 1);
+        assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst, 'pending warm ownership cannot claim accepted peer bytes');
+      }
+      sameBytes(await demand.response, bytes); sameBytes(await previous.response, bytes);
+      assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+      const after = f.swarm.metrics(), rows = f.swarm.trace().rows;
+      const client = received.slice(beforeReceived).filter(row => row.path === '/media/seg.ts');
+      const server = requests.slice(beforeRequests).filter(row => row.path === '/media/seg.ts');
+      const peer = after.bytes.peerFirst - before.bytes.peerFirst;
+      assert(client.every(row => row.complete && row.bytes === (row.range ? row.range[1] - row.range[0] : size)));
+      assert.equal(client.reduce((sum, row) => sum + row.bytes, 0), server.reduce((sum, row) => sum + row.sent, 0));
+      const starts = rows.filter(row => row.k === 'xfer' && row.op === 'start' && row.at >= (rows.filter(row => row.k === 'load' && row.sn === 0).at(-1)?.at ?? 0));
+      if (warming) {
+        assert.equal(client.length, 1); assert.equal(client[0].range, null); assert.equal(client[0].warm, true);
+        assert.equal(server.length, 1); assert.equal(server[0].status, 200); assert.equal(peer, 0);
+        const warmLoad = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
+        assert(warmLoad);
+        assert(rows.some(row => row.k === 'xferFinish' && row.load === warmLoad.load && row.peerOnly && row.reason === 'whole-peer-capacity'));
+        assert(!rows.some(row => row.k === 'mixedScope' && row.load === warmLoad.load));
+        assert.equal(after.warmAhead.consumedPeerBytes, 0); assert.equal(after.warmAhead.reservationBytes, 0);
+      } else {
+        assert(client.length > 0 && client.every(row => row.range && row.status === 206));
+        const start = starts.at(-1); assert(start && start.exclusiveOrigin === true);
+        assert.deepEqual(start.probePeers, []); assert(start.peers.every(([, first, rate]) => Number.isFinite(first) && Number.isFinite(rate) && rate > 0));
+        assert(start.out.c.some(row => row.t === 'origin') && start.out.c.some(row => row.t === 'request'));
+        assert(peer > 0 && peer < size); assert.equal(peer + client.reduce((sum, row) => sum + row.bytes, 0), size);
+      }
+      observations.push({ warming, objectBytes: size, acceptedPeerBytes: peer,
+        actualTargetHttpBytes: client.reduce((sum, row) => sum + row.bytes, 0), targetWholeGets: server.filter(row => !row.range).length,
+        target206Gets: server.filter(row => row.range).length, targetClientBodies: client.map(({ bytes, status, complete, range, warm }) => ({ bytes, status, complete, range, warm })),
+        excludedLeadBodyBytes: received.slice(beforeReceived).filter(row => row.path === '/media/lead.ts').reduce((sum, row) => sum + row.bytes, 0),
+        calibrationBodyBytes: received.slice(0, beforeReceived).reduce((sum, row) => sum + row.bytes, 0),
+        coreReady: after.core.state, coalesced: after.warmAhead?.coalesced ?? null,
+        configuredPeerBytesPerSecond: .3 * 1024 * 1024, configuredSourceBytesPerSecondPerRequest: 3 * 1024 * 1024 });
+    } finally { await f.close(); }
+  }
+  console.log(JSON.stringify({ fixture: 'real-core-warm-vs-genuine-mixed', policyContrastOnly: true, observations }));
+});
+
 async function bufferedMixedFixture(t, clock, options = {}) {
   lateRaceKeyClock(t);
   let training = true;

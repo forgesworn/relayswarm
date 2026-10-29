@@ -159,7 +159,14 @@ HTTP arm in flight. Existing demanded whole/range request limits still apply;
 this is not a two-request global HTTP limit. Demand starts immediately and
 joins already-running exact-object work instead of downloading it again.
 That work becomes genuine demand and frees the single speculative slot, so
-the following object can load concurrently. The combined cache and in-flight
+the following object can load concurrently only while the promoted demand has
+measured source-recovery headroom. Missing headroom defers the next speculative
+request, including after an awaited authority check or reservation callback;
+the promoted source keeps its ownership and original parent deadline. Deferred
+metadata retains its original eight-second expiry and recovers the current
+parsed loader context before transport starts. Completion or cancellation of
+the genuine work wakes admission without another timer.
+The combined cache and in-flight
 set remains bounded to three distinct objects and 24 MiB; all in-flight
 reservations reduce the existing held-cache budget together.
 This option alone adds no startup gate, pause, hidden player, clock offset or automatic seek.

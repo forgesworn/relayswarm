@@ -9,7 +9,7 @@ export async function mixedHttpOrigin(t, bytes, BaseLoader = class { constructor
   const server = createServer((req, res) => {
     const match = /^bytes=(\d+)-(\d+)$/u.exec(req.headers.range ?? '');
     const from = match ? Number(match[1]) : 0, to = match ? Number(match[2]) + 1 : size;
-    const row = { range: req.headers.range ?? null, status: match ? 206 : 200, sent: 0, complete: false };
+    const row = { path: new URL(req.url, 'http://127.0.0.1').pathname, range: req.headers.range ?? null, status: match ? 206 : 200, sent: 0, complete: false };
     requests.push(row); first(row);
     res.writeHead(row.status, { 'content-length': to - from,
       ...(match ? { 'content-range': `bytes ${from}-${to - 1}/${size}` } : {}) });

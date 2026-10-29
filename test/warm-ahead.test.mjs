@@ -330,6 +330,54 @@ test('promoting warmed work to genuine demand permits the next future load befor
   assert.deepEqual(await demand.result, f.bytes);
 });
 
+for (const budget of ['zero', 'throw']) test(`promoted demand defers its speculative successor when recovery headroom is ${budget}`, async t => {
+  const f = await fixture(t, { held: [1, 2] });
+  await f.load(0).result;
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const original = f.requests.find(row => row.context.frag.sn === 1);
+  f.media.currentTime = 1.9;
+  f.media.buffered = { length: 1, start: () => 0, end: () => {
+    if (budget === 'throw') throw new Error('fixture unavailable buffer');
+    return 2;
+  } };
+  const demand = f.load(1);
+  await sleep(10);
+  assert.equal(f.requests.some(row => row.context.frag.sn === 2), false, 'a low-buffer promoted source owns the next service opportunity');
+  assert.equal(original.aborted, false);
+  assert.equal(f.swarm.metrics().warmAhead.promoted, 1);
+  assert.equal(f.swarm.metrics().warmAhead.active, 0, 'denial before dequeue owns no new speculative row');
+  original.finish();
+  assert.deepEqual(await demand.result, f.bytes);
+  await until(() => f.requests.some(row => row.context.frag.sn === 2));
+  assert.deepEqual(demand.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
+  assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+});
+
+test('deferred speculation regenerates the actual SDK fragment-loader context before resuming', async t => {
+  let release, held = false;
+  const f = await fixture(t, { held: [1, 2], beforeCommitment: ctx => ctx.frag.sn === 2 && !held
+    ? new Promise(resolve => { held = true; release = resolve; }) : undefined });
+  t.after(() => release?.());
+  await f.load(0).result; await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const original = f.requests.find(row => row.context.frag.sn === 1), first = f.load(1);
+  await until(() => typeof release === 'function');
+  f.media.currentTime = 1.9; f.media.buffered = { length: 1, start: () => 0, end: () => 2 };
+  release(); await until(() => f.swarm.metrics().warmAhead.active === 0);
+  assert.equal(f.requests.some(row => row.context.frag.sn === 2), false);
+  f.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+  original.finish(); assert.deepEqual(await first.result, f.bytes);
+  await until(() => f.requests.some(row => row.context.frag.sn === 2));
+  const resumed = f.requests.find(row => row.context.frag.sn === 2);
+  assert.equal(resumed.context.type, LoaderContextType.MEDIA_FRAGMENT);
+  assert.equal(typeof resumed.context.headers, 'object'); assert.notEqual(resumed.context.headers, null);
+  assert.equal(resumed.context.rangeStart, f.fragments[2].byteRangeStartOffset);
+  assert.equal(resumed.context.rangeEnd, f.fragments[2].byteRangeEndOffset);
+  const second = f.load(2); resumed.finish(); assert.deepEqual(await second.result, f.bytes);
+  assert.deepEqual(second.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 2).length, 1);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+});
+
 test('an in-buffer seek retains wanted demand and speculation while an outside seek cancels speculation', async t => {
   const f = await fixture(t, { held: [1, 2] });
   await f.load(0).result;
@@ -838,6 +886,115 @@ function startupFixture(t, options = {}) {
   return { engine, state, requests, retained, verified, load };
 }
 const flushStartup = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
+
+for (const change of ['authorisation', 'reservation']) test(`promoted source headroom is rechecked after ${change} before speculative transport`, async t => {
+  let budget = 25, release, changed = false;
+  const permit = context => ({ key: context.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true });
+  const f = startupFixture(t, { startup: false, steady: true, reuseBudget: () => budget,
+    permit: ctx => change === 'authorisation' && ctx.frag.sn === 2 && !changed
+      ? new Promise(resolve => { release = () => { changed = true; resolve(permit(ctx)); }; }) : permit(ctx),
+    reserve: bytes => { if (change === 'reservation' && bytes === 8 && !changed) { changed = true; budget = 0; } return true; } });
+  t.after(() => release?.());
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  const original = f.requests.find(row => row.context.frag.sn === 1), demand = f.load(1, 12000);
+  await flushStartup();
+  if (change === 'authorisation') { assert.equal(typeof release, 'function'); budget = 0; release(); await flushStartup(); }
+  assert.equal(f.requests.some(row => row.context.frag.sn === 2), false);
+  assert.equal(original.aborted, false); assert.equal(f.engine.snapshot().promoted, 1);
+  assert.equal(f.engine.snapshot().active, 0); assert.equal(f.engine.snapshot().reservationBytes, 4);
+  const authCalls = f.state.authCalls; await flushStartup(); assert.equal(f.state.authCalls, authCalls, 'denial cannot busy-retry authority');
+  original.finish(); await flushStartup();
+  assert.equal(demand.calls.success, 1); assert.equal(demand.calls.abort, 0);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 2).length, 1, 'genuine completion wakes the deferred future');
+});
+
+test('deferred speculation retains its original eight-second expiry on re-admission', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 1000, budget = 25, release;
+  t.mock.method(performance, 'now', () => clock);
+  const permit = ctx => ({ key: ctx.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true });
+  let held = false;
+  const f = startupFixture(t, { startup: false, steady: true, reuseBudget: () => budget,
+    permit: ctx => ctx.frag.sn === 2 && !held ? new Promise(resolve => { held = true; release = () => resolve(permit(ctx)); }) : permit(ctx) });
+  t.after(() => release?.());
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  const demand = f.load(1, 12000); await flushStartup();
+  clock += 3000; t.mock.timers.tick(3000); budget = 0; release(); await flushStartup();
+  assert.equal(f.requests.some(row => row.context.frag.sn === 2), false);
+  clock += 1000; t.mock.timers.tick(1000); f.requests.find(row => row.context.frag.sn === 1).finish(); await flushStartup();
+  assert.equal(demand.calls.success, 1); const deferred = f.requests.find(row => row.context.frag.sn === 2); assert(deferred);
+  clock += 3999; t.mock.timers.tick(3999); await flushStartup(); assert.equal(deferred.aborted, false);
+  clock += 1; t.mock.timers.tick(1); await flushStartup(); assert.equal(deferred.aborted, true, 'four seconds spent waiting do not buy a fresh eight seconds');
+});
+
+for (const ending of ['clear', 'stop', 'replacement', 'revocation']) test(`deferred speculation cannot revive after ${ending}`, async t => {
+  let budget = 25, release;
+  const f = startupFixture(t, { startup: false, steady: true, reuseBudget: () => budget,
+    permit: ctx => ctx.frag.sn === 2 ? new Promise(resolve => { release = () => resolve(ending === 'revocation' ? null : {
+      key: ctx.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true }); }) : {
+      key: ctx.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true } });
+  t.after(() => release?.());
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  const original = f.requests.find(row => row.context.frag.sn === 1); f.load(1, 12000); await flushStartup();
+  assert.equal(typeof release, 'function');
+  if (ending === 'clear') f.engine.clear();
+  if (ending === 'stop') f.engine.stop();
+  if (ending === 'replacement') f.load(5, 12000);
+  if (ending === 'clear' || ending === 'stop') assert.equal(f.engine.snapshot().active, 1, 'the cancelled validator retains its slot until actual settlement');
+  budget = 0; release(); await flushStartup();
+  original.finish(true); await flushStartup();
+  assert.equal(f.requests.some(row => row.context.frag.sn === 2), false);
+  assert.equal(f.engine.snapshot().reservationBytes, ending === 'revocation' ? 4 : 0);
+  if (ending === 'revocation') assert(f.requests.some(row => row.context.frag.sn === 3), 'refusal does not stop a different authorised future');
+});
+
+for (const change of ['authorisation', 'reservation']) test(`a candidate promoted during ${change} keeps its genuine parent source`, async t => {
+  let budget = 25, release, promote = false, joined, held = false;
+  const permit = ctx => ({ key: ctx.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true });
+  const f = startupFixture(t, { startup: false, steady: true, reuseBudget: () => budget,
+    permit: ctx => change === 'authorisation' && ctx.frag.sn === 2 && !held ? new Promise(resolve => { held = true; release = () => resolve(permit(ctx)); }) : permit(ctx),
+    reserve: bytes => { if (change === 'reservation' && bytes === 8 && promote) { promote = false; budget = 0; joined = f.load(2, 12000); } return true; } });
+  t.after(() => release?.());
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup(); promote = true;
+  f.load(1, 12000); await flushStartup();
+  if (change === 'authorisation') { budget = 0; joined = f.load(2, 12000); release(); await flushStartup(); }
+  const row = f.requests.find(row => row.context.frag.sn === 2); assert(row, 'the now-genuine candidate must still load');
+  assert.equal(row.aborted, false); budget = 25; row.finish(); await flushStartup();
+  assert.equal(joined.calls.success, 1); assert.equal(joined.calls.abort, 0);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 2).length, 1);
+  assert.equal(f.requests.find(row => row.context.frag.sn === 1).aborted, true, 'moving the demanded window retains cancellation of obsoleteSN1');
+});
+
+for (const ending of ['clear', 'stop', 'replacement']) test(`promoted headroom callback reentrancy cannot revive work after ${ending}`, async t => {
+  let armed = false;
+  const f = startupFixture(t, { startup: false, steady: true, reuseBudget: () => {
+    if (armed) { armed = false; if (ending === 'clear') f.engine.clear(); if (ending === 'stop') f.engine.stop(); if (ending === 'replacement') f.load(5, 12000); }
+    return 25;
+  } });
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup(); armed = true;
+  f.load(1, 12000); await flushStartup();
+  assert.equal(f.requests.some(row => row.context.frag.sn === 2), false);
+  assert.equal(f.engine.snapshot().reservationBytes, 0);
+});
+
+for (const ending of ['clear', 'stop', 'replacement']) test(`speculative reservation reentrancy cannot revive work after ${ending}`, async t => {
+  let armed = false;
+  const f = startupFixture(t, { startup: false, steady: true, reuseBudget: () => 25,
+    reserve: size => { if (armed && size === 8) { armed = false; if (ending === 'clear') f.engine.clear(); if (ending === 'stop') f.engine.stop(); if (ending === 'replacement') f.load(5, 12000); } return true; } });
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup(); armed = true;
+  f.load(1, 12000); await flushStartup();
+  assert.equal(f.requests.some(row => row.context.frag.sn === 2), false);
+  assert.equal(f.engine.snapshot().reservationBytes, 0);
+});
+
+test('a live promoted row without a current genuine context cannot admit speculation', async t => {
+  const f = startupFixture(t, { startup: false, steady: true, reuseBudget: () => 25 });
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  const demand = f.load(1, 12000); demand.context.frag.sn = 9;
+  await flushStartup();
+  assert.equal(f.requests.some(row => row.context.frag.sn === 2), false);
+  assert.equal(f.engine.snapshot().promoted, 1); assert.equal(f.engine.snapshot().active, 0);
+});
 const requireOriginalVerified = async (f, body, beforeFinish = () => {}) => {
   await flushStartup();
   assert.equal(f.requests.length, 1, 'only the genuine source is admitted before its first verification');

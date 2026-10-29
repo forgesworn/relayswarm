@@ -411,6 +411,13 @@ publish or deliver cancelled data; the slot and reservation are released when
 that operation settles. Cancelled rows do not count as current playback coverage
 or reusable pending data. Cancellation does not increase the existing limits.
 
+Promotion frees the speculative slot but does not by itself admit another HTTP
+request. While that promoted source is pending, its genuine consumer must have
+measured recovery headroom before new speculation starts. Admission rechecks
+after authority and reservation callbacks; it never cancels the promoted source
+to make room. Deferred metadata keeps its original eight-second expiry and uses
+the current parsed loader context when admitted again.
+
 Offer and answer gathering retain the 1.2-second soft cap when the local SDP
 already contains a candidate. If it is still empty at that point, gathering
 waits for the first candidate or native completion, within the same negotiation
@@ -2223,7 +2230,14 @@ HTTP arm in flight. Existing demanded whole/range request limits still apply;
 this is not a two-request global HTTP limit. Demand starts immediately and
 joins already-running exact-object work instead of downloading it again.
 That work becomes genuine demand and frees the single speculative slot, so
-the following object can load concurrently. The combined cache and in-flight
+the following object can load concurrently only while the promoted demand has
+measured source-recovery headroom. Missing headroom defers the next speculative
+request, including after an awaited authority check or reservation callback;
+the promoted source keeps its ownership and original parent deadline. Deferred
+metadata retains its original eight-second expiry and recovers the current
+parsed loader context before transport starts. Completion or cancellation of
+the genuine work wakes admission without another timer.
+The combined cache and in-flight
 set remains bounded to three distinct objects and 24 MiB; all in-flight
 reservations reduce the existing held-cache budget together.
 This option alone adds no startup gate, pause, hidden player, clock offset or automatic seek.
@@ -3121,6 +3135,35 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased promoted-source admission (29 October 2026)
+
+A promoted genuine source no longer automatically admits a second speculative
+HTTP request. Its consumer must have measured recovery headroom. Admission
+rechecks after authority and reservation callbacks; missing context, unavailable
+headroom and lifecycle changes leave new speculation deferred. The existing
+source keeps its parent deadline. Deferred metadata retains its original
+eight-second expiry and recovers the current parsed loader fields before
+transport starts. Genuine completion or cancellation resumes admission without
+polling. Cache, object and reservation limits remain unchanged.
+
+Two low-headroom regressions fail before this correction and pass afterwards.
+A separate actual-SDK regression catches missing loader fields during deferral
+and passes after restoring them from current parsed metadata. The final focused
+selection passes 20/20; all 171 warm/startup checks pass with the committed Core
+selected where applicable. Direct engine controls remain JavaScript policy
+tests. Current main-thread and committed-WASM Worker controls both complete
+actual disjoint HTTP206 and verified peer assembly.
+
+A controlled real-Core comparison explains the remaining warm-path limitation:
+the warm/coalesced target uses one 6 MiB whole GET and accepts no peer bytes;
+the otherwise eligible genuine target uses 5,603,328 HTTP206 body bytes plus
+688,128 verified peer bytes, with no target whole GET. Both arms use the same
+explicit synthetic pacing, media geometry and deadlines; calibration and lead
+traffic are accounted separately. This is policy evidence, not a field speed or
+traffic-saving qualification. Warm mixed planning must own its source ranges
+before a whole GET starts. This correction does not yet implement that path or
+establish a sustained playback improvement. The draft remains unqualified.
 
 ## Unreleased moving-room startup admission (29 October 2026)
 

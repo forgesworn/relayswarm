@@ -10,6 +10,35 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased promoted-source admission (29 October 2026)
+
+A promoted genuine source no longer automatically admits a second speculative
+HTTP request. Its consumer must have measured recovery headroom. Admission
+rechecks after authority and reservation callbacks; missing context, unavailable
+headroom and lifecycle changes leave new speculation deferred. The existing
+source keeps its parent deadline. Deferred metadata retains its original
+eight-second expiry and recovers the current parsed loader fields before
+transport starts. Genuine completion or cancellation resumes admission without
+polling. Cache, object and reservation limits remain unchanged.
+
+Two low-headroom regressions fail before this correction and pass afterwards.
+A separate actual-SDK regression catches missing loader fields during deferral
+and passes after restoring them from current parsed metadata. The final focused
+selection passes 20/20; all 171 warm/startup checks pass with the committed Core
+selected where applicable. Direct engine controls remain JavaScript policy
+tests. Current main-thread and committed-WASM Worker controls both complete
+actual disjoint HTTP206 and verified peer assembly.
+
+A controlled real-Core comparison explains the remaining warm-path limitation:
+the warm/coalesced target uses one 6 MiB whole GET and accepts no peer bytes;
+the otherwise eligible genuine target uses 5,603,328 HTTP206 body bytes plus
+688,128 verified peer bytes, with no target whole GET. Both arms use the same
+explicit synthetic pacing, media geometry and deadlines; calibration and lead
+traffic are accounted separately. This is policy evidence, not a field speed or
+traffic-saving qualification. Warm mixed planning must own its source ranges
+before a whole GET starts. This correction does not yet implement that path or
+establish a sustained playback improvement. The draft remains unqualified.
+
 ## Unreleased moving-room startup admission (29 October 2026)
 
 Additional composition controls exercise steady warming after startup release,

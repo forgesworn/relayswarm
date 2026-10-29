@@ -141,6 +141,13 @@ publish or deliver cancelled data; the slot and reservation are released when
 that operation settles. Cancelled rows do not count as current playback coverage
 or reusable pending data. Cancellation does not increase the existing limits.
 
+Promotion frees the speculative slot but does not by itself admit another HTTP
+request. While that promoted source is pending, its genuine consumer must have
+measured recovery headroom before new speculation starts. Admission rechecks
+after authority and reservation callbacks; it never cancels the promoted source
+to make room. Deferred metadata keeps its original eight-second expiry and uses
+the current parsed loader context when admitted again.
+
 Offer and answer gathering retain the 1.2-second soft cap when the local SDP
 already contains a candidate. If it is still empty at that point, gathering
 waits for the first candidate or native completion, within the same negotiation
