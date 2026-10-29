@@ -9485,6 +9485,171 @@ async function bufferedMixedFixture(t, clock, options = {}) {
   return f;
 }
 
+// These SDK integration controls model the internal descriptor supplied by the
+// separately tested warm engine. Real Core/signatures/framing/range I/O remain.
+function ownedWarmControl(f, clock, remainingMs = 8000) {
+  const signal = new AbortController(), enteredAt = clock.now() - (8000 - remainingMs);
+  const owner = { valid: true, reads: 0, signal, enteredAt, deadline: enteredAt + 8000, genuine: null };
+  const context = { ...f.ctx };
+  context[WARM_AHEAD] = { peerBytes: 0, work: () => {
+    owner.reads++;
+    return owner.valid && !signal.signal.aborted && f.hls.media.paused === false && (clock.now() < owner.deadline || owner.genuine)
+      ? { context, enteredAt, deadline: owner.deadline, signal: signal.signal, genuine: owner.genuine } : null;
+  } };
+  const calls = { success: 0, abort: 0, error: 0, timeout: 0 }, loader = new f.hls.config.fLoader(f.hlsConfig);
+  const start = () => {
+    let finish;
+    const outcome = new Promise(resolve => { finish = resolve; });
+    loader.load(context, f.loaderConfig, Object.fromEntries(['success', 'abort', 'error', 'timeout'].map(name =>
+      ['on' + name[0].toUpperCase() + name.slice(1), (...args) => { calls[name]++; finish({ kind: name, args }); }])));
+    return outcome;
+  };
+  return { owner, context, calls, loader, start };
+}
+
+// Controlled descriptors isolate SDK provenance validation from the separately
+// tested warm-row clock. Advancing performance without dispatching timers models
+// a synchronous callback arriving on the original eight-second boundary.
+for (const worker of [false, true]) test(`owned warm promotion at its original deadline cannot revive source work (${worker ? 'worker' : 'main'})`, async t => {
+  const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    assert.equal(f.swarm.metrics().core.state, 'ready');
+    if (worker) assert.equal(f.swarm.metrics().core.transferWorker.state, 'ready');
+    const before = { whole: f.wholeLoads.length, ranges: f.ranges.length, wants: f.channels[0].wants.length, peer: f.swarm.metrics().bytes.peerFirst };
+    const work = ownedWarmControl(f, clock, 10), priorNow = performance.now.bind(performance);
+    work.owner.genuine = { at: work.owner.deadline, context: work.context };
+    t.mock.method(performance, 'now', () => priorNow() + 10);
+    const outcome = work.start();
+    assert.equal(work.calls.abort, 1, 'late genuine provenance must be rejected synchronously before any timer dispatch');
+    assert.equal((await clock.settle(outcome)).kind, 'abort');
+    await clock.advance(40);
+    assert.equal(f.wholeLoads.length, before.whole); assert.equal(f.ranges.length, before.ranges);
+    assert.equal(f.channels[0].wants.length, before.wants); assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer);
+    assert.equal(work.calls.success + work.calls.error + work.calls.timeout, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const worker of [false, true]) test(`owned warm valid promotion crosses row deadline without renewing its transport parent (${worker ? 'worker' : 'main'})`, async t => {
+  const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    // Healthy synthetic headroom; this is a policy control, not field timing.
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 24 };
+    const before = { whole: f.wholeLoads.length, ranges: f.ranges.length, peer: f.swarm.metrics().bytes.peerFirst };
+    const work = ownedWarmControl(f, clock, 10), started = clock.now(), outcome = work.start();
+    await clock.advance(5);
+    work.owner.genuine = { at: clock.now(), context: work.context };
+    assert(work.owner.genuine.at < work.owner.deadline);
+    const result = await clock.settle(outcome);
+    assert.equal(result.kind, 'success'); sameBytes(new Uint8Array(result.args[0].data), f.bytes);
+    assert(clock.now() > work.owner.deadline, 'completion is after the fixed original row deadline');
+    assert(clock.now() < started + 10000, 'completion remains within the original transport parent');
+    assert.equal(f.wholeLoads.length, before.whole); assert(f.ranges.length > before.ranges);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer, 'the original speculative marker still defers consumption credit');
+    assert.equal(work.calls.success, 1); assert.equal(work.calls.abort + work.calls.error + work.calls.timeout, 0);
+    const rows = f.swarm.trace().rows.filter(row => row.k === 'mixedScope' && row.load === f.swarm.trace().rows.findLast(row => row.k === 'mixedScope' && row.reason === 'entry').load);
+    const ends = rows.map(row => row.ms + row.recoveryRemainingMs);
+    assert(ends.every(end => Math.abs(end - 10000) <= 1), 'promotion never resets the original ten-second transport parent');
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const worker of [false, true]) test(`owned warm valid promotion cannot renew a shorter original parent (${worker ? 'worker' : 'main'})`, async t => {
+  const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    f.loaderConfig = { ...f.loaderConfig, timeout: 50 };
+    const before = { whole: f.wholeLoads.length, ranges: f.ranges.length, peer: f.swarm.metrics().bytes.peerFirst };
+    const work = ownedWarmControl(f, clock, 10), started = clock.now(), outcome = work.start();
+    await clock.advance(5); work.owner.genuine = { at: clock.now(), context: work.context };
+    assert(work.owner.genuine.at < work.owner.deadline);
+    assert.equal((await clock.settle(outcome, 100)).kind, 'timeout');
+    assert(clock.now() <= started + 51, 'the shorter original parent expires without renewal');
+    assert.equal(f.wholeLoads.length, before.whole + 1); assert.equal(f.ranges.length, before.ranges);
+    assert(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs <= 50);
+    await clock.advance(550);
+    assert.equal(work.calls.success, 0); assert.equal(work.calls.timeout, 1);
+    assert.equal(work.calls.abort + work.calls.error, 0);
+    assert.equal(f.wholeLoads.length, before.whole + 1); assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const worker of [false, true]) for (const ending of ['expiry', 'pause', 'abort', 'revoked']) {
+  test(`owned warm mixed ${ending} during authority wait starts no late I/O (${worker ? 'worker' : 'main'})`, async t => {
+    const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null;
+    let f, release, blocked = false;
+    try {
+      f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+        ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) },
+        beforeCommitment: () => new Promise((resolve, reject) => { blocked = true; release = ending === 'revoked' ? () => reject(new Error('revoked')) : resolve; }) });
+      assert.equal(f.swarm.metrics().core.state, 'ready');
+      if (worker) assert.equal(f.swarm.metrics().core.transferWorker.state, 'ready');
+      const before = { whole: f.wholeLoads.length, ranges: f.ranges.length, wants: f.channels[0].wants.length, peer: f.swarm.metrics().bytes.peerFirst };
+      const work = ownedWarmControl(f, clock, ending === 'expiry' ? 10 : 8000), outcome = work.start();
+      await clock.advanceUntil(() => blocked, 20);
+      const entry = f.swarm.trace().rows.findLast(row => row.k === 'mixedScope' && row.reason === 'entry');
+      assert(entry, 'the owner passed admission and entered new mixed setup before authority yielded');
+      const load = f.swarm.trace().rows.find(row => row.k === 'load' && row.load === entry.load);
+      assert.equal(load.budgetGeometry.source, 'warm-ahead'); assert(work.owner.reads > 1);
+      if (ending === 'expiry') await clock.advance(11);
+      else if (ending === 'pause') f.hls.media.paused = true;
+      else if (ending === 'abort') { work.owner.signal.abort(); work.loader.abort(); }
+      else work.owner.valid = false;
+      release(); await clock.advance(40);
+      assert.equal(f.wholeLoads.length, before.whole); assert.equal(f.ranges.length, before.ranges);
+      assert.equal(f.channels[0].wants.length, before.wants); assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer);
+      assert.equal(work.calls.success, 0);
+      const terminals = work.calls.abort + work.calls.error + work.calls.timeout;
+      assert.equal(terminals, 1, 'lost ownership settles once without accepting delayed metadata');
+      assert.notEqual((await clock.settle(outcome)).kind, 'success');
+      await clock.advance(500);
+      assert.equal(work.calls.abort + work.calls.error + work.calls.timeout, terminals);
+      assert.equal(f.wholeLoads.length, before.whole); assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer);
+    } finally { release?.(); if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+}
+
+for (const worker of [false, true]) test(`owned warm mixed loss after origin invocation rejects stale callbacks (${worker ? 'worker' : 'main'})`, async t => {
+  const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    const before = { whole: f.wholeLoads.length, ranges: f.ranges.length, peer: f.swarm.metrics().bytes.peerFirst };
+    const work = ownedWarmControl(f, clock), outcome = work.start();
+    await clock.advanceUntil(() => f.ranges.length > before.ranges, 25);
+    assert(f.swarm.trace().rows.some(row => row.k === 'mixedScope' && row.reason === 'origin-invoked'));
+    const rangesAtLoss = f.ranges.length; work.owner.valid = false;
+    await clock.advance(600);
+    assert.equal(work.calls.success, 0); assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer);
+    assert.equal(f.wholeLoads.length, before.whole, 'a stale range reply cannot create a recovery whole GET');
+    assert.equal(f.ranges.length, rangesAtLoss, 'no new range may follow lost ownership');
+    assert.equal(work.calls.abort + work.calls.error + work.calls.timeout, 1);
+    assert.notEqual((await clock.settle(outcome)).kind, 'success');
+    assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const worker of [false, true]) test(`owned warm mixed missing capability retains one ordinary source (${worker ? 'worker' : 'main'})`, async t => {
+  const bytes = Buffer.from(multiCoreBytes), offset = bytes.indexOf(Buffer.from('rs_xfer_capabilities'));
+  assert(offset >= 0); bytes[offset] = bytes[offset + 1] = 0x78;
+  const legacy = await WebAssembly.compile(bytes), clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { untrained: true, swarmOptions: { warmAhead: true, serve: true, coreWasm: legacy,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    const before = { whole: f.wholeLoads.length, ranges: f.ranges.length, peer: f.swarm.metrics().bytes.peerFirst };
+    const work = ownedWarmControl(f, clock), outcome = await clock.settle(work.start());
+    assert.equal(outcome.kind, 'success'); sameBytes(new Uint8Array(outcome.args[0].data), f.bytes);
+    assert.equal(f.wholeLoads.length, before.whole + 1); assert.equal(f.ranges.length, before.ranges);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer); assert.equal(work.calls.success, 1);
+    assert.equal(f.swarm.metrics().core.state, 'ready');
+    if (worker) assert.equal(f.swarm.metrics().core.transferWorker.state, 'ready');
+    assert(f.swarm.trace().rows.some(row => row.k === 'mixedScope' && row.reason === 'entry'));
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
 test('buffered mixed scope trace reports the actual fragment rejection before transfer finish without extra getter reads', async t => {
   for (const field of ['start', 'duration']) {
     const counts = [];

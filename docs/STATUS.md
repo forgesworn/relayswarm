@@ -19,13 +19,39 @@ retains the original speculative expiry and cancellation signal; promotion
 keeps the original parent deadline. Accepted peer credit waits for genuine
 consumption of the complete verified object.
 
-All 191 warm/startup policy checks pass. The main-thread and committed-WASM
-Worker warm mixed checks pass 2/2: each 6 MiB target uses 688,128 verified
-peer bytes and 5,603,328 HTTP206 body bytes, with no whole GET. Credit remains
-zero before genuine consumption and is not duplicated by repeated reuse. These controlled
-checks are not a sustained playback, physical-device or public-operator result.
-Warm mixed lifecycle/failure qualification and a fresh finite field run remain
-pending. No experimental SDK is deployed; this PR is not ready to merge.
+All 193 warm/startup checks pass. The current main-thread and committed-WASM
+Worker warm mixed checks pass: each 6 MiB target uses 688,128 verified peer
+bytes and 5,603,328 HTTP206 body bytes, with no whole GET. Credit remains zero
+before genuine consumption and is not duplicated by repeated reuse. The legacy
+whole-source versus genuine-mixed comparison also passes. Explicit synthetic
+pacing and separately accounted calibration/lead bodies make these policy
+checks, not a sustained playback, physical-device or public-operator result.
+
+Eighteen additional SDK controls pass on the main thread and committed Worker.
+They cover lost ownership during authority waits, expiry, pause, abort,
+revocation, stale range replies, missing capability, valid promotion beyond the
+speculative deadline and shorter original parents. The internal descriptor is
+modelled in those controls; actual warm-engine and HTTP assembly proofs are
+separate. Twenty-five existing mixed fallback/deadline controls also pass.
+
+Review exposed a late-promotion bug: if JavaScript delayed the timer callback,
+a first genuine request at or after eight seconds could clear an expired
+speculative timer. Both exact-boundary and boundary-plus-one regressions fail
+before the warm-engine correction. The SDK also rejects late promotion
+provenance. Valid earlier promotion preserves the original parent timeout.
+The original Linux CI reservation assertion is retained as failed evidence;
+its fixture now holds the next future explicitly, checks its reservation and
+verifies zero reservations after pause instead of assuming global quiescence.
+
+The first broad Core swarm run records 874 passes, two scope-proof failures
+and one JavaScript-selection-only skip. Ordinary loads were emitting an extra
+warm-only trace field; the strict scope validator correctly rejected that
+shape. The SDK now emits that field only for actual warm owners. Both failing
+cases and the warm checks pass in a new 28/28 selection without changing the
+validator. A complete corrected-source rerun is in progress; the failed run is
+retained. A fresh finite field run, physical-device acceptance and a public
+operator remain pending. No experimental SDK is deployed; this PR is not ready
+to merge.
 
 ## Unreleased promoted-source admission (29 October 2026)
 

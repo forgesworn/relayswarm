@@ -721,7 +721,7 @@ test('combined steady warming and buffered mixed options serve a verified future
 });
 
 test('an ordered reliable silent peer keeps the verified warm HTTP winner after an active WANT', { timeout: 20000 }, async t => {
-  const f = await fixture(t, { rangePeer: true, silentPeer: true, held: [1], bufferedMixedRanges: true, traceRequests: 128 });
+  const f = await fixture(t, { rangePeer: true, silentPeer: true, held: [1, 2], bufferedMixedRanges: true, traceRequests: 128 });
   assert.equal(f.swarm.metrics().core.state, 'ready');
   Object.assign(f.media, { readyState: 4, playbackRate: 1, ended: false, seeking: false });
   const peer = await f.addPeer();
@@ -745,10 +745,16 @@ test('an ordered reliable silent peer keeps the verified warm HTTP winner after 
   assert.equal(httpSuccess, 1); assert(future.completed); assert.equal(future.aborted, false);
   assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 0); assert.equal(f.swarm.metrics().peerAdmission.waiting, 0);
   assert.equal(f.swarm.metrics().warmAhead.rejected, 0); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
-  assert.equal(first.calls.success, 1); assert.equal(f.swarm.metrics().warmAhead.reservationBytes, 0);
+  assert.equal(first.calls.success, 1);
+  await until(() => f.requests.some(row => row.context.frag.sn === 2));
+  const next = f.requests.find(row => row.context.frag.sn === 2); assert(!next.completed && !next.aborted);
+  assert.equal(f.swarm.metrics().warmAhead.reservationBytes, f.bytes.length, 'only the next held future owns a reservation');
   const consumed = f.load(1); assert.deepEqual(await consumed.result, f.bytes);
   assert.equal(consumed.calls.success, 1); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
   assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+  f.media.paused = true; f.media.dispatchEvent(new Event('pause'));
+  await until(() => f.swarm.metrics().warmAhead.reservationBytes === 0 && f.swarm.metrics().warmAhead.active === 0);
+  assert(next.aborted);
 });
 
 test('exhausting the upload allowance also withdraws warm references and reservations', async t => {
@@ -936,6 +942,30 @@ test('warm work ownership preserves original entry and signal across genuine pro
   assert.equal(promoted.genuine.context, demand.context); assert.equal(row.config, originalConfig);
   assert.equal(row.config.loadPolicy.maxLoadTimeMs, 12000); assert.equal(row.aborted, false);
   row.finish(); await flushStartup(); assert.equal(demand.calls.success, 1); assert.equal(work(), null);
+});
+
+for (const lateMs of [0, 1]) test(`warm demand at original expiry plus${lateMs}ms cannot revive work before its timer callback`, async t => {
+  // Deliberately advance the logical performance clock without dispatching timers.
+  t.mock.timers.enable({ apis: ['setTimeout'] }); let clock = 1000;
+  t.mock.method(performance, 'now', () => clock);
+  const f = startupFixture(t, { startup: false, steady: true, reuseBudget: () => 25 });
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  const original = f.requests.find(row => row.context.frag.sn === 1), work = original.context[STARTUP_MARKER].work, captured = work();
+  assert(captured); assert.equal(captured.genuine, null);
+  clock = captured.deadline + lateMs; assert.equal(work(), null);
+  const demand = f.load(1, 12000); await flushStartup();
+  assert.equal(original.aborted, true, 'first genuine demand cannot clear an already-expired speculative owner');
+  assert.equal(captured.signal.aborted, true); assert.equal(work(), null);
+  assert.equal(f.engine.snapshot().promotions, 0); assert.equal(f.engine.snapshot().coalesced, 0);
+  const recovery = f.requests.filter(row => row.context.frag.sn === 1).at(-1);
+  assert.notEqual(recovery, original); assert.equal(recovery.context, demand.context);
+  assert.equal(recovery.config.loadPolicy.maxLoadTimeMs, 12000, 'the genuine load keeps its ordinary new demand parent budget');
+  original.finish(true); await flushStartup(); assert.equal(demand.calls.success, 0);
+  assert.equal(f.retained.length, 0, 'late old bytes cannot populate reusable warm data');
+  recovery.finish(); await flushStartup();
+  assert.equal(demand.calls.success, 1); assert.equal(demand.calls.abort, 0);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 2);
+  assert.equal(f.engine.snapshot().verifiedPeerBytes, 0); assert.equal(f.engine.snapshot().consumedPeerBytes, 0);
 });
 
 for (const change of ['url','frag-url','scope','sn','cc','level','start','duration','fragment'])

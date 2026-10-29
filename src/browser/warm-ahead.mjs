@@ -124,10 +124,10 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     const controller = new AbortController(), revision = generation, cfg = config, policy = loaderConfig;
     const workContext = item.context, workFragment = workContext.frag, workIdentity = metadataOnly(item);
     let loader, timer, finish;
-    const row = { ...item, reserved: 0, finished: false, waiters: new Set(), genuineAt: null,
+    const row = { ...item, deadline, reserved: 0, finished: false, waiters: new Set(), genuineAt: null,
       promise: new Promise(resolve => { finish = resolve; }),
-      noteDemand() {
-        row.genuineAt ??= performance.now();
+      noteDemand(at) {
+        row.genuineAt ??= at;
         item.context[WARM_AHEAD]?.onGenuine?.();
       },
       genuine() {
@@ -700,12 +700,17 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       const token = ++this.token, own = noteDemand(context, this.config, policy, terminal.id), cached = own && cache.get(own.key);
       if (!beginStartup(this, terminal, own, policy)) return;
       const pendingRow = !cached && own && jobs.get(own.key);
+      const demandAt = performance.now();
+      if (pendingRow && live(pendingRow) && !pendingRow.genuine() && demandAt >= pendingRow.deadline) {
+        cancelJob(pendingRow);
+        if (token !== this.token || this.pendingTerminal !== terminal || terminal.settled) return;
+      }
       const pending = pendingRow && live(pendingRow) ? pendingRow : null, existing = cached ?? pending?.promise;
       if (existing) {
         if (pending) {
           counters.coalesced++;
           pending.waiters.add(this); this.warmPending = pending;
-          pending.noteDemand();
+          pending.noteDemand(demandAt);
           if (active === pending && promoted.size === 0) { active = null; promoted.add(pending); pending.promote(); counters.promotions++; }
         }
         this.reuseAbort = new AbortController();

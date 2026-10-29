@@ -1208,7 +1208,7 @@ class HlsSwarm {
                 value.enteredAt === initial.enteredAt && value.deadline === initial.deadline &&
                 Number.isFinite(value.enteredAt) && Number.isFinite(value.deadline) && value.enteredAt <= at &&
                 value.deadline > value.enteredAt && value.deadline - value.enteredAt <= 8000 &&
-                (at < value.deadline || genuine && Number.isFinite(genuine.at) && genuine.at >= value.enteredAt && genuine.at <= at &&
+                (at < value.deadline || genuine && Number.isFinite(genuine.at) && genuine.at >= value.enteredAt && genuine.at < value.deadline && genuine.at <= at &&
                   demand?.key === identity.key && demand.scope === identity.scope &&
                   Math.abs(demand.context.frag.start - identity.context.frag.start) <= 1e-9 &&
                   Math.abs(demand.context.frag.duration - identity.context.frag.duration) <= 1e-9));
@@ -1429,7 +1429,7 @@ class HlsSwarm {
           const measured = (name, value) => { if (swarm.options.traceRequests) currentGeometry[name] = Number.isFinite(value) ? value : null; return value; };
           try {
             const currentIdentity = warmContext(context);
-            const valid = seen('notStopped', !swarm.stopped) && seen('warmOwner', !warmOwner || warmOwner.current()) && seen('hls', swarm.hls === hls) && seen('media', hls.media === media) &&
+            const valid = seen('notStopped', !swarm.stopped) && (!warmOwner || seen('warmOwner', warmOwner.current())) && seen('hls', swarm.hls === hls) && seen('media', hls.media === media) &&
               seen('generation', swarm.latePeerGeneration === generation) && seen('stream', swarm.options.streamEvent?.id === stream) &&
               seen('unpaused', media.paused === false) && seen('unended', media.ended === false) && seen('unseeking', media.seeking === false) &&
               seen('unitRate', measured('playbackRate', media.playbackRate) === 1) && seen('ready', measured('readyState', media.readyState) >= 3) &&
@@ -2153,9 +2153,9 @@ class HlsSwarm {
   }
 
   #peerBudget(context, geometry) {
-    // Speculation never reserves a positive peer-only wait or asks a mixed
-    // transfer to create origin ranges. Cached peers can still race the one
-    // immediately started whole-object HTTP request through the usual path.
+    // Speculation never reserves a positive exclusive peer wait. Eligible
+    // owned work measures buffer geometry separately before choosing a mixed
+    // plan; the original marker still defers accepted credit until consumption.
     if (context?.[WARM_AHEAD]) { geometry.source = "warm-ahead"; return 0; }
     const media = this.hls?.media;
     let sustainableMs = Infinity;

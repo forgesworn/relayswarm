@@ -371,7 +371,9 @@ entering the shared held cache. At most three warm references and 24 MiB of
 warm data/reservations fit inside the existing `maxHeldBytes` budget. The warm
 map references the held buffer; delivery to hls.js receives a transfer-safe
 copy. Normal player/decoder memory and transient demand buffers remain
-separate. Speculation expires after eight seconds. Promotion retires that
+separate. Speculation expires after eight seconds. A genuine request must
+join before that absolute expiry to promote pending work; a delayed timer
+callback cannot let a later request revive it. Valid promotion retires the
 speculation-only timer; the already-running parent's timeout still runs from
 its original start. A parent error or timeout settles the genuine demand
 through its original callback, without an implicit fresh request or reset
