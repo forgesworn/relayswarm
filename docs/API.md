@@ -116,8 +116,10 @@ intentional endgame duplication; failed or cancelled work may still need
 source recovery. Each range and ordinary
 fallback keeps the captured absolute parent and playback-recovery deadlines;
 the concurrent peer window is additionally bounded by
-`min(maxPeerWaitMs, 2500)`. A whole source request never runs beside an active
-mixed transfer. After that peer window closes, source ranges may finish the
+`min(maxPeerWaitMs, 2500)` and ends before the captured measured source-recovery
+reserve. A shorter parent deadline retains that same reserve; if at most 25 ms
+remain for peer work, whole-source loading begins immediately. A whole source
+request never runs beside an active mixed transfer. After that peer window closes, source ranges may finish the
 missing pieces within the same original recovery interval. Media handoff
 requires a complete verified object and current
 authority. Count accepted peer media separately from actual HTTP bodies,

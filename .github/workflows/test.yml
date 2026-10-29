@@ -221,6 +221,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:proto
+      - name: Committed Core worker and HTTP byte accounting
+        run: node --test test/core-transfer-worker.test.mjs
       - run: npm run proto:traces
       - name: Rust format, lint, test and WebAssembly build
         working-directory: core

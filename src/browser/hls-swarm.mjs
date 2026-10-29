@@ -1309,7 +1309,10 @@ class HlsSwarm {
         const firstMs = config?.loadPolicy?.maxTimeToFirstByteMs;
         const firstDeadline = Math.min(recoveryDeadline, enteredAt + (Number.isFinite(firstMs) && firstMs > 0 ? firstMs : parentMs));
         const setupDeadline = Math.min(enteredAt + 25, recoveryDeadline);
-        const limit = Math.min(recoveryDeadline, enteredAt + Math.min(2500, swarm.options.maxPeerWaitMs));
+        // Immediate source ranges do not remove the measured recovery reserve
+        // needed when a peer-dependent remainder must return to source.
+        const limit = Math.max(enteredAt, Math.min(recoveryDeadline - geometry.originReserveMs,
+          enteredAt + Math.min(2500, swarm.options.maxPeerWaitMs)));
         const traceLoad = swarm.#traceBegin(context, 0, limit - enteredAt, geometry);
         let phase = 'mixed', originInvoked = false, setupTimer, recoveryTimer, retireSource;
         this.active = token; this.pendingCallbacks = { callbacks, context };
@@ -1401,7 +1404,7 @@ class HlsSwarm {
         setupTimer = setTimeout(fallback, Math.max(0, setupDeadline - now()));
         recoveryTimer = setTimeout(expire, Math.max(0, recoveryDeadline - now()));
         swarm.lifecycle.signal.addEventListener('abort', fallback, { once: true });
-        if (firstDeadline - enteredAt <= 25) return fallback();
+        if (firstDeadline - enteredAt <= 25 || limit - enteredAt <= 25) return fallback();
         if (!current()) return fallback();
         swarm.#peerFirst(context, controller.signal, plan, 0, geometry).then(result => {
           if (!owns() || phase !== 'mixed') return;
