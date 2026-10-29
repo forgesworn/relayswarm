@@ -10,6 +10,29 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased room-start publication boundary (29 October 2026)
+
+An optional startup commit hook now requires verified coverage strictly above
+the measured recovery requirement before publication, including after awaited
+authority checks. Exact equality cannot survive a positive acknowledgement
+delay once the room clock advances. No-hook and post-acknowledgement validation
+retain their existing minimum-headroom rule and original deadlines.
+
+A controlled regression reproduces the prior twelve-second startup failure and
+releases once at 7.91 seconds after the correction. Its first two source service
+times reproduce captured timings; subsequent one-second services and a ten-ms
+acknowledgement are explicit synthetic inputs. All 146 warm/startup checks pass.
+This is local regression evidence, not a new field or physical-device result.
+
+The latest sustained two-viewer private 4K diagnostic still fails acceptance:
+one viewer recorded four waits totalling 0.877 seconds, three player errors and
+2.16% accepted peer media; the other accepted none. A later mixed-disabled
+control failed startup and motivated this boundary correction. Full CI also
+retains a failing committed-WASM Worker integration case. The branch remains
+draft; sustained playback, useful contribution, independently operated public
+credential issuing and physical iPhone acceptance remain open. Production and
+the paired private relay are unchanged.
+
 ## Unreleased first-candidate SDP gathering (28 October 2026)
 
 The browser loader retains its 1.2-second gathering soft cap when local offer

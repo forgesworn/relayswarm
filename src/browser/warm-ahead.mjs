@@ -392,6 +392,13 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     startup.verifiedStart = start; startup.verifiedEnd = end;
     return { start, end, rows: used };
   };
+  const startupHeadroomSufficient = (covered, target, recovery) => {
+    if (covered.end === null) return false;
+    const headroomMs = (covered.end - target) * 1000;
+    // Publishing starts an advancing room clock. Exact equality cannot survive
+    // a positive ACK delay; keep it valid for no-hook and post-ACK handoffs.
+    return !startup.commitStarted && typeof startupCommit === 'function' ? headroomMs > recovery : headroomMs >= recovery;
+  };
   const startupCandidate = (target = undefined) => {
     if (!startupCurrent()) return null;
     if (target === undefined) target = readStartupTarget();
@@ -402,7 +409,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     if (!Number.isFinite(recovery) || recovery < 0) return endStartup('failed', 'invalid-recovery');
     startup.requiredHeadroomMs = recovery;
     const covered = coverage(target);
-    if (covered.end === null || (covered.end - target) * 1000 < recovery) return;
+    if (!startupHeadroomSufficient(covered, target, recovery)) return;
     return { covered, recovery };
   };
   const waitStartupCommit = signal => new Promise((resolve, reject) => {
@@ -476,7 +483,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         if (performance.now() >= startup.deadline) return endStartup('failed', 'deadline');
         if (!residentCurrent()) return;
         const final = coverage(fresh, covered.rows);
-        if (final.end === null || (final.end - fresh) * 1000 < recovery) return;
+        if (!startupHeadroomSufficient(final, fresh, recovery)) return;
         return true;
       };
     };

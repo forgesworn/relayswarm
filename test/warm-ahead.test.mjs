@@ -2082,6 +2082,89 @@ test('startup buffer future dependency cannot survive pause or changed parsed fu
   }
 });
 
+// Encoded-loader regression for the observed early-publication boundary.
+// SN0/SN1 services are controlled941/4916ms from the captured trajectory;
+// SN2+ later1000ms and the10ms ACK are explicit synthetic assumptions. No
+// unrequested field response or WAN throughput is inferred from this fixture.
+test('startup first-room publication retains a strict recovery surplus before starting its clock', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let elapsed = 0, epoch = null, commitCalls = 0;
+  t.mock.method(performance, 'now', () => 1000 + elapsed);
+  const bytes = Uint8Array.from({ length: 6 * 1024 * 1024 }, (_, index) => index % 251), digest = sha(bytes);
+  const sourceSamples = [], completions = [], checkpoints = [];
+  const f = startupFixture(t, { timedStats: true, startupMaxBytes: 32 * 1024 * 1024,
+    permit: ctx => ({ key: ctx.url, size: bytes.length, sha256: digest, current: () => true }),
+    beforeSuccess: (ctx, stats) => {
+      const serviceMs = stats.loading.end - stats.loading.start;
+      sourceSamples.push(serviceMs);
+      const sorted = [...sourceSamples].sort((a, b) => a - b);
+      f.state.recovery = Math.max(2000, Math.round(sorted[Math.floor(sorted.length * .9)]) * 1.25 + 100);
+      completions.push({ sn: ctx.frag.sn, elapsed, serviceMs, recoveryMs: f.state.recovery });
+    },
+    commit: ({ signal }) => {
+      assert.equal(signal.aborted, false); commitCalls++; epoch = elapsed;
+      return new Promise(resolve => setTimeout(resolve, 10));
+    },
+  });
+  f.state.target = 0;
+  const first = f.load(0, 12000);
+  await flushStartup();
+  while (elapsed < 12000 && !first.calls.success && !first.calls.error) {
+    elapsed++;
+    f.state.target = epoch === null ? 0 : (elapsed - epoch) / 1000;
+    t.mock.timers.tick(1);
+    for (const row of f.requests) {
+      const serviceMs = row.context.frag.sn === 0 ? 941 : row.context.frag.sn === 1 ? 4916 : 1000;
+      if (!row.response && !row.aborted && performance.now() - row.stats.loading.start >= serviceMs) row.finish(false, bytes);
+    }
+    await flushStartup();
+    const warm = f.engine.snapshot(), startup = f.engine.startupSnapshot();
+    assert(startup.heldObjects <= 4 && startup.heldBytes <= 32 * 1024 * 1024);
+    assert(warm.cacheBytes + warm.reservationBytes <= 24 * 1024 * 1024 && warm.active <= 1);
+    if ([941, 5857].includes(elapsed)) checkpoints.push({ elapsed, commitCalls, startup });
+  }
+  const final = f.engine.startupSnapshot();
+  console.log(JSON.stringify({ fixture: 'startup-first-room-strict-surplus', elapsed, epoch, commitCalls, completions,
+    checkpoints, requests: f.requests.map(row => row.context.frag.sn), final,
+    calls: { success: first.calls.success, error: first.calls.error, abort: first.calls.abort } }));
+  assert.equal(first.calls.success, 1, 'verified contiguous recovery must release before the unchanged12s deadline');
+  assert.equal(first.calls.error, 0); assert.equal(first.calls.abort, 0); assert(elapsed < 12000);
+  assert.equal(checkpoints[0].commitCalls, 0, 'own[0,2] equal to R2000 must not publish an advancing room clock');
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2, 3]);
+  assert.equal(commitCalls, 1); assert.equal(final.commitCompleted, true); assert.equal(final.released, 1);
+  assert.equal(final.requiredHeadroomMs, 6245);
+  assert((final.verifiedEnd - final.targetTime) * 1000 >= final.requiredHeadroomMs);
+  assert.strictEqual(first.calls.args[0], f.requests[0].response);
+  assert.strictEqual(first.calls.args[1], f.requests[0].stats);
+  assert.strictEqual(first.calls.args[2], first.context);
+  assert(f.state.reservations.every(size => size <= 32 * 1024 * 1024));
+});
+
+test('startup without a commit hook still releases exact recovery equality', async t => {
+  const f = startupFixture(t), first = f.load(0, 12000);
+  f.state.target = 0;
+  await requireOriginalVerified(f);
+  const final = f.engine.startupSnapshot();
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(first.calls.abort, 0);
+  assert.equal(final.verifiedEnd - final.targetTime, 2); assert.equal(final.requiredHeadroomMs, 2000);
+  assert.equal(final.commitStarted, false); assert.equal(final.commitCompleted, false); assert.equal(final.released, 1);
+  assert.strictEqual(first.calls.args[0], f.requests[0].response);
+});
+
+test('startup commit rechecks strict surplus after awaited authority instead of publishing at fresh equality', async t => {
+  let commits = 0;
+  const f = startupFixture(t, { commit: () => { commits++; } }), first = f.load(0, 12000);
+  await requireOriginalVerified(f);
+  f.state.holdRecheck = true; f.state.holdCheckSn = 0;
+  f.requests[1].finish(); await flushStartup();
+  assert.equal(typeof f.state.releaseRecheck, 'function'); assert.equal(commits, 0);
+  f.state.target = 2; f.state.releaseRecheck(); await flushStartup();
+  assert.equal(commits, 0, 'authority await cannot lend an earlier surplus to the external hook');
+  assert.equal(first.calls.success, 0); assert.equal(f.engine.startupSnapshot().commitStarted, false);
+  assert.equal(f.requests.length, 3); f.requests[2].finish(); await flushStartup();
+  assert.equal(commits, 1); assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
+});
+
 test('startup commit waits for safe verified bytes, then ACK and fresh authority before the exact callback', async t => {
   let commitCalls = 0, release, argument;
   const f = startupFixture(t, { commit: value => {

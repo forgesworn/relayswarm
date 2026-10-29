@@ -240,6 +240,13 @@ return a promise. For example, a host can prepare a new room locally at zero,
 publish its start after verified media is ready, and await acknowledgement.
 An existing room must retain its advancing clock.
 
+Before calling an external commit hook, verified coverage must strictly exceed
+the measured recovery requirement: exact equality leaves no room for the clock
+advance during acknowledgement. This surplus is rechecked after awaited
+authority checks. Without a hook, exact equality remains sufficient. After
+acknowledgement, the fresh coverage check still requires at least the measured
+recovery headroom; the original deadline remains unchanged.
+
 The original twelve-second/parent startup deadline and held reservations
 remain in force while the host acknowledges. Cancellation retires the operation; late resolution
 or rejection cannot release media. A current hook failure reports
