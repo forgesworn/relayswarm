@@ -3178,6 +3178,24 @@ players then used recorded VOD without a RelaySwarm adapter, so later HTTP206s
 are not evidence of SDK mixed transfers. This is a failed field result, not a
 performance qualification. Physical-device and public-operator gates remain.
 
+A subsequent private two-viewer candidate enables both steady warming and
+buffered mixed ranges against the updated website. First 4K frames arrive in
+4.7 and 8.1 seconds; cumulative native observations record zero waits, stalls,
+player errors or dropped frames, including a track wrap and at least 79 seconds
+afterwards. Both retain the Hls/MediaSource adapter. This is an unmatched
+diagnostic, so it does not isolate which option or source conditions produced
+that healthy playback.
+
+The overall candidate still fails. Accepted peer media is only 0.044% and
+0.118%, with maximum reported verified TLS-route media of 0.47 and 1.22 MiB,
+below the unchanged 5% and 8 MiB requirements. The start route capture records
+nominated, connected relay/TLS pairs still in the ICE `in-progress` state;
+the final pairs succeed, but the required start proof is missing. Monotonic
+observation is 340002 ms while wall observation is 339996 ms, below its separate
+340000 ms minimum. The failed capture remains unchanged. The temporary issuer,
+relay, browser profiles and rendered credentials were removed, and the paired
+private relay and firewall are unchanged. No experimental SDK was deployed.
+
 ## Unreleased room-start publication boundary (29 October 2026)
 
 An optional startup commit hook now requires verified coverage strictly above
