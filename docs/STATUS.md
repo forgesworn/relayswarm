@@ -12,6 +12,14 @@ Earlier release and pilot evidence below retains its date and source.
 
 ## Unreleased moving-room startup admission (29 October 2026)
 
+Additional composition controls exercise steady warming after startup release,
+deferred consumption credit, cached reuse and pause cancellation. A separate
+combined-options integration case explicitly asserts the committed Core is
+ready and verifies a warmed object's HAVE advertisement, upload and local reuse.
+The focused eight-control selection passes with the correct Core environment;
+direct warm-engine controls remain JavaScript policy tests. This is not a new
+full-suite run or mixed-transfer performance qualification.
+
 When the original fragment is obsolete, merely selecting metadata ahead of the
 room target no longer freezes a window before it passes the existing recovery
 and verified-service projection. Freezing follows successful reservation and

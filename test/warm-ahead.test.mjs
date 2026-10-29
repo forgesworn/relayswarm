@@ -87,6 +87,8 @@ async function fixture(t, options = {}) {
       lateHaveRace: options.lateHaveRace ?? false,
       maxPeerWaitMs: options.maxPeerWaitMs ?? 2500, lateWindowMs: 4000 } : {}),
     ...(options.maxRaces ? { maxConcurrentRaces: options.maxRaces } : {}),
+    ...(options.bufferedMixedRanges === undefined ? {} : { bufferedMixedRanges: options.bufferedMixedRanges }),
+    ...(options.traceRequests === undefined ? {} : { traceRequests: options.traceRequests }),
     ...(options.gated ? { ticket: 'fixture-owner', admit: () => state.admit } : {}),
     maxHeldBytes: options.maxHeldBytes ?? 64 * 1024 * 1024, maxHeldSegments: options.maxHeldSegments ?? 12,
     ...(options.onPeerDelivery ? { onPeerDelivery: options.onPeerDelivery } : {}),
@@ -154,7 +156,7 @@ async function fixture(t, options = {}) {
       data: JSON.stringify({ t: 'want', id: sn + 1, k: sha(`${swarmId}\n/media/s${sn}.m4s`) }),
     })); } };
   };
-  return { requests, fragments, swarm, hls, media, load, bytes, state, addPeer };
+  return { requests, fragments, swarm, hls, media, load, bytes, state, addPeer, connections };
 }
 
 test('warm ahead reuses one verified HTTP object locally without duplicate network or peer credit', async t => {
@@ -637,6 +639,39 @@ test('a connected peer can request the verified future object before local deman
   assert.equal(f.swarm.metrics().bytes.uploaded, f.bytes.length);
 });
 
+test('combined steady warming and buffered mixed options serve a verified future with the actual Core', async t => {
+  const f = await fixture(t, { rangePeer: true, silentPeer: true, held: [1], bufferedMixedRanges: true,
+    traceRequests: 128 });
+  assert.equal(f.swarm.metrics().core.state, 'ready', 'the committed WASM Core is actually selected');
+  assert.equal(f.swarm.metrics().disabledReason, null);
+  Object.assign(f.media, { readyState: 4, playbackRate: 1, ended: false, seeking: false });
+  const peer = await f.addPeer(); f.connections[0].connectionState = 'connected';
+  const genuine = f.load(0); assert.deepEqual(await genuine.result, f.bytes);
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const future = f.requests.find(row => row.context.frag.sn === 1);
+  assert(future.context[STARTUP_MARKER], 'speculation enters the real SDK with its warm ownership marker');
+  const key = sha('warm-ahead-fixture\n/media/s1.m4s');
+  assert(!peer.sent.some(row => row?.t === 'have' && (row.keys ?? row.add ?? []).includes(key)),
+    'unverified in-flight source bytes cannot advertise a held future');
+  future.finish(); await until(() => f.swarm.metrics().warmAhead.verified >= 1);
+  await until(() => peer.sent.some(row => row?.t === 'have' && (row.keys ?? row.add ?? []).includes(key)));
+  const loadIds = f.swarm.trace().rows.filter(row => row.k === 'load' && row.sn === 1).map(row => row.load);
+  assert(loadIds.length > 0, 'the speculative SDK load is present in the actual trace');
+  assert(!f.swarm.trace().rows.some(row => row.k === 'mixedScope' && loadIds.includes(row.load)),
+    'the marked speculative object does not enter buffered mixed setup');
+  peer.want(1); await until(() => peer.sent.some(row => row?.t === 'eof' && row.id === 2));
+  assert.deepEqual(peer.sent.find(row => row instanceof Uint8Array), f.bytes);
+  const before = f.swarm.metrics().bytes.peerFirst;
+  const consumed = f.load(1); assert.deepEqual(await consumed.result, f.bytes);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+  assert.equal(consumed.calls.success, 1); assert.equal(genuine.calls.success, 1);
+  assert.equal(f.swarm.metrics().warmAhead.localReuseBytes, f.bytes.length);
+  assert.equal(f.swarm.metrics().bytes.peerFirst, before, 'HTTP warm reuse cannot invent accepted peer bytes');
+  assert(f.swarm.metrics().warmAhead.active <= 1);
+  f.media.paused = true; f.media.dispatchEvent(new Event('pause'));
+  assert.equal(f.swarm.metrics().warmAhead.cacheBytes, 0);
+});
+
 test('exhausting the upload allowance also withdraws warm references and reservations', async t => {
   const f = await fixture(t, { allowance: 1024 });
   const peer = await f.addPeer();
@@ -755,7 +790,7 @@ function startupFixture(t, options = {}) {
       return permit.sha256 === sha(new Uint8Array(data));
     },
     onVerified: (_permit, data) => { retained.push(data); return true; },
-    onReuse: options.onReuse,
+    onReuse: options.onReuse, reuseBudget: options.reuseBudget,
   });
   const load = (sn = 0, parentMs = 1_000) => {
     const loader = new engine.Loader({ progressive: options.progressive ?? false }), ctx = context(sn), calls = { success: 0, error: 0, abort: 0, progress: 0 };
@@ -896,6 +931,45 @@ test('startup reservation reentrancy cancels changed identity before future HTTP
   assert.equal(f.requests.length, 1, 'identity cancellation must retire admission before any future source load');
   assert.equal(f.engine.snapshot().active, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
   assert.equal(first.calls.success, 0);
+});
+
+test('combined startup buffering and steady warming release once then continue parsed futures', async t => {
+  const f = startupFixture(t, { steady: true, startupMaxBytes: 32 * 1024 * 1024, reuseBudget: () => 25 });
+  let firstAccepted = 0, futureAccepted = 0;
+  const first = f.load(0, 20000);
+  first.context[STARTUP_MARKER].peerBytes = 4;
+  first.context[STARTUP_MARKER].accept = () => { firstAccepted++; };
+  await requireOriginalVerified(f);
+  assert.equal(first.calls.success, 0); assert.equal(firstAccepted, 0);
+  assert.equal(f.engine.startupSnapshot().limits.objects, 4);
+  assert.equal(f.engine.startupSnapshot().limits.bytes, 32 * 1024 * 1024);
+  assert(f.engine.startupSnapshot().heldObjects <= 4);
+  assert(f.engine.startupSnapshot().heldBytes <= 32 * 1024 * 1024);
+  const future = f.requests.find(row => row.context.frag.sn === 1);
+  future.context[STARTUP_MARKER].peerBytes = 4;
+  future.context[STARTUP_MARKER].accept = () => { futureAccepted++; };
+  future.finish(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(firstAccepted, 1);
+  assert.equal(futureAccepted, 0, 'reservoir verification is not consumption of the future object');
+  assert.equal(f.engine.startupSnapshot().state, 'ready');
+  assert.equal(f.engine.snapshot().limits.objects, 3);
+  assert.equal(f.engine.snapshot().limits.bytes, 24 * 1024 * 1024);
+  const cached = f.load(1, 20000); await flushStartup();
+  assert.equal(cached.calls.success, 1); assert.equal(first.calls.success, 1);
+  assert.equal(futureAccepted, 1); assert.equal(firstAccepted, 1);
+  assert.equal(f.engine.snapshot().consumedPeerBytes, 8);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+  const next = f.requests.find(row => row.context.frag.sn === 2); assert(next);
+  next.finish(); await flushStartup();
+  const continuation = f.requests.find(row => row.context.frag.sn === 3);
+  assert(continuation, 'the real next parsed window continues after startup instead of one-shot shutdown');
+  assert(f.engine.snapshot().trackedObjects <= 3);
+  assert(f.engine.snapshot().cacheBytes + f.engine.snapshot().reservationBytes <= 24 * 1024 * 1024);
+  // The SDK pause handler invalidates the warm scope through this same clear.
+  f.state.allowed = false; f.engine.clear(); await flushStartup();
+  assert(continuation.aborted); assert.equal(f.engine.snapshot().cacheBytes, 0);
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().active, 0);
+  assert.equal(first.calls.success, 1); assert.equal(cached.calls.success, 1);
 });
 
 test('startup future HTTP waits for genuine whole verification and wakes without a new timer', async t => {
