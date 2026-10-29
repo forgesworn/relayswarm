@@ -6645,6 +6645,103 @@ test("zero-budget cached race keeps a bursty peer until the real HTTP winner or 
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
+class FixedRateChannel extends PhasedFlowChannel {
+  constructor(bytes, options = {}) { super(bytes, options); this.rate = options.rate ?? 327_680; }
+  send(data) {
+    const frame = typeof data === 'string' ? JSON.parse(data) : null;
+    if (frame?.t === 'want') {
+      const size = commitmentPieceSize(this.bytes.length);
+      const from = frame.p ? frame.p[0] * size : 0;
+      const to = frame.p ? Math.min(frame.p[1] * size, this.bytes.length) : this.bytes.length;
+      this.flowMs = (to - from) / this.rate * 1000;
+    }
+    return super.send(data);
+  }
+}
+
+test("known whole-unfit cached peer-only work leaves immediate HTTP alone", async t => {
+  const clock = virtualClock(t);
+  let f;
+  // A six-MiB commitment has 98,304-byte pieces. Carrying one over the
+  // existing 300ms measurement floor gives a real measured 327,680B/s flow.
+  try {
+    f = await clock.settle(multiFixture(t, { size: 6 * 1024 * 1024,
+      holders: [{ Channel: FixedRateChannel, firstByteMs: 450 }], originFallbackMs: 1000,
+      originDelayMs: 50, holdWholeOrigin: true, traceRequests: 4096,
+      swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 2500 } }));
+    sameBytes(await clock.settle(f.load(), 2000), f.bytes);
+    const training = f.swarm.metrics().peerRequestDiagnostics.records.find(row =>
+      row.outcome === 'payload' && row.receivedBytes >= 32_768 && row.elapsedMs - row.firstByteMs >= 300);
+    assert(training, 'the real signed Core transfer must first measure this accepted holder');
+    assert(f.ranges.length > 0, 'ordinary mixed range delivery supplies the calibration object');
+    const wants = f.channels[0].wants.length, sources = f.wholeLoads.length, before = f.swarm.metrics();
+    f.hls.media = { currentTime: 10, paused: false, ended: false, seeking: false, readyState: 4,
+      playbackRate: 1, buffered: { length: 0 } };
+    const entry = clock.now(), pending = beginCountedMultiLoad(f);
+    assert.equal(f.wholeLoads.length, sources + 1, 'whole HTTP starts synchronously before peer admission');
+    const whole = f.wholeLoads.at(-1);
+    await clock.advance(2600);
+    const model = f.swarm.metrics().core.multiHolder.peerFlow.lastModel;
+    assert(model && model.firstByteMs !== null && model.rateBytesPerSecond > 0,
+      'the decision uses an actual known same-link flow, not an unknown refresh');
+    assert(model.firstByteMs + f.pieceSize / model.rateBytesPerSecond * 1000 < 2500,
+      'a single piece fits the peer-only deadline');
+    assert(model.firstByteMs + f.bytes.length / model.rateBytesPerSecond * 1000 > 2500,
+      'the same known flow cannot complete the signed whole object');
+    whole.callbacks.onSuccess({ data: f.bytes.slice().buffer }, whole.loader.stats, multiContext, null);
+    sameBytes(await clock.settle(pending.response), f.bytes);
+    assert.deepEqual([pending.calls.success.length, pending.calls.abort.length, pending.calls.error.length], [1, 0, 0]);
+    assert.equal(f.wholeLoads.length, sources + 1, 'there is still exactly one whole HTTP source');
+    const starts = f.swarm.trace().rows.filter(row => row.k === 'xfer' && row.op === 'start' && row.peerOnly);
+    t.diagnostic(JSON.stringify({ training: { bytes: training.receivedBytes, firstByteMs: training.firstByteMs,
+      flowMs: training.elapsedMs - training.firstByteMs }, model, wholeBytes: f.bytes.length,
+      elapsedMs: clock.now() - entry, additionalPeerRequests: f.channels[0].wants.length - wants,
+      peerOnlyCoreStarts: starts.length, peerOnlyCommands: starts.map(row => row.out?.c) }));
+    assert.equal(f.channels[0].wants.length, wants,
+      'a known whole-unfit peer-only transfer must not claim the holder for partial work it cannot deliver');
+    const after = f.swarm.metrics();
+    assert.equal(after.segments.peerNoFit, before.segments.peerNoFit + 1);
+    assert.equal(after.peerAdmission.claims, before.peerAdmission.claims, 'decline occurs before taking a link lease');
+    assert.equal(after.core.multiHolder.transfers, before.core.multiHolder.transfers, 'decline occurs before allocating Core work');
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test("known whole-fit cached peer-only work combines admissible holders", async t => {
+  for (const count of [1, 2]) await t.test(`${count} measured holder${count === 1 ? '' : 's'}`, async t => {
+    const clock = virtualClock(t); let f;
+    try {
+      f = await clock.settle(multiFixture(t, { size: count * 65_536,
+        holders: Array.from({ length: count }, () => ({ Channel: FixedRateChannel, firstByteMs: 450, rate: 65_536 / .3 })),
+        originFallbackMs: 800, holdWholeOrigin: true, traceRequests: 4096,
+        swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 800 } }));
+      sameBytes(await clock.settle(f.load(), 1_000), f.bytes);
+      assert.equal(f.swarm.metrics().peerRequestDiagnostics.counters.payload, count,
+        'every holder first supplies an actual verified 300ms flow');
+      const wants = f.channels.map(channel => channel.wants.length), before = f.swarm.metrics();
+      f.hls.media = { currentTime: 10, buffered: { length: 0 } };
+      const entry = clock.now(), pending = beginCountedMultiLoad(f);
+      assert.equal(f.wholeLoads.length, 1, 'the original whole HTTP starts synchronously');
+      sameBytes(await clock.settle(pending.response, 800), f.bytes);
+      const start = f.swarm.trace().rows.find(row => row.k === 'xfer' && row.op === 'start' && row.peerOnly);
+      assert(start, 'actual Core peer-only delivery is admitted');
+      assert.equal(start.peers.length, count);
+      assert(start.peers.every(([, first, rate]) => first === 450 && rate > 0), 'all estimates use measured same-link flow');
+      assert.deepEqual(start.probePeers, [], 'the positive case cannot pass through unknown refresh');
+      if (count === 2) assert(start.peers.every(([, first, rate]) => first + f.bytes.length / rate > 800),
+        'neither holder could deliver this whole object alone');
+      assert(start.peers.reduce((sum, [, first, rate]) => sum + Math.max(0, 800 - first) * rate, 0) >= f.bytes.length,
+        'the combined measured holders fit without increasing the original deadline');
+      assert(f.channels.every((channel, i) => channel.wants.length > wants[i]), 'both admitted holders really serve the object');
+      assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaceWins, before.segments.zeroBudgetPeerRaceWins + 1);
+      assert.equal(f.swarm.metrics().bytes.peerFirst - before.bytes.peerFirst, f.bytes.length);
+      assert.equal(f.wholeLoads[0].loader.aborted, true);
+      assert.deepEqual(f.ranges, [], 'peer-only success opens no internal HTTP range');
+      assert.deepEqual([pending.calls.success.length, pending.calls.abort.length, pending.calls.error.length], [1, 0, 0]);
+      assert(clock.now() - entry <= 800);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
 test("zero-budget cached peer-only ranges cannot be stranded by earlier fast whole-HTTP timing", async t => {
   const clock = virtualClock(t), observed = [];
   let f, releaseMetadata;

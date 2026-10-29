@@ -2736,6 +2736,18 @@ class HlsSwarm {
       this.peerFlow.lastNoModel = { candidateCount: candidates.length, model: { ...this.peerFlow.lastModel } };
       this.counters.peerNoFit += 1; return null;
     }
+    // This fresh transfer has no verified pieces and no origin lane. A piece
+    // fitting is not enough: even optimistically sharing the whole object
+    // across the measured holders must fit the same absolute peer deadline.
+    // Unknown/refresh paths retain their existing bounded calibration attempt;
+    // origin-backed transfers may still use a small useful peer fraction.
+    if (plan.peerOnly && [...models.values()].every(model => Number.isFinite(model.rate) && model.rate > 0
+        && Number.isFinite(model.firstByteMs) && model.firstByteMs >= 0)) {
+      const availableMs = Math.max(0, plan.limit - now());
+      const capacity = [...models.values()].map(model => Math.max(0, availableMs - model.firstByteMs) * model.rate)
+        .sort((a, b) => b - a).slice(0, this.options.maxHoldersPerObject).reduce((sum, bytes) => sum + bytes, 0);
+      if (capacity < commitment.size) { this.counters.peerNoFit += 1; return null; }
+    }
     const holders = [...models.keys()];
     const lease = {}, partialSlot = plan[OWNED_HTTP_WINNER];
     let preservePartial = null, preparePartial = null;
