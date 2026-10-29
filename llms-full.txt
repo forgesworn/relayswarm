@@ -3150,6 +3150,40 @@ the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Current-source private field diagnostic (29 October 2026)
+
+One further full-context Core run passes 876 checks with zero failures and one
+Core-inapplicable JavaScript-selection skip. Both warm main-thread and Worker
+HTTP206 positives pass. The earlier intermittent Worker whole-source failure
+does not recur; its cause remains unexplained and its failed receipt is retained.
+
+A fresh private two-viewer trial uses the exact current build. Both browsers
+verify all four substituted module bodies and reach actual 3840x2160 frames in
+4.97 and 5.04 seconds. Both receive separate short-lived credentials and connect
+native ICE/SCTP within 0.92 seconds. The strict readiness stage nevertheless
+fails: one transport-selected remote candidate remains `prflx`, while the
+required type is `relay`. Its local relay/TLS path, DTLS and candidate pair
+succeed; this does not satisfy the unchanged remote-relay gate. SDP messages
+were sent with one candidate before gathering completed, but no retained
+candidate-membership evidence proves why the native type differs.
+
+The 340-second observation never starts. Final reports record zero accepted
+peer bytes on both viewers, and both complete HTTP captures contain no Range
+requests or HTTP206 responses. One viewer records a 47.5 ms seek-associated wait
+while 5.009 seconds remain buffered; it resumes before the nearby source body
+completes. The other records no health event. There is no reproduced eight-second
+discard/refetch episode. A retained mixed entry omits the warm-owner role and
+some refusal rows, so it cannot establish that warm-owned mixed delivery ran.
+No coordination or underflow cause is inferred from those missing observations.
+
+All 32 captured files and 17 run inputs reverify within the original limits.
+Cleanup removes the temporary relay/issuer, exact browser profiles and stages,
+rendered private material and archive, while preserving the paired relay and
+firewall. This is a failed private diagnostic, not sustained playback,
+public-operator, physical-phone or traffic-saving qualification. The next
+measurement must retain the existing warm-role/refusal fields and privately
+compare candidate membership without publishing addresses or SDP.
+
 ## Draft steady warm mixed delivery (29 October 2026)
 
 The draft now lets eligible steady future work choose disjoint source ranges
