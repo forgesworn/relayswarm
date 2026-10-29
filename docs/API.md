@@ -509,6 +509,17 @@ ID, and each multi-holder scheduler call with its inputs and the commands it
 returned, so a recorded transfer replays against the module offline. Times are
 whole milliseconds from the swarm's creation; holders are session labels, not
 keys. It is kept out of `metrics()`, which receipts snapshot repeatedly.
+Cached setup records `cached-no-matching-have` when no currently eligible
+captured holder matches the exact object, and `cached-ranges-unavailable` when
+the range engine declines before transfer. `matchingHave: false` alone does not
+prove that an advertised claim was absent. Its optional `projection` with
+`stage: "cached-entry"` records aggregate `capturedLinks`, `entryChecked`,
+`entryMatched`, `currentChecked`, `currentMatched` and `eligibleMatched` counts
+from the initial pass. A zero checked count means that predicate was not read;
+late-HAVE checks do not rewrite these initial observations. These fields identify
+existing return branches without creating credit or changing source loading. A cached handoff's new
+`load` row includes an optional numeric `parentLoad` linking its earlier mixed
+load. Ring eviction can remove that parent; missing history remains unknown.
 Buffered mixed loads also retain `mixedScope` decisions and `xferFinish`
 reasons when tracing is enabled. Scope rows record the predicates and fragment
 geometry actually read by the existing checks; a skipped predicate remains

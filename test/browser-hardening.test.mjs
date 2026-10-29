@@ -9523,6 +9523,81 @@ function ownedWarmControl(f, clock, remainingMs = 8000) {
   return { owner, context, calls, loader, start };
 }
 
+for (const worker of [false, true]) test(`owned warm mixed reports captured nonmatching HAVE before Core allocation (${worker ? 'worker' : 'main'})`, async t => {
+  const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    assert.equal(f.swarm.metrics().core.state, 'ready');
+    if (worker) assert.equal(f.swarm.metrics().core.transferWorker.state, 'ready');
+    const unrelated = 'f'.repeat(64); assert.notEqual(unrelated, f.key);
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [unrelated] }));
+    const before = f.swarm.metrics(), whole = f.wholeLoads.length, ranges = f.ranges.length;
+    const work = ownedWarmControl(f, clock), result = await clock.settle(work.start());
+    assert.equal(result.kind, 'success'); sameBytes(new Uint8Array(result.args[0].data), f.bytes);
+    assert.equal(f.wholeLoads.length, whole + 1); assert.equal(f.ranges.length, ranges);
+    assert.deepEqual(f.channels[0].wants, []); assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, before.core.multiHolder.transfers);
+    const rows = f.swarm.trace().rows, entry = rows.findLast(row => row.k === 'mixedScope' && row.reason === 'entry');
+    assert(entry, 'accepted framing2 with nonempty other-object HAVE entered owned warm setup');
+    assert.equal(rows.find(row => row.k === 'load' && row.load === entry.load).budgetGeometry.source, 'warm-ahead');
+    const eligibility = rows.find(row => row.k === 'eligibility' && row.load === entry.load && row.reason === 'cached-no-matching-have');
+    assert(eligibility, 'the actual cached exact-HAVE refusal must identify why no Core transfer was allocated');
+    assert.equal(eligibility.matchingHave, false); assert.equal(eligibility.budgetGeometry.source, 'warm-ahead');
+    assert.deepEqual(eligibility.projection, { stage: 'cached-entry', capturedLinks: 1,
+      entryChecked: 1, entryMatched: 0, currentChecked: 0, currentMatched: 0, eligibleMatched: 0 });
+    assert(!JSON.stringify(eligibility).includes(unrelated)); assert(!JSON.stringify(eligibility).includes(f.key));
+    assert.equal(work.calls.success, 1);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const worker of [false, true]) test(`owned warm mixed distinguishes exact entry HAVE withdrawn before key completion (${worker ? 'worker' : 'main'})`, async t => {
+  const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    assert.equal(f.swarm.metrics().core.state, 'ready');
+    if (worker) assert.equal(f.swarm.metrics().core.transferWorker.state, 'ready');
+    const before = f.swarm.metrics(), whole = f.wholeLoads.length, ranges = f.ranges.length;
+    const work = ownedWarmControl(f, clock), pending = work.start();
+    // load() has synchronously captured the exact entry HAVE, while #segmentKey
+    // must yield before matching it against the link's current HAVE snapshot.
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    const result = await clock.settle(pending);
+    assert.equal(result.kind, 'success'); sameBytes(new Uint8Array(result.args[0].data), f.bytes);
+    assert.equal(f.wholeLoads.length, whole + 1); assert.equal(f.ranges.length, ranges);
+    assert.deepEqual(f.channels[0].wants, []); assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, before.core.multiHolder.transfers);
+    const rows = f.swarm.trace().rows, entry = rows.findLast(row => row.k === 'mixedScope' && row.reason === 'entry');
+    assert(entry);
+    const eligibility = rows.find(row => row.k === 'eligibility' && row.load === entry.load && row.reason === 'cached-no-matching-have');
+    assert(eligibility); assert.equal(eligibility.matchingHave, false);
+    assert.equal(eligibility.budgetGeometry.source, 'warm-ahead');
+    assert.deepEqual(eligibility.projection, { stage: 'cached-entry', capturedLinks: 1,
+      entryChecked: 1, entryMatched: 1, currentChecked: 1, currentMatched: 0, eligibleMatched: 0 });
+    assert.equal(work.calls.success, 1);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('owned warm mixed reports unavailable range engine before Core allocation', async t => {
+  const clock = virtualClock(t); let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { untrained: true, swarmOptions: { warmAhead: true, serve: true, multiHolder: false } });
+    assert.equal(f.swarm.metrics().core.state, 'ready');
+    const before = f.swarm.metrics(), whole = f.wholeLoads.length;
+    const work = ownedWarmControl(f, clock), result = await clock.settle(work.start());
+    assert.equal(result.kind, 'success'); sameBytes(new Uint8Array(result.args[0].data), f.bytes);
+    assert.equal(f.wholeLoads.length, whole + 1); assert.equal(f.ranges.length, 0); assert.deepEqual(f.channels[0].wants, []);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, before.core.multiHolder.transfers);
+    const rows = f.swarm.trace().rows, entry = rows.findLast(row => row.k === 'mixedScope' && row.reason === 'entry');
+    assert(entry);
+    const eligibility = rows.find(row => row.k === 'eligibility' && row.load === entry.load && row.reason === 'cached-ranges-unavailable');
+    assert(eligibility); assert.equal(eligibility.matchingHave, null);
+    assert.equal(eligibility.budgetGeometry.source, 'warm-ahead');
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
 // Controlled descriptors isolate SDK provenance validation from the separately
 // tested warm-row clock. Advancing performance without dispatching timers models
 // a synchronous callback arriving on the original eight-second boundary.
@@ -9837,6 +9912,10 @@ test('buffered mixed fast Core plan returns to the existing cached winner withou
     assert.equal(f.wholeLoads.length, before + 1); assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length, JSON.stringify(f.swarm.trace().rows.slice(-25)));
     const starts = f.swarm.trace().rows.filter(row => row.k === 'xfer' && row.op === 'start').slice(-2);
     assert.equal(starts.length, 2); assert.equal(starts[0].deadline, starts[1].deadline, 'handoff keeps the exact original peer deadline');
+    const rows = f.swarm.trace().rows, originalLoad = rows.findLast(row => row.k === 'mixedScope' && row.reason === 'cached-handoff').load;
+    const cachedLoad = rows.find(row => row.k === 'load' && row.load === starts[1].load);
+    assert.notEqual(cachedLoad.load, originalLoad); assert.equal(cachedLoad.parentLoad, originalLoad,
+      'the new cached trace ID links to its original mixed owner without carrying keys or identities');
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 

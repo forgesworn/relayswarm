@@ -2580,6 +2580,17 @@ ID, and each multi-holder scheduler call with its inputs and the commands it
 returned, so a recorded transfer replays against the module offline. Times are
 whole milliseconds from the swarm's creation; holders are session labels, not
 keys. It is kept out of `metrics()`, which receipts snapshot repeatedly.
+Cached setup records `cached-no-matching-have` when no currently eligible
+captured holder matches the exact object, and `cached-ranges-unavailable` when
+the range engine declines before transfer. `matchingHave: false` alone does not
+prove that an advertised claim was absent. Its optional `projection` with
+`stage: "cached-entry"` records aggregate `capturedLinks`, `entryChecked`,
+`entryMatched`, `currentChecked`, `currentMatched` and `eligibleMatched` counts
+from the initial pass. A zero checked count means that predicate was not read;
+late-HAVE checks do not rewrite these initial observations. These fields identify
+existing return branches without creating credit or changing source loading. A cached handoff's new
+`load` row includes an optional numeric `parentLoad` linking its earlier mixed
+load. Ring eviction can remove that parent; missing history remains unknown.
 Buffered mixed loads also retain `mixedScope` decisions and `xferFinish`
 reasons when tracing is enabled. Scope rows record the predicates and fragment
 geometry actually read by the existing checks; a skipped predicate remains
@@ -3149,6 +3160,22 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased cached setup diagnostics (29 October 2026)
+
+Cached mixed setup now identifies a missing exact captured HAVE and an
+unavailable range engine at their existing pre-Core return branches. Cached
+handoff load IDs link to their earlier mixed owner. The change adds bounded
+local diagnostic fields only; transport, authority, scheduling, deadlines,
+selection and accepted credit retain their existing behaviour.
+
+Regressions first fail for the missing refusal row and initial claim counts.
+Ten focused Core controls pass after the diagnostic repair, including
+main/Worker actual HTTP206 assembly, absent versus withdrawn exact-HAVE claims,
+refusal without a new transfer, unchanged cached deadlines, and existing
+getter/throwing-sink checks. A repaired private capture preserves the warm role,
+initial predicate counts and linked load history within its original byte limits;
+its 13 controls pass. These checks establish observation behaviour, not a field fix.
 
 ## Current-source private field diagnostic (29 October 2026)
 

@@ -10,6 +10,22 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased cached setup diagnostics (29 October 2026)
+
+Cached mixed setup now identifies a missing exact captured HAVE and an
+unavailable range engine at their existing pre-Core return branches. Cached
+handoff load IDs link to their earlier mixed owner. The change adds bounded
+local diagnostic fields only; transport, authority, scheduling, deadlines,
+selection and accepted credit retain their existing behaviour.
+
+Regressions first fail for the missing refusal row and initial claim counts.
+Ten focused Core controls pass after the diagnostic repair, including
+main/Worker actual HTTP206 assembly, absent versus withdrawn exact-HAVE claims,
+refusal without a new transfer, unchanged cached deadlines, and existing
+getter/throwing-sink checks. A repaired private capture preserves the warm role,
+initial predicate counts and linked load history within its original byte limits;
+its 13 controls pass. These checks establish observation behaviour, not a field fix.
+
 ## Current-source private field diagnostic (29 October 2026)
 
 One further full-context Core run passes 876 checks with zero failures and one

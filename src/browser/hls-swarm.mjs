@@ -237,6 +237,7 @@ const increment = (value) => Math.min(Number.MAX_SAFE_INTEGER, value + 1);
 const PEER_ELIGIBILITY_REASONS = Object.freeze([
   "no-budget", "aborted-before-eligibility", "no-have-no-wait", "no-have-wait",
   "wait-no-longer-eligible", "wait-aborted", "wait-expired", "have-at-entry", "have-after-wait", "projected-late",
+  "cached-no-matching-have", "cached-ranges-unavailable",
 ]);
 const PEER_REQUEST_OUTCOMES = Object.freeze(["payload", "none", "timeout", "abort", "abandoned", "closed", "busy", "send-error"]);
 // A projection from evidence this old may be stale; one attempt within the
@@ -856,14 +857,15 @@ class HlsSwarm {
     try { return (context && this.traceLoads.get(context)) ?? null; } catch { return null; }
   }
 
-  #traceBegin(context, budgetMs, limitMs, budgetGeometry) {
+  #traceBegin(context, budgetMs, limitMs, budgetGeometry, parentLoad) {
     if (!this.options.traceRequests) return;
     try {
       const load = this.traceLoadNext++;
       this.traceLoads.set(context, load);
       const integer = (value) => Number.isSafeInteger(value) ? value : null;
       this.#trace({ k: "load", load, at: this.#traceAt(), sn: integer(context.frag?.sn), level: integer(context.frag?.level), cc: integer(context.frag?.cc),
-        budgetMs: Math.round(budgetMs), limitMs: Math.round(limitMs), budgetGeometry: { ...budgetGeometry } });
+        budgetMs: Math.round(budgetMs), limitMs: Math.round(limitMs), budgetGeometry: { ...budgetGeometry },
+        ...(Number.isSafeInteger(parentLoad) && parentLoad > 0 ? { parentLoad } : {}) });
       return load;
     } catch {}
   }
@@ -1491,7 +1493,7 @@ class HlsSwarm {
                 if (settled) return; settled = true; callbacks[name]?.(...args);
               };
               try { return this.loadCachedRace(context, remaining, handed, geometry, cached,
-                { enteredAt, recoveryDeadline, firstDeadline, scopeCurrent, entryLinkCurrent, ownerCurrent: warmOwner?.current }); }
+                { enteredAt, recoveryDeadline, firstDeadline, scopeCurrent, entryLinkCurrent, ownerCurrent: warmOwner?.current, parentLoad: traceLoad }); }
               catch {
                 traceMixed('cached-handoff-threw');
                 this.cancel?.(); this.pendingCallbacks = null;
@@ -1580,7 +1582,7 @@ class HlsSwarm {
         return finishOrigin;
       }
       loadCachedRace(context, config, callbacks, budgetGeometry, cached, absolute = null) {
-        const traceLoad = swarm.#traceBegin(context, 0, swarm.options.maxPeerWaitMs, budgetGeometry);
+        const traceLoad = swarm.#traceBegin(context, 0, swarm.options.maxPeerWaitMs, budgetGeometry, absolute?.parentLoad);
         const token = {}, controller = new AbortController(), t0 = absolute?.enteredAt ?? now();
         const peerDeadline = Math.min(t0 + swarm.options.maxPeerWaitMs, absolute?.recoveryDeadline ?? Infinity);
         const partial = swarm.#partialHttpWinner(controller);
@@ -2495,7 +2497,10 @@ class HlsSwarm {
     // engine is unavailable. The ordinary origin wrapper still owns caching
     // and statistics; unconfigured live/VOD coordination is unchanged.
     if (this.options.transferWorkerUrl !== undefined && this.transferWorkerState !== "ready") return null;
-    if (plan.bufferedMixed && !this.#rangesEnabled()) return null;
+    if (plan.bufferedMixed && !this.#rangesEnabled()) {
+      this.#peerEligibility(context, budgetMs, "cached-ranges-unavailable", null, budgetGeometry, undefined, undefined, false, traceLoad);
+      return null;
+    }
     const discoveryContext = this.discovery.contexts.get(context.frag.type || "main");
     const key = plan.knownKey ?? await this.#segmentKey(context);
     if (signal.aborted || this.stopped || plan.currentValid && !plan.currentValid()) {
@@ -2503,10 +2508,22 @@ class HlsSwarm {
       return null;
     }
     if (plan.cachedOnly) {
-      const matching = (atEntry) => [...plan.cachedOnly].filter(([link, have]) => (!atEntry || have.has(key)) && link.have.has(key)
-        && this.links.get(link.pubkey) === link && this.#peerEntryAvailable(link, context) && !this.banned.has(link.pubkey)
-        && link.supportsRanges === true && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 &&
-        (!plan.entryLinkCurrent || plan.entryLinkCurrent(link))).map(([link]) => link);
+      let cachedEntry;
+      const matching = (atEntry) => {
+        const entries = [...plan.cachedOnly];
+        const observed = atEntry ? { stage: "cached-entry", capturedLinks: entries.length,
+          entryChecked: 0, entryMatched: 0, currentChecked: 0, currentMatched: 0, eligibleMatched: 0 } : null;
+        const checked = (name, value) => {
+          if (observed) { observed[name + "Checked"]++; if (value) observed[name + "Matched"]++; }
+          return value;
+        };
+        const holders = entries.filter(([link, have]) => (!atEntry || checked("entry", have.has(key))) && checked("current", link.have.has(key))
+          && this.links.get(link.pubkey) === link && this.#peerEntryAvailable(link, context) && !this.banned.has(link.pubkey)
+          && link.supportsRanges === true && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 &&
+          (!plan.entryLinkCurrent || plan.entryLinkCurrent(link))).map(([link]) => link);
+        if (observed) { observed.eligibleMatched = holders.length; cachedEntry = observed; }
+        return holders;
+      };
       let holders = matching(true);
       if (!holders.length && plan.lateHaveRace) {
         // HTTP is already running. Observe actual HAVE on the accepted
@@ -2522,7 +2539,14 @@ class HlsSwarm {
       // Freeze once. Failure or corruption does not open another late-HAVE
       // trial or admit a holder that appeared after this snapshot.
       plan.cachedHolders = new Set(holders);
-      if (!plan.cachedHolders.size || !this.#rangesEnabled()) return null;
+      if (!plan.cachedHolders.size) {
+        this.#peerEligibility(context, budgetMs, "cached-no-matching-have", false, budgetGeometry, cachedEntry, undefined, false, traceLoad);
+        return null;
+      }
+      if (!this.#rangesEnabled()) {
+        this.#peerEligibility(context, budgetMs, "cached-ranges-unavailable", true, budgetGeometry, cachedEntry, undefined, false, traceLoad);
+        return null;
+      }
       if (!plan.bufferedMixed) this.counters.zeroBudgetPeerRaces += 1;
     }
     const rendition = this.#renditionContext(context);
