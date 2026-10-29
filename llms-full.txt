@@ -3269,14 +3269,28 @@ optional real-clock admission. Full six-MiB main/Worker positives still use
 the actual warm manager, commitments, Core and HTTP206, and require exact
 disjoint assembly with deferred once-only credit. Their explicitly functional
 controller clock yields to actual setup I/O before advancing policy timers;
-it is not elapsed-time or throughput evidence. Separate real-clock cases
+it is not elapsed-time or throughput evidence. Two separate real-clock cases
 require either full mixed assembly or complete same-load setup-decline proof,
 zero attempted ranges/peer requests/credit and an exact whole-source body
-within reduced original deadlines. An actual held Worker reply exercises that
-fallback and rejects 28 altered receipts. The incomplete original macOS input
-is retained as a rejecting fixture. All 13 focused checks pass, including the
-six existing real-clock six-MiB tuples and mandatory Core/Worker positive.
-Product timing, original fixture timeouts and field thresholds are unchanged.
+within reduced original deadlines. A separate functional control holds an
+actual Worker reply and advances its logical scheduler to the original 25 ms
+boundary, checking fallback and rejecting 28 altered receipts. It makes no
+native elapsed-time claim. The incomplete original macOS input remains a
+rejecting fixture; six existing real-clock six-MiB tuples are unchanged.
+
+The `a85f8134` full hosted run failed two new test assumptions: macOS passed
+921 of 922 checks but its forced native-time control never observed the START
+reply it expected to hold; that optional setup window does not guarantee a
+START. Its exact internal branch is unknown. Windows base passed 601 of 602
+checks; checkout CRLF conversion changed the immutable JSON receipt's hash.
+The forced control now uses the explicitly functional scheduler described
+above, while ordinary real-clock checks remain unchanged. One file-specific
+Git attribute preserves the original LF receipt bytes and expected hash; an
+actual Git checkout with `core.autocrlf=true` reproduces the old mismatch and
+passes after that correction. The three affected controls, immutable negative
+and two mandatory assembly positives pass locally. The original hosted failures
+remain failed; a new full CI run is required. Product code and timing, original
+fixture timeouts and field thresholds are unchanged.
 
 ## Unreleased cooperative VOD futures (29 October 2026)
 

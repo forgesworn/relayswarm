@@ -4931,7 +4931,7 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
           sentAtMs: performance.now() });
         else this.rpcDropped = (this.rpcDropped ?? 0) + 1;
       }
-      if (this.holdStart && data.op === 'start') (this.startIds ??= new Set()).add(data.id);
+      if (this.holdStart && data.op === 'start') { this.heldStartPosted = true; (this.startIds ??= new Set()).add(data.id); }
       if (this.holdDelivered && data.op === 'delivered') (this.deliveredIds ??= new Set()).add(data.id);
       if (data.op === 'new') this.newCount = (this.newCount ?? 0) + 1;
       if (data.op === 'free') onFree?.();
@@ -9644,11 +9644,14 @@ for (const [knownFlow, worker, forceSetupExpiry = false, forceScopeExpiry = fals
 // admitted warm setup phase only, leave policy time fixed while real metadata
 // and Worker messages complete; source/peer pacing then uses the same clocks
 // and original deadlines. No model, HAVE, source body or Core result is seeded.
-function warmFunctionalClock(t, awaitingSetup) {
+function warmFunctionalClock(t, awaitingSetup, observeTimers = false) {
   const nativeTimer = setTimeout, nativeNow = performance.now.bind(performance);
-  let at = Math.ceil(nativeNow()), heldSince = null;
+  let at = Math.ceil(nativeNow()), heldSince = null, setupReleasedAt = null;
   const performanceMock = t.mock.method(performance, 'now', () => at);
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
+  // For the forced-RPC functional control, observe the unchanged timer API
+  // after the logical scheduler is installed; this is not a native-time claim.
+  const timerObserver = observeTimers ? realTimerInvocationContext() : null;
   const step = async (ms = 10) => {
     await new Promise(resolve => nativeTimer(resolve, 1));
     if (awaitingSetup()) {
@@ -9656,7 +9659,12 @@ function warmFunctionalClock(t, awaitingSetup) {
       assert(nativeNow() - heldSince < 2000, 'functional warm setup must finish its actual async work');
       return;
     }
-    heldSince = null; at += ms; t.mock.timers.tick(ms);
+    if (observeTimers && heldSince !== null) setupReleasedAt = at;
+    heldSince = null;
+    // Hit the unchanged setup boundary exactly, then resume ordinary batches.
+    const elapsed = setupReleasedAt === null ? null : at - setupReleasedAt;
+    const advanceMs = observeTimers && elapsed !== null && elapsed < 25 ? Math.min(ms, 25 - elapsed) : ms;
+    at += advanceMs; t.mock.timers.tick(advanceMs);
   };
   const advanceUntil = async (predicate, limitMs = 10000) => {
     const begin = at, wall = nativeNow();
@@ -9673,9 +9681,10 @@ function warmFunctionalClock(t, awaitingSetup) {
     return result.value;
   };
   let restored = false;
-  const restore = () => { if (!restored) { restored = true; t.mock.timers.reset(); performanceMock.mock.restore(); } };
+  const restore = () => { if (!restored) { restored = true; timerObserver?.restore(); t.mock.timers.reset(); performanceMock.mock.restore(); } };
   t.after(restore);
-  return { settle, advanceUntil, advance: async ms => { for (let done = 0; done < ms; done += 10) await step(Math.min(10, ms - done)); }, restore };
+  return { settle, advanceUntil, timerSnapshot: timerObserver?.snapshot,
+    advance: async ms => { for (let done = 0; done < ms; done += 10) await step(Math.min(10, ms - done)); }, restore };
 }
 
 // Actual real-clock optional admission needs a complete same-load observation,
@@ -9827,18 +9836,23 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
   }
   for (const warming of ownedWarm ? [true] : [true, false]) {
     let f, received, declined = false, declineProof = null;
-    const timers = realAdmission ? realTimerInvocationContext() : null;
+    const timers = realAdmission && !logical ? realTimerInvocationContext() : null;
     if (timers) t.after(() => timers.restore());
     const clock = logical ? warmFunctionalClock(t, () => {
       const rows = f?.swarm.trace().rows ?? [];
       const warm = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
-      return Boolean(warm && !received.some(row => row.path === '/media/seg.ts' && row.warm));
-    }) : null;
+      // The forced-decline control fixes one explicit async setup phase:
+      // let actual metadata/allocation reach its REAL posted START, then let
+      // the original25ms timer advance while that actual reply is held.
+      // Neither range admission nor a favourable Core result controls time.
+      return Boolean(warm && (holdSetup ? !bridge?.workers[0]?.heldStartPosted :
+        !received.some(row => row.path === '/media/seg.ts' && row.warm)));
+    }, holdSetup) : null;
     const settle = promise => clock ? clock.settle(promise) : promise;
     const wait = predicate => clock ? clock.advanceUntil(predicate) : until(predicate);
     let rpcObserved = 0;
     const rpc = [], bridge = worker ? transferWorkerFixture(t, { onRpc: row => { rpcObserved++; if (rpc.length < 64) rpc.push(row); } }) : null;
-    const origin = await mixedHttpOrigin(t, bytes, Loader, timers?.snapshot), { requests, url } = origin;
+    const origin = await mixedHttpOrigin(t, bytes, Loader, clock?.timerSnapshot ?? timers?.snapshot), { requests, url } = origin;
     received = origin.received;
     class AccountedHTTP extends origin.HttpLoader {
       load(ctx, config, callbacks) {
@@ -9931,8 +9945,12 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
             assert(declineProof, JSON.stringify({ message: 'real warm fallback requires complete same-load setup proof', proofInput }));
             if (holdSetup) {
               assert.equal(declineProof.stage, 'warm-observed-pending-rpc-timer');
+              assert.equal(proofInput.timer.firedAtMs, proofInput.expected.enteredAtMs + 25,
+                'functional control expires the original setup timer at exactly25ms');
               warmDeclineMutationControls(proofInput);
-              console.log(JSON.stringify({ fixture: 'actual-warm-held-rpc-proof', proofInput, proof: declineProof }));
+              console.log(JSON.stringify({ fixture: 'actual-warm-held-rpc-proof',
+                controllerClock: 'logical-functional', timerClockDomain: 'logical-performance',
+                proofInput, proof: declineProof }));
             }
           } else assert(targetOrigin.range, JSON.stringify({ message: 'eligible owned warm work starts origin206 before any whole GET', worker,
             load: load ?? null, traceDropped: trace.dropped, rows: diagnosticRows.slice(-64), rowsOmitted: Math.max(0, diagnosticRows.length - 64),
@@ -10016,8 +10034,11 @@ for (const worker of [false, true]) test(`owned steady warm work assembles disjo
 for (const worker of [false, true]) test(`owned steady warm real-clock admission retains strict206 or observed setup decline (${worker ? 'worker' : 'main'})`, { timeout: 20000 },
   t => realCoreWarmContrast(t, { ownedWarm: true, worker, realAdmission: true }));
 
-test('owned steady warm real-clock held Worker reply proves setup-only whole fallback', { timeout: 20000 },
-  t => realCoreWarmContrast(t, { ownedWarm: true, worker: true, realAdmission: true, holdSetup: true }));
+// Mandatory functional timer/RPC control; no assumption that a native25ms
+// optional setup reaches START under arbitrary hosted load. Ordinary real-clock
+// cases above still require actual strict206 or a complete observed decline.
+test('owned steady warm held Worker reply proves setup-only whole fallback (logical controller)', { timeout: 20000 },
+  t => realCoreWarmContrast(t, { ownedWarm: true, worker: true, logical: true, realAdmission: true, holdSetup: true }));
 
 
 async function bufferedMixedFixture(t, clock, options = {}) {
