@@ -16,6 +16,7 @@ import { PeerLink } from "../src/browser/peer-link.mjs";
 import { RelayPool, RelaySwarmSession } from "../src/relay-session.mjs";
 import { commitmentContent, commitmentPieceSize, KIND_SEGMENT_COMMITMENT, verifySegmentCommitment } from "../src/browser/segment-commitment.mjs";
 import { startLocalRelay } from "./support/local-relay.mjs";
+import { mixedHttpOrigin } from "./support/mixed-http-origin.mjs";
 import { boundedOperation } from "../src/browser/bounded-operation.mjs";
 import { WARM_AHEAD } from "../src/browser/warm-ahead.mjs";
 import { NeighbourDiscovery } from "../src/browser/neighbour-discovery.mjs";
@@ -4814,11 +4815,19 @@ test("a caller abort during the wait is not a miss", async t => {
 const multiCoreBytes = await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url));
 const multiCore = await WebAssembly.compile(multiCoreBytes);
 
-function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false, holdNew = false, holdBan = false, holdDelivered = false, onFree } = {}) {
+function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false, holdNew = false, holdBan = false, holdDelivered = false, onFree, onRpc } = {}) {
   const workers = [];
   class WorkerImpl extends EventTarget {
     constructor() {
       super(); workers.push(this); this.holdNew = holdNew; this.holdDelivered = holdDelivered;
+      if (onRpc) this.addEventListener('message', ({ data }) => {
+        if (!this.rpcSent?.has(data.id)) return;
+        const sent = this.rpcSent.get(data.id); this.rpcSent.delete(data.id);
+        if ((this.rpcObserved ?? 0) < 32) {
+          this.rpcObserved = (this.rpcObserved ?? 0) + 1;
+          try { onRpc({ ...sent, replyAtMs: performance.now(), success: data.ok === true }); } catch {}
+        } else this.rpcDropped = (this.rpcDropped ?? 0) + 1;
+      });
       this.thread = new WorkerThread(new URL("./support/core-transfer-worker-thread.mjs", import.meta.url));
       this.exit = new Promise(resolve => this.thread.once("exit", resolve));
       this.thread.on("message", data => {
@@ -4831,6 +4840,11 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
       this.thread.on("error", () => this.dispatchEvent(new Event("error")));
     }
     postMessage(data, transfer) {
+      if (onRpc && ['new', 'start'].includes(data.op)) {
+        this.rpcSent ??= new Map();
+        if (this.rpcSent.size < 32) this.rpcSent.set(data.id, { id: data.id, op: data.op, sentAtMs: performance.now() });
+        else this.rpcDropped = (this.rpcDropped ?? 0) + 1;
+      }
       if (this.holdDelivered && data.op === 'delivered') (this.deliveredIds ??= new Set()).add(data.id);
       if (data.op === 'new') this.newCount = (this.newCount ?? 0) + 1;
       if (data.op === 'free') onFree?.();
@@ -8729,50 +8743,11 @@ test('buffered mixed setup retains only25ms before ordinary source invocation wh
   } finally { release?.(); if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
-for (const knownFlow of [true, false]) for (const worker of [false, true]) test(`buffered mixed ${knownFlow ? '' : 'untrained '}six-MiB object combines a paced peer fraction with actual206 HTTP bodies and no extra whole GET (${worker ? 'committed-WASM worker' : 'main-thread'})`, { timeout: 20000 }, async t => {
-  const workerOptions = worker ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: transferWorkerFixture(t).WorkerImpl } : {};
-  const { request } = await import('node:http');
+for (const [knownFlow, worker, forceSetupExpiry] of [[true, false, false], [true, true, false], [false, false, false], [false, true, false], [false, true, true]]) test(`buffered mixed ${knownFlow ? '' : 'untrained '}six-MiB object retains exact206 assembly or proven25ms setup decline (${worker ? 'committed-WASM worker' : 'main-thread'}${forceSetupExpiry ? ', held allocation' : ''})`, { timeout: 20000 }, async t => {
+  const rpc = [], bridge = worker ? transferWorkerFixture(t, { onRpc: row => rpc.push(row) }) : null;
+  const workerOptions = bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {};
   const size = 6 * 1024 * 1024, bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
-  const received = [], requests = [], server = createServer((req, res) => {
-    const match = /^bytes=(\d+)-(\d+)$/u.exec(req.headers.range ?? '');
-    const from = match ? Number(match[1]) : 0, to = match ? Number(match[2]) + 1 : size;
-    const row = { range: req.headers.range ?? null, status: match ? 206 : 200, sent: 0, complete: false };
-    requests.push(row);
-    res.writeHead(row.status, { 'content-length': to - from,
-      ...(match ? { 'content-range': `bytes ${from}-${to - 1}/${size}` } : {}) });
-    let at = from, timer;
-    const write = () => {
-      if (res.destroyed) return;
-      if (at >= to) { row.complete = true; res.end(); return; }
-      const end = Math.min(to, at + 65536), chunk = bytes.subarray(at, end);
-      row.sent += chunk.length; res.write(chunk); at = end;
-      if (at >= to) { row.complete = true; res.end(); return; }
-      timer = setTimeout(write, 65536 / (3 * 1024 * 1024) * 1000);
-    };
-    res.on('close', () => clearTimeout(timer)); write();
-  });
-  server.listen(0, '127.0.0.1'); await once(server, 'listening');
-  t.after(() => { server.closeAllConnections(); server.close(); });
-  const url = `http://127.0.0.1:${server.address().port}/media/seg.ts`;
-  class HttpLoader extends Loader {
-    load(ctx, config, callbacks) {
-      this.receipt = { range: ctx.rangeEnd ? [ctx.rangeStart, ctx.rangeEnd] : null, bytes: 0, complete: false, aborted: false, status: null }; received.push(this.receipt);
-      this.aborted = false; this.stats = { aborted: false, loaded: 0, loading: { start: performance.now(), first: 0, end: 0 } };
-      this.req = request(ctx.url, { agent: false, headers: ctx.rangeEnd ? { Range: `bytes=${ctx.rangeStart}-${ctx.rangeEnd - 1}` } : {} }, res => {
-        this.receipt.status = res.statusCode; this.stats.loading.first = performance.now(); const chunks = [];
-        res.on('data', chunk => { chunks.push(chunk); this.stats.loaded += chunk.length; this.receipt.bytes += chunk.length; });
-        res.on('end', () => {
-          if (this.aborted) return;
-          this.receipt.complete = true;
-          this.stats.loading.end = performance.now(); const data = Buffer.concat(chunks);
-          callbacks.onSuccess({ data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), code: res.statusCode }, this.stats, ctx, null);
-        });
-      });
-      this.req.on('error', () => { if (!this.aborted) callbacks.onError?.({ code: 0 }, ctx, null, this.stats); }); this.req.end();
-    }
-    abort() { this.aborted = true; if (this.receipt) this.receipt.aborted = true; this.req?.destroy(); }
-    destroy() { this.abort(); }
-  }
+  const { received, requests, url, HttpLoader } = await mixedHttpOrigin(t, bytes, Loader);
   class PacedPeer extends PhasedFlowChannel {
     send(data) {
       const frame = typeof data === 'string' ? JSON.parse(data) : null;
@@ -8806,8 +8781,62 @@ for (const knownFlow of [true, false]) for (const worker of [false, true]) test(
     if (knownFlow) assert(before.peerRequestDiagnostics.records.some(row => row.outcome === 'payload' && row.elapsedMs - row.firstByteMs >= 300),
       'established rate must come from real prior qualifying peer payload');
     else assert.equal(before.peerRequestDiagnostics.records.length, 0, 'source calibration must not ask the untrained holder');
-    sameBytes(await f.load(ctx), bytes, 'the real Core must verify and assemble the complete object');
+    const wantsBefore = f.channels[0].wants.length, observedBefore = observed.length;
+    const authority = { media: f.hls.media, buffered: f.hls.media.buffered, frag: ctx.frag,
+      start: ctx.frag.start, duration: ctx.frag.duration, pc: f.connections[0], channel: f.channels[0] };
+    if (forceSetupExpiry) bridge.workers[0].holdNew = true;
+    const calls = { success: 0, error: 0, abort: 0, timeout: 0 };
+    const response = new Promise((resolve, reject) => new f.hls.config.fLoader(f.hlsConfig).load(ctx, f.loaderConfig, {
+      onSuccess: value => { calls.success++; resolve(new Uint8Array(value.data)); },
+      onError: () => { calls.error++; reject(new Error('fixture source error')); },
+      onAbort: () => { calls.abort++; reject(new Error('fixture source abort')); },
+      onTimeout: () => { calls.timeout++; reject(new Error('fixture source timeout')); },
+    }));
+    if (forceSetupExpiry) {
+      await until(() => bridge.workers[0].newRequests?.length > 0);
+      await sleep(30); // Actual reply unavailability exceeds the original25ms; no clock or deadline is changed.
+      bridge.workers[0].releaseNew();
+    }
+    sameBytes(await response, bytes, 'one complete correct object reaches the genuine demand');
+    assert.deepEqual(calls, { success: 1, error: 0, abort: 0, timeout: 0 });
     const trace = f.swarm.trace(), start = trace.rows.filter(row => row.k === 'xfer' && row.op === 'start').at(-1);
+    if (requests.filter(row => !row.range).length !== 1) {
+      const fallback = received.at(-1), metrics = f.swarm.metrics(), enteredAt = fallback.sdkEnteredAtMs, cutoff = enteredAt + 25;
+      const crossed = rpc.find(row => row.success && row.sentAtMs >= enteredAt && row.sentAtMs < cutoff && row.replyAtMs >= cutoff);
+      assert(worker && Number.isFinite(enteredAt) && enteredAt > 0 && crossed,
+        JSON.stringify({ message: 'whole fallback needs a successful setup RPC crossing the actual25ms cutoff',
+          knownFlow, worker, rpc, enteredAt, invokedAtMs: fallback.invokedAtMs }));
+      assert(fallback.invokedAtMs >= cutoff, 'the real source invocation follows the exhausted setup window');
+      assert.equal(requests.length, 2); assert(requests.every(row => !row.range && row.status === 200 && row.complete && row.sent === size));
+      assert.equal(received.length, 2); assert(received.every(row => !row.range && row.complete && row.bytes === size));
+      assert.equal(f.channels[0].wants.length, wantsBefore, 'decline issues no demand peer request');
+      assert.equal(metrics.bytes.peerFirst, peerBefore); assert.equal(observed.length, observedBefore);
+      assert.equal(metrics.core.multiHolder.originRanges, before.core.multiHolder.originRanges);
+      assert(fallback.maxLoadTimeMs > 0 && fallback.maxLoadTimeMs <= f.loaderConfig.loadPolicy.maxLoadTimeMs - 25);
+      assert(fallback.maxTimeToFirstByteMs > 0 && fallback.maxTimeToFirstByteMs <= f.loaderConfig.loadPolicy.maxTimeToFirstByteMs - 25);
+      assert(fallback.completedAtMs < enteredAt + Math.min(f.loaderConfig.loadPolicy.maxLoadTimeMs, 10000));
+      assert.equal(metrics.core?.state, 'ready'); assert.equal(metrics.core?.transferWorker?.state, 'ready');
+      assert.equal(metrics.core.transferWorker.transfers, 0); assert.equal(metrics.core.transferWorker.pending, 0);
+      assert.equal(metrics.core.fallbacks, before.core.fallbacks); assert.equal(metrics.errors.total, before.errors.total);
+      assert.equal(metrics.segments.commitmentRejected, before.segments.commitmentRejected);
+      assert.equal(metrics.segments.commitmentUnavailable, before.segments.commitmentUnavailable);
+      assert.equal(f.hls.media, authority.media); assert.equal(ctx.frag, authority.frag);
+      assert.equal(ctx.frag.start, authority.start); assert.equal(ctx.frag.duration, authority.duration);
+      assert.equal(authority.media.buffered, authority.buffered); assert.equal(authority.buffered.end(0), 20);
+      assert.equal(authority.media.currentTime, 10); assert.equal(authority.media.playbackRate, 1);
+      assert.equal(authority.media.paused || authority.media.ended || authority.media.seeking, false);
+      assert(authority.media.readyState >= 3);
+      assert.equal(f.connections[0], authority.pc); assert.equal(authority.pc.connectionState, 'connected');
+      assert.equal(f.channels[0], authority.channel); assert.equal(authority.channel.readyState, 'open');
+      assert(bridge.workers.every(value => !value.rpcDropped));
+      assert.deepEqual(calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+      console.log(JSON.stringify({ fixture: 'buffered-mixed-206', outcome: 'proven-setup-expiry', knownFlow, worker,
+        setupBudgetMs: 25, enteredAtMs: enteredAt, crossingRpc: crossed, sourceInvokedAtMs: fallback.invokedAtMs,
+        remainingLoadMs: fallback.maxLoadTimeMs, remainingTtfbMs: fallback.maxTimeToFirstByteMs,
+        wholeDemandGets: 1, originRanges: 0, demandPeerRequests: 0, acceptedDemandPeerBytes: 0 }));
+      return;
+    }
+    assert.equal(forceSetupExpiry, false, 'held allocation must prove the guarded-decline branch');
     if (!start) {
       const m = f.swarm.metrics();
       assert.ok(start, JSON.stringify({ message: 'mixed transfer did not record a Core start', knownFlow, worker,
