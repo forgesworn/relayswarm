@@ -3133,11 +3133,21 @@ This is local regression evidence, not a new field or physical-device result.
 The latest sustained two-viewer private 4K diagnostic still fails acceptance:
 one viewer recorded four waits totalling 0.877 seconds, three player errors and
 2.16% accepted peer media; the other accepted none. A later mixed-disabled
-control failed startup and motivated this boundary correction. Full CI also
-retains a failing committed-WASM Worker integration case. The branch remains
-draft; sustained playback, useful contribution, independently operated public
-credential issuing and physical iPhone acceptance remain open. Production and
-the paired private relay are unchanged.
+control failed startup and motivated this boundary correction. A fresh
+mixed-disabled control with the correction started one viewer in 6.4 seconds,
+but that viewer recorded three waits totalling 5.159 seconds and the other
+reached the unchanged startup deadline without a frame. This does not isolate
+the remaining problem to mixed transfers or establish sufficient source cadence.
+
+The test classifier now recognises the exact Core-reply setup rejection before
+any transfer command is applied. An immutable actual CI receipt and 32 hostile
+mutations cover this zero-I/O branch; the original failed run remains failed.
+The bounded integration selection remains red at 14/15: its held-allocation
+case did not observe the required RPC before its fixture timeout, and fallback
+completion was not captured. The branch remains draft; sustained playback,
+useful contribution, independently operated public credential issuing and
+physical iPhone acceptance remain open. Production and the paired private
+relay are unchanged.
 
 ## Unreleased first-candidate SDP gathering (28 October 2026)
 

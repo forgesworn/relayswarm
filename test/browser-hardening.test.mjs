@@ -8808,6 +8808,32 @@ function mixedScopeSetupProof(trace, expected) {
     const xfers = rows.map((row, index) => ({ row, index })).filter(item => same(item.row) && item.row.k === 'xfer');
     const finishes = rows.map((row, index) => ({ row, index })).filter(item => same(item.row) && item.row.k === 'xferFinish');
     const ranges = rows.map((row, index) => ({ row, index })).filter(item => same(item.row) && item.row.k === 'origin' && item.row.ranged === true);
+    // A successful Core RPC can reach receive() before its continuation calls
+    // currentValid(). That exact guard runs before apply(state), so this earlier
+    // rejection has one allocation but no attempted origin arm or peer command.
+    if (rows[fallback].reason === 'peer-result-empty' && expected.coreTransfersDelta === 1) {
+      if (xfers.length !== 1 || finishes.length !== 1 || ranges.length || expected.originRangeAttempts !== 0 ||
+          rows.slice(entry + 1, origin).some(row => same(row) && row.k === 'origin')) return null;
+      const { row: started, index: startIndex } = xfers[0], { row: finished, index: finishIndex } = finishes[0];
+      if (![started, finished].every(row => Number.isSafeInteger(row.at)) ||
+          !(entry < startIndex && startIndex < failure && failure < finishIndex && finishIndex < fallback && fallback < origin &&
+            started.at >= rows[entry].at && started.at <= rejected.at && finished.at >= rejected.at && finished.at <= rows[fallback].at)) return null;
+      if (started.op !== 'start' || started.exclusiveOrigin !== true || started.peerOnly === true || started.size !== expected.size ||
+          !Number.isSafeInteger(started.pieces) || !Number.isSafeInteger(started.pieceSize) || started.pieceSize <= 0 ||
+          Math.ceil(started.size / started.pieceSize) !== started.pieces || !(started.deadline > started.at) ||
+          started.out?.finished !== false || typeof started.out?.late !== 'boolean' || !Array.isArray(started.out?.c)) return null;
+      const commands = started.out.c, sources = commands.filter(command => command.t === 'origin'), peers = commands.filter(command => command.t === 'request');
+      if (commands.length !== 2 || sources.length !== 1 || peers.length !== 1 || commands.some(command =>
+          !Array.isArray(command.p) || command.p.length !== 2 || !command.p.every(Number.isSafeInteger) ||
+          command.p[0] < 0 || command.p[0] >= command.p[1] || command.p[1] > started.pieces) ||
+          !started.peers?.some(([id]) => id === peers[0].peer) ||
+          !(sources[0].p[1] <= peers[0].p[0] || peers[0].p[1] <= sources[0].p[0])) return null;
+      if (finished.reason !== 'reply-current-invalid' || finished.delivered !== false || finished.bufferedMixed !== true || finished.peerOnly !== false ||
+          finished.verifiedBytes !== 0 || finished.originBytes !== 0 || !(finished.peerRemainingMs > 0 && finished.recoveryRemainingMs > 0) ||
+          rows[origin].leg !== 'fallback' || rows[origin].ranged !== false || rows[origin].ms !== 0) return null;
+      return { stage: 'after-core-reply-before-io', proofTime,
+        sequence: [load, entry, startIndex, failure, finishIndex, fallback, origin].map(index => rows[index]) };
+    }
     if (rows[fallback].reason === 'peer-result-empty') {
       if (xfers.length || finishes.length || ranges.length || expected.coreTransfersDelta !== 0 || expected.originRangeAttempts !== 0) return null;
       return { stage: 'before-core', proofTime, sequence };
@@ -8967,6 +8993,67 @@ test('buffered mixed immutable actual after-Core receipt proves the aborted pre-
   assert.equal(receipt.observedCounts.peerRequests, 0); assert.equal(receipt.observedCounts.acceptedPeerBytes, 0);
   assert.equal(receipt.observedCounts.physicalWholeGets, 2); assert.equal(receipt.observedCounts.successfulCallbacks, 1);
   assert.equal(proof.sequence.find(row => row.k === 'xfer').out.late, true, 'retain the actual planning prediction without treating it as physical I/O');
+});
+
+test('buffered mixed immutable actual Core-reply receipt proves zero attempted I/O', async () => {
+  const text = (await readFile(new URL('./fixtures/buffered-mixed-after-core-reply-setup.json', import.meta.url), 'utf8')).replace(/\r\n/gu, '\n');
+  assert.equal(createHash('sha256').update(text).digest('hex'), '243b804cc80dfcf006048a61241d6b53db433b19379cce3348824acf4d916f1d');
+  const receipt = JSON.parse(text), { expected } = receipt;
+  assert.equal(receipt.provenance.sourceCommit, '688f8607365cdbea9d44d06e3204cd55025caba9');
+  assert.equal(receipt.provenance.originalLogSha256, '332b46def0c753877dea349a92f9e92e6495158427d37d5bb0690fc6ea4c05ca');
+  assert.equal(receipt.provenance.originalExitCode, 1, 'original hosted803/804 result remains RED');
+  const proof = mixedScopeSetupProof(receipt.trace, expected);
+  assert.equal(proof?.stage, 'after-core-reply-before-io');
+  assert.equal(proof.proofTime, expected.enteredAtMs + 25);
+  const rpc = receipt.workerRpc.at(-1);
+  assert.equal(rpc.op, 'start'); assert.equal(rpc.success, true);
+  assert(rpc.replyAtMs < expected.enteredAtMs + 25, 'RPC instrumentation reply precedes cutoff; the later actual scope predicate proves expiry');
+  assert.equal(receipt.timer, null);
+  assert.deepEqual(receipt.observedCounts, { coreTransfers: 1, originRangeAttempts: 0, peerRequests: 0, acceptedPeerBytes: 0,
+    physicalWholeGets: 2, physicalRangeGets: 0, clientRangeBodies: 0, successfulCallbacks: 1 });
+});
+
+test('buffered mixed Core-reply setup proof rejects mismatched or hidden I/O evidence', async () => {
+  const vector = JSON.parse(await readFile(new URL('./fixtures/buffered-mixed-after-core-reply-setup.json', import.meta.url), 'utf8'));
+  assert.equal(mixedScopeSetupProof(vector.trace, vector.expected)?.stage, 'after-core-reply-before-io');
+  const controls = [
+    ['wrong terminal branch', v => { v.trace.rows[4].reason = 'signal-abort'; }],
+    ['later source-attempt branch', v => { v.trace.rows[5].reason = 'before-origin-invalid'; }],
+    ['attempted origin range', v => { v.expected.originRangeAttempts = 1; }],
+    ['unknown origin attempts', v => { delete v.expected.originRangeAttempts; }],
+    ['missing Core allocation', v => { v.expected.coreTransfersDelta = 0; }],
+    ['extra Core allocation', v => { v.expected.coreTransfersDelta = 2; }],
+    ['physical Range GET', v => { v.expected.physicalRangeGets = 1; }],
+    ['invoked Range loader', v => { v.expected.clientRangeLoads = 1; }],
+    ['peer WANT', v => { v.expected.peerRequests = 1; }],
+    ['accepted peer credit', v => { v.expected.acceptedPeerBytes = 1; }],
+    ['credited Core bytes', v => { v.trace.rows[4].verifiedBytes = 1; }],
+    ['credited source bytes', v => { v.trace.rows[4].originBytes = 1; }],
+    ['delivered Core reply', v => { v.trace.rows[4].delivered = true; }],
+    ['wrong physical scope reason', v => { v.trace.rows[3].reason = 'scope-ready'; }],
+    ['another failed scope', v => { v.trace.rows[3].scope.recovery = false; }],
+    ['missing scope identity', v => { delete v.trace.rows[3].scope.identity; }],
+    ['early diagnostic elapsed', v => { v.trace.rows[3].ms = 24; }],
+    ['source already invoked', v => { v.trace.rows[3].originInvoked = true; }],
+    ['cross-load start', v => { v.trace.rows[2].load++; }],
+    ['cross-load terminal', v => { v.trace.rows[4].load++; }],
+    ['wrong genuine tuple', v => { v.trace.rows[0].sn++; }],
+    ['terminal before scope failure', v => { [v.trace.rows[3], v.trace.rows[4]] = [v.trace.rows[4], v.trace.rows[3]]; }],
+    ['fallback before terminal', v => { [v.trace.rows[4], v.trace.rows[5]] = [v.trace.rows[5], v.trace.rows[4]]; }],
+    ['hidden request trace', v => { v.trace.rows.splice(3, 0, { k: 'request', load: 2, at: 2199 }); }],
+    ['hidden origin trace', v => { v.trace.rows.splice(3, 0, { k: 'origin', load: 2, at: 2199, ranged: true }); }],
+    ['extra Core command', v => { v.trace.rows.splice(3, 0, { k: 'xfer', load: 2, at: 2199, op: 'tick' }); }],
+    ['overlapping plan', v => { v.trace.rows[2].out.c[1].p[0] = 0; }],
+    ['unexpected plan command', v => { v.trace.rows[2].out.c.push({ t: 'deliver' }); }],
+    ['wrong object size', v => { v.expected.size--; }],
+    ['renewed parent budget', v => { v.expected.remainingLoadMs = 10000; }],
+    ['renewed first-byte budget', v => { v.expected.remainingTtfbMs = 10000; }],
+    ['trace lost rows', v => { v.trace.dropped = 1; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const copy = structuredClone(vector); mutate(copy);
+    assert.equal(mixedScopeSetupProof(copy.trace, copy.expected), null, name);
+  }
 });
 
 test('buffered mixed timer observer preserves native receiver arguments handle and synchronous scope', async () => {
