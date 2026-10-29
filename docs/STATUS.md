@@ -37,8 +37,15 @@ the Windows native job was cancelled, and dependent live-relay coverage was
 skipped. The browser capture stalls even with peers disabled and
 later records playlist HTTP500s; the first stall precedes those responses, and
 the underlying server exception was not retained. Warm/startup and mixed ranges
-were disabled in that fixture. Its failure remains unresolved. The current
-admission fix still requires fresh field and physical-device qualification.
+were disabled in that fixture. Its failure remains unresolved.
+
+A fresh mixed-disabled control of the admission fix reached both first 4K
+frames in 7.1 and 5.6 seconds, but sustained playback failed badly: the final
+reports record 30/25 stalls totalling 167.1/95.6 seconds and no accepted peer
+media. Initial Hls underflows preceded automatic native-HLS fallback. Both
+players then used recorded VOD without a RelaySwarm adapter, so later HTTP206s
+are not evidence of SDK mixed transfers. This is a failed field result, not a
+performance qualification. Physical-device and public-operator gates remain.
 
 ## Unreleased room-start publication boundary (29 October 2026)
 
