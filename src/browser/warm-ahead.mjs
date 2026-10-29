@@ -89,7 +89,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
   };
   const pump = () => {
     if (closed || active || !allowed() || !queued.length || demand.size + promoted.size > 1 ||
-        (!steady && startup.state !== 'buffering') || (startup.state === 'buffering' && (!startup.permit || startup.checking))) return;
+        (!steady && startup.state !== 'buffering') || (startup.state === 'buffering' && (!startup.permit || !startup.verified || startup.checking))) return;
     if (startup.state === 'buffering' && !prepareStartupAdmission()) return;
     // A pending bootstrap may replace obsolete future rows, but cannot evict
     // current coverage (or an authority pin) simply to admit another object.
@@ -605,6 +605,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       counters.verifiedBytes += data.byteLength;
       counters.verifiedPeerBytes += startup.terminal.context[WARM_AHEAD]?.peerBytes ?? 0;
       void checkStartup();
+      queueMicrotask(pump);
     } catch { if (startupCurrent()) endStartup('failed', 'first-integrity'); }
     finally { startup.verifying = false; }
   };

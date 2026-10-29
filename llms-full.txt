@@ -2280,7 +2280,10 @@ does not trigger this extension. Otherwise the existing rolling policy may
 retire its completed, unpinned first future when it contains the target.
 Once a future window starts ahead of the actual target, its start stays fixed;
 release waits for the real target and verified coverage to meet again.
-Startup contains at most four objects within its chosen byte allowance. Future requests remain serial,
+Startup contains at most four objects within its chosen byte allowance. The first
+genuine response verifies before future requests begin, so this reservoir's
+speculative downloads do not compete with its first source-service measurement.
+Future requests remain serial,
 and insufficient capacity cannot release unsafe media or extend the deadline.
 In-flight work and authority pins keep their reservations.
 The rolling plan stores metadata only, without retaining discarded payloads.
