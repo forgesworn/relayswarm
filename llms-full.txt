@@ -3159,9 +3159,9 @@ retains the original speculative expiry and cancellation signal; promotion
 keeps the original parent deadline. Accepted peer credit waits for genuine
 consumption of the complete verified object.
 
-All 193 warm/startup checks pass. The current main-thread and committed-WASM
-Worker warm mixed checks pass: each 6 MiB target uses 688,128 verified peer
-bytes and 5,603,328 HTTP206 body bytes, with no whole GET. Credit remains zero
+All 193 warm/startup checks pass. Controlled passing main-thread and
+committed-WASM Worker warm mixed runs use 688,128 verified peer
+bytes and 5,603,328 HTTP206 body bytes per 6 MiB target, with no whole GET. Credit remains zero
 before genuine consumption and is not duplicated by repeated reuse. The legacy
 whole-source versus genuine-mixed comparison also passes. Explicit synthetic
 pacing and separately accounted calibration/lead bodies make these policy
@@ -3188,10 +3188,15 @@ and one JavaScript-selection-only skip. Ordinary loads were emitting an extra
 warm-only trace field; the strict scope validator correctly rejected that
 shape. The SDK now emits that field only for actual warm owners. Both failing
 cases and the warm checks pass in a new 28/28 selection without changing the
-validator. A complete corrected-source rerun is in progress; the failed run is
-retained. A fresh finite field run, physical-device acceptance and a public
-operator remain pending. No experimental SDK is deployed; this PR is not ready
-to merge.
+validator. The complete corrected-source rerun records 875 passes, one
+failure and that same skip: its warm Worker target unexpectedly starts whole
+HTTP instead of ranges. The failure has no branch trace, so its cause remains
+unknown. A bounded assertion payload now retains scope/transfer/HTTP and Worker
+RPC evidence without relaxing the HTTP206 requirement or deadlines. One isolated
+diagnostic run passes actual assembly; it neither explains nor rescinds the
+full-run failure. No further blind reruns were used to claim a fix. A fresh
+finite field run, physical-device acceptance and a public operator remain
+pending. No experimental SDK is deployed; this PR is not ready to merge.
 
 ## Unreleased promoted-source admission (29 October 2026)
 
@@ -3212,8 +3217,9 @@ selected where applicable. Direct engine controls remain JavaScript policy
 tests. Current main-thread and committed-WASM Worker controls both complete
 actual disjoint HTTP206 and verified peer assembly.
 
-A controlled real-Core comparison explains the remaining warm-path limitation:
-the warm/coalesced target uses one 6 MiB whole GET and accepts no peer bytes;
+A controlled real-Core comparison retains the legacy whole-source control:
+with mixed ranges disabled, the warm/coalesced target uses one 6 MiB whole GET
+and accepts no peer bytes;
 the otherwise eligible genuine target uses 5,603,328 HTTP206 body bytes plus
 688,128 verified peer bytes, with no target whole GET. Both arms use the same
 explicit synthetic pacing, media geometry and deadlines; calibration and lead

@@ -9350,7 +9350,8 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {
     }
   }
   for (const warming of ownedWarm ? [true] : [true, false]) {
-    const bridge = worker ? transferWorkerFixture(t) : null;
+    let rpcObserved = 0;
+    const rpc = [], bridge = worker ? transferWorkerFixture(t, { onRpc: row => { rpcObserved++; if (rpc.length < 64) rpc.push(row); } }) : null;
     const origin = await mixedHttpOrigin(t, bytes, Loader), { received, requests, url } = origin;
     class AccountedHTTP extends origin.HttpLoader {
       load(ctx, config, callbacks) {
@@ -9403,7 +9404,22 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {
       if (warming) await until(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/seg.ts' && row.warm));
       if (ownedWarm) {
         const targetOrigin = received.slice(beforeReceived).find(row => row.path === '/media/seg.ts');
-        assert(targetOrigin.range, 'eligible owned warm work starts origin206 before any whole GET');
+        if (!targetOrigin.range) {
+          const trace = f.swarm.trace(), metrics = f.swarm.metrics();
+          const load = trace.rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead')?.load;
+          const diagnosticRows = trace.rows.filter(row => row.load === load && ['load', 'mixedScope', 'xfer', 'xferFinish', 'originStart', 'origin'].includes(row.k));
+          const pending = bridge?.workers.flatMap(value => [...(value.rpcSent?.values() ?? [])]) ?? [];
+          assert(targetOrigin.range, JSON.stringify({ message: 'eligible owned warm work starts origin206 before any whole GET', worker,
+            load: load ?? null, traceDropped: trace.dropped, rows: diagnosticRows.slice(-64), rowsOmitted: Math.max(0, diagnosticRows.length - 64),
+            rpc, rpcOmitted: Math.max(0, rpcObserved - rpc.length), pendingRpc: pending.slice(-32), pendingRpcOmitted: Math.max(0, pending.length - 32),
+            rpcDropped: bridge?.workers.reduce((sum, value) => sum + (value.rpcDropped ?? 0), 0) ?? 0,
+            targetHttp: received.slice(beforeReceived).filter(row => row.path === '/media/seg.ts').slice(-8).map(({ range, status, bytes, complete, aborted, invokedAtMs, sdkEnteredAtMs }) =>
+              ({ range, status, bytes, complete, aborted, invokedAtMs, sdkEnteredAtMs })),
+            states: { core: metrics.core.state, worker: metrics.core.transferWorker.state },
+            deltas: { transfers: metrics.core.multiHolder.transfers - before.core.multiHolder.transfers,
+              originRanges: metrics.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+              peerAccepted: metrics.bytes.peerFirst - before.bytes.peerFirst, warmStarted: metrics.warmAhead.started - before.warmAhead.started } }));
+        }
         await until(() => f.swarm.metrics().warmAhead.verified > before.warmAhead.verified);
         assert(f.swarm.metrics().warmAhead.verifiedPeerBytes > before.warmAhead.verifiedPeerBytes);
         assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst, 'verified warm assembly defers accepted credit before genuine consumption');
