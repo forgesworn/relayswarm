@@ -9136,7 +9136,58 @@ for (const [knownFlow, worker, forceSetupExpiry = false, forceScopeExpiry = fals
       onTimeout: () => { calls.timeout++; reject(new Error('fixture source timeout')); },
     }));
     if (forceSetupExpiry) {
-      await until(() => bridge.workers[0].newRequests?.length > 0);
+      try { await until(() => bridge.workers[0].newRequests?.length > 0); }
+      catch (error) {
+        try {
+          const number = value => Number.isFinite(value) ? value : null;
+          const numbers = (value, names) => Object.fromEntries(names.map(name => [name, number(value?.[name])]));
+          const label = value => typeof value === 'string' && /^[a-z][a-z0-9-]{0,63}$/iu.test(value) && !/^[a-f0-9]{32,}$/iu.test(value) ? value : null;
+          const delta = (value, prior) => Number.isFinite(value) && Number.isFinite(prior) ? value - prior : null;
+          const trace = f.swarm.trace(), metrics = f.swarm.metrics();
+          const selectedLoad = trace.rows.filter(row => row.k === 'mixedScope' && row.reason === 'entry').at(-1)?.load ??
+            trace.rows.filter(row => row.k === 'load' && row.sn === ctx.frag.sn && row.cc === ctx.frag.cc && row.level === ctx.frag.level).at(-1)?.load;
+          const rows = trace.rows.filter(row => row.load === selectedLoad &&
+            ['load', 'mixedScope', 'xfer', 'xferFinish', 'request', 'origin', 'originStart', 'originProgress', 'originTerminal'].includes(row.k));
+          const project = row => ({ ...numbers(row, ['load', 'at', 'ms', 'sn', 'cc', 'level', 'budgetMs', 'limitMs', 'size', 'pieces', 'pieceSize',
+              'deadline', 'setupRemainingMs', 'peerRemainingMs', 'recoveryRemainingMs', 'mixedRemainingMs', 'nextOriginReserveMs', 'firstByteRemainingMs',
+              'verifiedBytes', 'originBytes', 'bytes', 'loaderLoadedBytes', 'loaderTotalBytes']),
+            ...Object.fromEntries(['k', 'op', 'phase', 'reason', 'leg', 'outcome'].map(name => [name, label(row[name])])),
+            ...Object.fromEntries(['originInvoked', 'ranged', 'delivered', 'bufferedMixed', 'peerOnly', 'exclusiveOrigin'].map(name =>
+              [name, typeof row[name] === 'boolean' ? row[name] : null])),
+            scope: row.scope ? Object.fromEntries(MIXED_SCOPE_CHECKS.map(name => [name, typeof row.scope[name] === 'boolean' ? row.scope[name] : null])) : null,
+            capturedGeometry: row.capturedGeometry ? numbers(row.capturedGeometry, ['currentTime', 'playableEnd', 'fragmentStart', 'durationMs', 'fragmentDurationSeconds', 'originReserveMs']) : null,
+            currentGeometry: row.currentGeometry ? numbers(row.currentGeometry, ['fragmentStart', 'fragmentDurationSeconds', 'playbackRate', 'readyState']) : null,
+          });
+          const summary = values => Object.fromEntries([['whole', false], ['range', true]].map(([name, ranged]) => {
+            const selected = values.filter(row => Boolean(row.range) === ranged);
+            return [name, { count: selected.length, complete: selected.filter(row => row.complete === true).length,
+              aborted: selected.filter(row => row.aborted === true).length,
+              statuses: selected.slice(-4).map(row => number(row.status)),
+              bytes: selected.reduce((sum, row) => sum + (number(row.bytes ?? row.sent) ?? 0), 0) }];
+          }));
+          const rpcRows = rpc.slice(-32).map(row => ({ ...numbers(row, ['id', 'sentAtMs', 'replyAtMs']), op: label(row.op), success: row.success === true }));
+          const pendingRpc = bridge.workers.flatMap(value => [...(value.rpcSent?.values() ?? [])]).slice(-32)
+            .map(row => ({ ...numbers(row, ['id', 'sentAtMs']), op: label(row.op) }));
+          const selectedRows = rows.length <= 32 ? rows : [...rows.slice(0, 16), ...rows.slice(-16)];
+          const diagnostic = { fixture: 'held-mixed-allocation-precondition', atMs: performance.now(), requiredPredicateObserved: false,
+            newRequests: bridge.workers.reduce((sum, value) => sum + (value.newRequests?.length ?? 0), 0),
+            totalNewPosts: bridge.workers.reduce((sum, value) => sum + (value.newCount ?? 0), 0), calls: { ...calls },
+            rpc: rpcRows, pendingRpc, rpcDropped: bridge.workers.reduce((sum, value) => sum + (value.rpcDropped ?? 0), 0),
+            requests: summary(requests), received: summary(received),
+            receivedTiming: received.slice(-4).map(row => ({ ...numbers(row, ['sdkEnteredAtMs', 'invokedAtMs', 'completedAtMs', 'maxLoadTimeMs', 'maxTimeToFirstByteMs', 'bytes', 'status']),
+              ranged: Boolean(row.range), complete: row.complete === true, aborted: row.aborted === true })),
+            metricsDeltas: { coreTransfers: delta(metrics.core.multiHolder.transfers, before.core.multiHolder.transfers),
+              originRangeAttempts: delta(metrics.core.multiHolder.originRanges, before.core.multiHolder.originRanges),
+              peerRequests: f.channels[0].wants.length - wantsBefore, acceptedPeerBytes: delta(metrics.bytes.peerFirst, peerBefore) },
+            trace: { dropped: trace.dropped, selectedLoad: number(selectedLoad), originalRows: rows.length,
+              omittedRows: rows.length - selectedRows.length, rows: selectedRows.map(project) } };
+          while (Buffer.byteLength(JSON.stringify(diagnostic)) > 16384 && diagnostic.trace.rows.length) {
+            diagnostic.trace.rows.splice(Math.floor(diagnostic.trace.rows.length / 2), 1); diagnostic.trace.omittedRows++;
+          }
+          t.diagnostic(JSON.stringify(diagnostic));
+        } catch { t.diagnostic(JSON.stringify({ fixture: 'held-mixed-allocation-precondition', diagnosticUnavailable: true })); }
+        throw error; // The required held RPC, original predicate and timeout remain mandatory.
+      }
       await sleep(30); // Actual reply unavailability exceeds the original25ms; no clock or deadline is changed.
       bridge.workers[0].releaseNew();
     }

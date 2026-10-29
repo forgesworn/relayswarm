@@ -43,6 +43,17 @@ useful contribution, independently operated public credential issuing and
 physical iPhone acceptance remain open. Production and the paired private
 relay are unchanged.
 
+A subsequent diagnostic-only attempt retains that held-case failure and records
+setup expiry before allocation, zero RPCs/ranges/peer requests, and one successful
+whole-source fallback callback. It explains that attempt without satisfying the
+required held-RPC coverage or changing its original timeout.
+
+A separate source-only Chrome probe on the same test Mac fetched four complete,
+catalogue-hash-verified objects over HTTP/3 in 0.68–1.50 seconds each, totalling
+24,331,115 bytes. It used no SDK, player or video decoding. Different objects,
+request order and run time prevent a matched comparison with playback; this
+point-in-time observation does not identify the field bottleneck.
+
 ## Unreleased first-candidate SDP gathering (28 October 2026)
 
 The browser loader retains its 1.2-second gathering soft cap when local offer
