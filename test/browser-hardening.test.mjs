@@ -9796,19 +9796,37 @@ for (const untrained of [false, true]) test('buffered mixed verifies a pre-cap '
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
-test('buffered mixed discards physical peer completion after its cap while keeping source recovery', async t => {
+for (const headroomMs of [10000, 14000]) test('buffered mixed discards physical peer completion after its cap while keeping source recovery (' + headroomMs + 'ms buffered)', async t => {
   const clock = virtualClock(t); let f, shift = 0, late = false;
   try {
     t.mock.method(performance, 'now', () => clock.now() + shift);
     f = await bufferedMixedFixture(t, clock, { originDelayMs: 3000 });
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 10 + headroomMs / 1000 };
     const receive = f.channels[0].receive.bind(f.channels[0]);
     t.mock.method(f.channels[0], 'receive', data => {
       if (!late && typeof data === 'string' && JSON.parse(data).t === 'eof') { late = true; shift = 2600; }
       return receive(data);
     });
-    const before = f.wholeLoads.length, pending = beginCountedMultiLoad(f, f.ctx);
-    sameBytes(await clock.settle(pending.response, 6000), f.bytes);
-    assert(late); assert.equal(f.wholeLoads.length, before);
+    const before = f.wholeLoads.length, enteredAt = performance.now(), pending = beginCountedMultiLoad(f, f.ctx);
+    // The2600ms performance jump does not advance the mock timer clock. At
+    //10s headroom, the source recovery callback reaches modeled8600ms and
+    //must use the original1400ms whole fallback; its500ms body is observed
+    //within the same original10s parent, rather than renewing that deadline.
+    try { sameBytes(await clock.settle(pending.response, headroomMs === 10000 ? 7000 : 6000), f.bytes); }
+    catch (error) {
+      console.log(JSON.stringify({ fixture: 'late-physical-peer-cap', shift, late, now: performance.now(),
+        calls: { success: pending.calls.success.length, abort: pending.calls.abort.length, error: pending.calls.error.length },
+        wholeLoads: f.wholeLoads.length, before, ranges: f.ranges,
+        decisions: f.swarm.trace().rows.filter(row => ['load', 'mixedScope', 'xferFinish'].includes(row.k)).slice(-16) }));
+      throw error;
+    }
+    assert(late); assert(performance.now() - enteredAt < 10000, 'both outcomes retain the original absolute parent');
+    if (headroomMs === 10000) {
+      assert.equal(f.wholeLoads.length, before + 1);
+      assert.equal(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs, 1400);
+      const rejected = f.swarm.trace().rows.find(row => row.k === 'mixedScope' && row.reason === 'current-recovery');
+      assert.equal(rejected.mixedRemainingMs, -600); assert.equal(rejected.recoveryRemainingMs, 1400);
+    } else assert.equal(f.wholeLoads.length, before, 'healthy next-recovery headroom preserves the original range owner');
     assert.equal(f.swarm.metrics().bytes.peerFirst, 0, 'post-cap physical completion supplies no accepted peer media');
     assert(f.swarm.metrics().core.multiHolder.unusedBytes > 0, 'discarded late payload remains accounted');
   } finally { shift = 0; if (f) await clock.settle(f.close()); clock.restore(); }
