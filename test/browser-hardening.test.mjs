@@ -10983,3 +10983,192 @@ test('buffered mixed origin recovery cannot outlive its original absolute parent
     assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
+
+async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConstructor = false) {
+  // Deterministic policy proof: simulated source/native RTC, real sessions,
+  // commitments, Core, ordered protocol bytes, verification and consumption.
+  // No source server, preloaded cache/HAVE, timing model or claimed WAN rate.
+  const pair = await framingPairFixture(t, { pairedState: true }), actors = [], source = [], loaders = new Set(), objects = new Map(), events = new Map();
+  let clock, revokeOnConstructor = null;
+  const settle = promise => clock ? clock.settle(promise) : promise;
+  const wait = predicate => clock ? clock.advanceUntil(predicate) : until(predicate);
+  const size = 1024 * 1024, secret = generateSecretKey(), seconds = Math.floor(Date.now() / 1000);
+  const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds,
+    tags: [['d', 'reciprocal-futures'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
+  const keyFor = path => createHash('sha256').update(`${base.swarmId}\n${path}`).digest('hex');
+  const getCommitment = ctx => {
+    const path = new URL(ctx.url).pathname, data = objects.get(path); assert(data);
+    const id = `${path}:${ctx.frag.sn}:${ctx.frag.cc}`;
+    if (!events.has(id)) {
+      const pieceSize = commitmentPieceSize(data.length), pieces = [];
+      for (let at = 0; at < data.length; at += pieceSize) pieces.push(createHash('sha256').update(data.subarray(at, at + pieceSize)).digest('hex'));
+      events.set(id, finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds,
+        tags: [['x', base.swarmId], ['e', streamEvent.id]], content: commitmentContent({ v: 3,
+          streamEventId: streamEvent.id, swarmId: base.swarmId, key: keyFor(path), rendition: '/media/index.m3u8',
+          playlist: '/media/index.m3u8', mediaType: 'main', encryption: null, sequence: ctx.frag.sn,
+          discontinuity: ctx.frag.cc, part: null, sha256: createHash('sha256').update(data).digest('hex'),
+          size: data.length, pieceSize, pieces, expiresAt: seconds + 60 }) }, secret));
+    }
+    return events.get(id);
+  };
+  const invoke = (actor, frag) => {
+    const f = actors[actor], ctx = { url: frag.url, frag, part: null, type: LoaderContextType.MEDIA_FRAGMENT,
+      responseType: 'arraybuffer', headers: {}, rangeStart: 0, rangeEnd: 0 };
+    const loader = new f.hls.config.fLoader(f.hls.config), calls = { success: 0, error: 0, abort: 0, timeout: 0 };
+    frag.stats = loader.stats;
+    const response = new Promise((resolve, reject) => loader.load(ctx, { timeout: 10000 }, {
+      onSuccess: value => { calls.success++; resolve(new Uint8Array(value.data)); },
+      onError: () => { calls.error++; reject(new Error('reciprocal source error')); },
+      onAbort: () => { calls.abort++; reject(new Error('reciprocal source abort')); },
+      onTimeout: () => { calls.timeout++; reject(new Error('reciprocal source timeout')); },
+    }));
+    response.catch(() => {}); return { response, calls };
+  };
+  try {
+    for (const actor of [0, 1]) {
+      class Source extends Loader {
+        stats = new LoadStats();
+        constructor(...args) {
+          super(...args);
+          if (actor === 1 && revokeOnConstructor) { const revoke = revokeOnConstructor; revokeOnConstructor = null; revoke(); }
+        }
+        load(ctx, config, callbacks) {
+          const data = objects.get(new URL(ctx.url).pathname); assert(data);
+          const from = ctx.rangeEnd ? ctx.rangeStart : 0, to = ctx.rangeEnd || data.length;
+          const row = { actor, sn: ctx.frag.sn, warm: Boolean(ctx[WARM_AHEAD]), range: ctx.rangeEnd ? [from, to] : null,
+            bytes: 0, complete: false, aborted: false }; source.push(row); loaders.add(this);
+          this.stats.loading.start = performance.now();
+          this.complete = () => {
+            if (row.complete || row.aborted) return;
+            row.complete = true; row.bytes = to - from; this.stats.loaded = this.stats.total = row.bytes;
+            this.stats.loading.first = this.stats.loading.end = performance.now();
+            callbacks.onSuccess({ data: data.slice(from, to).buffer, code: row.range ? 206 : 200 }, this.stats, ctx, null);
+          };
+          this.row = row;
+          // Explicit functional-controller service scalars calibrate recovery
+          // above two seconds; no native elapsed/performance claim or seeded
+          // peer model is made by this logical-clock control.
+          if (ctx.frag.sn === 0 || row.range) this.timer = setTimeout(this.complete, ctx.frag.sn === 0 ? 1600 : 20);
+          // Whole speculative futures stay pending until their owner ledger is
+          // checked, so no holder can have advertised either future yet.
+        }
+        abort() { clearTimeout(this.timer); if (this.row && !this.row.complete) this.row.aborted = true; }
+        destroy() { this.abort(); loaders.delete(this); }
+      }
+      const media = Object.assign(new EventTarget(), { currentTime: 0, paused: false, ended: false, seeking: false,
+        readyState: 4, playbackRate: 1, buffered: { length: 0 } });
+      actors.push(await pair.make({ OriginLoader: Source, player: { media }, swarmOptions: {
+        streamEvent, getCommitment, warmAhead: true, bufferedMixedRanges: true, zeroBudgetPeerRace: true,
+        sustainablePeerWait: true, originReserveMs: 2000, maxPeerWaitMs: 2500, traceRequests: 4096 } }));
+    }
+    await until(() => actors.every(f => f.swarm.metrics().peers.connected === 1));
+    // Functional controller only: hold actual async setup until either source
+    // lane is invoked, without selecting a favourable result or seeding a model.
+    clock = warmFunctionalClock(t, () => actors.some((f, actor) => {
+      const rows = f.swarm.trace().rows;
+      const load = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
+      return load && rows.some(row => row.k === 'mixedScope' && row.load === load.load && row.reason === 'entry') &&
+        !source.some(row => row.actor === actor && row.sn === 1);
+    }));
+    const pubkeys = actors.map(f => f.swarm.metrics().pubkey), winner = path => {
+      const key = BigInt('0x' + keyFor(path));
+      return (key ^ BigInt('0x' + pubkeys[0])) < (key ^ BigInt('0x' + pubkeys[1])) ? 0 : 1;
+    };
+    const paths = [];
+    for (const owner of [0]) {
+      for (let n = 0; n < 256; n++) {
+        const path = `/media/future-${owner}-${n}.ts`;
+        if (winner(path) === owner) { paths.push(path); break; }
+      }
+    }
+    assert.equal(paths.length, 1, 'actual peer identities elect actor0 for the single future');
+    objects.set('/media/lead.ts', new Uint8Array(32768).fill(9));
+    paths.forEach((path, index) => objects.set(path, Uint8Array.from({ length: size }, (_, i) => (i * 131 + index * 17) % 251)));
+    const playlist = '#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nlead.ts\n' +
+      paths.map(path => `#EXTINF:2,\n${path.split('/').at(-1)}\n`).join('') + '#EXT-X-ENDLIST\n';
+    const details = actors.map(f => {
+      const parsed = M3U8Parser.parseLevelPlaylist(playlist, 'https://origin.example/media/index.m3u8', 0, 'main', 0, null);
+      f.hls.levels = [{ details: parsed }]; return parsed;
+    });
+    for (const f of actors) assert.deepEqual([f.swarm.metrics().core.verifier, f.swarm.metrics().core.selection, f.swarm.metrics().core.discovery], ['wasm', 'wasm', 'wasm']);
+    const lead = actors.map((_, actor) => invoke(actor, details[actor].fragments[0]));
+    await settle(Promise.all(lead.map(x => x.response)));
+    for (const f of actors) f.hls.media.buffered = { length: 1, start: () => 0, end: () => 10 };
+    await wait(() => source.filter(row => row.sn > 0).length === 1);
+    await wait(() => actors[1].swarm.metrics().warmAhead.active === 0 && actors[1].swarm.metrics().warmAhead.queued === 0);
+    assert.equal(actors[1].swarm.metrics().warmAhead.started, 0, 'non-owner actually declined optional source before HAVE');
+    const initial = source.filter(row => row.sn > 0);
+    const advertised = pair.channels.flatMap(channel => channel.sent.filter(row => row?.t === 'have').flatMap(row => row.keys ?? row.add ?? []));
+    assert(paths.every(path => !advertised.includes(keyFor(path))), 'neither held future body has been seeded or advertised');
+    assert(actors.every(f => f.swarm.metrics().bytes.peerFirst === 0 && f.swarm.metrics().warmAhead.verifiedPeerBytes === 0));
+    console.log(JSON.stringify({ fixture: 'reciprocal-warm-source-policy', simulatedSourceAndRtc: true,
+      coreReady: actors.map(f => f.swarm.metrics().core.state), expectedOwners: [{ actor: 0, sn: 1 }],
+      actualSourceStarts: initial.map(({ actor, sn, warm, range }) => ({ actor, sn, warm, range })),
+      futureHaveCount: paths.filter(path => advertised.includes(keyFor(path))).length }));
+    assert.deepEqual(initial.map(({ actor, sn }) => ({ actor, sn })).sort((a, b) => a.actor - b.actor),
+      [{ actor: 0, sn: 1 }], 'only actual elected owner starts speculative whole source');
+    assert(initial.every(row => row.warm && !row.range));
+    let exactHaveDelivered = false;
+    const listeners = pair.channels.map(channel => {
+      const listener = event => { if (typeof event.data !== 'string') return;
+        const frame = JSON.parse(event.data);
+        if (frame.t === 'have' && (frame.keys ?? frame.add ?? []).includes(keyFor(paths[0]))) exactHaveDelivered = true;
+      };
+      channel.addEventListener('message', listener); return [channel, listener];
+    });
+    if (paused) { actors[1].hls.media.paused = true; actors[1].hls.media.dispatchEvent(new Event('pause')); }
+    let supplyWithdrawn = false;
+    if (withdrawAtConstructor) revokeOnConstructor = () => {
+      const sender = pair.channels.find(channel => channel.sent.some(frame => frame?.t === 'have' &&
+        (frame.keys ?? frame.add ?? []).includes(keyFor(paths[0]))));
+      assert(sender?.other, 'the exact verified HAVE came from the real paired holder');
+      sender.other.receive(JSON.stringify({ t: 'have', add: [], del: [keyFor(paths[0])] })); supplyWithdrawn = true;
+    };
+    for (const loader of loaders) if (loader.row?.actor === 0 && loader.row?.sn === 1) loader.complete();
+    await wait(() => actors[0].swarm.metrics().warmAhead.verified === 1 && exactHaveDelivered);
+    const atHave = performance.now();
+    // One short observation of an event-driven opportunity. This is not a
+    // larger setup/peer/row deadline; no genuine request is made to wake it.
+    await clock.advance(100);
+    if (!paused && !withdrawAtConstructor) await wait(() => actors[1].swarm.metrics().warmAhead.verified === 1);
+    const receiver = actors[1].swarm.metrics(), targetStarts = source.filter(row => row.actor === 1 && row.sn === 1);
+    const diagnostic = { fixture: 'exact-have-idle-warm-reconsideration', controllerClock: 'logical-functional', paused, withdrawAtConstructor, supplyWithdrawn,
+      simulatedSourceAndRtc: true, actualSignedCommitmentAndCore: true, targetBytes: size,
+      exactHaveDelivered, ownerWholeComplete: source.some(row => row.actor === 0 && row.sn === 1 && row.complete),
+      observationAfterHaveMs: performance.now() - atHave,
+      receiverWarm: receiver.warmAhead, receiverCore: receiver.core.state,
+      receiverTargetSources: targetStarts.map(({ range, warm, complete }) => ({ range, warm, complete })),
+      receiverAcceptedPeerBytes: receiver.bytes.peerFirst,
+      receiverTrace: actors[1].swarm.trace().rows.filter(row => ['load', 'eligibility', 'mixedScope', 'xferFinish'].includes(row.k))
+        .map(row => ({ k: row.k, sn: row.sn, role: row.budgetGeometry?.source, reason: row.reason })) };
+    console.log(JSON.stringify(diagnostic));
+    for (const [channel, listener] of listeners) channel.removeEventListener('message', listener);
+    assert.equal(receiver.bytes.peerFirst, 0, 'warm verification before genuine consumption cannot earn accepted credit');
+    if (!paused && !withdrawAtConstructor) {
+      // After recording the idle result, prove that exact same current target
+      // is genuinely eligible for the existing mixed engine when Hls wakes it.
+      const demand = invoke(1, details[1].fragments[1]);
+      sameBytes(await settle(demand.response), objects.get(paths[0]));
+      assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+      const after = actors[1].swarm.metrics(), controlSources = source.filter(row => row.actor === 1 && row.sn === 1);
+      assert(after.bytes.peerFirst > 0, 'the same target actually consumes verified peer bytes after a genuine wake');
+      assert(controlSources.length > 0 && controlSources.every(row => row.range && row.complete),
+        'the same target actually uses origin ranges, never a duplicate whole GET');
+      assert.equal(controlSources.reduce((sum, row) => sum + row.bytes, 0) + after.bytes.peerFirst, size);
+      console.log(JSON.stringify({ fixture: 'post-idle-genuine-mixed-control',
+        acceptedPeerBytes: after.bytes.peerFirst, completeOriginRangeBytes: controlSources.reduce((sum, row) => sum + row.bytes, 0),
+        targetBytes: size, coreReady: after.core.state, idleTargetSourceStarts: targetStarts.length }));
+    }
+    if (withdrawAtConstructor) assert.equal(supplyWithdrawn, true, 'the final constructor callback actually withdrew the current exact HAVE');
+    if (paused || withdrawAtConstructor) assert.equal(targetStarts.length, 0, 'pause or withdrawn exact supply before entry cannot start whole or ranged I/O');
+    else assert(targetStarts.some(row => row.warm && row.range),
+      'exact verified HAVE reconsiders the still-current skipped future without a new genuine request');
+  } finally { clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy(); }
+}
+
+test('owned warm exact HAVE wakes an idle skipped future through real Core mixed assembly', { timeout: 15000 },
+  t => cooperativeHaveReconsideration(t));
+test('owned warm exact HAVE cannot restart skipped work after pause', { timeout: 15000 },
+  t => cooperativeHaveReconsideration(t, true));
+test('owned warm exact HAVE withdrawal during final constructor cannot fall through to whole HTTP', { timeout: 15000 },
+  t => cooperativeHaveReconsideration(t, false, true));

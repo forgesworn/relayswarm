@@ -162,6 +162,16 @@ after authority and reservation callbacks; it never cancels the promoted source
 to make room. Deferred metadata keeps its original eight-second expiry and uses
 the current parsed loader context when admitted again.
 
+For combined warm-ahead/mixed main VOD, a skipped future keeps at most two
+payload-free routing descriptors. An exact added HAVE can reconsider each once
+within its original eight-second expiry, through fresh parsed-context,
+authority, eligibility and reservation checks. It retains no body, permit or
+reservation while skipped. Reconsideration requires a current exact holder;
+losing that supply before loading refuses the optional work. Deferred work
+keeps both the original deadline and one-shot marker. New demand, changed
+context, expiry or stop invalidates the descriptor. This adds no timer or
+source wait and leaves genuine loading independent of speculative ownership.
+
 Offer and answer gathering retain the 1.2-second soft cap when the local SDP
 already contains a candidate. If it is still empty at that point, gathering
 waits for the first candidate or native completion, within the same negotiation

@@ -194,6 +194,15 @@ request, new deadline or accepted credit by itself. Membership differences can
 still cause duplicate or absent speculation; genuine demand does not depend
 on agreement about an owner.
 
+A skipped future can be reconsidered once when a current link adds its exact
+HAVE. At most two metadata-only descriptors retain the routing key and original
+eight-second deadline; no body, permit or reservation is retained. Existing
+parsed-context, authority, holder and resource checks run again. Supply must
+still be present before loading; paused, changed, expired or stopped work is
+refused. Deferring a reconsideration retains its deadline and one-shot marker.
+The notification adds no timer, source wait, deadline renewal or playback
+credit. Genuine loading continues independently.
+
 The separate unreleased `startupBufferTarget` option defaults to `null`. A host
 may supply a synchronous function returning its fresh raw HLS target time in
 seconds. Return `null` when the player, room epoch or playback intent is no
@@ -428,6 +437,11 @@ is recorded once; `bytes.peerFirst` and `onPeerDelivery` receive speculative
 peer credit only when real hls.js demand consumes it. Local reuse does not
 create network bytes. These source tests do not establish sustained cold-cache
 4K, a public TURN route, network savings or physical-device continuity.
+
+`sourceYielded` counts optional source decisions declined by the prefetch hook;
+`haveReconsidered` counts exact-HAVE notifications admitted to the existing
+queue, not completed transfers. `declinedSourceObjects` is the current bounded
+metadata count. None represents delivered or accepted media.
 
 Multi-holder admission reserves its candidate links synchronously before
 asynchronous worker creation. Other download selectors respect those leases.

@@ -47,12 +47,15 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       startupMaxBytes !== MAX_BYTES && typeof startupTarget !== 'function') throw new RangeError('Invalid startup byte budget');
   let closed = false, generation = 0, active = null, scope = null, queued = [], config, loaderConfig, latestDemand = null, loadId = 0;
   const cache = new Map(), demand = new Set(), jobs = new Map(), promoted = new Set(), reuseWaiters = new Set(), pins = new Map();
+  // Payload-free routes for at most the current parsed next two futures.
+  const declined = new Map();
+  const expireDeclined = () => { for (const [key, row] of declined) if (performance.now() >= row.deadline) declined.delete(key); };
   const startup = { enabled: typeof startupTarget === 'function', state: startupTarget ? 'idle' : 'off', reason: null,
     owner: null, terminal: null, own: null, permit: null, response: null, verified: false, reserved: 0,
     controller: null, timer: null, poll: null, plan: [], cursor: null, frozenStart: null, hopAvailable: true, checking: false, targetTime: null, verifiedStart: null, verifiedEnd: null,
     requiredHeadroomMs: null, planningServiceMs: null, released: 0, failures: 0, cancellations: 0, commitStarted: false, commitCompleted: false };
   const counters = { started: 0, verified: 0, rejected: 0, cancelled: 0, coalesced: 0, promotions: 0, localReuseBytes: 0,
-    verifiedBytes: 0, verifiedPeerBytes: 0, consumedPeerBytes: 0, cacheBytes: 0, highWaterBytes: 0 };
+    verifiedBytes: 0, verifiedPeerBytes: 0, consumedPeerBytes: 0, cacheBytes: 0, highWaterBytes: 0, sourceYielded: 0, haveReconsidered: 0 };
   const futureReserved = () => [...jobs.values()].reduce((sum, row) => sum + row.reserved, 0);
   const reserved = () => startup.reserved + futureReserved();
   const byteLimit = () => startup.state === 'buffering' ? startupMaxBytes : MAX_BYTES;
@@ -82,7 +85,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
   const clear = () => {
     if (startup.state === 'idle' || startup.state === 'buffering') endStartup('cancelled', 'cleared', !closed);
     startup.planningServiceMs = null;
-    generation++; queued = []; latestDemand = null;
+    generation++; queued = []; latestDemand = null; declined.clear();
     for (const row of [...jobs.values()]) cancelJob(row);
     for (const key of cache.keys()) drop(key);
     for (const resume of [...reuseWaiters]) resume(true);
@@ -99,6 +102,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     return !closed && revision === generation && latest === latestDemand;
   };
   const pump = () => {
+    expireDeclined();
     if (closed || active || !allowed() || !queued.length || demand.size + promoted.size > 1 ||
         (!steady && startup.state !== 'buffering') || (startup.state === 'buffering' && (!startup.permit || !startup.verified || startup.checking))) return;
     const pumpRevision = generation, latest = latestDemand;
@@ -117,13 +121,13 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       try { current = latest && parsedNext(latest.own).find(future => samePosition(future, item)); } catch {}
       if (closed || active || revision !== generation || latest !== latestDemand || pendingQueue !== queued) return;
       if (!current || performance.now() >= deadline) { queueMicrotask(pump); return; }
-      item = { ...current, deadline };
+      item = { ...current, deadline, ...(item.reconsidered ? { reconsidered: true, objectKey: item.objectKey } : {}) };
     }
     while (tracked() >= MAX_OBJECTS && cache.size && startup.state !== 'buffering') drop(cache.keys().next().value);
     if (tracked() >= objectLimit()) return;
     const controller = new AbortController(), revision = generation, cfg = config, policy = loaderConfig;
     const workContext = item.context, workFragment = workContext.frag, workIdentity = metadataOnly(item);
-    let loader, timer, finish;
+    let loader, timer, finish, permit;
     const row = { ...item, deadline, reserved: 0, finished: false, waiters: new Set(), genuineAt: null,
       promise: new Promise(resolve => { finish = resolve; }),
       noteDemand(at) {
@@ -139,6 +143,27 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       finish: result => finish(result), cancel() {
         controller.abort(); clearTimeout(timer); try { loader?.abort(); loader?.destroy(); } catch {}
       } };
+    const reconsiderCurrent = () => {
+      if (!item.reconsidered) return true;
+      try { if (!allowed()) return false; } catch { return false; }
+      if (permit && permit.key !== item.objectKey) return false;
+      let parsed = false;
+      if (!row.genuine()) {
+        try { parsed = parsedNext(latestDemand?.own).some(future => samePosition(future, workIdentity)); } catch { return false; }
+      }
+      let supply = true;
+      // The retained key only routes HAVE. Never present routing metadata as
+      // a permit: supply checks receive the actual fresh authorisation result.
+      if (permit && !row.genuine()) { try { supply = prefetch(workContext, permit, true) === true; } catch { supply = false; } }
+      try { if (!allowed()) return false; } catch { return false; }
+      const genuine = row.genuine();
+      const planned = genuine ? samePosition(warmContext(genuine.context), workIdentity) : supply && parsed && latestDemand === latest;
+      return !closed && revision === generation && live(row) && !controller.signal.aborted &&
+        planned && scope === workIdentity.scope &&
+        item.context === workContext && workContext.frag === workFragment &&
+        workContext.url === workIdentity.context.url && workFragment.url === workIdentity.context.frag.url &&
+        samePosition(warmContext(workContext), workIdentity) && (performance.now() < deadline || genuine);
+    };
     active = row; jobs.set(row.key, row);
     timer = setTimeout(() => cancelJob(row), Math.max(0, deadline - performance.now()));
     const deferSpeculation = () => {
@@ -149,7 +174,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       // Only metadata returns to the current parsed plan; no body, permit or
       // validator escapes its owner, and re-admission cannot renew eight seconds.
       const latest = latestDemand, wanted = latest?.upcoming.some(future => samePosition(future, item));
-      const deferred = wanted && performance.now() < deadline ? { ...metadataOnly(item), deadline } : null;
+      const deferred = wanted && performance.now() < deadline ? { ...metadataOnly(item), deadline,
+        ...(item.reconsidered ? { reconsidered: true, objectKey: item.objectKey } : {}) } : null;
       const pendingQueue = queued, index = queued.findIndex(future => samePosition(future, item));
       const genuine = row.genuine();
       if (controller.signal.aborted || closed || revision !== generation || !live(row)) return true;
@@ -163,29 +189,43 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     };
     void (async () => {
       try {
-        let permit;
+        if (!reconsiderCurrent()) return null;
         row.validating = true;
         try { permit = await authorise(item.context, controller.signal); }
         finally { row.validating = false; }
-        if (controller.signal.aborted || closed || revision !== generation || !live(row) || !allowed()) return null;
+        if (controller.signal.aborted || closed || revision !== generation || !live(row) || !allowed() || !reconsiderCurrent()) return null;
         if (!permit || !Number.isSafeInteger(permit.size) || permit.size < 1 || permit.size > MAX_BYTES) { counters.rejected++; return null; }
         if (deferSpeculation()) return null;
         // Only optional steady work may yield to another contributor. Startup
         // coverage and a genuine demand promoted during authorisation retain
         // their existing source path, without a wait or a renewed deadline.
         if ((startup.state === 'off' || startup.state === 'ready') && !row.genuine()) {
-          let proceed = false;
-          try { proceed = prefetch(item.context, permit) === true; } catch {}
-          if (!row.genuine() && !proceed) return null;
-          if (controller.signal.aborted || closed || revision !== generation || !live(row) || !allowed()) return null;
+          let proceed = false, yielded = false;
+          try { const decision = prefetch(item.context, permit, item.reconsidered === true); proceed = decision === true; yielded = decision === false; } catch {}
+          if (controller.signal.aborted || closed || revision !== generation || !live(row) || !allowed() || !reconsiderCurrent()) return null;
+          if (!row.genuine() && !proceed) {
+            if (yielded) counters.sourceYielded++;
+            // A reconsideration is one-shot, including a fresh supply refusal.
+            if (yielded && !item.reconsidered && typeof permit.key === 'string' && permit.key.length > 0 && permit.key.length <= 512 &&
+                performance.now() < deadline && latestDemand?.upcoming.some(future => samePosition(future, workIdentity))) {
+              expireDeclined();
+              if (declined.size < 2 && !declined.has(item.key)) {
+                const metadata = metadataOnly(item);
+                if (!closed && revision === generation && live(row) && !controller.signal.aborted &&
+                    performance.now() < deadline && samePosition(metadata, workIdentity))
+                  declined.set(item.key, { item: metadata, objectKey: permit.key, deadline });
+              }
+            }
+            return null;
+          }
         }
         while (!bytesFit(permit.size) && cache.size && startup.state !== 'buffering') drop(cache.keys().next().value);
         if (!bytesFit(permit.size)) { counters.rejected++; return null; }
         row.reserved = permit.size;
         if (!reserve(reserved())) { row.reserved = 0; counters.rejected++; return null; }
-        if (controller.signal.aborted || closed || revision !== generation || !live(row)) return null;
+        if (controller.signal.aborted || closed || revision !== generation || !live(row) || !reconsiderCurrent()) return null;
         if (deferSpeculation()) return null;
-        if (controller.signal.aborted || closed || revision !== generation || !live(row)) return null;
+        if (controller.signal.aborted || closed || revision !== generation || !live(row) || !reconsiderCurrent()) return null;
         // Freeze only an admitted, reserved future, never a skipped metadata
         // candidate or a request refused by the object/byte budget.
         if (startup.state === 'buffering') {
@@ -215,7 +255,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
             } catch { return null; }
           } };
         loader = new Loader(cfg);
-        if (controller.signal.aborted || closed || revision !== generation || !live(row)) return null;
+        if (controller.signal.aborted || closed || revision !== generation || !live(row) || !reconsiderCurrent()) return null;
         counters.started++;
         const requestEntry = performance.now();
         const response = await new Promise(resolve => loader.load(item.context, policy, {
@@ -254,7 +294,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     })().then(result => finishJob(row, result));
   };
   const noteDemand = (context, cfg, policy, owner) => {
-    latestDemand = null;
+    latestDemand = null; declined.clear();
     const own = warmContext(context);
     if (!own || closed) return null;
     if (scope !== own.scope) { if (scope !== null) clear(); scope = own.scope; }
@@ -267,7 +307,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     for (const row of [...jobs.values()]) if (!keep.has(row.key)) cancelJob(row);
     queued = upcoming.map(item => {
       const deferred = queued.find(previous => previous.deadline !== undefined && samePosition(previous, item));
-      return deferred ? { ...item, deadline: deferred.deadline } : item;
+      return deferred ? { ...item, deadline: deferred.deadline, ...(deferred.reconsidered ? { reconsidered: true, objectKey: deferred.objectKey } : {}) } : item;
     });
     if (validInterval(own) && upcoming.every(validInterval))
       latestDemand = { own: metadataOnly(own), upcoming: upcoming.map(metadataOnly), owner };
@@ -918,9 +958,29 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       } catch { latestDemand = null; }
       return false;
     },
+    reconsiderHave(added) {
+      expireDeclined();
+      if (closed || !steady || !['off', 'ready'].includes(startup.state) || !Array.isArray(added)) return 0;
+      let count = 0;
+      const revision = generation, latest = latestDemand;
+      for (const [key, row] of [...declined]) {
+        if (!added.includes(row.objectKey)) continue;
+        declined.delete(key); // Consume before any reentrant host callback.
+        let proceed = false;
+        try { proceed = allowed() === true; } catch {}
+        if (!proceed || closed || revision !== generation || latestDemand !== latest || !latest ||
+            performance.now() >= row.deadline || !latest.upcoming.some(item => samePosition(item, row.item)) ||
+            cache.has(key) || queued.some(item => item.key === key)) continue;
+        queued.push({ ...row.item, deadline: row.deadline, reconsidered: true, objectKey: row.objectKey });
+        counters.haveReconsidered++; count++;
+      }
+      if (count) queueMicrotask(pump);
+      return count;
+    },
     pinned: key => pins.has(key), release(key) { for (const [id, row] of cache) if (row.permit.key === key) drop(id); },
-    stop() { closed = true; clear(); }, snapshot: () => ({ ...counters,
+    stop() { closed = true; clear(); }, snapshot: () => { expireDeclined(); return ({ ...counters,
+      declinedSourceObjects: declined.size,
       reservationBytes: reserved(), active: Number(Boolean(active)), promoted: promoted.size, trackedObjects: tracked(),
       queued: queued.length, cacheObjects: cache.size,
-      limits: { objects: objectLimit(), bytes: byteLimit(), speculativeWholeRequests: 1, deadlineMs: startup.state === 'buffering' ? STARTUP_DEADLINE_MS : DEADLINE_MS, revalidationMs: 25 } }) };
+      limits: { objects: objectLimit(), bytes: byteLimit(), speculativeWholeRequests: 1, deadlineMs: startup.state === 'buffering' ? STARTUP_DEADLINE_MS : DEADLINE_MS, revalidationMs: 25 } }); } };
 }

@@ -61,6 +61,28 @@ The original failed receipt remains unchanged. All 32 sealed files were
 reverified; temporary relay, browser profiles, raw credential input and rendered
 secrets were removed, with the paired private relay and firewall unchanged.
 
+## Unreleased exact-HAVE reconsideration (29 October 2026)
+
+A focused two-SDK/Core fixture reproduces a missed optional opportunity:
+the elected owner verifies an object and delivers its exact HAVE, but an idle
+viewer that previously skipped that future starts no warm work. The same
+object then completes on genuine demand using 327,680 verified peer bytes and
+720,896 source-range bytes, with no duplicate whole GET. This uses simulated
+source and native RTC; it proves the source-policy opportunity, not field
+causality or throughput.
+
+Skipped futures now retain at most two metadata-only routing descriptors.
+An exact added HAVE can reconsider each once within its original deadline,
+through fresh context, authority, holder and resource checks. Deferred work
+keeps the one-shot marker. This adds no timer, source wait or playback credit;
+genuine demand remains independent. A fresh field measurement is still needed
+to establish whether this change meets the original contribution requirement.
+All 15 manager guards and the complete 231-test manager suite pass. Eight
+scoped SDK/Core controls pass, including idle mixed assembly with deferred
+credit, pause and constructor-time supply withdrawal, the earlier reciprocal
+owner case, full six-MiB main/Worker positives and capability fallbacks. These
+are functional controller/protocol checks, not native throughput measurements.
+
 ## Setup-proof and native CI scheduling correction (29 October 2026)
 
 The `a007c07` hosted run passed its reciprocal future-owner and existing

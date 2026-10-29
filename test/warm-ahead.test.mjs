@@ -834,6 +834,7 @@ function startupFixture(t, options = {}) {
       url: `https://origin.example/media/s${sn}.m4s`, baseurl: 'https://origin.example/media/index.m3u8' } });
   class Loader {
     stats = { loading: { start: 0 }, loaded: 0 };
+    constructor() { options.onConstructor?.(); }
     load(ctx, _policy, callbacks) {
       if (options.timedStats) this.stats.loading = { start: performance.now() };
       const row = { context: ctx, config: _policy, callbacks, aborted: false, stats: this.stats,
@@ -900,6 +901,180 @@ function startupLogicalClock(t) {
   let now = 1000; t.mock.method(performance, 'now', () => now);
   return ms => { now += ms; t.mock.timers.tick(ms); };
 }
+
+// Manager lifecycle controls with simulated four-byte source bodies. Actual
+// SDK/Core transfer and credit are exercised separately, not manufactured here.
+async function declinedWarmFixture(t, hooks = {}) {
+  const have = new Set(), auth = [], contexts = new Map(), checks = [];
+  const key = sn => `object-${sn}`;
+  let f;
+  const state = { have, auth, contexts, checks, key, get f() { return f; } };
+  f = startupFixture(t, { startup: false, steady: true,
+    permit: ctx => {
+      auth.push(ctx.frag.sn); contexts.set(ctx.frag.sn, ctx);
+      const permit = { key: key(ctx.frag.sn), size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true };
+      return hooks.authorise ? hooks.authorise(ctx, permit, state) : permit;
+    },
+    prefetch: (ctx, permit, reconsidered) => {
+      assert.equal(permit.size, 4, 'supply checks receive a fresh actual permit, never routing metadata');
+      assert.equal(typeof permit.sha256, 'string'); assert.equal(typeof permit.current, 'function');
+      checks.push({ sn: ctx.frag.sn, reconsidered: reconsidered === true });
+      return have.has(permit.key);
+    },
+    onNext: ctx => hooks.next?.(ctx, state), onConstructor: () => hooks.constructor?.(state),
+    reserve: size => hooks.reserve?.(size, state) ?? true,
+    reuseBudget: ctx => hooks.budget?.(ctx, state) ?? 25,
+  });
+  const first = f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0]);
+  assert.equal(f.engine.snapshot().declinedSourceObjects, 2);
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().cacheObjects, 0);
+  assert.equal(f.engine.snapshot().active, 0); assert.equal(f.engine.snapshot().trackedObjects, 0);
+  return { ...state, f, first };
+}
+
+test('warm HAVE reconsideration retains at most two routes and consumes each notification once', async t => {
+  startupLogicalClock(t);
+  const { f, have, auth, key } = await declinedWarmFixture(t);
+  assert.equal(f.engine.reconsiderHave(['unrelated']), 0);
+  have.add(key(1)); assert.equal(f.engine.reconsiderHave([key(1), key(1)]), 1);
+  assert.equal(f.engine.reconsiderHave([key(1)]), 0); await flushStartup();
+  const future = f.requests.find(row => row.context.frag.sn === 1); assert(future);
+  future.finish(); await flushStartup();
+  assert.equal(f.engine.snapshot().verified, 1); assert.equal(f.engine.snapshot().consumedPeerBytes, 0);
+  assert.equal(auth.filter(sn => sn === 1).length, 2, 'initial refusal and one fresh authorised reconsideration');
+  const count = f.state.authCalls;
+  for (let i = 0; i < 4; i++) assert.equal(f.engine.reconsiderHave([key(1)]), 0);
+  await flushStartup(); assert.equal(f.state.authCalls, count);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+  assert(f.engine.snapshot().declinedSourceObjects <= 2);
+});
+
+for (const outcome of ['throw', 'nonboolean']) test(`warm HAVE reconsideration cannot retain an uncertain ${outcome} decision`, async t => {
+  startupLogicalClock(t);
+  const f = startupFixture(t, { startup: false, steady: true, prefetch: () => {
+    if (outcome === 'throw') throw new Error('controlled optional policy failure');
+    return undefined;
+  } });
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0]);
+  assert.equal(f.engine.snapshot().declinedSourceObjects, 0); assert.equal(f.engine.snapshot().sourceYielded, 0);
+  assert.equal(f.engine.snapshot().reservationBytes, 0); const count = f.state.authCalls;
+  assert.equal(f.engine.reconsiderHave(['https://origin.example/media/s1.m4s']), 0);
+  await flushStartup(); assert.equal(f.state.authCalls, count);
+});
+
+test('warm HAVE reconsideration retains the first eight-second deadline', async t => {
+  const tick = startupLogicalClock(t), { f, have, key } = await declinedWarmFixture(t);
+  tick(7900); have.add(key(1)); assert.equal(f.engine.reconsiderHave([key(1)]), 1); await flushStartup();
+  const future = f.requests.find(row => row.context.frag.sn === 1); assert(future);
+  const work = future.context[STARTUP_MARKER].work();
+  assert.equal(work.enteredAt, 1000); assert.equal(work.deadline, 9000);
+  tick(99); await flushStartup(); assert.equal(future.aborted, false);
+  tick(1); await flushStartup(); assert.equal(future.aborted, true);
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().declinedSourceObjects, 0);
+  const count = f.state.authCalls; have.add(key(2));
+  assert.equal(f.engine.reconsiderHave([key(1), key(2)]), 0); await flushStartup();
+  assert.equal(f.state.authCalls, count); assert.equal(f.engine.snapshot().verified, 0);
+});
+
+for (const ending of ['reserve-withdraw', 'constructor-withdraw', 'constructor-pause', 'authorise-mutate', 'authorise-mutate-throw', 'next-mutate-throw', 'next-stop', 'next-pause-after-constructor']) {
+  test(`warm HAVE reconsideration rejects ${ending} before optional source`, async t => {
+    startupLogicalClock(t); let armed = false, changed = false, constructed = false;
+    const change = state => {
+      changed = true; armed = false;
+      if (ending.endsWith('withdraw')) state.have.delete(state.key(1));
+      else if (ending === 'constructor-pause') state.f.state.allowed = false;
+    };
+    const { f, have, auth, key } = await declinedWarmFixture(t, {
+      reserve: (_size, state) => { if (armed && ending === 'reserve-withdraw') change(state); return true; },
+      constructor: state => {
+        if (armed && ending === 'next-pause-after-constructor') constructed = true;
+        else if (armed && ending.startsWith('constructor-')) change(state);
+      },
+      authorise: (ctx, permit, state) => {
+        if (armed && ctx.frag.sn === 1 && ending.startsWith('authorise-')) {
+          changed = true; armed = false; ctx.frag.start += 0.5;
+          if (ending.endsWith('throw')) throw new Error('controlled changed context');
+        }
+        return permit;
+      },
+      next: (_ctx, state) => {
+        if (ending === 'next-pause-after-constructor') {
+          if (armed && constructed) { changed = true; armed = false; state.f.state.allowed = false; }
+          return;
+        }
+        if (!armed || !ending.startsWith('next-')) return;
+        if (ending === 'next-stop') { changed = true; armed = false; state.f.engine.stop(); }
+        else if (state.auth.filter(sn => sn === 1).length === 2) {
+          changed = true; armed = false; state.contexts.get(1).frag.start += 0.5;
+          throw new Error('controlled parsed callback mutation');
+        }
+      },
+    });
+    armed = true; have.add(key(1)); assert.equal(f.engine.reconsiderHave([key(1)]), 1); await flushStartup();
+    assert(changed, 'the guarded callback actually executed');
+    assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0]);
+    assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().active, 0);
+    assert.equal(f.engine.snapshot().verified, 0); assert.equal(f.engine.snapshot().consumedPeerBytes, 0);
+    f.state.allowed = true; have.add(key(1)); const count = auth.length;
+    for (let i = 0; i < 4; i++) assert.equal(f.engine.reconsiderHave([key(1)]), 0);
+    await flushStartup(); assert.equal(auth.length, count, 'failed reconsideration cannot repopulate a HAVE retry route');
+  });
+}
+
+test('warm HAVE reconsideration cannot reuse a changed authorised object key', async t => {
+  startupLogicalClock(t); let changed = false;
+  const { f, have, key } = await declinedWarmFixture(t, { authorise: (_ctx, permit) => changed ? { ...permit, key: 'replacement-object' } : permit });
+  changed = true; have.add(key(1)); have.add('replacement-object');
+  assert.equal(f.engine.reconsiderHave([key(1)]), 1); await flushStartup();
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0]);
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.reconsiderHave([key(1)]), 0);
+});
+
+test('warm HAVE reconsideration preserves genuine promotion during fresh authorisation', async t => {
+  const tick = startupLogicalClock(t); let held = false, release;
+  t.after(() => release?.());
+  const { f, have, key } = await declinedWarmFixture(t, { authorise: (ctx, permit) => held && ctx.frag.sn === 1
+    ? new Promise(resolve => { held = false; release = () => resolve(permit); }) : permit });
+  tick(7900); held = true; have.add(key(1)); assert.equal(f.engine.reconsiderHave([key(1)]), 1); await flushStartup();
+  assert.equal(typeof release, 'function');
+  const demand = f.load(1, 12000); await flushStartup(); have.delete(key(1)); tick(200); release(); await flushStartup();
+  const source = f.requests.find(row => row.context.frag.sn === 1); assert(source, 'genuine recovery remains available after pre-expiry promotion');
+  source.finish(); await flushStartup();
+  assert.equal(demand.calls.success, 1); assert.equal(demand.calls.abort, 0); assert.equal(demand.calls.error, 0);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+});
+
+test('warm HAVE reconsideration preserves one-shot routing through promoted-headroom deferral', async t => {
+  const tick = startupLogicalClock(t); let budget = 25, hold = false, release;
+  t.after(() => release?.());
+  const { f, have, auth, checks, key } = await declinedWarmFixture(t, {
+    budget: () => budget,
+    authorise: (ctx, permit) => hold && ctx.frag.sn === 2 ? new Promise(resolve => {
+      hold = false; release = () => resolve(permit);
+    }) : permit,
+  });
+  have.add(key(1)); assert.equal(f.engine.reconsiderHave([key(1)]), 1); await flushStartup();
+  const source = f.requests.find(row => row.context.frag.sn === 1); assert(source);
+  const demand = f.load(1, 12000); await flushStartup();
+  assert.equal(f.engine.snapshot().promoted, 1); assert.equal(f.engine.snapshot().declinedSourceObjects, 2);
+  const currentPlanAuth = auth.filter(sn => sn === 2).length;
+  assert.equal(currentPlanAuth, 2, 'SN2 was separately declined for the original and current genuine plans');
+  tick(2000); hold = true; have.add(key(2)); assert.equal(f.engine.reconsiderHave([key(2)]), 1); await flushStartup();
+  assert.equal(typeof release, 'function'); budget = 0; release(); await flushStartup();
+  assert.equal(f.requests.some(row => row.context.frag.sn === 2), false);
+  assert.equal(f.engine.snapshot().active, 0); assert.equal(f.engine.snapshot().reservationBytes, 4);
+  const heldAuth = f.state.authCalls; await flushStartup(); assert.equal(f.state.authCalls, heldAuth, 'blocked headroom does not busy-retry authority');
+  have.delete(key(2)); tick(1000); budget = 25; source.finish(); await flushStartup();
+  assert.equal(demand.calls.success, 1); assert.equal(f.requests.some(row => row.context.frag.sn === 2), false);
+  assert.equal(auth.filter(sn => sn === 2).length, currentPlanAuth + 2,
+    'one fresh HAVE retry and one fresh authorisation on headroom resume remain mandatory');
+  assert(checks.some(row => row.sn === 2 && row.reconsidered), 'resumed routing keeps the strict exact-supply policy');
+  const count = f.state.authCalls; have.add(key(2));
+  for (let i = 0; i < 4; i++) assert.equal(f.engine.reconsiderHave([key(2)]), 0);
+  await flushStartup(); assert.equal(f.state.authCalls, count); assert.equal(f.engine.snapshot().consumedPeerBytes, 0);
+});
 
 // Logical scheduling only: four-byte authorised bodies, not media throughput.
 // Geometry is from manifest ad78fc006bc131da3dcbf10656d4b8023e3fde71cbe5dba7a39a1f3af7ae238c.

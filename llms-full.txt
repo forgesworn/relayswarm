@@ -432,6 +432,16 @@ after authority and reservation callbacks; it never cancels the promoted source
 to make room. Deferred metadata keeps its original eight-second expiry and uses
 the current parsed loader context when admitted again.
 
+For combined warm-ahead/mixed main VOD, a skipped future keeps at most two
+payload-free routing descriptors. An exact added HAVE can reconsider each once
+within its original eight-second expiry, through fresh parsed-context,
+authority, eligibility and reservation checks. It retains no body, permit or
+reservation while skipped. Reconsideration requires a current exact holder;
+losing that supply before loading refuses the optional work. Deferred work
+keeps both the original deadline and one-shot marker. New demand, changed
+context, expiry or stop invalidates the descriptor. This adds no timer or
+source wait and leaves genuine loading independent of speculative ownership.
+
 Offer and answer gathering retain the 1.2-second soft cap when the local SDP
 already contains a candidate. If it is still empty at that point, gathering
 waits for the first candidate or native completion, within the same negotiation
@@ -2279,6 +2289,15 @@ request, new deadline or accepted credit by itself. Membership differences can
 still cause duplicate or absent speculation; genuine demand does not depend
 on agreement about an owner.
 
+A skipped future can be reconsidered once when a current link adds its exact
+HAVE. At most two metadata-only descriptors retain the routing key and original
+eight-second deadline; no body, permit or reservation is retained. Existing
+parsed-context, authority, holder and resource checks run again. Supply must
+still be present before loading; paused, changed, expired or stopped work is
+refused. Deferring a reconsideration retains its deadline and one-shot marker.
+The notification adds no timer, source wait, deadline renewal or playback
+credit. Genuine loading continues independently.
+
 The separate unreleased `startupBufferTarget` option defaults to `null`. A host
 may supply a synchronous function returning its fresh raw HLS target time in
 seconds. Return `null` when the player, room epoch or playback intent is no
@@ -2513,6 +2532,11 @@ is recorded once; `bytes.peerFirst` and `onPeerDelivery` receive speculative
 peer credit only when real hls.js demand consumes it. Local reuse does not
 create network bytes. These source tests do not establish sustained cold-cache
 4K, a public TURN route, network savings or physical-device continuity.
+
+`sourceYielded` counts optional source decisions declined by the prefetch hook;
+`haveReconsidered` counts exact-HAVE notifications admitted to the existing
+queue, not completed transfers. `declinedSourceObjects` is the current bounded
+metadata count. None represents delivered or accepted media.
 
 Multi-holder admission reserves its candidate links synchronously before
 asynchronous worker creation. Other download selectors respect those leases.
@@ -3260,6 +3284,28 @@ neither traffic savings nor a physical-phone, public-default or NAT result.
 The original failed receipt remains unchanged. All 32 sealed files were
 reverified; temporary relay, browser profiles, raw credential input and rendered
 secrets were removed, with the paired private relay and firewall unchanged.
+
+## Unreleased exact-HAVE reconsideration (29 October 2026)
+
+A focused two-SDK/Core fixture reproduces a missed optional opportunity:
+the elected owner verifies an object and delivers its exact HAVE, but an idle
+viewer that previously skipped that future starts no warm work. The same
+object then completes on genuine demand using 327,680 verified peer bytes and
+720,896 source-range bytes, with no duplicate whole GET. This uses simulated
+source and native RTC; it proves the source-policy opportunity, not field
+causality or throughput.
+
+Skipped futures now retain at most two metadata-only routing descriptors.
+An exact added HAVE can reconsider each once within its original deadline,
+through fresh context, authority, holder and resource checks. Deferred work
+keeps the one-shot marker. This adds no timer, source wait or playback credit;
+genuine demand remains independent. A fresh field measurement is still needed
+to establish whether this change meets the original contribution requirement.
+All 15 manager guards and the complete 231-test manager suite pass. Eight
+scoped SDK/Core controls pass, including idle mixed assembly with deferred
+credit, pause and constructor-time supply withdrawal, the earlier reciprocal
+owner case, full six-MiB main/Worker positives and capability fallbacks. These
+are functional controller/protocol checks, not native throughput measurements.
 
 ## Setup-proof and native CI scheduling correction (29 October 2026)
 

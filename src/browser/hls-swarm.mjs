@@ -667,7 +667,7 @@ class HlsSwarm {
           startupRecovery: context => Math.max(this.options.originReserveMs,
             (percentile(this.#originSamples(context), 0.9) || 0) * 1.25 + 100),
           allowed: () => this.#servingAllowed() && hls.media?.paused !== true && !onCellular(),
-          prefetch: (context, permit) => this.#ownsWarmSource(context, permit.key),
+          prefetch: (context, permit, reconsidered) => this.#ownsWarmSource(context, permit.key, reconsidered),
           next: context => {
             const fragments = hls.levels?.[context.frag?.level]?.details?.fragments;
             if (!Array.isArray(fragments)) return [];
@@ -2149,12 +2149,12 @@ class HlsSwarm {
     if (!previous) for (const link of this.links.values()) link.sendContribution(this.#servingAllowed(), rendition);
   }
 
-  #ownsWarmSource(context, key) {
+  #ownsWarmSource(context, key, requireExact = false) {
     const frag = context?.frag;
     if (!this.options.bufferedMixedRanges || !this.#rangesEnabled() ||
         this.options.transferWorkerUrl !== undefined && this.transferWorkerState !== 'ready' || frag?.type !== 'main' ||
         !Number.isInteger(frag.level) || frag.level < 0 || this.hls?.levels?.[frag.level]?.details?.live !== false ||
-        !/^[0-9a-f]{64}$/.test(key) || !/^[0-9a-f]{64}$/.test(this.session?.pubkey)) return true;
+        !/^[0-9a-f]{64}$/.test(key) || !/^[0-9a-f]{64}$/.test(this.session?.pubkey)) return !requireExact;
     const rendition = this.#renditionContext(context), discovery = this.discovery.contexts.get('main');
     const candidates = [...this.links.values()].filter(peer => !peer.closed && /^[0-9a-f]{64}$/.test(peer.pubkey) && !this.banned.has(peer.pubkey) &&
       peer.pc?.connectionState === 'connected' && peer.channel?.readyState === 'open' && peer.supportsRanges &&
@@ -2164,7 +2164,9 @@ class HlsSwarm {
     // A held exact object can already feed the ordinary mixed path. Otherwise
     // avoid duplicating a future whole GET with a current contributor. This
     // decides optional work only; it never delays a genuine player request.
-    if (!candidates.length || candidates.some(peer => peer.have.has(key))) return true;
+    if (candidates.some(peer => peer.have.has(key))) return true;
+    if (requireExact) return false;
+    if (!candidates.length) return true;
     const target = BigInt('0x' + key), local = target ^ BigInt('0x' + this.session.pubkey);
     return candidates.every(peer => (target ^ BigInt('0x' + peer.pubkey)) >= local);
   }
@@ -4744,6 +4746,7 @@ class HlsSwarm {
       maxSegmentBytes: this.options.maxSegmentBytes,
       onRequest: (from, key, range) => this.#serveRequest(from, key, range),
       onHaveChange: (_link, added) => {
+        if (!this.stopped && !_link.closed && this.links.get(_link.pubkey) === _link) this.warmAhead?.reconsiderHave(added);
         for (const waiter of [...this.haveWaiters]) waiter(added);
         this.#checkLatePeers();
       },
