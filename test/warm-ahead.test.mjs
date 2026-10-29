@@ -893,6 +893,14 @@ function startupFixture(t, options = {}) {
 }
 const flushStartup = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
 
+// Logical controller proofs pair monotonic expiry with mocked timer delivery.
+// Native elapsed-time tests and explicitly clocked replays remain separate.
+function startupLogicalClock(t) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let now = 1000; t.mock.method(performance, 'now', () => now);
+  return ms => { now += ms; t.mock.timers.tick(ms); };
+}
+
 // Logical scheduling only: four-byte authorised bodies, not media throughput.
 // Geometry is from manifest ad78fc006bc131da3dcbf10656d4b8023e3fde71cbe5dba7a39a1f3af7ae238c.
 // Known SN1/4/8/9 services and recovery are retained scalar observations;
@@ -2406,11 +2414,11 @@ test('startup buffer rechecks a moving target after authority yields instead of 
 });
 
 test('startup buffer deadline fails once and cannot renew through a retry loader', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const tick = startupLogicalClock(t);
   const f = startupFixture(t), first = f.load(0, 25);
   f.requests[0].finish(); await flushStartup();
   assert.equal(first.calls.success, 0);
-  t.mock.timers.tick(25); await flushStartup();
+  tick(25); await flushStartup();
   assert.equal(first.calls.error, 1);
   assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
   assert.equal(f.engine.startupSnapshot().state, 'failed');
@@ -2454,14 +2462,14 @@ test('startup buffer explicit abort, quiet destroy and engine stop fence late lo
 });
 
 test('startup buffer reservations include first input and reject a future object beyond the shared cap', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const tick = startupLogicalClock(t);
   const f = startupFixture(t, { permitSize: sn => (sn === 0 ? 16 : 12) * 1024 * 1024 }), first = f.load(0, 25);
   await flushStartup();
   assert.equal(f.requests.length, 1, 'future12MiB cannot fit beside the reserved first16MiB');
   assert.equal(f.engine.startupSnapshot().heldBytes, 16 * 1024 * 1024);
   assert.ok(f.engine.snapshot().trackedObjects <= 3);
   assert.ok(f.engine.snapshot().reservationBytes <= 24 * 1024 * 1024);
-  t.mock.timers.tick(25); await flushStartup();
+  tick(25); await flushStartup();
   assert.equal(first.calls.error, 1);
 });
 
@@ -2483,14 +2491,14 @@ test('startup buffer rejects a corrupt first body without accepting peer contrib
 });
 
 test('startup buffer cannot count future cached bytes across a timeline gap as headroom', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const tick = startupLogicalClock(t);
   const f = startupFixture(t, { starts: [0, 4, 6] }), first = f.load(0, 25);
   f.requests[0].finish(); await flushStartup();
   f.requests[1].finish(); await flushStartup();
   f.requests[2].finish(); await flushStartup();
   assert.equal(first.calls.success, 0);
   assert.equal(f.engine.startupSnapshot().verifiedEnd, 2);
-  t.mock.timers.tick(25); await flushStartup(); assert.equal(first.calls.error, 1);
+  tick(25); await flushStartup(); assert.equal(first.calls.error, 1);
 });
 
 test('startup buffer initial unavailable target starts no HTTP or authority work', async t => {
@@ -2575,14 +2583,14 @@ test('startup buffer rejects future coverage evicted while another authority che
 });
 
 test('startup buffer pins reauthorised future rows and releases pins immediately on abort or deadline', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const tick = startupLogicalClock(t);
   for (const action of ['abort', 'deadline']) {
     const f = startupFixture(t), first = f.load(0, 25);
     f.requests[0].finish(); await flushStartup();
     f.state.holdRecheck = true; f.requests[1].finish(); await flushStartup();
     const key = f.requests[1].context.url;
     assert.equal(f.engine.pinned(key), true, 'shared held-cache trimming cannot evict active revalidation coverage');
-    if (action === 'abort') first.loader.abort(); else t.mock.timers.tick(25);
+    if (action === 'abort') first.loader.abort(); else tick(25);
     assert.equal(f.engine.pinned(key), false, 'an unresolved authority must not retain a pin after cancellation');
     assert.equal(f.engine.snapshot().reservationBytes, 0);
     f.state.releaseRecheck(); await flushStartup();
@@ -2856,12 +2864,16 @@ test('startup commit rechecks slow ACK target and holds for more verified headro
 });
 
 test('startup commit keeps the original deadline and ignores a late ACK or rejection', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const tick = startupLogicalClock(t);
   for (const rejectLate of [false, true]) {
     let resolve, reject, signal, calls = 0;
     const f = startupFixture(t, { commit: value => { signal = value.signal; calls++; return new Promise((yes, no) => { resolve = yes; reject = no; }); } }), first = f.load(0, 25);
     f.requests[0].finish(); await flushStartup(); f.requests[1].finish(); await flushStartup();
-    t.mock.timers.tick(25); await flushStartup();
+    assert.equal(calls, 1); assert(signal instanceof AbortSignal);
+    assert.equal(signal.aborted, false); assert.equal(first.calls.error, 0); assert.equal(first.calls.success, 0);
+    tick(24); await flushStartup();
+    assert.equal(signal.aborted, false); assert.equal(first.calls.error, 0); assert.equal(first.calls.success, 0);
+    tick(1); await flushStartup();
     assert.equal(signal.aborted, true); assert.equal(first.calls.error, 1);
     assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
     assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.pinned(f.requests[1].context.url), false);

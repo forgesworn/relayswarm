@@ -92,6 +92,17 @@ and two mandatory assembly positives pass locally. The original hosted failures
 remain failed; a new full CI run is required. Product code and timing, original
 fixture timeouts and field thresholds are unchanged.
 
+The later `1206505` macOS run passed 921 of 922 checks. An older ACK controller
+fixture mixed mocked timers with real monotonic time and never observed its
+commit signal. A native delayed-timer specimen reproduces that fixture failure;
+a separate real-time guard control correctly rejects an expired 25 ms startup
+without calling the hook or renewing through late completion. Five logical
+short-deadline fixtures now advance their timer and monotonic clocks together.
+Their original parents and assertions remain; the ACK case additionally checks
+that ownership is live at 24 ms and aborted at 25 ms. All five controls and
+216 manager checks pass locally. These are controller and unit-level deadline
+proofs; the failed hosted verdict and field acceptance remain separate.
+
 ## Unreleased cooperative VOD futures (29 October 2026)
 
 When both warm-ahead and buffered mixed ranges are enabled on explicit main
