@@ -2,7 +2,7 @@ import { createServer, request } from 'node:http';
 import { once } from 'node:events';
 
 // Shared real HTTP body/Range accounting. No Core or Hls admission policy.
-export async function mixedHttpOrigin(t, bytes, BaseLoader = class { constructor() { this.stats = {}; } }) {
+export async function mixedHttpOrigin(t, bytes, BaseLoader = class { constructor() { this.stats = {}; } }, invocationProbe = null) {
   const size = bytes.length, received = [], requests = [];
   let first;
   const firstRequest = new Promise(resolve => { first = resolve; });
@@ -44,6 +44,7 @@ export async function mixedHttpOrigin(t, bytes, BaseLoader = class { constructor
         sdkEnteredAtMs: Number.isFinite(priorStart) ? priorStart : null, invokedAtMs: performance.now(),
         maxLoadTimeMs: config?.loadPolicy?.maxLoadTimeMs ?? null,
         maxTimeToFirstByteMs: config?.loadPolicy?.maxTimeToFirstByteMs ?? null };
+      if (invocationProbe) this.receipt.invocationProbe = invocationProbe();
       received.push(this.receipt);
       this.aborted = false; this.stats = { aborted: false, loaded: 0, loading: { start: performance.now(), first: 0, end: 0 } };
       this.req = request(ctx.url, { agent: false, headers: ctx.rangeEnd ? { Range: `bytes=${ctx.rangeStart}-${ctx.rangeEnd - 1}` } : {} }, res => {

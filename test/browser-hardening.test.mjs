@@ -8743,11 +8743,53 @@ test('buffered mixed setup retains only25ms before ordinary source invocation wh
   } finally { release?.(); if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
-for (const [knownFlow, worker, forceSetupExpiry] of [[true, false, false], [true, true, false], [false, false, false], [false, true, false], [false, true, true]]) test(`buffered mixed ${knownFlow ? '' : 'untrained '}six-MiB object retains exact206 assembly or proven25ms setup decline (${worker ? 'committed-WASM worker' : 'main-thread'}${forceSetupExpiry ? ', held allocation' : ''})`, { timeout: 20000 }, async t => {
+// Observe only the currently executing real timer. The native delay, receiver,
+// callback arguments and returned handle are passed through unchanged.
+function realTimerInvocationContext() {
+  const native = globalThis.setTimeout; let current = null;
+  function observed(callback, delay, ...args) {
+    if (typeof callback !== 'function') return Reflect.apply(native, this, [callback, delay, ...args]);
+    const scheduledAtMs = performance.now();
+    return Reflect.apply(native, this, [function (...callbackArgs) {
+      const prior = current;
+      current = { scheduledAtMs, requestedDelayMs: typeof delay === 'number' && Number.isFinite(delay) ? delay : null,
+        firedAtMs: performance.now() };
+      try { return Reflect.apply(callback, this, callbackArgs); }
+      finally { current = prior; }
+    }, delay, ...args]);
+  }
+  globalThis.setTimeout = observed;
+  return { snapshot: () => current ? { ...current } : null,
+    restore: () => { globalThis.setTimeout = native; } };
+}
+
+test('buffered mixed timer observer preserves native receiver arguments handle and synchronous scope', async () => {
+  const native = globalThis.setTimeout, observer = realTimerInvocationContext(), argument = {};
+  try {
+    await new Promise((resolve, reject) => {
+      const handle = setTimeout(function (first, second) {
+        try {
+          assert.equal(this, handle); assert.equal(first, argument); assert.equal(second, 7);
+          const context = observer.snapshot();
+          assert.deepEqual(Object.keys(context), ['scheduledAtMs', 'requestedDelayMs', 'firedAtMs']);
+          assert.equal(context.requestedDelayMs, 1); assert(context.firedAtMs >= context.scheduledAtMs);
+          resolve();
+        } catch (error) { reject(error); }
+      }, 1, argument, 7);
+      assert.equal(typeof handle.refresh, 'function', 'the native Timeout handle is returned unchanged');
+    });
+    assert.equal(observer.snapshot(), null, 'context does not survive the synchronous native callback');
+  } finally { observer.restore(); }
+  assert.equal(globalThis.setTimeout, native);
+});
+
+for (const [knownFlow, worker, forceSetupExpiry] of [[true, false, false], [true, true, false], [false, false, false], [false, true, false], [false, true, true]]) test(`buffered mixed ${knownFlow ? '' : 'untrained '}six-MiB object retains exact206 assembly or proven bounded setup decline (${worker ? 'committed-WASM worker' : 'main-thread'}${forceSetupExpiry ? ', held allocation' : ''})`, { timeout: 20000 }, async t => {
+  const timers = realTimerInvocationContext();
+  t.after(() => timers.restore());
   const rpc = [], bridge = worker ? transferWorkerFixture(t, { onRpc: row => rpc.push(row) }) : null;
   const workerOptions = bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {};
   const size = 6 * 1024 * 1024, bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
-  const { received, requests, url, HttpLoader } = await mixedHttpOrigin(t, bytes, Loader);
+  const { received, requests, url, HttpLoader } = await mixedHttpOrigin(t, bytes, Loader, timers.snapshot);
   class PacedPeer extends PhasedFlowChannel {
     send(data) {
       const frame = typeof data === 'string' ? JSON.parse(data) : null;
@@ -8802,18 +8844,33 @@ for (const [knownFlow, worker, forceSetupExpiry] of [[true, false, false], [true
     const trace = f.swarm.trace(), start = trace.rows.filter(row => row.k === 'xfer' && row.op === 'start').at(-1);
     if (requests.filter(row => !row.range).length !== 1) {
       const fallback = received.at(-1), metrics = f.swarm.metrics(), enteredAt = fallback.sdkEnteredAtMs, cutoff = enteredAt + 25;
-      const crossed = rpc.find(row => row.success && row.sentAtMs >= enteredAt && row.sentAtMs < cutoff && row.replyAtMs >= cutoff);
-      assert(worker && Number.isFinite(enteredAt) && enteredAt > 0 && crossed,
-        JSON.stringify({ message: 'whole fallback needs a successful setup RPC crossing the actual25ms cutoff',
-          knownFlow, worker, rpc, enteredAt, invokedAtMs: fallback.invokedAtMs }));
-      assert(fallback.invokedAtMs >= cutoff, 'the real source invocation follows the exhausted setup window');
+      const timer = fallback.invocationProbe;
+      const boundedTimer = timer && Number.isFinite(timer.scheduledAtMs) && timer.scheduledAtMs >= enteredAt &&
+        timer.scheduledAtMs <= cutoff && Number.isFinite(timer.requestedDelayMs) && timer.requestedDelayMs >= 0 && timer.requestedDelayMs <= 25 &&
+        Number.isFinite(timer.firedAtMs) && timer.firedAtMs >= timer.scheduledAtMs && timer.firedAtMs <= fallback.invokedAtMs;
+      const pendingAtTimer = boundedTimer && rpc.find(row => row.success && ['new', 'start'].includes(row.op) &&
+        row.sentAtMs >= enteredAt && row.sentAtMs <= timer.firedAtMs && timer.firedAtMs <= row.replyAtMs);
+      const lateReply = rpc.find(row => row.success && ['new', 'start'].includes(row.op) &&
+        row.sentAtMs >= enteredAt && row.sentAtMs < cutoff && row.replyAtMs >= cutoff && row.replyAtMs <= fallback.invokedAtMs);
+      const proofTime = pendingAtTimer ? timer.firedAtMs : lateReply?.replyAtMs;
+      assert(worker && Number.isFinite(enteredAt) && enteredAt > 0 && Number.isFinite(proofTime),
+        JSON.stringify({ message: 'whole fallback needs an observed bounded timer with a pending successful setup RPC, or a completed exact late RPC',
+          knownFlow, worker, rpc, timer, enteredAt, invokedAtMs: fallback.invokedAtMs,
+          remainingLoadMs: fallback.maxLoadTimeMs, remainingTtfbMs: fallback.maxTimeToFirstByteMs }));
+      assert(fallback.invokedAtMs >= proofTime, 'the real source invocation follows its observed setup-decline proof');
+      if (forceSetupExpiry) assert(pendingAtTimer, 'held allocation must exercise the actual timer-context proof');
       assert.equal(requests.length, 2); assert(requests.every(row => !row.range && row.status === 200 && row.complete && row.sent === size));
       assert.equal(received.length, 2); assert(received.every(row => !row.range && row.complete && row.bytes === size));
       assert.equal(f.channels[0].wants.length, wantsBefore, 'decline issues no demand peer request');
       assert.equal(metrics.bytes.peerFirst, peerBefore); assert.equal(observed.length, observedBefore);
       assert.equal(metrics.core.multiHolder.originRanges, before.core.multiHolder.originRanges);
-      assert(fallback.maxLoadTimeMs > 0 && fallback.maxLoadTimeMs <= f.loaderConfig.loadPolicy.maxLoadTimeMs - 25);
-      assert(fallback.maxTimeToFirstByteMs > 0 && fallback.maxTimeToFirstByteMs <= f.loaderConfig.loadPolicy.maxTimeToFirstByteMs - 25);
+      const proofElapsed = proofTime - enteredAt, invokedElapsed = fallback.invokedAtMs - enteredAt;
+      assert(fallback.maxLoadTimeMs > 0 && fallback.maxLoadTimeMs <= f.loaderConfig.loadPolicy.maxLoadTimeMs - proofElapsed);
+      assert(fallback.maxLoadTimeMs >= f.loaderConfig.loadPolicy.maxLoadTimeMs - invokedElapsed,
+        'the parent config is prepared between the observed proof and actual source invocation');
+      assert(fallback.maxTimeToFirstByteMs > 0 && fallback.maxTimeToFirstByteMs <= f.loaderConfig.loadPolicy.maxTimeToFirstByteMs - proofElapsed);
+      assert(fallback.maxTimeToFirstByteMs >= f.loaderConfig.loadPolicy.maxTimeToFirstByteMs - invokedElapsed,
+        'the original first-byte config is prepared in the same observed interval');
       assert(fallback.completedAtMs < enteredAt + Math.min(f.loaderConfig.loadPolicy.maxLoadTimeMs, 10000));
       assert.equal(metrics.core?.state, 'ready'); assert.equal(metrics.core?.transferWorker?.state, 'ready');
       assert.equal(metrics.core.transferWorker.transfers, 0); assert.equal(metrics.core.transferWorker.pending, 0);
@@ -8830,8 +8887,9 @@ for (const [knownFlow, worker, forceSetupExpiry] of [[true, false, false], [true
       assert.equal(f.channels[0], authority.channel); assert.equal(authority.channel.readyState, 'open');
       assert(bridge.workers.every(value => !value.rpcDropped));
       assert.deepEqual(calls, { success: 1, error: 0, abort: 0, timeout: 0 });
-      console.log(JSON.stringify({ fixture: 'buffered-mixed-206', outcome: 'proven-setup-expiry', knownFlow, worker,
-        setupBudgetMs: 25, enteredAtMs: enteredAt, crossingRpc: crossed, sourceInvokedAtMs: fallback.invokedAtMs,
+      console.log(JSON.stringify({ fixture: 'buffered-mixed-206', outcome: pendingAtTimer ? 'observed-timer-yield' : 'proven-exact-late-rpc', knownFlow, worker,
+        setupBudgetMs: 25, enteredAtMs: enteredAt, timer, proofTimeMs: proofTime,
+        setupRpc: pendingAtTimer || lateReply, sourceInvokedAtMs: fallback.invokedAtMs,
         remainingLoadMs: fallback.maxLoadTimeMs, remainingTtfbMs: fallback.maxTimeToFirstByteMs,
         wholeDemandGets: 1, originRanges: 0, demandPeerRequests: 0, acceptedDemandPeerBytes: 0 }));
       return;
@@ -8891,7 +8949,7 @@ for (const [knownFlow, worker, forceSetupExpiry] of [[true, false, false], [true
       configuredPeerBytesPerSecond: .3 * 1024 * 1024, configuredOriginBytesPerSecond: 3 * 1024 * 1024 }));
     assert.equal(observed.reduce((sum, row) => sum + row.bytes, 0), peer);
     assert.equal(metrics.segments.zeroBudgetPeerRaceWins, 0, 'mixed delivery is not a peer-only whole-object race');
-  } finally { await f.close(); }
+  } finally { try { await f.close(); } finally { timers.restore(); } }
 });
 
 async function bufferedMixedFixture(t, clock, options = {}) {
@@ -9142,11 +9200,11 @@ test('buffered mixed whole fallback cannot renew an expired original TTFB after 
   } finally { shift = 0; release?.(); if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
-for (const ending of ['expiry', 'throw']) test(`buffered mixed whole fallback ${ending} retires the exact source owner once`, async t => {
+for (const parentMs of [100, 3000]) for (const ending of ['expiry', 'throw']) test(`buffered mixed whole fallback ${ending} retires the exact source owner once (parent${parentMs})`, async t => {
   const clock = virtualClock(t); let f, release, saved, reads = 0;
   try {
     f = await bufferedMixedFixture(t, clock, { beforeCommitment: () => new Promise(resolve => { release = resolve; }) });
-    f.loaderConfig.timeout = 100; f.loaderConfig.loadPolicy.maxTimeToFirstByteMs = 80;
+    f.loaderConfig.timeout = parentMs; f.loaderConfig.loadPolicy.maxTimeToFirstByteMs = 80;
     const loader = new f.hls.config.fLoader(f.hlsConfig), calls = { success: 0, error: 0, timeout: 0 };
     t.mock.method(loader.inner, 'abort', () => {}); // Uncooperative: no onAbort or cancellation acknowledgement.
     t.mock.method(loader.inner, 'load', (ctx, config, callbacks) => {
@@ -9155,10 +9213,15 @@ for (const ending of ['expiry', 'throw']) test(`buffered mixed whole fallback ${
     });
     const before = f.swarm.metrics().bytes.fromOrigin;
     loader.load(f.ctx, f.loaderConfig, { onSuccess: () => calls.success++, onError: () => calls.error++, onTimeout: () => calls.timeout++ });
-    await clock.advance(25);
-    assert(saved); assert.equal(saved.config.loadPolicy.maxLoadTimeMs, 75);
-    assert.equal(saved.config.loadPolicy.maxTimeToFirstByteMs, 55, 'original first-byte deadline is clipped from entry');
-    if (ending === 'expiry') { await clock.advance(75); assert.equal(calls.timeout, 1); }
+    const setupMs = parentMs === 100 ? 0 : 25;
+    if (setupMs) { await clock.advance(24); assert.equal(saved, undefined, 'valid mixed ownership retains only its setup window'); await clock.advance(1); }
+    assert(saved, 'an insufficient-recovery100ms parent invokes source synchronously');
+    assert.equal(saved.config.loadPolicy.maxLoadTimeMs, parentMs - setupMs);
+    assert.equal(saved.config.loadPolicy.maxTimeToFirstByteMs, 80 - setupMs, 'the original80ms first-byte deadline is preserved');
+    if (ending === 'expiry') {
+      await clock.advance(parentMs - setupMs - 1); assert.equal(calls.timeout, 0);
+      await clock.advance(1); assert.equal(calls.timeout, 1, 'retirement occurs at the exact captured parent deadline');
+    }
     else assert.equal(calls.error, 1);
     saved.callbacks.onSuccess({ get data() { reads++; return f.bytes.slice().buffer; } }, loader.inner.stats, saved.ctx, null);
     release?.(); await clock.advance(1000);
