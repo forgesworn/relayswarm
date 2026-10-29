@@ -103,6 +103,16 @@ that ownership is live at 24 ms and aborted at 25 ms. All five controls and
 216 manager checks pass locally. These are controller and unit-level deadline
 proofs; the failed hosted verdict and field acceptance remain separate.
 
+At `39e28b1`, the complete macOS native gate passed. Two other hosted cases
+failed: Windows policy/session renewal was not fresh at its original issuance
+checkpoint, and the browser TURN-rollover journey observed refreshed credentials
+but no accepted peer media in its latest swarm generation. Each unchanged local
+journey subsequently passed once. Those runs do not explain or rescore either
+hosted failure, and no product correction is claimed. Bounded test diagnostics
+now retain native request/renewal timing and redacted per-generation demand,
+media-state and pending-source history. Original authority, delays, media,
+predicates and supervisor limits remain unchanged; hosted diagnosis is pending.
+
 ## Unreleased cooperative VOD futures (29 October 2026)
 
 When both warm-ahead and buffered mixed ranges are enabled on explicit main

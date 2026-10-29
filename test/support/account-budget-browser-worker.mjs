@@ -30,11 +30,11 @@ const receipt = { v: 1, kind: turnRenewal ? "relayswarm-account-budget-turn-rene
     quota: "durable accepted media reservations; not wire metering or NAT acceptance" }, checkpoints: [], failures: [], cleanup: {} };
 if (turnRenewal) Object.assign(receipt.scope, { turnCredentialRenewal: true, issuer: "owned fake response; no issuer DNS or HTTP", turnEndpoint: "unavailable loopback TCP port9",
   actualInternetTurnOrTlsRelayProof: false, mediaTransport: "real loopback WebRTC host path", credentialTtlSeconds: 15 });
-const contexts = [], pages = [], pageErrors = [], renewals = {};
+const contexts = [], pages = [], pageErrors = [], renewals = {}, diagnosticMedia = new Map();
 const accountKey = generateSecretKey(), accountPubkey = getPublicKey(accountKey);
 const websiteSession = randomBytes(32).toString("hex"), websiteDigest = createHash("sha256").update(websiteSession).digest();
 let root = input.root, fixture, demo, browser, browserServer, expired = false;
-let issuerCalls = 0;
+let issuerCalls = 0, captureTurnTimeline;
 const begin = performance.now();
 const log = (message) => console.error(`[account-budget-browser] ${message}`);
 const budget = (maximum) => cap(clock, "work", maximum);
@@ -75,6 +75,70 @@ try {
   const persistent = await browser.newContext(); contexts.push(persistent);
   receipt.scope.browserVersion = browser.version();
   const read = (page) => page.evaluate(() => window.relaySwarmDemo.report());
+  // Passive test-only observations. Fixed enums/numbers/hash-only paths;
+  // no credentials, identities, arbitrary errors, SDP or endpoint strings.
+  captureTurnTimeline = async () => Promise.all(pages.map(async ({ name, page }) => {
+    let value;
+    try {
+      value = await bounded(() => page.evaluate(() => {
+        const report = window.relaySwarmDemo.report();
+        const num = x => Number.isFinite(x) ? x : null;
+        const count = x => Number.isSafeInteger(x) && x >= 0 ? x : null;
+        const media = window.relaySwarmDemo.media, bool = x => typeof x === "boolean" ? x : null;
+        const rows = [], generations = [...report.sessions, ...(report.current ? [report.current] : [])];
+        for (const g of generations.slice(-4)) {
+          const m = g.metrics;
+          rows.push({ kind: "generation", startMs: num(g.startedAtMs), endMs: num(g.endedAtMs),
+            current: g === report.current, serving: m.serving === true,
+            peerLoads: count(m.segments.peerFirstLoaded), originLoads: count(m.segments.originLoaded),
+            acceptedPeerBytes: count(m.bytes.peerFirst), verifiedPeerBytes: count(m.bytes.fromPeers),
+            sourceBytes: count(m.bytes.fromOrigin), uploadedBytes: count(m.bytes.uploaded), heldBytes: count(m.bytes.held),
+            connected: count(m.peers.connected), linksOpened: count(m.peers.linksOpened), linksClosed: count(m.peers.linksClosed) });
+        }
+        // demo/client records Hls FRAG_LOADED after loader payload arrival;
+        // this does not establish MSE append, decoded frames or playback.
+        for (const f of report.player.fragments.slice(-8)) rows.push({ kind: "hls-frag-loaded", atMs: num(f.atMs),
+          level: count(f.level), sequence: count(f.sequence), cc: count(f.discontinuity), bytes: count(f.size),
+          source: ["origin", "peer", "unknown"].includes(f.source) ? f.source : null,
+          loadingMs: num(f.loadingMs), rangeStart: count(f.rangeStart), rangeEnd: count(f.rangeEnd) });
+        const current = report.current, m = current?.metrics;
+        for (const r of (m?.peerRequestDiagnostics?.records ?? []).slice(-6)) rows.push({ kind: "peer-request", generationStartMs: num(current.startedAtMs),
+          instanceAtMs: num(r.atMs), level: count(r.level), cc: count(r.cc),
+          outcome: ["payload", "none", "timeout", "abort", "abandoned", "closed", "busy", "send-error"].includes(r.outcome) ? r.outcome : null,
+          elapsedMs: num(r.elapsedMs), firstByteMs: num(r.firstByteMs), expectedBytes: count(r.expectedBytes), receivedBytes: count(r.receivedBytes) });
+        for (const r of (m?.peerEligibilityDiagnostics?.records ?? []).slice(-4)) rows.push({ kind: "eligibility", generationStartMs: num(current.startedAtMs),
+          instanceAtMs: num(r.atMs), level: count(r.level), cc: count(r.cc), budgetMs: num(r.budgetMs),
+          reason: ["no-budget", "aborted-before-eligibility", "no-have-no-wait", "no-have-wait", "wait-no-longer-eligible", "wait-aborted", "wait-expired", "have-at-entry", "have-after-wait", "projected-late", "cached-no-matching-have", "cached-ranges-unavailable"].includes(r.reason) ? r.reason : null,
+          matchingHave: typeof r.matchingHave === "boolean" ? r.matchingHave : null,
+          exactHolderCount: Array.isArray(r.haveHolders) ? r.haveHolders.length : null });
+        return { status: "captured", pageElapsedMs: num(report.durationMs), pageStartedUnixMs: num(Date.parse(report.startedAt)),
+          currentTime: num(report.player.currentTime), bufferedSeconds: num(report.player.bufferedSeconds), paused: report.player.paused === true,
+          durationSeconds: num(media?.duration), ended: bool(media?.ended), seeking: bool(media?.seeking),
+          readyState: count(media?.readyState), networkState: count(media?.networkState),
+          fatalErrors: count(report.player.fatalErrors), rows, generationsTotal: generations.length,
+          fragmentsTotalRetained: report.player.fragments.length,
+          requestRecordsDropped: count(m?.peerRequestDiagnostics?.dropped), eligibilityRecordsDropped: count(m?.peerEligibilityDiagnostics?.dropped) };
+      }), clock, "work", 2000);
+    } catch { value = { status: "unavailable", rows: [] }; }
+    const media = diagnosticMedia.get(name);
+    // Keep the current generation and outstanding requests ahead of old tails.
+    const currentRows = value.rows.filter(row => row.kind === "generation" && row.current);
+    value.rows = [...currentRows, ...(media?.pending.values() ?? []),
+      ...value.rows.filter(row => !currentRows.includes(row)), ...(media?.rows ?? [])];
+    const observedRows = value.rows.length;
+    value.rows = value.rows.slice(0, 32);
+    const result = { name, ...value, rowCapacity: 32, byteCapacity: 8192,
+      omittedForRows: Math.max(0, observedRows - 32), droppedForBytes: 0,
+      mediaEventsObserved: media?.observed ?? 0, mediaEventsOmitted: Math.max(0, (media?.observed ?? 0) - (media?.rows.length ?? 0)),
+      mediaStartsObserved: media?.started ?? 0, mediaPendingTracked: media?.pending.size ?? 0,
+      mediaPendingOmitted: 0, mediaStartsUntracked: media?.untracked ?? 0, mediaReadErrors: media?.readErrors ?? 0 };
+    const pendingOmitted = () => result.mediaPendingTracked - result.rows.filter(row => row.kind === "source-request" && row.state === "pending").length;
+    result.mediaPendingOmitted = pendingOmitted();
+    while (Buffer.byteLength(JSON.stringify(result, null, 2)) > 8192 && result.rows.length) {
+      result.rows.pop(); result.droppedForBytes++; result.mediaPendingOmitted = pendingOmitted();
+    }
+    return result;
+  }));
   const inspect = async (name, page) => {
     const report = await read(page);
     assert.ok(!JSON.stringify(report).includes(accountPubkey), "Player receipts must omit the stable account identity");
@@ -96,6 +160,39 @@ try {
     if (method === "website") await context.addCookies([{ name: "account-fixture", value: websiteSession, url: demo.base, httpOnly: true, sameSite: "Strict" }]);
     const page = await context.newPage(); page.setDefaultTimeout(budget(12000)); pages.push({ name, page, context, signerCalls: () => signerCalls, keyReads: () => keyReads });
     page.on("pageerror", () => pageErrors.push({ name, category: "pageerror" }));
+    if (turnRenewal) {
+      const media = { rows: [], observed: 0, started: 0, nextId: 0, pending: new Map(), untracked: 0, readErrors: 0 };
+      const observedOrigin = new URL(demo.base).origin; diagnosticMedia.set(name, media);
+      const observe = (request, phase) => {
+        try {
+          const url = new URL(request.url());
+          if (url.origin !== observedOrigin || !url.pathname.startsWith("/media/") || url.pathname.endsWith(".m3u8")) return;
+          const timing = request.timing(), range = /^bytes=(\d+)-(\d+)$/u.exec(request.headers().range ?? "");
+          if (phase === "start") {
+            media.started++;
+            if (media.pending.size >= 32) { media.untracked++; return; }
+            media.pending.set(request, { kind: "source-request", state: "pending", requestId: ++media.nextId,
+              startObservedUnixMs: Date.now(), pathSha256: createHash("sha256").update(url.pathname).digest("hex"),
+              nativeStartUnixMs: Number.isFinite(timing.startTime) && timing.startTime >= 0 ? timing.startTime : null,
+              rangeStart: range ? Number(range[1]) : null, rangeEnd: range ? Number(range[2]) + 1 : null });
+            return;
+          }
+          const prior = media.pending.get(request); media.pending.delete(request); media.observed++;
+          media.rows.push({ ...(prior ?? { kind: "source-request", requestId: null, startObservedUnixMs: null,
+            pathSha256: createHash("sha256").update(url.pathname).digest("hex"),
+            nativeStartUnixMs: Number.isFinite(timing.startTime) && timing.startTime >= 0 ? timing.startTime : null,
+            rangeStart: range ? Number(range[1]) : null, rangeEnd: range ? Number(range[2]) + 1 : null }),
+            state: phase === "failed" ? "failed" : "complete", finishedObservedUnixMs: Date.now(),
+            endUnixMs: Number.isFinite(timing.startTime) && timing.startTime >= 0 && Number.isFinite(timing.responseEnd) && timing.responseEnd >= 0
+              ? timing.startTime + timing.responseEnd : null });
+          if (media.rows.length > 6) media.rows.shift();
+        } catch { media.readErrors++; /* Passive diagnostics cannot affect browser behaviour. */ }
+      };
+      page.on("request", request => observe(request, "start"));
+      page.on("requestfinished", request => observe(request, "complete"));
+      page.on("requestfailed", request => observe(request, "failed"));
+    }
+
     page.on("response", (response) => { if (new URL(response.url()).pathname === "/account-budget/renew" && response.status() === 200) renewals[name] = (renewals[name] || 0) + 1; });
     await page.goto(demo.base); await page.waitForFunction(() => window.relaySwarmDemo?.ready() && !document.getElementById("start").disabled);
     assert.equal(signerCalls, 0, "The page must not request account signatures before an explicit account action");
@@ -235,6 +332,10 @@ try {
   assert.equal(pageErrors.length, 0); assert.ok(!expired); receipt.ok = true; receipt.stage = "complete";
 } catch (error) { receipt.failures.push({ category: ["AssertionError", "TimeoutError", "Error", "AbortError"].includes(error.name) ? error.name : "other" }); }
 finally {
+  if (turnRenewal && captureTurnTimeline) {
+    try { receipt.turnRolloverTimeline = await captureTurnTimeline(); }
+    catch { receipt.turnRolloverTimeline = [{ status: "unavailable", rows: [] }]; }
+  }
   clearTimeout(alarm);
   const close = async (name, resource, operation) => {
     receipt.cleanup[name] = resource ? false : null;
