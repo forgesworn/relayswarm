@@ -9616,7 +9616,84 @@ class BufferedTailPeer extends PhasedFlowChannel {
 
 // Calibrate recovery through a real SDK source completion, then exercise
 // silent peer retirement and verified source completion on the original clock.
-for (const boundary of ['buffer', 'parent', 'parent-without-reserve']) test('buffered mixed preserves measured source recovery at the ' + boundary + ' boundary', async t => {
+for (const boundary of ['near-buffer', 'healthy-buffer', 'short-parent']) test('buffered mixed leaves the next source recovery intact at the ' + boundary, async t => {
+  const clock = virtualClock(t); let f, demandAt = null;
+  const size = (boundary === 'healthy-buffer' ? 6 : 1) * 1024 * 1024,
+    source = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251), sourceCalls = [];
+  // Synthetic service, not an unobserved whole-GET counterfactual: calibration
+  // and the first ordinary demand take2258ms, its successor2429ms.
+  // Ranged bodies share a3329ms completion point for the first demand.
+  class CadencedSource extends Loader {
+    load(context, config, callbacks) {
+      this.aborted = false;
+      const from = context.rangeEnd ? context.rangeStart : 0, to = context.rangeEnd || size;
+      const row = { from, to, ranged: Boolean(context.rangeEnd), at: clock.now(), completed: false, config }; this.row = row; sourceCalls.push(row);
+      this.stats.loading = { start: clock.now(), first: 0, end: 0 };
+      const delay = demandAt === null ? 2258 : row.ranged ? Math.max(0, demandAt + 3329 - clock.now()) : context.frag.sn === 1 ? 2258 : 2429;
+      setTimeout(() => {
+        if (this.aborted) return;
+        row.completed = true; row.completedAt = clock.now(); this.stats.loaded = to - from;
+        this.stats.loading.first = clock.now(); this.stats.loading.end = clock.now();
+        callbacks.onSuccess({ data: source.slice(from, to).buffer, code: row.ranged ? 206 : 200 }, this.stats, context, null);
+      }, delay);
+    }
+    abort() { this.aborted = true; if (this.row) this.row.aborted = true; }
+    destroy() { this.destroyed = true; }
+  }
+  try {
+    f = await bufferedMixedFixture(t, clock, { size, untrained: true, OriginLoader: CadencedSource,
+      holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 350 }] });
+    assert.equal(f.swarm.metrics().segments.originLatencyMedianMs, 2258);
+    // A second genuine demand establishes its known same-link peer model;
+    // the first no-HAVE request above supplied the actual source clock.
+    f.hls.media.buffered = { length: 0 };
+    sameBytes(await clock.settle(f.load(f.ctx)), f.bytes);
+    assert(f.swarm.metrics().core.multiHolder.peerBytes > 0, 'genuine calibration verifies peer pieces without seeding a model');
+    for (const channel of f.channels) channel.wants.length = 0;
+    const reserve = 2258 * 1.25 + 100; assert.equal(reserve, 2922.5);
+    let position = 10, end = 10 + (boundary === 'healthy-buffer' ? 12 : 3.446), lastAt = clock.now(), minimumAhead = Infinity;
+    const playback = () => {
+      const ahead = end - position - (clock.now() - lastAt) / 1000;
+      minimumAhead = Math.min(minimumAhead, ahead); position = Math.min(end, position + (clock.now() - lastAt) / 1000); lastAt = clock.now();
+      return ahead;
+    };
+    Object.defineProperty(f.hls.media, 'currentTime', { configurable: true, get() { playback(); return position; } });
+    Object.defineProperty(f.hls.media, 'readyState', { configurable: true, get() { return playback() > 0 ? 4 : 2; } });
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => end };
+    f.ctx.frag.start = end; f.ctx.frag.duration = 2;
+    if (boundary === 'short-parent') f.loaderConfig.loadPolicy.maxLoadTimeMs = 3000;
+    const before = sourceCalls.length, transfers = f.swarm.metrics().core.multiHolder.transfers, peerBefore = f.swarm.metrics().bytes.peerFirst;
+    demandAt = clock.now(); const first = beginCountedMultiLoad(f, f.ctx);
+    sameBytes(await clock.settle(first.response), f.bytes); const firstElapsed = clock.now() - demandAt;
+    const afterFirst = playback(); end += 2;
+    const demandSources = sourceCalls.slice(before), peer = f.swarm.metrics().bytes.peerFirst - peerBefore;
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    const next = { ...f.ctx, url: 'https://origin.example/media/next.ts', frag: { ...f.ctx.frag, sn: 2, start: end, duration: 2 } };
+    const secondAt = clock.now(), second = beginCountedMultiLoad(f, next);
+    sameBytes(await clock.settle(second.response), f.bytes); playback(); end += 2;
+    console.log(JSON.stringify({ fixture: 'next-source-recovery', boundary, reserveMs: reserve, firstElapsedMs: firstElapsed,
+      nextElapsedMs: clock.now() - secondAt, minimumAheadMs: minimumAhead * 1000, peerBytes: peer,
+      sourceBodies: demandSources.map(row => ({ ranged: row.ranged, bytes: row.to - row.from, complete: row.completed })) }));
+    assert(minimumAhead >= 0, 'sequential genuine demands must not exhaust the captured playable buffer');
+    if (boundary === 'healthy-buffer') {
+      assert(demandSources.some(row => row.ranged && row.completed), 'healthy headroom actually runs source ranges');
+      assert(peer > 0, 'the real committed Core verifies a nonzero peer contribution');
+      assert.equal(demandSources.reduce((sum, row) => sum + (row.completed ? row.to - row.from : 0), 0) + peer, size,
+        'complete206 bodies and accepted peer bytes retain disjoint ownership');
+      assert(afterFirst * 1000 >= reserve, 'successful mixed completion retains the next whole-source recovery');
+    } else {
+      assert.equal(demandSources.length, 1); assert.equal(demandSources[0].ranged, false, 'near-edge admission starts ordinary whole HTTP');
+      assert.equal(f.swarm.metrics().core.multiHolder.transfers, transfers, 'decline occurs before Core allocation');
+      assert.equal(peer, 0);
+      if (boundary === 'short-parent') assert.equal(demandSources[0].config.loadPolicy.maxLoadTimeMs, 3000,
+        'mixed clipping never replaces the original shorter-parent whole budget');
+    }
+    assert.equal(first.calls.success.length, 1); assert.equal(second.calls.success.length, 1);
+    assert.equal(first.calls.abort.length + first.calls.error.length + second.calls.abort.length + second.calls.error.length, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const boundary of ['buffer', 'buffer-with-next-reserve', 'parent', 'parent-without-reserve']) test('buffered mixed preserves measured source recovery at the ' + boundary + ' boundary', async t => {
   const clock = virtualClock(t); let f;
   const size = 1024 * 1024, sourceMs = 1600, source = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251), sourceCalls = [];
   class MeasuredSource extends Loader {
@@ -9649,21 +9726,21 @@ for (const boundary of ['buffer', 'parent', 'parent-without-reserve']) test('buf
     const measured = f.swarm.metrics().segments.originLatencyMedianMs;
     assert.equal(measured, sourceMs, 'recovery comes from the actual completed source calibration');
     const reserve = measured * 1.25 + 100; assert.equal(reserve, 2100);
-    const headroomMs = boundary === 'buffer' ? 3000 : 10000;
+    const headroomMs = boundary === 'buffer' ? 3000 : boundary === 'buffer-with-next-reserve' ? 5100 : 10000;
     const parentMs = boundary === 'parent' ? 3000 : boundary === 'parent-without-reserve' ? 1800 : 10000;
     f.hls.media.buffered = { length: 1, start: () => 0, end: () => 10 + headroomMs / 1000 };
     f.loaderConfig.loadPolicy.maxLoadTimeMs = parentMs;
     f.channels[0].quiet = true;
     const before = sourceCalls.length, start = clock.now(), pending = beginCountedMultiLoad(f, f.ctx);
-    if (boundary === 'parent-without-reserve') {
-      assert.equal(sourceCalls.length, before + 1, 'a parent shorter than recovery starts ordinary source synchronously');
+    if (boundary === 'parent-without-reserve' || boundary === 'buffer') {
+      assert.equal(sourceCalls.length, before + 1, 'insufficient current or next recovery starts ordinary source synchronously');
       assert.equal(sourceCalls.at(-1).ranged, false); assert.deepEqual(f.channels[0].wants, []);
       sameBytes(await clock.settle(pending.response, parentMs), f.bytes);
       assert.equal(sourceCalls.length, before + 1); assert.equal(f.swarm.metrics().core.multiHolder.transfers, 0);
     } else {
       await clock.advanceUntil(() => f.channels[0].wants.length > 0, 25);
       assert(sourceCalls.slice(before).some(row => row.ranged), 'the genuine demand starts its source before waiting for the probe');
-      const spare = Math.min(parentMs, headroomMs) - reserve;
+      const spare = Math.min(parentMs, headroomMs - reserve) - reserve;
       await clock.advance(spare - (clock.now() - start));
       assert(f.channels[0].cancels > 0, 'silent peer must retire before consuming the measured source recovery reserve');
       const wants = f.channels[0].wants.length;

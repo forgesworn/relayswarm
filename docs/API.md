@@ -113,14 +113,15 @@ the Core leaves at most one batch of unissued source work, capped by both
 work; it cannot take pieces already assigned to an in-flight HTTP request.
 Known initial peer models do not hold this extra tail. This mode also excludes
 intentional endgame duplication; failed or cancelled work may still need
-source recovery. Each range and ordinary
-fallback keeps the captured absolute parent and playback-recovery deadlines;
-the concurrent peer window is additionally bounded by
-`min(maxPeerWaitMs, 2500)` and ends before the captured measured source-recovery
-reserve. A shorter parent deadline retains that same reserve; if at most 25 ms
-remain for peer work, whole-source loading begins immediately. A whole source
-request never runs beside an active mixed transfer. After that peer window closes, source ranges may finish the
-missing pieces within the same original recovery interval. Media handoff
+source recovery. Ordinary whole-source fallback keeps the captured absolute
+parent, first-byte and playback-recovery deadlines. Mixed completion has an
+earlier deadline that retains one measured source-recovery reserve for the
+following fragment. Its concurrent peer window retains another such reserve
+for the current transfer and remains bounded by `min(maxPeerWaitMs, 2500)`.
+If at most 25 ms remain for peer work, whole-source loading begins immediately
+with its original budgets. A whole source request never runs beside an active
+mixed transfer. After the peer window closes, source ranges may finish missing
+pieces only before the mixed-completion deadline. Media handoff
 requires a complete verified object and current
 authority. Count accepted peer media separately from actual HTTP bodies,
 including partial, duplicate and ignored-range traffic. Controlled fixtures do
@@ -480,6 +481,10 @@ geometry actually read by the existing checks; a skipped predicate remains
 unknown. These observations distinguish fallback and expiry branches without
 rechecking authority or changing transfer policy. They do not establish network
 throughput or explain a stall without the corresponding player observations.
+`mixedScope.recoveryRemainingMs` retains the original whole-source deadline;
+`mixedRemainingMs` identifies the earlier mixed deadline and
+`nextOriginReserveMs` its captured recovery allowance. A transfer terminal's
+`recoveryRemainingMs` describes that Core transfer's own deadline.
 Whole HTTP legs have an early numeric load alias, including synchronous cached
 HTTP winners, immediate fallback and the immutable context of a late peer arm.
 Their fixed `leg` is `fallback`, `cached` or `late`. `originStart` observes

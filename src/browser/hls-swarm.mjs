@@ -1305,13 +1305,16 @@ class HlsSwarm {
         const token = {}, controller = new AbortController(), media = swarm.hls.media, hls = swarm.hls;
         const generation = swarm.latePeerGeneration, stream = swarm.options.streamEvent?.id, identity = warmContext(context);
         const fragment = context.frag, start = fragment.start, duration = fragment.duration;
-        const recoveryDeadline = enteredAt + Math.min(parentMs, (geometry.playableEnd - geometry.currentTime) * 1000);
+        const bufferDeadline = enteredAt + (geometry.playableEnd - geometry.currentTime) * 1000;
+        const recoveryDeadline = Math.min(enteredAt + parentMs, bufferDeadline);
+        const mixedEnd = Math.min(recoveryDeadline, bufferDeadline - geometry.originReserveMs);
         const firstMs = config?.loadPolicy?.maxTimeToFirstByteMs;
         const firstDeadline = Math.min(recoveryDeadline, enteredAt + (Number.isFinite(firstMs) && firstMs > 0 ? firstMs : parentMs));
         const setupDeadline = Math.min(enteredAt + 25, recoveryDeadline);
-        // Immediate source ranges do not remove the measured recovery reserve
-        // needed when a peer-dependent remainder must return to source.
-        const limit = Math.max(enteredAt, Math.min(recoveryDeadline - geometry.originReserveMs,
+        // Mixed completion retains a source recovery for the next genuine load;
+        // its peer remainder also keeps its own measured source recovery.
+        // Whole fallback retains the original parent and first-byte budgets.
+        const limit = Math.max(enteredAt, Math.min(mixedEnd - geometry.originReserveMs,
           enteredAt + Math.min(2500, swarm.options.maxPeerWaitMs)));
         const traceLoad = swarm.#traceBegin(context, 0, limit - enteredAt, geometry);
         let phase = 'mixed', originInvoked = false, setupTimer, recoveryTimer, retireSource;
@@ -1324,6 +1327,7 @@ class HlsSwarm {
             swarm.#trace({ k: 'mixedScope', load: traceLoad, at: swarm.#traceAt(at), phase, reason,
               ms: Math.round(at - enteredAt), setupRemainingMs: Math.round(setupDeadline - at),
               peerRemainingMs: Math.round(limit - at), recoveryRemainingMs: Math.round(recoveryDeadline - at),
+              mixedRemainingMs: Math.round(mixedEnd - at), nextOriginReserveMs: number(geometry.originReserveMs),
               firstByteRemainingMs: Math.round(firstDeadline - at), originInvoked,
               capturedGeometry: Object.fromEntries(['currentTime', 'playableEnd', 'fragmentStart', 'originReserveMs',
                 'originRecoveryMs', 'uncappedMs', 'sustainableMs', 'durationMs'].map(name => [name, number(geometry[name])])
@@ -1414,7 +1418,7 @@ class HlsSwarm {
           let failed = null;
           const seen = (name, value) => { if (swarm.options.traceRequests && observedScope) observedScope[name] = value; if (!value) failed ??= name; return value; };
           const result = valid && seen('owns', owns()) && seen('mixed', phase === 'mixed') && seen('signal', !controller.signal.aborted) &&
-            seen('currentNotStopped', !swarm.stopped) && seen('recovery', at < recoveryDeadline) && seen('setup', originInvoked || at < setupDeadline);
+            seen('currentNotStopped', !swarm.stopped) && seen('recovery', at < mixedEnd) && seen('setup', originInvoked || at < setupDeadline);
           if (valid && !result) traceMixed('current-' + failed, at);
           return result;
         };
@@ -1426,7 +1430,7 @@ class HlsSwarm {
         };
         const origin = { Loader: BaseLoader, config: this.hlsConfig,
           get loaderConfig() { return remainingOriginConfig(config, recoveryDeadline, firstDeadline); } };
-        const plan = { deadline: limit, limit, originReserveMs: recoveryDeadline - limit, expired: false, onDeadline: null, origin,
+        const plan = { deadline: limit, limit, originReserveMs: Math.max(0, mixedEnd - limit), expired: false, onDeadline: null, origin,
           cachedOnly: new Map([...captured].map(([link, entry]) => [link, entry.have])), lateHaveRace: false,
           bufferedMixed: true, currentValid: current, peerCurrentValid: () => current() && now() < limit,
           entryLinkCurrent, revalidateAuthority: true, extend: () => false,
