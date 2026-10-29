@@ -12,13 +12,13 @@ const PIECE = 65_536, SIZE = 6 * PIECE + 1_000;
 
 // One transfer, two holders and origin, answered at fixed delays. Rows are
 // written exactly as the loader writes them.
-function recordTrace({ probePeers, peerOnly = false } = {}) {
+function recordTrace({ probePeers, peerOnly = false, exclusiveOrigin = false } = {}) {
   const object = Uint8Array.from({ length: SIZE }, (_, i) => (i * 7 + 1) & 255);
   const pieces = [];
   for (let at = 0; at < SIZE; at += PIECE) pieces.push(createHash("sha256").update(object.subarray(at, at + PIECE)).digest("hex"));
   const deadline = 4_000;
   const transfer = core.transfer({ size: SIZE, sha256: createHash("sha256").update(object).digest("hex"), pieces, deadline, maxHolders: 3, originReserveMs: 0,
-    ...(peerOnly ? { peerOnly: true } : {}) });
+    ...(peerOnly ? { peerOnly: true } : {}), ...(exclusiveOrigin ? { exclusiveOrigin: true } : {}) });
   const rows = [{ k: "load", load: 1, at: 0, budgetMs: 1_500, budgetGeometry: { currentTime: 8, bufferedEnd: 12 } }];
   const queue = [];
   const delay = { 1: 40, 2: 90, origin: 30 };
@@ -32,7 +32,7 @@ function recordTrace({ probePeers, peerOnly = false } = {}) {
   const estimates = { peers: [[1, null, 1_000], [2, null, null]], origin: peerOnly ? null : [null, 500], sharedFirstByteMs: 20, sharedRate: 1_000,
     ...(probePeers ? { probePeers } : {}) };
   record("start", 10, { size: SIZE, pieces: pieces.length, pieceSize: PIECE, deadline, maxHolders: 3, originReserveMs: 0,
-    ...(peerOnly ? { peerOnly: true } : {}), ...estimates, holders: [[1, 5], [2, 6]] },
+    ...(peerOnly ? { peerOnly: true } : {}), ...(exclusiveOrigin ? { exclusiveOrigin: true } : {}), ...estimates, holders: [[1, 5], [2, 6]] },
     transfer.start(10, estimates));
   while (queue.length) {
     queue.sort((a, b) => a.at - b.at);
@@ -91,6 +91,24 @@ test("peer-only creation mode and absent origin replay without a synthetic sourc
   const out = await report(traceSets(trace), { core, whatIf: [1, 2] });
   assert.deepEqual(out.replayMismatches, []);
   assert.equal(out.originShare, 0);
+});
+
+test("exclusive origin ownership survives replay and what-if construction without legacy fallback", async () => {
+  const trace = recordTrace({ exclusiveOrigin: true, probePeers: [1, 2] }), [calls] = transfers(trace.rows);
+  assert.equal(replay(core, calls), null);
+  const changed = structuredClone(calls);
+  delete changed[0].exclusiveOrigin;
+  assert.match(replay(core, changed), /start at 10 gave different commands/);
+  const configs = [], observed = { transfer(config) { configs.push(config); return core.transfer(config); } };
+  const out = await report(traceSets(trace), { core: observed, whatIf: [1, 2] });
+  assert.deepEqual(out.replayMismatches, []);
+  assert.equal(out.whatIf.transfers, 1);
+  assert.equal(configs.length, 3, 'recorded replay and both simulations preserve the mode');
+  assert(configs.every(config => config.exclusiveOrigin === true));
+  const old = await report(traceSets(trace), { core: { transfer: () => null }, whatIf: [1, 2] });
+  assert.equal(old.transfers, 0);
+  assert.match(old.replayMismatches[0], /the module refused the transfer/);
+  assert.equal(old.whatIf.transfers, 0, 'an unsupported mode is not replayed or fitted as legacy mixed');
 });
 
 test("direct measures count each piece once and keep holder timing", () => {

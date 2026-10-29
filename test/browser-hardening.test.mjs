@@ -4811,7 +4811,8 @@ test("a caller abort during the wait is not a miss", async t => {
 
 // --- multi-holder transfer (schema 3, framing 2) -----------------------------
 
-const multiCore = await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url)));
+const multiCoreBytes = await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url));
+const multiCore = await WebAssembly.compile(multiCoreBytes);
 
 function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false, holdNew = false, holdBan = false, holdDelivered = false, onFree } = {}) {
   const workers = [];
@@ -7790,7 +7791,8 @@ test("trace: a multi-holder transfer replays from its rows alone to the same com
   const core = await loadCore(multiCore);
   const transfer = core.transfer({ size: start.size, sha256: createHash("sha256").update(object).digest("hex"), pieces,
     deadline: start.deadline, maxHolders: start.maxHolders, originReserveMs: start.originReserveMs,
-    ...(start.peerOnly ? { peerOnly: true } : {}) });
+    ...(start.peerOnly ? { peerOnly: true } : {}),
+    ...(start.exclusiveOrigin === undefined ? {} : { exclusiveOrigin: start.exclusiveOrigin }) });
   const summary = (state) => ({ c: state.commands.map(({ t, peer, p }) => ({ t, ...(peer !== undefined ? { peer } : {}), ...(p ? { p } : {}) })),
     next: state.next, late: state.late, finished: state.finished });
   for (const row of calls) {
@@ -8727,7 +8729,7 @@ test('buffered mixed setup retains only25ms before ordinary source invocation wh
   } finally { release?.(); if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
-for (const worker of [false, true]) test(`buffered mixed six-MiB object combines a paced peer fraction with actual206 HTTP bodies and no extra whole GET (${worker ? 'committed-WASM worker' : 'main-thread'})`, { timeout: 20000 }, async t => {
+for (const knownFlow of [true, false]) for (const worker of [false, true]) test(`buffered mixed ${knownFlow ? '' : 'untrained '}six-MiB object combines a paced peer fraction with actual206 HTTP bodies and no extra whole GET (${worker ? 'committed-WASM worker' : 'main-thread'})`, { timeout: 20000 }, async t => {
   const workerOptions = worker ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: transferWorkerFixture(t).WorkerImpl } : {};
   const { request } = await import('node:http');
   const size = 6 * 1024 * 1024, bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
@@ -8791,19 +8793,33 @@ for (const worker of [false, true]) test(`buffered mixed six-MiB object combines
       baseurl: new URL('index.m3u8', url).href, start: 10, duration: 2 } };
     f.hls.media = { currentTime: 10, paused: false, ended: false, seeking: false, readyState: 4, playbackRate: 1,
       buffered: { length: 0 } };
+    // Measure the actual source with no holder claim; the new demand must
+    // calibrate this same admitted link without a seeded rate or prior probe.
+    if (!knownFlow) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
     sameBytes(await f.load(ctx), bytes, 'actual whole-source control trains origin timing without fabricated samples');
     assert.equal(requests.length, 1); assert.equal(requests[0].status, 200); assert.equal(requests[0].sent, size);
     await sleep(2); // Let the old calibration request's real cancellation EOF retire.
     for (const pc of f.connections) pc.connectionState = 'connected';
+    if (!knownFlow) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [f.key] }));
     f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
     const before = f.swarm.metrics(), peerBefore = before.bytes.peerFirst;
-    assert(before.peerRequestDiagnostics.records.some(row => row.outcome === 'payload' && row.elapsedMs - row.firstByteMs >= 300),
+    if (knownFlow) assert(before.peerRequestDiagnostics.records.some(row => row.outcome === 'payload' && row.elapsedMs - row.firstByteMs >= 300),
       'established rate must come from real prior qualifying peer payload');
+    else assert.equal(before.peerRequestDiagnostics.records.length, 0, 'source calibration must not ask the untrained holder');
     sameBytes(await f.load(ctx), bytes, 'the real Core must verify and assemble the complete object');
     const start = f.swarm.trace().rows.filter(row => row.k === 'xfer' && row.op === 'start').at(-1);
-    assert.deepEqual(start.probePeers, [], 'mixed ownership admits only real measured same-link holders');
-    assert(start.peers.length && start.peers.every(([, first, rate]) => Number.isFinite(first) && first >= 0 && Number.isFinite(rate) && rate > 0));
-    assert(start.out.c.some(row => row.t === 'origin') && start.out.c.some(row => row.t === 'request'));
+    assert.equal(start.exclusiveOrigin, true, 'only the opted mixed plan requests exclusive Core origin ownership');
+    if (knownFlow) {
+      assert.deepEqual(start.probePeers, [], 'known mixed ownership uses real measured same-link holders');
+      assert(start.peers.length && start.peers.every(([, first, rate]) => Number.isFinite(first) && first >= 0 && Number.isFinite(rate) && rate > 0));
+    } else {
+      assert.deepEqual(start.probePeers, [start.peers[0][0]], 'the genuine unknown-link demand uses the existing one-piece allowance');
+      assert(start.peers.every(([, first, rate]) => first === null && rate === null), 'no rate or first-byte estimate is invented');
+      const initialPeer = start.out.c.filter(row => row.t === 'request');
+      assert.equal(initialPeer.length, 1); assert.equal(initialPeer[0].p[1] - initialPeer[0].p[0], 1);
+    }
+    assert(start.out.c.some(row => row.t === 'origin') && start.out.c.some(row => row.t === 'request'),
+      'the genuine demand must accept its peer fraction alongside disjoint origin ranges');
     const metrics = f.swarm.metrics(), ranged = requests.filter(row => row.range);
     assert.equal(requests.filter(row => !row.range).length, 1, JSON.stringify({ message: 'there is no whole GET beside the mixed range arm',
       requests, transfer: f.swarm.metrics().core.multiHolder, trace: f.swarm.trace().rows.slice(-12) }));
@@ -8816,9 +8832,14 @@ for (const worker of [false, true]) test(`buffered mixed six-MiB object combines
     const verifiedOrigin = metrics.core.multiHolder.originBytes - before.core.multiHolder.originBytes;
     assert.equal(verifiedOrigin + peer, size, 'only fresh verified origins and peer pieces compose accepted media');
     assert.equal(clientBodyBytes, source, 'complete HTTP client bodies agree with server submitted bytes in this controlled fixture');
-    assert.equal(clientBodyBytes + peer, size, 'the measured known-model fixture assigns disjoint complete source and peer bytes');
+    assert.equal(clientBodyBytes + peer, size, 'actual complete source and accepted peer bodies have disjoint ownership');
     assert(source >= verifiedOrigin, 'actual206 bodies include any duplicated/unused range bytes');
-    console.log(JSON.stringify({ fixture: 'buffered-mixed-206', worker, actualClient206BodyBytes: clientBodyBytes, serverSubmitted206Bytes: source, objectBytes: size, acceptedPeerBytes: peer,
+    const { replay } = await import('../scripts/trace-report.mjs'), replayCore = await loadCore(multiCore);
+    try {
+      const calls = f.swarm.trace().rows.filter(row => row.k === 'xfer' && row.load === start.load);
+      assert.equal(replay(replayCore, calls), null, 'exclusive ownership survives trace reconstruction');
+    } finally { replayCore.retire(); }
+    console.log(JSON.stringify({ fixture: 'buffered-mixed-206', knownFlow, worker, actualClient206BodyBytes: clientBodyBytes, serverSubmitted206Bytes: source, objectBytes: size, acceptedPeerBytes: peer,
       freshOriginBytes: verifiedOrigin, actualComplete206BodyBytes: source,
       actual206Bodies: ranged.map(({ sent, status, complete }) => ({ bytes: sent, status, complete })),
       priorWholeSourceBytes: requests[0].sent, additionalWholeGets: requests.filter(row => !row.range).length - 1,
@@ -8839,10 +8860,12 @@ async function bufferedMixedFixture(t, clock, options = {}) {
   f.hls.media = { currentTime: 10, paused: false, ended: false, seeking: false, readyState: 4, playbackRate: 1,
     buffered: { length: 0 } };
   if (options.swarmOptions?.transferWorkerUrl) await clock.advanceUntil(() => f.swarm.metrics().core.transferWorker.state === 'ready', 1000);
+  if (options.untrained) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
   if (!options.skipTraining) sameBytes(await clock.settle(f.load(f.ctx)), f.bytes);
   if (!options.skipTraining) await clock.advance(2);
   training = false;
   for (const pc of f.connections) pc.connectionState = 'connected';
+  if (options.untrained) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [f.key] }));
   f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
   // Request diagnostics retain calibration separately; new assertions count only
   // work begun after this actual source/peer training stage.
@@ -8850,12 +8873,34 @@ async function bufferedMixedFixture(t, clock, options = {}) {
   return f;
 }
 
-for (const exclusion of ['default', 'underflow', 'warm', 'part', 'no-have', 'no-recovery', 'unknown-model']) {
+for (const worker of [false, true]) test("buffered mixed missing ownership capability uses one whole source and preserves its engine " + (worker ? "(worker)" : "(main)"), async t => {
+  // Keep all real verifier/link exports; hide only this optional capability
+  // export to model a module that cannot promise exclusive origin ownership.
+  const bytes = Buffer.from(multiCoreBytes), name = Buffer.from('rs_xfer_capabilities'), offset = bytes.indexOf(name);
+  assert(offset >= 0 && bytes.indexOf(name, offset + 1) === -1);
+  bytes[offset] = bytes[offset + 1] = 0x78;
+  const legacy = await WebAssembly.compile(bytes);
+  const bridge = worker ? transferWorkerFixture(t) : null, clock = virtualClock(t); let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { untrained: true, swarmOptions: { coreWasm: legacy,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    assert.equal(f.swarm.metrics().peerRequestDiagnostics.records.length, 0, 'source calibration did not probe the holder');
+    const before = f.wholeLoads.length, load = beginCountedMultiLoad(f, f.ctx);
+    sameBytes(await clock.settle(load.response), f.bytes);
+    assert.equal(f.wholeLoads.length, before + 1); assert.equal(f.ranges.length, 0);
+    assert.deepEqual(f.channels[0].wants, []); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.equal(f.swarm.metrics().core.state, 'ready');
+    if (worker) assert.equal(f.swarm.metrics().core.transferWorker.state, 'ready', 'ordinary missing capability does not retire the worker');
+    assert.equal(load.calls.success.length, 1);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const exclusion of ['default', 'underflow', 'warm', 'part', 'no-have', 'no-recovery', 'probe-cooldown']) {
   test(`buffered mixed admission preserves immediate ordinary source for ${exclusion}`, async t => {
     const clock = virtualClock(t); let f;
     try {
       f = await bufferedMixedFixture(t, clock, { skipTraining: exclusion === 'no-recovery',
-        ...(exclusion === 'unknown-model' ? { wholeOriginDelayMs: 100 } : {}),
+        ...(exclusion === 'probe-cooldown' ? { wholeOriginDelayMs: 100 } : {}),
         swarmOptions: { bufferedMixedRanges: exclusion !== 'default' } });
       let ctx = f.ctx;
       if (exclusion === 'underflow') f.hls.media.readyState = 2;
@@ -8871,10 +8916,13 @@ for (const exclusion of ['default', 'underflow', 'warm', 'part', 'no-have', 'no-
 }
 
 test('buffered mixed late authority, caller abort and replacement fence all delayed setup callbacks', async t => {
-  for (const ending of ['abort', 'replacement', 'disconnect']) {
+  for (const ending of ['abort', 'replacement', 'disconnect', 'revoked']) {
     const clock = virtualClock(t); let f, release;
     try {
-      f = await bufferedMixedFixture(t, clock, { beforeCommitment: () => new Promise(resolve => { release = resolve; }) });
+      f = await bufferedMixedFixture(t, clock, { untrained: ending === 'revoked',
+        beforeCommitment: () => new Promise((resolve, reject) => {
+          release = ending === 'revoked' ? () => reject(new Error('authority revoked')) : resolve;
+        }) });
       const before = f.wholeLoads.length, pending = beginCountedMultiLoad(f, f.ctx);
       await clock.advance(5); assert.equal(typeof release, 'function');
       if (ending === 'abort') pending.loader.abort();
@@ -8896,7 +8944,9 @@ test('buffered mixed fast Core plan returns to the existing cached winner withou
   const original = prototype.start; let sawPeerOnly = false;
   const clock = virtualClock(t); let f;
   try {
-    f = await bufferedMixedFixture(t, clock);
+    f = await bufferedMixedFixture(t, clock, { untrained: true });
+    assert.equal(f.swarm.metrics().peerRequestDiagnostics.records.length, 0,
+      'source-only training does not invent a fast peer model or bypass the known whole-object fit guard');
     f.channels[0].firstByteMs = 1; f.channels[0].flowMs = 40; // The actual LAN-style body can finish before the source.
     t.mock.method(prototype, 'start', function (at, estimates) {
       const state = original.call(this, at, { ...estimates, probePeers: [],
@@ -8929,13 +8979,14 @@ class BufferedCorruptPeer extends PhasedFlowChannel {
   }
 }
 
-for (const bad of ['ignored-range', 'corrupt-peer']) {
+for (const bad of ['ignored-range', 'corrupt-peer', 'corrupt-probe']) {
   test(`buffered mixed ${bad} cancels its partial work before bounded source fallback without accepted peer credit`, async t => {
     const clock = virtualClock(t); let f;
     try {
       f = await bufferedMixedFixture(t, clock, bad === 'ignored-range' ? { ignoreRanges: true }
-        : { holders: [{ Channel: BufferedCorruptPeer, firstByteMs: 10, flowMs: 350 }], originDelayMs: 1000 });
-      if (bad === 'corrupt-peer') f.channels[0].corruptNext = true;
+        : { untrained: bad === 'corrupt-probe',
+          holders: [{ Channel: BufferedCorruptPeer, firstByteMs: 10, flowMs: 350 }], originDelayMs: 1000 });
+      if (bad !== 'ignored-range') f.channels[0].corruptNext = true;
       const before = f.wholeLoads.length, pending = beginCountedMultiLoad(f, f.ctx);
       sameBytes(await clock.settle(pending.response), f.bytes);
       const metrics = f.swarm.metrics();
@@ -9134,10 +9185,10 @@ test('buffered mixed retires peer work at its fixed cap while source ranges fini
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
-test('buffered mixed verifies a pre-cap peer body after its cap without renewing peer network work', async t => {
+for (const untrained of [false, true]) test('buffered mixed verifies a pre-cap ' + (untrained ? 'untrained ' : '') + 'peer body after its cap without renewing peer network work', async t => {
   const { WorkerImpl, workers } = transferWorkerFixture(t), clock = virtualClock(t); let f;
   try {
-    f = await bufferedMixedFixture(t, clock, { originDelayMs: 3000,
+    f = await bufferedMixedFixture(t, clock, { untrained, originDelayMs: 3000,
       swarmOptions: { maxPeerWaitMs: 600, transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl } });
     workers[0].holdDelivered = true;
     const before = f.wholeLoads.length, start = clock.now(), pending = beginCountedMultiLoad(f, f.ctx);

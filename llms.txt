@@ -178,6 +178,16 @@ decline this mode safely; unsupported creation does not retire mixed transfers.
 Experimental lateHaveRace is separately opt-in: actual matching HAVE on
 load-entry connections may start one peer arm within that same original
 window while HTTP runs. It adds no origin range, new peer or deferred HTTP.
+Unreleased bufferedMixedRanges defaults off and requires healthy buffered
+genuine demand, captured framing-2 HAVE and measured source recovery.
+An unknown holder may use the existing initial one-piece probe and cooldown.
+Its verified refill can take only unissued source work, with one initial tail
+capped at both 512 KiB and four pieces; in-flight HTTP ownership is preserved.
+Internal exclusiveOrigin creation requires capability mask value 4 and rejects
+peerOnly. Older modules decline before allocation. The same flag crosses the
+worker bridge and trace replay. Source invocation remains entry-bounded to
+25 ms, peer networking to its original capped window, and all source recovery
+to the original parent/playback deadline. No field benefit is established.
 Wider media includes fMP4, audio, explicit AES-128, mixed variants and warm LL parts/deltas.
 The example origin adds bounded blocking reload for compatible complete live
 playlists across all renditions, with 24 waiters inside 32 media requests.

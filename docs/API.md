@@ -100,13 +100,20 @@ The unreleased `bufferedMixedRanges: true` option permits concurrent peer and
 source ranges for a genuine, unencrypted whole main fragment when the original
 exclusive peer-wait budget is zero. It excludes speculative/startup work,
 parts, progressive loading and underflow. Admission requires healthy buffered
-playback at normal speed, a ready range core, an exact entry-snapshot HAVE on
-a connected framing 2 link, fresh measured first-byte and payload timing on
-that link, and measured source recovery. Unknown links retain existing
-calibration behaviour. Setup has at most 25 ms from load entry to invoke the
+playback at normal speed, a ready range core with the exclusive-origin
+capability, an exact entry-snapshot HAVE on a connected framing 2 link, and
+measured source recovery. A holder uses fresh measured timing or its existing
+bounded initial one-piece probe, subject to the existing cooldown. Setup has
+at most 25 ms from load entry to invoke the
 host's original source loader; this is not a wire-dispatch guarantee.
 
-The source range starts before any peer request. Each range and ordinary
+The source range starts before any peer request. With an active initial probe,
+the Core leaves at most one batch of unissued source work, capped by both
+512 KiB and four signed pieces. A verified probe can refill from that queued
+work; it cannot take pieces already assigned to an in-flight HTTP request.
+Known initial peer models do not hold this extra tail. This mode also excludes
+intentional endgame duplication; failed or cancelled work may still need
+source recovery. Each range and ordinary
 fallback keeps the captured absolute parent and playback-recovery deadlines;
 the concurrent peer window is additionally bounded by
 `min(maxPeerWaitMs, 2500)`. A whole source request never runs beside an active
@@ -117,6 +124,14 @@ authority. Count accepted peer media separately from actual HTTP bodies,
 including partial, duplicate and ignored-range traffic. Controlled fixtures do
 not establish field continuity, throughput or savings. The option defaults to
 `false`; see the [loading contract](../INTEGRATION.md#options).
+
+The internal Core transfer creation option `exclusiveOrigin: true` selects
+that queued-origin ownership contract. It defaults to `false`, rejects a
+non-boolean or a simultaneous `peerOnly: true`, and requires mask value `4`
+from `rs_xfer_capabilities()` before allocation. Main-thread and worker bridges
+preserve the same flag. An older module declines this mode safely; the loader
+uses its ordinary source path. Trace replay and what-if construction retain
+the flag rather than reconstructing a legacy mixed transfer.
 
 The additional experimental `lateHaveRace: true` observes actual matching
 HAVE on those connections accepted at load entry when no initial cached

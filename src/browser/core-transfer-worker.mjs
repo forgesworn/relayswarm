@@ -35,11 +35,14 @@ export function coreTransferWorkerConfig(value, limits) {
   if (!value || !Array.isArray(value.pieces) || value.pieces.length < 1 || value.pieces.length > 256) throw new CoreTransferWorkerError("invalid-transfer");
   const config = value && { size: value.size, sha256: value.sha256, pieces: value.pieces?.slice(),
     deadline: value.deadline, maxHolders: value.maxHolders, originReserveMs: value.originReserveMs,
-    ...(value.peerOnly === true ? { peerOnly: true } : {}) };
+    ...(value.peerOnly === true ? { peerOnly: true } : {}),
+    ...(value.exclusiveOrigin === true ? { exclusiveOrigin: true } : {}) };
   if (!config || !integer(config.size) || config.size < 1 || config.size > limits.maxSegmentBytes
     || !hash(config.sha256) || !Array.isArray(config.pieces) || config.pieces.length < 1 || config.pieces.length > 256
     || !config.pieces.every(hash) || !time(config.deadline) || !integer(config.maxHolders) || config.maxHolders < 1
-    || config.maxHolders > 32 || !time(config.originReserveMs) || (value.peerOnly !== undefined && typeof value.peerOnly !== "boolean")) throw new CoreTransferWorkerError("invalid-transfer");
+    || config.maxHolders > 32 || !time(config.originReserveMs) || (value.peerOnly !== undefined && typeof value.peerOnly !== "boolean")
+    || (value.exclusiveOrigin !== undefined && typeof value.exclusiveOrigin !== "boolean")
+    || config.peerOnly && config.exclusiveOrigin) throw new CoreTransferWorkerError("invalid-transfer");
   return config;
 }
 

@@ -1326,3 +1326,292 @@ fn peer_only_endgame_uses_an_idle_peer_within_cap_and_first_copy_wins() {
     assert_eq!(transfer.verified_bytes(), bytes.len() as u64);
     assert!(transfer.drain_commands().is_empty());
 }
+
+#[test]
+fn exclusive_origin_verified_probe_refills_disjoint_tail_before_the_original_floor() {
+    let bytes = object_sized(6 * 1024 * 1024);
+    let mut transfer = transfer(&bytes, NOW + 4_500).with_exclusive_origin().unwrap();
+    transfer.start_with_probe_peers(
+        NOW,
+        &[peer(1, None, None)],
+        origin(0.0, bytes.len() as f64 / 2_000.0),
+        None,
+        None,
+        &[1],
+    );
+    let mut log = transfer.drain_commands();
+    let probe = range_of(&log, Source::Peer(1));
+    let prefix = range_of(&log, Source::Origin);
+    let count = piece_count(bytes.len() as u64).unwrap();
+    assert_eq!(probe.end - probe.start, 1, "unknown calibration is still one piece");
+    assert!(prefix.start < prefix.end, "source starts a nonempty prefix immediately");
+    assert!(
+        prefix.end < count,
+        "origin must leave an unissued tail for genuine verified refills"
+    );
+    let tail = PieceRange {
+        start: prefix.end,
+        end: count,
+    };
+    assert!(tail.end - tail.start <= MAX_PEER_REQUEST_PIECES);
+    assert!(slice(&bytes, tail).len() as u64 <= MAX_PEER_REQUEST_BYTES);
+    transfer.progress(NOW + 100, Source::Peer(1), 16_384);
+    transfer.delivered(NOW + 450, Source::Peer(1), probe, slice(&bytes, probe));
+    let refilled = transfer.drain_commands();
+    let next = range_of(&refilled, Source::Peer(1));
+    assert!(
+        next.start >= prefix.end && next.end <= count,
+        "a refill owns only previously unissued source pieces"
+    );
+    assert!(
+        slice(&bytes, probe).len() + slice(&bytes, next).len() >= bytes.len() / 20,
+        "calibration can grow into useful media"
+    );
+    log.extend(refilled);
+    transfer.delivered(NOW + 1_900, Source::Origin, prefix, slice(&bytes, prefix));
+    log.extend(transfer.drain_commands());
+    transfer.delivered(NOW + 2_000, Source::Peer(1), next, slice(&bytes, next));
+    log.extend(transfer.drain_commands());
+    assert_eq!(delivered(&log), Some(&bytes));
+    let mut issued: Vec<u32> = requests(&log).iter().flat_map(|(_, range)| range.start..range.end).collect();
+    issued.sort_unstable();
+    assert_eq!(issued, all(bytes.len() as u64), "every physical piece was requested exactly once");
+    assert_eq!(transfer.verified_bytes(), bytes.len() as u64);
+    assert!(transfer.finished());
+}
+
+fn exclusive_probe(bytes: &[u8]) -> (Transfer, Vec<Command>) {
+    let mut transfer = transfer(bytes, NOW + 4_500).with_exclusive_origin().unwrap();
+    transfer.start_with_probe_peers(
+        NOW,
+        &[peer(1, None, None)],
+        origin(0.0, bytes.len() as f64 / 2_000.0),
+        None,
+        None,
+        &[1],
+    );
+    let commands = transfer.drain_commands();
+    (transfer, commands)
+}
+
+#[test]
+fn exclusive_origin_small_objects_keep_a_nonempty_source_and_no_missing_piece() {
+    for size in [1, 32_768, 65_536, 65_537, 2 * 65_536, 3 * 65_536, 5 * 65_536 + 17] {
+        let bytes = object_sized(size);
+        let (mut transfer, initial) = exclusive_probe(&bytes);
+        let source = range_of(&initial, Source::Origin);
+        assert!(source.start < source.end, "source must not wait for a probe: {size}");
+        if piece_count(size as u64).unwrap() == 1 {
+            assert!(requests(&initial).iter().all(|(source, _)| *source == Source::Origin));
+        }
+        let mut commands = initial;
+        let mut log = Vec::new();
+        for _ in 0..16 {
+            let next = requests(&commands);
+            log.extend(commands);
+            for (source, range) in next {
+                transfer.delivered(NOW + 10, source, range, slice(&bytes, range));
+            }
+            commands = transfer.drain_commands();
+            if commands.is_empty() {
+                break;
+            }
+            if transfer.finished() {
+                log.extend(commands);
+                break;
+            }
+        }
+        assert_eq!(delivered(&log), Some(&bytes), "size {size}");
+        let mut issued: Vec<u32> = requests(&log).iter().flat_map(|(_, range)| range.start..range.end).collect();
+        issued.sort_unstable();
+        assert_eq!(issued, all(size as u64), "no starvation or duplicate physical work: {size}");
+    }
+}
+
+#[test]
+fn exclusive_origin_floor_recovers_a_silent_probe_and_all_queued_tail_once() {
+    let bytes = object_sized(6 * 1024 * 1024);
+    let (mut transfer, mut log) = exclusive_probe(&bytes);
+    let probe = range_of(&log, Source::Peer(1));
+    let prefix = range_of(&log, Source::Origin);
+    assert_eq!(transfer.next_deadline(), Some(NOW + 2_500));
+    transfer.tick(NOW + 2_500);
+    let floor = transfer.drain_commands();
+    assert!(floor.contains(&Command::Cancel { peer: 1 }));
+    assert!(requests(&floor).is_empty(), "the running source prefix remains its sole owner");
+    log.extend(floor);
+    transfer.delivered(NOW + 2_600, Source::Origin, prefix, slice(&bytes, prefix));
+    let recovery = transfer.drain_commands();
+    let recovered: Vec<u32> = requests(&recovery).iter().flat_map(|(_, range)| range.start..range.end).collect();
+    assert_eq!(
+        recovered.len(),
+        5,
+        "one cancelled probe plus the entire four-piece tail refills at once"
+    );
+    let before_late = transfer.verified_bytes();
+    transfer.delivered(NOW + 2_601, Source::Peer(1), probe, slice(&bytes, probe));
+    assert_eq!(transfer.verified_bytes(), before_late, "late cancelled bytes earn no credit");
+    assert!(transfer.drain_commands().is_empty());
+    for (source, range) in requests(&recovery) {
+        transfer.delivered(NOW + 2_800, source, range, slice(&bytes, range));
+        log.extend(transfer.drain_commands());
+    }
+    log.extend(recovery);
+    assert_eq!(delivered(&log), Some(&bytes));
+    assert_eq!(transfer.verified_bytes(), bytes.len() as u64);
+}
+
+#[test]
+fn exclusive_origin_failed_or_stalled_refill_preserves_verified_probe_and_recovers_tail() {
+    let bytes = object_sized(6 * 1024 * 1024);
+    for stalled in [false, true] {
+        let (mut transfer, mut log) = exclusive_probe(&bytes);
+        let probe = range_of(&log, Source::Peer(1));
+        let prefix = range_of(&log, Source::Origin);
+        transfer.progress(NOW + 100, Source::Peer(1), 16_384);
+        transfer.delivered(NOW + 450, Source::Peer(1), probe, slice(&bytes, probe));
+        let refill = transfer.drain_commands();
+        let tail = range_of(&refill, Source::Peer(1));
+        log.extend(refill);
+        if stalled {
+            transfer.progress(NOW + 550, Source::Peer(1), 16_384);
+            transfer.progress(NOW + 1_200, Source::Peer(1), 32_768);
+        } else {
+            transfer.failed(NOW + 600, Source::Peer(1));
+        }
+        let retired = transfer.drain_commands();
+        if stalled {
+            assert!(retired.contains(&Command::Abandon { peer: 1 }));
+        }
+        assert!(requests(&retired).is_empty(), "recovery does not duplicate the running prefix");
+        log.extend(retired);
+        let credited = transfer.verified_bytes();
+        transfer.delivered(NOW + 1_300, Source::Peer(1), tail, slice(&bytes, tail));
+        assert_eq!(transfer.verified_bytes(), credited);
+        transfer.delivered(NOW + 1_900, Source::Origin, prefix, slice(&bytes, prefix));
+        let recovery = transfer.drain_commands();
+        assert_eq!(
+            requests(&recovery),
+            vec![(Source::Origin, tail)],
+            "the entire remaining batch refills without holding another tail"
+        );
+        transfer.delivered(NOW + 2_100, Source::Origin, tail, slice(&bytes, tail));
+        log.extend(recovery);
+        log.extend(transfer.drain_commands());
+        assert_eq!(delivered(&log), Some(&bytes));
+        assert_eq!(transfer.verified_bytes(), bytes.len() as u64);
+    }
+}
+
+#[test]
+fn exclusive_origin_corrupt_probe_cannot_claim_or_credit_the_unissued_tail() {
+    let bytes = object_sized(6 * 1024 * 1024);
+    let (mut transfer, mut log) = exclusive_probe(&bytes);
+    let probe = range_of(&log, Source::Peer(1));
+    let prefix = range_of(&log, Source::Origin);
+    let mut corrupt = slice(&bytes, probe).to_vec();
+    corrupt[0] ^= 1;
+    transfer.delivered(NOW + 400, Source::Peer(1), probe, &corrupt);
+    let banned = transfer.drain_commands();
+    assert!(banned.contains(&Command::Ban { peer: 1 }));
+    assert!(requests(&banned).is_empty());
+    assert_eq!(transfer.verified_bytes(), 0);
+    log.extend(banned);
+    transfer.delivered(NOW + 1_900, Source::Origin, prefix, slice(&bytes, prefix));
+    let recovery = transfer.drain_commands();
+    assert_eq!(requests(&recovery).iter().map(|(_, range)| range.end - range.start).sum::<u32>(), 5);
+    for (source, range) in requests(&recovery) {
+        assert_eq!(source, Source::Origin);
+        transfer.delivered(NOW + 2_100, source, range, slice(&bytes, range));
+        log.extend(transfer.drain_commands());
+    }
+    log.extend(recovery);
+    assert_eq!(delivered(&log), Some(&bytes));
+}
+
+#[test]
+fn exclusive_origin_endgame_does_not_duplicate_a_running_peer_or_source() {
+    let bytes = object_sized(3 * 65_536);
+    let (mut transfer, initial) = exclusive_probe(&bytes);
+    let probe = range_of(&initial, Source::Peer(1));
+    let prefix = range_of(&initial, Source::Origin);
+    transfer.delivered(NOW + 100, Source::Peer(1), probe, slice(&bytes, probe));
+    let tail = range_of(&transfer.drain_commands(), Source::Peer(1));
+    transfer.delivered(NOW + 200, Source::Origin, prefix, slice(&bytes, prefix));
+    assert!(transfer.drain_commands().is_empty());
+    transfer.tick(NOW + 230);
+    assert!(
+        transfer.drain_commands().is_empty(),
+        "a late projection cannot create duplicate physical IO"
+    );
+    assert!(
+        transfer.next_deadline().is_none_or(|at| at > NOW + 230),
+        "disabled endgame must not retain an expired polling deadline"
+    );
+    transfer.delivered(NOW + 300, Source::Peer(1), tail, slice(&bytes, tail));
+    assert_eq!(delivered(&transfer.drain_commands()), Some(&bytes));
+}
+
+#[test]
+fn exclusive_origin_known_initial_plan_is_unchanged_and_source_failure_terminates() {
+    let bytes = object_sized(6 * 1024 * 1024);
+    let mut legacy = transfer(&bytes, NOW + 4_500);
+    let mut exclusive = transfer(&bytes, NOW + 4_500).with_exclusive_origin().unwrap();
+    for transfer in [&mut legacy, &mut exclusive] {
+        transfer.start(NOW, &[peer(1, Some(100.0), Some(300.0))], origin(0.0, 3_000.0), None, None);
+    }
+    let old = legacy.drain_commands();
+    let initial = exclusive.drain_commands();
+    assert_eq!(initial, old, "a known lane needs no calibration tail hold");
+    assert!(requests(&initial).iter().any(|(source, _)| *source == Source::Origin));
+    assert!(requests(&initial).iter().any(|(source, _)| *source == Source::Peer(1)));
+    exclusive.failed(NOW + 200, Source::Origin);
+    let failed = exclusive.drain_commands();
+    assert!(failed.contains(&Command::Fail));
+    assert!(failed.contains(&Command::Cancel { peer: 1 }));
+    assert!(exclusive.finished());
+    for (source, range) in requests(&initial) {
+        exclusive.delivered(NOW + 300, source, range, slice(&bytes, range));
+    }
+    assert_eq!(exclusive.verified_bytes(), 0);
+    assert!(exclusive.drain_commands().is_empty());
+}
+
+#[test]
+fn exclusive_origin_builder_refuses_peer_only_and_started_transfers() {
+    let bytes = object();
+    assert!(peer_only_transfer(&bytes, NOW + 4_500, 1).with_exclusive_origin().is_none());
+    let mut transfer = transfer(&bytes, NOW + 4_500).with_exclusive_origin().unwrap();
+    transfer.start_peer_only_with_probe_peers(NOW, &[peer(1, None, None)], None, None, &[1]);
+    assert!(
+        transfer.drain_commands().is_empty(),
+        "originless start cannot bypass the creation contract"
+    );
+    transfer.start(NOW, &[], origin(0.0, 3_000.0), None, None);
+    assert!(!transfer.drain_commands().is_empty());
+    assert!(transfer.with_exclusive_origin().is_none());
+}
+
+#[test]
+fn exclusive_origin_tail_obeys_both_caps_even_when_one_canonical_piece_is_oversized() {
+    for size in [6 * 1024 * 1024, 16 * 1024 * 1024, 33 * 1024 * 1024] {
+        let bytes = object_sized(size);
+        let (_, initial) = exclusive_probe(&bytes);
+        let prefix = range_of(&initial, Source::Origin);
+        let count = piece_count(size as u64).unwrap();
+        let tail = PieceRange {
+            start: prefix.end,
+            end: count,
+        };
+        assert!(tail.end - tail.start <= MAX_PEER_REQUEST_PIECES);
+        let held = if tail.start == tail.end {
+            0
+        } else {
+            slice(&bytes, tail).len() as u64
+        };
+        assert!(held <= MAX_PEER_REQUEST_BYTES, "size {size}: {held} held bytes");
+        if commitment_piece_size(size as i64) as u64 > MAX_PEER_REQUEST_BYTES {
+            assert_eq!(held, 0, "an indivisible oversized piece is never withheld as a tail");
+        }
+    }
+}

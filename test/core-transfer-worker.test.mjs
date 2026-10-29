@@ -139,7 +139,7 @@ test("peer-only worker frames preserve exact Rust range verification with no ori
   } finally { await remote.free(); direct.free(); core.retire(); }
 });
 
-test("unsupported peer-only mode preserves a real worker and its ordinary mixed handles", async t => {
+for (const mode of ["peerOnly", "exclusiveOrigin"]) test("unsupported " + (mode === "peerOnly" ? "peer-only" : "exclusive origin") + " mode preserves a real worker and its ordinary mixed handles", async t => {
   const additions = {
     rs_xfer_new: [[0x7c, 0x7c, 0x7c, 0x7c, 0x7f, 0x7f], [0x7f]],
     rs_xfer_call: [[0x7f, 0x7f, 0x7c, 0x7c, 0x7c, 0x7c, 0x7f, 0x7f], [0x7f]],
@@ -153,13 +153,27 @@ test("unsupported peer-only mode preserves a real worker and its ordinary mixed 
   } finally { for (const [key, value] of previous) { if (value === undefined) delete CORE_FUNCTIONS[key]; else CORE_FUNCTIONS[key] = value; } }
   const failures = [], { client, workers } = await real(t, { module: legacy, onFailure: error => failures.push(error) });
   const options = config(object(1_024));
-  await assert.rejects(client.transfer({ ...options, peerOnly: true }), { code: "invalid-transfer" });
+  await assert.rejects(client.transfer({ ...options, [mode]: true }), { code: "invalid-transfer" });
   assert.equal(client.snapshot().state, "ready");
   assert.equal(client.snapshot().transfers, 0);
   const mixed = await client.transfer(options);
   assert.equal(await mixed.free(), true, "the pre-existing mixed constructor/free ABI remains usable");
   assert.equal(workers[0].terminated, undefined);
   assert.deepEqual(failures, []);
+});
+
+test("exclusive origin worker config preserves only valid explicit opt-ins before posting", async t => {
+  const { client, worker } = await held(t), options = config(object(1_024));
+  for (const exclusiveOrigin of [null, 1, "true", {}, []])
+    await assert.rejects(client.transfer({ ...options, exclusiveOrigin }), { code: "invalid-transfer" });
+  await assert.rejects(client.transfer({ ...options, exclusiveOrigin: true, peerOnly: true }), { code: "invalid-transfer" });
+  assert.equal(worker.requests.filter(row => row.op === "new").length, 0);
+  const exclusive = await client.transfer({ ...options, exclusiveOrigin: true });
+  assert.equal(worker.requests.find(row => row.op === "new").input.exclusiveOrigin, true);
+  await exclusive.free();
+  const ordinary = await client.transfer(options);
+  assert.equal(Object.hasOwn(worker.requests.filter(row => row.op === "new").at(-1).input, "exclusiveOrigin"), false);
+  await ordinary.free();
 });
 
 test("transfers and cumulative active bytes have independent finite limits", async t => {

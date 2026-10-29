@@ -16,17 +16,24 @@ function withBytes(exports, bytes, run) {
 const resultBytes = (exports, length) => new Uint8Array(exports.memory.buffer, exports.rs_result_ptr(), length);
 
 
-export function createCoreTransfer(exports, { size, sha256, pieces, deadline, maxHolders, originReserveMs, peerOnly = false }, retired, fail) {
+export function createCoreTransfer(exports, { size, sha256, pieces, deadline, maxHolders, originReserveMs, peerOnly = false, exclusiveOrigin = false }, retired, fail) {
   if (retired() || !TRANSFER_EXPORTS.every(name => typeof exports[name] === "function")) return null;
-  if (typeof peerOnly !== "boolean") return null;
+  if (typeof peerOnly !== "boolean" || typeof exclusiveOrigin !== "boolean" || peerOnly && exclusiveOrigin) return null;
   // An older module must not silently ignore originless mode and invent an
   // HTTP lane. Decline just this object before allocation, retaining mixed.
   if (peerOnly) {
     try { if (typeof exports.rs_xfer_capabilities !== "function" || !(exports.rs_xfer_capabilities() & 2)) return null; }
     catch { return null; }
   }
+  // Exclusive origin ranges require the new ownership contract. An older
+  // module must decline this object before allocating a legacy transfer.
+  if (exclusiveOrigin) {
+    try { if (typeof exports.rs_xfer_capabilities !== "function" || !(exports.rs_xfer_capabilities() & 4)) return null; }
+    catch { return null; }
+  }
   try {
-    const handle = withBytes(exports, encoder.encode(JSON.stringify({ sha256, pieces, ...(peerOnly ? { peerOnly: true } : {}) })),
+    const handle = withBytes(exports, encoder.encode(JSON.stringify({ sha256, pieces, ...(peerOnly ? { peerOnly: true } : {}),
+      ...(exclusiveOrigin ? { exclusiveOrigin: true } : {}) })),
       (pointer, length) => exports.rs_xfer_new(size, deadline, maxHolders, originReserveMs, pointer, length));
     return handle ? new CoreTransfer(exports, handle, retired, fail, peerOnly) : null;
   } catch (error) { fail(error); return null; }

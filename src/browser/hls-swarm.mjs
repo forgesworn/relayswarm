@@ -1214,7 +1214,7 @@ class HlsSwarm {
             const cached = new Map([...swarm.links.values()].filter(link => swarm.#peerEntryAvailable(link, context) &&
               link.pc?.connectionState === 'connected' && link.channel?.readyState === 'open' && link.supportsRanges &&
               (swarm.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !swarm.banned.has(link.pubkey) && link.have.size &&
-              (!swarm.options.admit || validTicket(swarm.admitted.get(link.pubkey)?.ticket)) && swarm.#knownRangeFlow(link))
+              (!swarm.options.admit || validTicket(swarm.admitted.get(link.pubkey)?.ticket)) && swarm.#bufferedRangeFlowAvailable(link))
               .map(link => [link, { pc: link.pc, channel: link.channel, ticket: swarm.admitted.get(link.pubkey)?.ticket, have: new Set(link.have) }]));
             if (cached.size) return this.loadBufferedMixed(context, config, callbacks, budgetGeometry, cached, enteredAt, parentMs);
           }
@@ -2271,10 +2271,15 @@ class HlsSwarm {
     return state;
   }
 
-  #knownRangeFlow(link) {
+  #bufferedRangeFlowAvailable(link) {
     const state = this.linkTimings.get(link), at = now();
-    return Boolean(state?.firstBytes.some(row => at - row.at <= LINK_TIMING_TTL_MS && Number.isFinite(row.value)) &&
+    const known = Boolean(state?.firstBytes.some(row => at - row.at <= LINK_TIMING_TTL_MS && Number.isFinite(row.value)) &&
       state.flows.some(row => at - row.at <= LINK_TIMING_TTL_MS && row.flowMs >= MIN_LINK_FLOW_MS && row.value > 0));
+    // Unknown lanes start with one signed piece. Verified refills can use
+    // only the Core's bounded, still-unissued origin tail.
+    // Keep ordinary HTTP immediate during an unproductive probe's cooldown.
+    return known || at - (state?.probeAt ?? -Infinity) >= LINK_REFRESH_MS ||
+      at - (state?.usefulAt ?? -Infinity) <= LINK_TIMING_TTL_MS;
   }
 
   #observeLinkTiming(link, result, preserveUseful = false) {
@@ -2730,7 +2735,7 @@ class HlsSwarm {
         typeof plan.revalidateAuthority === 'function' && !plan.revalidateAuthority()) return null;
     if (!candidates.length) return worker ? null : undefined;
     const models = new Map(candidates.map(link => [link, this.#linkTransferEstimate(link, Math.max(0, plan.limit - now()), commitment.pieceSize)])
-      .filter(([, model]) => model !== null && (!plan.bufferedMixed || !model.refresh && model.firstByteMs !== null && model.rate > 0)));
+      .filter(([, model]) => model !== null));
     if (!models.size) {
       this.peerFlow.noModelTransfers = increment(this.peerFlow.noModelTransfers);
       this.peerFlow.lastNoModel = { candidateCount: candidates.length, model: { ...this.peerFlow.lastModel } };
@@ -2770,7 +2775,8 @@ class HlsSwarm {
     const deadline = Math.floor(plan.limit);
     const hardDeadline = plan.peerOnly ? plan.limit : plan.limit + plan.originReserveMs;
     const config = { size: commitment.size, sha256: commitment.sha256, pieces: commitment.pieces,
-      deadline, maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...(plan.peerOnly ? { peerOnly: true } : {}) };
+      deadline, maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...(plan.peerOnly ? { peerOnly: true } : {}),
+      ...(plan.bufferedMixed ? { exclusiveOrigin: true } : {}) };
     let transfer;
     try { transfer = worker ? await this.transferWorker.transfer(config, { signal }) : this.core.transfer(config); }
     catch { return null; }
@@ -3103,7 +3109,8 @@ class HlsSwarm {
       const estimates = { peers, origin, sharedFirstByteMs, sharedRate: this.peerSelection.rate(), probePeers };
       // The input is for the trace only.
       submit("start", this.options.traceRequests ? { size: commitment.size, pieces: commitment.pieces.length, pieceSize, deadline: deadline - base,
-        maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...(plan.peerOnly ? { peerOnly: true } : {}), ...structuredClone(estimates),
+        maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...(plan.peerOnly ? { peerOnly: true } : {}),
+        ...(plan.bufferedMixed ? { exclusiveOrigin: true } : {}), ...structuredClone(estimates),
         holders: [...ids].map(([id, link]) => [id, this.#holderLabel(link.pubkey)]) } : null, (at) => transfer.start(at, estimates), started => {
       if (started?.late) this.multiHolder.late += 1;
       if (plan.bufferedMixed) {
