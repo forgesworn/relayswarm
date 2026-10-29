@@ -4913,6 +4913,7 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
       this.thread = new WorkerThread(new URL("./support/core-transfer-worker-thread.mjs", import.meta.url));
       this.exit = new Promise(resolve => this.thread.once("exit", resolve));
       this.thread.on("message", data => {
+        if (this.holdStart && this.startIds?.delete(data.id)) { (this.startReplies ??= []).push(data); return; }
         if (this.holdDelivered && this.deliveredIds?.delete(data.id)) { (this.deliveredReplies ??= []).push(data); return; }
         if (this.holdNew && this.newIds?.delete(data.id)) { (this.newRequests ??= []).push({ data }); return; }
         if (holdBan && data.result?.commands?.some(command => command.t === "ban")) { this.banReply = data; return; }
@@ -4924,9 +4925,13 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
     postMessage(data, transfer) {
       if (onRpc && ['new', 'start'].includes(data.op)) {
         this.rpcSent ??= new Map();
-        if (this.rpcSent.size < 32) this.rpcSent.set(data.id, { id: data.id, op: data.op, sentAtMs: performance.now() });
+        if (this.rpcSent.size < 32) this.rpcSent.set(data.id, { id: data.id, op: data.op, handle: data.handle,
+          ...(data.op === 'new' ? { configSize: data.input.size, configDeadline: data.input.deadline,
+            exclusiveOrigin: data.input.exclusiveOrigin === true, peerOnly: data.input.peerOnly === true } : {}),
+          sentAtMs: performance.now() });
         else this.rpcDropped = (this.rpcDropped ?? 0) + 1;
       }
+      if (this.holdStart && data.op === 'start') (this.startIds ??= new Set()).add(data.id);
       if (this.holdDelivered && data.op === 'delivered') (this.deliveredIds ??= new Set()).add(data.id);
       if (data.op === 'new') this.newCount = (this.newCount ?? 0) + 1;
       if (data.op === 'free') onFree?.();
@@ -4935,6 +4940,7 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
       if (failDelivery && data.op === "delivered") { queueMicrotask(() => this.dispatchEvent(new Event("error"))); return; }
       this.thread.postMessage(data, transfer);
     }
+    releaseStart() { this.dispatchEvent(new MessageEvent('message', { data: this.startReplies.shift() })); }
     releaseInit() { this.thread.postMessage(this.init); }
     releaseNew() { const { data } = this.newRequests.shift(); this.dispatchEvent(new MessageEvent('message', { data })); }
     releaseFinal() { this.dispatchEvent(new MessageEvent("message", { data: this.finalReply })); }
@@ -9633,7 +9639,175 @@ for (const [knownFlow, worker, forceSetupExpiry = false, forceScopeExpiry = fals
   } finally { try { await f.close(); } finally { timers.restore(); } }
 });
 
-async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {}) {
+// Functional controller clock, not elapsed/throughput evidence. Ten-ms batches
+// avoid one real Windows timer per virtual millisecond. During the explicitly
+// admitted warm setup phase only, leave policy time fixed while real metadata
+// and Worker messages complete; source/peer pacing then uses the same clocks
+// and original deadlines. No model, HAVE, source body or Core result is seeded.
+function warmFunctionalClock(t, awaitingSetup) {
+  const nativeTimer = setTimeout, nativeNow = performance.now.bind(performance);
+  let at = Math.ceil(nativeNow()), heldSince = null;
+  const performanceMock = t.mock.method(performance, 'now', () => at);
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
+  const step = async (ms = 10) => {
+    await new Promise(resolve => nativeTimer(resolve, 1));
+    if (awaitingSetup()) {
+      heldSince ??= nativeNow();
+      assert(nativeNow() - heldSince < 2000, 'functional warm setup must finish its actual async work');
+      return;
+    }
+    heldSince = null; at += ms; t.mock.timers.tick(ms);
+  };
+  const advanceUntil = async (predicate, limitMs = 10000) => {
+    const begin = at, wall = nativeNow();
+    while (!predicate()) {
+      assert(at - begin <= limitMs && nativeNow() - wall < 15000, 'functional warm phase did not settle');
+      await step();
+    }
+  };
+  const settle = async promise => {
+    let result;
+    promise.then(value => { result = { value }; }, error => { result = { error }; });
+    await advanceUntil(() => result);
+    if (result.error) throw result.error;
+    return result.value;
+  };
+  let restored = false;
+  const restore = () => { if (!restored) { restored = true; t.mock.timers.reset(); performanceMock.mock.restore(); } };
+  t.after(restore);
+  return { settle, advanceUntil, advance: async ms => { for (let done = 0; done < ms; done += 10) await step(Math.min(10, ms - done)); }, restore };
+}
+
+// Actual real-clock optional admission needs a complete same-load observation,
+// not an elapsed-time inference. The incomplete897 diagnostic is NOT such a
+// receipt: it omitted the timer schedule, RPC handle and source config budgets.
+function warmSetupDeclineProof({ trace, expected, timer, rpc }) {
+  try {
+    if (trace.dropped !== 0 || !Array.isArray(trace.rows) || expected.rpcDropped !== 0 ||
+        expected.rpcOmitted !== 0 || expected.rowsOmitted !== 0 || !Array.isArray(rpc) ||
+        ['originRangeAttempts', 'physicalRangeGets', 'clientRangeLoads', 'peerRequests', 'acceptedPeerBytes', 'verifiedWarmPeerBytes']
+          .some(name => expected[name] !== 0)) return null;
+    const rows = trace.rows.filter(row => row.load === expected.load), load = rows.find(row => row.k === 'load');
+    if (!load || load.budgetGeometry?.source !== 'warm-ahead' || load.sn !== expected.sn ||
+        load.cc !== expected.cc || load.level !== expected.level || !Number.isSafeInteger(expected.load)) return null;
+    if (rows.some(row => row.k === 'mixedScope' && row.scope && row.scope.warmOwner !== true)) return null;
+    const normalized = { dropped: trace.dropped, rows: trace.rows.map(row => {
+      if (!row.scope) return row;
+      const { warmOwner, ...scope } = row.scope;
+      return { ...row, scope };
+    }) };
+    const scope = mixedScopeSetupProof(normalized, expected);
+    if (scope) return { ...scope, stage: 'warm-' + scope.stage };
+    const entry = rows.findIndex(row => row.k === 'mixedScope' && row.reason === 'entry');
+    const fired = rows.findIndex(row => row.k === 'mixedScope' && row.reason === 'setup-timer');
+    const origin = rows.findIndex(row => row.k === 'originStart');
+    if (!(entry > 0 && entry < fired && fired < origin) || rows.some(row => row.k === 'request' || row.k === 'xfer') ||
+        rows.slice(0, origin).some(row => row.k === 'origin') ||
+        rows.filter(row => row.k === 'mixedScope' && row.phase === 'mixed').length !== 2) return null;
+    const state = rows[fired].scope, checks = [...MIXED_SCOPE_CHECKS, 'warmOwner'];
+    if (!state || Object.keys(state).length !== checks.length || checks.some(name => state[name] !== true) ||
+        rows[fired].originInvoked !== false || rows[fired].phase !== 'mixed' ||
+        rows[origin].leg !== 'fallback' || rows[origin].ranged !== false || rows[origin].ms !== 0) return null;
+    const at = expected.enteredAtMs, invoked = expected.invokedAtMs, cutoff = at + 25;
+    if (![at, invoked, timer?.scheduledAtMs, timer?.requestedDelayMs, timer?.firedAtMs].every(Number.isFinite) ||
+        !(at > 0 && timer.scheduledAtMs >= at && timer.scheduledAtMs <= cutoff && timer.requestedDelayMs >= 0 &&
+          timer.requestedDelayMs <= 25 && timer.firedAtMs >= timer.scheduledAtMs && invoked >= timer.firedAtMs)) return null;
+    const g = rows[fired].capturedGeometry, current = rows[fired].currentGeometry;
+    if (!g || !current || load.budgetMs !== 0 || !(load.limitMs > 25) ||
+        g.fragmentStart !== expected.fragmentStart || g.fragmentDurationSeconds !== expected.fragmentDurationSeconds ||
+        current.fragmentStart !== g.fragmentStart || current.fragmentDurationSeconds !== g.fragmentDurationSeconds ||
+        current.playbackRate !== 1 || !(current.readyState >= 3) ||
+        ['currentTime', 'playableEnd', 'fragmentStart', 'durationMs', 'originReserveMs'].some(name =>
+          !Number.isFinite(g[name]) || load.budgetGeometry[name] !== g[name])) return null;
+    const recovery = Math.min(expected.parentMs, (g.playableEnd - g.currentTime) * 1000), first = Math.min(recovery, expected.ttfbMs);
+    const proofElapsed = timer.firedAtMs - at, invokedElapsed = invoked - at;
+    if (!(recovery > 25 && first > 25 && expected.remainingLoadMs > 0 && expected.remainingTtfbMs > 0 &&
+        expected.remainingLoadMs <= recovery - proofElapsed && expected.remainingLoadMs >= recovery - invokedElapsed &&
+        expected.remainingTtfbMs <= first - proofElapsed && expected.remainingTtfbMs >= first - invokedElapsed)) return null;
+    const allocated = rpc.filter(row => row.op === 'new' && row.sentAtMs >= at && row.sentAtMs <= invoked);
+    if (allocated.length !== 1) return null;
+    const allocation = allocated[0], starts = rpc.filter(row => row.op === 'start' && row.sentAtMs >= at && row.sentAtMs <= invoked);
+    if (!Number.isSafeInteger(allocation.id) || allocation.id < 1 || allocation.success !== true ||
+        !Number.isSafeInteger(allocation.handle) || allocation.handle < 1 || allocation.configSize !== expected.size ||
+        allocation.exclusiveOrigin !== true || allocation.peerOnly !== false ||
+        allocation.configDeadline !== Math.floor(at + load.limitMs) || starts.length > 1 ||
+        starts.some(row => !Number.isSafeInteger(row.id) || row.id <= allocation.id || row.handle !== allocation.handle || row.sentAtMs < allocation.replyAtMs)) return null;
+    const pending = [allocation, ...starts].find(row => row.success === true && Number.isFinite(row.sentAtMs) &&
+      Number.isFinite(row.replyAtMs) && row.sentAtMs <= timer.firedAtMs && timer.firedAtMs <= row.replyAtMs);
+    const finishes = rows.filter(row => row.k === 'xferFinish');
+    const finishIndex = rows.findIndex(row => row.k === 'xferFinish');
+    if (rows.filter(row => row.k === 'load').length !== 1 ||
+        [rows[0], rows[entry], rows[fired], rows[finishIndex], rows[origin]].some((row, i, sequence) =>
+          !Number.isSafeInteger(row?.at) || row.at < 0 || i > 0 && row.at < sequence[i - 1].at) ||
+        !(fired < finishIndex && finishIndex < origin)) return null;
+    if (!pending || finishes.length !== 1 || finishes[0].delivered !== false || finishes[0].bufferedMixed !== true ||
+        finishes[0].peerOnly !== false || finishes[0].verifiedBytes !== 0 || finishes[0].originBytes !== 0 ||
+        ![0, 1].includes(expected.coreTransfersDelta) ||
+        !(expected.coreTransfersDelta === 1 ? finishes[0].reason === 'signal-abort' && pending.op === 'start' :
+          ['allocation-error', 'allocation-state-deadline-authority-holder'].includes(finishes[0].reason) && pending.op === 'new')) return null;
+    return { stage: 'warm-observed-pending-rpc-timer', proofTime: timer.firedAtMs, rpc: pending };
+  } catch { return null; }
+}
+
+// Mutate the ACTUAL held-response observation below. These controls classify
+// evidence only; none introduces or changes controller time or source policy.
+function warmDeclineMutationControls(input) {
+  assert(warmSetupDeclineProof(input));
+  const controls = [
+    ['missing timer', v => { v.timer = null; }],
+    ['late scheduled timer', v => { v.timer.scheduledAtMs = v.expected.enteredAtMs + 26; }],
+    ['wrong requested delay', v => { v.timer.requestedDelayMs = 26; }],
+    ['source before firing', v => { v.expected.invokedAtMs = v.timer.firedAtMs - 1; }],
+    ['missing allocation handle', v => { delete v.rpc.find(r => r.op === 'new' && r.sentAtMs >= v.expected.enteredAtMs).handle; }],
+    ['different start handle', v => { v.rpc.find(r => r.op === 'start' && r.sentAtMs >= v.expected.enteredAtMs).handle++; }],
+    ['wrong object', v => { v.expected.size++; }],
+    ['wrong peer cap', v => { v.rpc.find(r => r.op === 'new' && r.sentAtMs >= v.expected.enteredAtMs).configDeadline++; }],
+    ['nonexclusive', v => { v.rpc.find(r => r.op === 'new' && r.sentAtMs >= v.expected.enteredAtMs).exclusiveOrigin = false; }],
+    ['not pending', v => { for (const r of v.rpc) r.replyAtMs = Math.min(r.replyAtMs, v.timer.firedAtMs - 1); }],
+    ['failed reply', v => { for (const r of v.rpc) r.success = false; }],
+    ['duplicate allocation', v => { v.rpc.push({...v.rpc.find(r => r.op === 'new' && r.sentAtMs >= v.expected.enteredAtMs)}); }],
+    ['wrong load', v => { v.expected.load++; }],
+    ['wrong role', v => { v.trace.rows.find(r => r.k === 'load' && r.load === v.expected.load).budgetGeometry.source = 'buffer'; }],
+    ['lost warm owner', v => { v.trace.rows.find(r => r.reason === 'setup-timer' && r.load === v.expected.load).scope.warmOwner = false; }],
+    ['range command', v => { v.expected.originRangeAttempts = 1; }],
+    ['actual range', v => { v.expected.physicalRangeGets = 1; }],
+    ['range invocation', v => { v.expected.clientRangeLoads = 1; }],
+    ['peer request', v => { v.expected.peerRequests = 1; }],
+    ['accepted peer', v => { v.expected.acceptedPeerBytes = 1; }],
+    ['verified warm bytes', v => { v.expected.verifiedWarmPeerBytes = 1; }],
+    ['renewed parent', v => { v.expected.remainingLoadMs = v.expected.parentMs; }],
+    ['renewed first byte', v => { v.expected.remainingTtfbMs = v.expected.ttfbMs; }],
+    ['delivered', v => { v.trace.rows.find(r => r.k === 'xferFinish' && r.load === v.expected.load).delivered = true; }],
+    ['wrong terminal', v => { v.trace.rows.find(r => r.k === 'xferFinish' && r.load === v.expected.load).reason = 'core-fail-command'; }],
+    ['hidden rows', v => { v.expected.rowsOmitted = 1; }],
+    ['dropped trace', v => { v.trace.dropped = 1; }],
+    ['dropped RPC', v => { v.expected.rpcDropped = 1; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const v = structuredClone(input); mutate(v);
+    assert.equal(warmSetupDeclineProof(v), null, name);
+  }
+  console.log(JSON.stringify({ fixture: 'warm-setup-decline-proof-mutations', rejected: controls.length }));
+}
+
+test('warm setup proof rejects the immutable incomplete897 failure without reconstructing missing observations', async () => {
+  const raw = await readFile(new URL('./fixtures/owned-warm-897-incomplete.json', import.meta.url));
+  assert.equal(createHash('sha256').update(raw).digest('hex'), 'cb9de5a1638cd959cd568a3db0eb260a13accf365f9b99a03d5f1cce66c5f1fa');
+  const old = JSON.parse(raw), source = old.targetHttp[0];
+  assert.equal(source.range, null); assert.equal(source.complete, false);
+  assert(!Object.hasOwn(source, 'invocationProbe'));
+  assert(!Object.hasOwn(source, 'maxLoadTimeMs'));
+  assert(old.rpc.every(row => !Object.hasOwn(row, 'handle')));
+  const input = { trace: { dropped: old.traceDropped, rows: old.rows }, rpc: old.rpc,
+    timer: source.invocationProbe, expected: { load: old.load, sn: 1, cc: 0, level: 0, size: 6291456,
+      enteredAtMs: source.sdkEnteredAtMs, invokedAtMs: source.invokedAtMs,
+      remainingLoadMs: source.maxLoadTimeMs, remainingTtfbMs: source.maxTimeToFirstByteMs,
+      rpcDropped: old.rpcDropped, rpcOmitted: old.rpcOmitted, rowsOmitted: old.rowsOmitted,
+      originRangeAttempts: old.deltas.originRanges, acceptedPeerBytes: old.deltas.peerAccepted } };
+  assert.equal(warmSetupDeclineProof(input), null, 'old RED lacks independent evidence; later controls cannot rescore it');
+});
+
+async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logical = false, realAdmission = false, holdSetup = false } = {}) {
   const size = 6 * 1024 * 1024, bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
   const secret = generateSecretKey(), seconds = Math.floor(Date.now() / 1000);
   const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds, tags: [['d', 'contrast'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
@@ -9652,12 +9826,28 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {
     }
   }
   for (const warming of ownedWarm ? [true] : [true, false]) {
+    let f, received, declined = false, declineProof = null;
+    const timers = realAdmission ? realTimerInvocationContext() : null;
+    if (timers) t.after(() => timers.restore());
+    const clock = logical ? warmFunctionalClock(t, () => {
+      const rows = f?.swarm.trace().rows ?? [];
+      const warm = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
+      return Boolean(warm && !received.some(row => row.path === '/media/seg.ts' && row.warm));
+    }) : null;
+    const settle = promise => clock ? clock.settle(promise) : promise;
+    const wait = predicate => clock ? clock.advanceUntil(predicate) : until(predicate);
     let rpcObserved = 0;
     const rpc = [], bridge = worker ? transferWorkerFixture(t, { onRpc: row => { rpcObserved++; if (rpc.length < 64) rpc.push(row); } }) : null;
-    const origin = await mixedHttpOrigin(t, bytes, Loader), { received, requests, url } = origin;
+    const origin = await mixedHttpOrigin(t, bytes, Loader, timers?.snapshot), { requests, url } = origin;
+    received = origin.received;
     class AccountedHTTP extends origin.HttpLoader {
       load(ctx, config, callbacks) {
-        const index = received.length, result = super.load(ctx, config, callbacks);
+        const index = received.length, result = super.load(ctx, config, { ...callbacks,
+          onSuccess: (response, stats, ...args) => {
+            // This loader records the native HTTP response callback as first.
+            received[index].firstResponseAtMs = stats.loading.first;
+            callbacks.onSuccess(response, stats, ...args);
+          } });
         Object.assign(received[index], { path: new URL(ctx.url).pathname, sn: ctx.frag.sn, warm: Boolean(ctx[WARM_AHEAD]) });
         return result;
       }
@@ -9668,10 +9858,10 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {
         key: createHash('sha256').update(`${base.swarmId}\n${new URL(ctx.url).pathname}`).digest('hex'),
         rendition: '/media/index.m3u8', playlist: '/media/index.m3u8', mediaType: 'main', encryption: null,
         sequence: ctx.frag.sn, discontinuity: ctx.frag.cc, part: null, sha256, size, pieceSize, pieces, expiresAt: seconds + 60 }) }, secret);
-    const f = await multiFixture(t, { size, OriginLoader: AccountedHTTP, holders: [{ Channel: ContrastPeer }], traceRequests: 4096,
+    f = await settle(multiFixture(t, { size, OriginLoader: AccountedHTTP, holders: [{ Channel: ContrastPeer }], traceRequests: 4096,
       swarmOptions: { streamEvent, getCommitment, serve: true, warmAhead: warming, bufferedMixedRanges: ownedWarm || !warming,
         ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}),
-        zeroBudgetPeerRace: true, sustainablePeerWait: true, maxPeerWaitMs: 2500 } });
+        zeroBudgetPeerRace: true, sustainablePeerWait: true, maxPeerWaitMs: 2500 } }));
     const invoke = ctx => {
       const loader = new f.hls.config.fLoader(f.hlsConfig), calls = { success: 0, error: 0, abort: 0, timeout: 0 };
       ctx.frag.stats = loader.stats;
@@ -9685,7 +9875,7 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {
     };
     try {
       assert.equal(f.swarm.metrics().core.state, 'ready');
-      if (worker) await until(() => f.swarm.metrics().core.transferWorker.state === 'ready');
+      if (worker) await wait(() => f.swarm.metrics().core.transferWorker.state === 'ready');
       const details = M3U8Parser.parseLevelPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nlead.ts\n#EXTINF:2,\nseg.ts\n#EXT-X-ENDLIST\n',
         new URL('index.m3u8', url).href, 0, 'main', 0, null);
       const contextFor = frag => ({ url: frag.url, frag, responseType: 'arraybuffer', type: LoaderContextType.MEDIA_FRAGMENT, headers: {}, part: null, rangeStart: 0, rangeEnd: 0 });
@@ -9693,17 +9883,19 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {
       f.hls.media = Object.assign(new EventTarget(), { currentTime: 10, paused: false, ended: false, seeking: false,
         readyState: 4, playbackRate: 1, buffered: { length: 0 } });
       // Neither arm has a future map during identical genuine calibration.
-      sameBytes(await invoke(target).response, bytes);
-      await sleep(2);
+      sameBytes(await settle(invoke(target).response), bytes);
+      if (clock) await clock.advance(2); else await sleep(2);
       assert(f.swarm.metrics().peerRequestDiagnostics.records.some(row => row.outcome === 'payload' && row.elapsedMs - row.firstByteMs >= 300),
         'the holder model comes from actual Core-verified qualifying payload');
       for (const pc of f.connections) pc.connectionState = 'connected';
       f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
       f.hls.levels = [{ details }];
       const before = f.swarm.metrics(), beforeReceived = received.length, beforeRequests = requests.length;
+      const beforePeerRequests = f.channels.reduce((sum, channel) => sum + channel.wants.length, 0);
+      if (holdSetup) { assert(worker && realAdmission); bridge.workers[0].holdStart = true; }
       const previous = invoke(lead); previous.response.catch(() => {});
-      await until(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/lead.ts'));
-      if (warming) await until(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/seg.ts' && row.warm));
+      await wait(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/lead.ts'));
+      if (warming) await wait(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/seg.ts' && row.warm));
       if (ownedWarm) {
         const targetOrigin = received.slice(beforeReceived).find(row => row.path === '/media/seg.ts');
         if (!targetOrigin.range) {
@@ -9711,7 +9903,38 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {
           const load = trace.rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead')?.load;
           const diagnosticRows = trace.rows.filter(row => row.load === load && ['load', 'mixedScope', 'xfer', 'xferFinish', 'originStart', 'origin'].includes(row.k));
           const pending = bridge?.workers.flatMap(value => [...(value.rpcSent?.values() ?? [])]) ?? [];
-          assert(targetOrigin.range, JSON.stringify({ message: 'eligible owned warm work starts origin206 before any whole GET', worker,
+          if (realAdmission) {
+            declined = true;
+            if (holdSetup) {
+              await wait(() => bridge.workers[0].startReplies?.length > 0);
+              bridge.workers[0].holdStart = false; bridge.workers[0].releaseStart();
+            }
+            await wait(() => f.swarm.trace().rows.some(row => row.k === 'xferFinish' && row.load === load));
+            const fullTrace = f.swarm.trace(), now = f.swarm.metrics();
+            const wants = f.channels.flatMap(channel => channel.wants);
+            const proofInput = { trace: fullTrace, timer: targetOrigin.invocationProbe, rpc,
+              expected: { load, sn: target.frag.sn, cc: target.frag.cc, level: target.frag.level, size,
+                fragmentStart: target.frag.start, fragmentDurationSeconds: target.frag.duration,
+                enteredAtMs: targetOrigin.sdkEnteredAtMs, invokedAtMs: targetOrigin.invokedAtMs,
+                parentMs: f.loaderConfig.loadPolicy.maxLoadTimeMs, ttfbMs: f.loaderConfig.loadPolicy.maxTimeToFirstByteMs,
+                remainingLoadMs: targetOrigin.maxLoadTimeMs, remainingTtfbMs: targetOrigin.maxTimeToFirstByteMs,
+                originRangeAttempts: now.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+                physicalRangeGets: requests.slice(beforeRequests).filter(row => row.path === '/media/seg.ts' && row.range).length,
+                clientRangeLoads: received.slice(beforeReceived).filter(row => row.path === '/media/seg.ts' && row.range).length,
+                peerRequests: wants.length - beforePeerRequests,
+                acceptedPeerBytes: now.bytes.peerFirst - before.bytes.peerFirst,
+                verifiedWarmPeerBytes: now.warmAhead.verifiedPeerBytes - before.warmAhead.verifiedPeerBytes,
+                coreTransfersDelta: now.core.multiHolder.transfers - before.core.multiHolder.transfers,
+                rpcDropped: bridge?.workers.reduce((sum, value) => sum + (value.rpcDropped ?? 0), 0) ?? 0,
+                rpcOmitted: Math.max(0, rpcObserved - rpc.length), rowsOmitted: 0 } };
+            declineProof = warmSetupDeclineProof(proofInput);
+            assert(declineProof, JSON.stringify({ message: 'real warm fallback requires complete same-load setup proof', proofInput }));
+            if (holdSetup) {
+              assert.equal(declineProof.stage, 'warm-observed-pending-rpc-timer');
+              warmDeclineMutationControls(proofInput);
+              console.log(JSON.stringify({ fixture: 'actual-warm-held-rpc-proof', proofInput, proof: declineProof }));
+            }
+          } else assert(targetOrigin.range, JSON.stringify({ message: 'eligible owned warm work starts origin206 before any whole GET', worker,
             load: load ?? null, traceDropped: trace.dropped, rows: diagnosticRows.slice(-64), rowsOmitted: Math.max(0, diagnosticRows.length - 64),
             rpc, rpcOmitted: Math.max(0, rpcObserved - rpc.length), pendingRpc: pending.slice(-32), pendingRpcOmitted: Math.max(0, pending.length - 32),
             rpcDropped: bridge?.workers.reduce((sum, value) => sum + (value.rpcDropped ?? 0), 0) ?? 0,
@@ -9722,8 +9945,9 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {
               originRanges: metrics.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
               peerAccepted: metrics.bytes.peerFirst - before.bytes.peerFirst, warmStarted: metrics.warmAhead.started - before.warmAhead.started } }));
         }
-        await until(() => f.swarm.metrics().warmAhead.verified > before.warmAhead.verified);
-        assert(f.swarm.metrics().warmAhead.verifiedPeerBytes > before.warmAhead.verifiedPeerBytes);
+        await wait(() => f.swarm.metrics().warmAhead.verified > before.warmAhead.verified);
+        if (declined) assert.equal(f.swarm.metrics().warmAhead.verifiedPeerBytes, before.warmAhead.verifiedPeerBytes);
+        else assert(f.swarm.metrics().warmAhead.verifiedPeerBytes > before.warmAhead.verifiedPeerBytes);
         assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst, 'verified warm assembly defers accepted credit before genuine consumption');
       }
       const demand = invoke(target); demand.response.catch(() => {});
@@ -9732,7 +9956,7 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {
         assert.equal(f.swarm.metrics().warmAhead.promotions, before.warmAhead.promotions + 1);
         assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst, 'pending warm ownership cannot claim accepted peer bytes');
       }
-      sameBytes(await demand.response, bytes); sameBytes(await previous.response, bytes);
+      sameBytes(await settle(demand.response), bytes); sameBytes(await settle(previous.response), bytes);
       assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
       const after = f.swarm.metrics(), rows = f.swarm.trace().rows;
       const client = received.slice(beforeReceived).filter(row => row.path === '/media/seg.ts');
@@ -9741,7 +9965,17 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {
       assert(client.every(row => row.complete && row.bytes === (row.range ? row.range[1] - row.range[0] : size)));
       assert.equal(client.reduce((sum, row) => sum + row.bytes, 0), server.reduce((sum, row) => sum + row.sent, 0));
       const starts = rows.filter(row => row.k === 'xfer' && row.op === 'start' && row.at >= (rows.filter(row => row.k === 'load' && row.sn === 0).at(-1)?.at ?? 0));
-      if (warming && !ownedWarm) {
+      if (declined) {
+        assert.equal(client.length, 1); assert.equal(server.length, 1);
+        assert.equal(client[0].range, null); assert.equal(client[0].status, 200); assert.equal(client[0].bytes, size);
+        assert.equal(peer, 0); assert.equal(after.warmAhead.verifiedPeerBytes, before.warmAhead.verifiedPeerBytes);
+        assert(client[0].completedAtMs < client[0].sdkEnteredAtMs + f.loaderConfig.loadPolicy.maxLoadTimeMs);
+        assert(client[0].completedAtMs <= client[0].invokedAtMs + client[0].maxLoadTimeMs,
+          'the complete fallback body stays within its original reduced source deadline');
+        assert(client[0].firstResponseAtMs >= client[0].invokedAtMs &&
+          client[0].firstResponseAtMs <= client[0].invokedAtMs + client[0].maxTimeToFirstByteMs,
+          'the native HTTP response arrives within its original reduced first-byte deadline');
+      } else if (warming && !ownedWarm) {
         assert.equal(client.length, 1); assert.equal(client[0].range, null); assert.equal(client[0].warm, true);
         assert.equal(server.length, 1); assert.equal(server[0].status, 200); assert.equal(peer, 0);
         const warmLoad = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
@@ -9759,25 +9993,32 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {
       if (ownedWarm) {
         assert.equal(after.warmAhead.consumedPeerBytes - before.warmAhead.consumedPeerBytes, peer);
         assert.equal(after.core.transferWorker.state, worker ? 'ready' : 'off');
-        const again = invoke(target); sameBytes(await again.response, bytes);
+        const again = invoke(target); sameBytes(await settle(again.response), bytes);
         assert.equal(again.calls.success, 1); assert.equal(f.swarm.metrics().bytes.peerFirst, after.bytes.peerFirst, 'repeated consumption cannot double-credit the same warm object');
       }
-      observations.push({ warming, ownedWarm, worker, objectBytes: size, acceptedPeerBytes: peer,
+      observations.push({ warming, ownedWarm, worker, optionalAdmissionDeclined: declined, setupProof: declineProof?.stage ?? null, controllerClock: logical ? 'logical-functional' : 'real', objectBytes: size, acceptedPeerBytes: peer,
         actualTargetHttpBytes: client.reduce((sum, row) => sum + row.bytes, 0), targetWholeGets: server.filter(row => !row.range).length,
         target206Gets: server.filter(row => row.range).length, targetClientBodies: client.map(({ bytes, status, complete, range, warm }) => ({ bytes, status, complete, range, warm })),
         excludedLeadBodyBytes: received.slice(beforeReceived).filter(row => row.path === '/media/lead.ts').reduce((sum, row) => sum + row.bytes, 0),
         calibrationBodyBytes: received.slice(0, beforeReceived).reduce((sum, row) => sum + row.bytes, 0),
         coreReady: after.core.state, coalesced: after.warmAhead?.coalesced ?? null,
         configuredPeerBytesPerSecond: .3 * 1024 * 1024, configuredSourceBytesPerSecondPerRequest: 3 * 1024 * 1024 });
-    } finally { await f.close(); }
+    } finally { try { await settle(f.close()); } finally { clock?.restore(); timers?.restore(); } }
   }
   console.log(JSON.stringify({ fixture: 'real-core-warm-vs-genuine-mixed', policyContrastOnly: true, observations }));
 }
 
 test('real Core contrasts legacy warm whole source with otherwise eligible genuine mixed ranges', { timeout: 25000 }, t => realCoreWarmContrast(t));
 
-for (const worker of [false, true]) test(`owned steady warm work assembles disjoint206 and defers peer credit until genuine consumption (${worker ? 'worker' : 'main'})`, { timeout: 20000 },
-  t => realCoreWarmContrast(t, { ownedWarm: true, worker }));
+for (const worker of [false, true]) test(`owned steady warm work assembles disjoint206 and defers peer credit until genuine consumption (${worker ? 'worker' : 'main'}, logical controller)`, { timeout: 20000 },
+  t => realCoreWarmContrast(t, { ownedWarm: true, worker, logical: true }));
+
+for (const worker of [false, true]) test(`owned steady warm real-clock admission retains strict206 or observed setup decline (${worker ? 'worker' : 'main'})`, { timeout: 20000 },
+  t => realCoreWarmContrast(t, { ownedWarm: true, worker, realAdmission: true }));
+
+test('owned steady warm real-clock held Worker reply proves setup-only whole fallback', { timeout: 20000 },
+  t => realCoreWarmContrast(t, { ownedWarm: true, worker: true, realAdmission: true, holdSetup: true }));
+
 
 async function bufferedMixedFixture(t, clock, options = {}) {
   lateRaceKeyClock(t);

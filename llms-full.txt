@@ -3264,6 +3264,20 @@ optional 25 ms setup timer had already selected whole-source recovery. That
 capture lacks enough timer and invocation metadata to prove a protected
 decline; it remains failed. No field result is qualified by these CI checks.
 
+The follow-up test-only correction separates mandatory mixed assembly from
+optional real-clock admission. Full six-MiB main/Worker positives still use
+the actual warm manager, commitments, Core and HTTP206, and require exact
+disjoint assembly with deferred once-only credit. Their explicitly functional
+controller clock yields to actual setup I/O before advancing policy timers;
+it is not elapsed-time or throughput evidence. Separate real-clock cases
+require either full mixed assembly or complete same-load setup-decline proof,
+zero attempted ranges/peer requests/credit and an exact whole-source body
+within reduced original deadlines. An actual held Worker reply exercises that
+fallback and rejects 28 altered receipts. The incomplete original macOS input
+is retained as a rejecting fixture. All 13 focused checks pass, including the
+six existing real-clock six-MiB tuples and mandatory Core/Worker positive.
+Product timing, original fixture timeouts and field thresholds are unchanged.
+
 ## Unreleased cooperative VOD futures (29 October 2026)
 
 When both warm-ahead and buffered mixed ranges are enabled on explicit main
