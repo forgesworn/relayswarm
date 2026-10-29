@@ -360,7 +360,7 @@ decision is not cached as permission for later upload requests.
 | `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
 | `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-object origin time with a 25% and 100 ms recovery margin. Substantial origin ranges update this estimate after scaling by their actual byte count. Unknown origin timing or duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. Independent cached/late-HAVE races keep their window beside immediate HTTP. |
 | `warmAhead` | `false` | Experimental peer-first option, requiring `serve: true`: use the same player's next two parsed, unencrypted, whole main-media fragments for bounded speculative loading. A warmed object promoted to genuine demand frees the sole speculative slot. Existing demand/range limits are unchanged. Verified future objects share the held cache; at most three distinct cached/in-flight objects and 24 MiB of warm data plus all reservations fit within `maxHeldBytes`. Fresh cache permission may wait only within actual buffer headroom, up to 25 ms, before ordinary source recovery proceeds independently. |
-| `startupBufferTarget` | `null` | Experimental one-shot startup buffer for peer-first serving: a synchronous function returns the current player's fresh raw HLS target time in seconds, or `null` when its ownership/epoch is invalid. Hold the first main-fragment callback until verified contiguous upcoming media covers that target and measured origin-recovery headroom. While pending, a 100 ms poll advances a bounded parsed future window toward that horizon, skipping unrequested near-tip work and reclaiming completed unowned coverage only when needed. A window ahead of the actual target waits for it; in-flight work and authority pins retain their reservations. When both verified futures contribute to contiguous coverage of the current target but still lack recovery headroom, preserve that useful prefix and admit one additional parsed successor, even if the held original first interval is obsolete. Startup permits at most four objects within `startupBufferMaxBytes` (24 MiB by default); steady warm-ahead remains at three. Future requests remain serial. The startup deadline is twelve seconds from the original first-fragment load entry, or the shorter parent load deadline; retries do not renew it. Ordinary speculative requests retain their separate eight-second expiry. Works with `warmAhead: false` to stop speculative fetching after startup. It never pauses, plays, seeks or changes the room clock; bounded failure reports a loader error instead of releasing unsafe media. |
+| `startupBufferTarget` | `null` | Experimental one-shot startup buffer for peer-first serving: a synchronous function returns the current player's fresh raw HLS target time in seconds, or `null` when its ownership/epoch is invalid. Hold the first main-fragment callback until verified contiguous upcoming media covers that target and measured origin-recovery headroom. While pending, a 100 ms poll advances a bounded parsed future window toward that horizon, skipping unrequested near-tip work and reclaiming completed unowned coverage only when needed. A window ahead of the actual target waits for it; in-flight work and authority pins retain their reservations. When both verified futures contribute to contiguous coverage of the current target but still lack recovery headroom, preserve that useful prefix and admit one additional parsed successor, even if the held original first interval is obsolete. Startup permits at most four objects within `startupBufferMaxBytes` (24 MiB by default); steady warm-ahead remains at three. Future requests remain serial. An ahead-only window without verified target coverage passes the recovery/service projection before admission; skipped metadata cannot freeze it. Once reserved and admitted, the window stays fixed until the target reaches its start. The startup deadline is twelve seconds from the original first-fragment load entry, or the shorter parent load deadline; retries do not renew it. Ordinary speculative requests retain their separate eight-second expiry. Works with `warmAhead: false` to stop speculative fetching after startup. It never pauses, plays, seeks or changes the room clock; bounded failure reports a loader error instead of releasing unsafe media. |
 | `startupBufferMaxBytes` | `25165824` | Encoded startup aggregate including the retained original response. Safe integer from 24 MiB through 32 MiB; a non-default value requires `startupBufferTarget`. Reserve the full chosen allowance against the shared held budget before HTTP. Cached/in-flight future bytes separately remain within 24 MiB, as do existing per-object checks. Object limits, recovery and deadlines are unchanged; this is not total browser memory. |
 | `startupBufferCommit` | `null` | Optional async host hook, requiring `startupBufferTarget`, called once with frozen `{ signal }` after verified reservoir readiness and before releasing HLS callbacks. Before publication, coverage must strictly exceed measured recovery headroom, including after awaited authority checks; exact equality remains sufficient without a hook and for fresh post-acknowledgement validation. The host may acknowledge a new room start here. The original startup deadline and resource limits continue; cancellation ignores late settlement. Fresh target, authority, context and resident coverage are checked again afterwards. The SDK never creates or reanchors the room clock. |
 | `uploadPacing` | `false` | Experimental canonical-piece upload refill deferral: one FIFO waiter per link, at most `min(maxUploadPeers, maxPeers)` waiters, and a fixed 250 ms queue deadline. The existing per-second rate, twice-rate burst, session allowance and wire remain unchanged. Whole-object deficits still refuse immediately. Queue rows contain identity and numeric geometry; held bytes and current host permission are checked after waiting. |
@@ -2266,6 +2266,12 @@ behind the required recovery horizon, with at most one metadata hop per poll.
 When available, the last verified future fragment's measured whole-load time
 adds a scheduling lead to that admission horizon. This is a time observation,
 not a throughput estimate or a change to the required release headroom.
+An ahead-only window with no verified coverage of the actual target must pass
+that projection before its first future request is admitted. Skipped metadata
+does not freeze a window. A reserved, admitted window remains fixed while the
+target is before its start, so later service observations cannot skip its
+contiguous successors. Verified original coverage and the fourth-slot extension
+below retain their contiguous successors.
 The fourth-slot successor extending two contiguous verified futures covering
 the current target is retained instead of being skipped by that horizon. Its
 bytes still pass the existing reservation, verification and final release checks.
@@ -2279,7 +2285,7 @@ response continues to occupy one of the four residency slots. Capacity is consid
 before retiring a useful completed prefix. An adequate window or a timeline gap
 does not trigger this extension. Otherwise the existing rolling policy may
 retire its completed, unpinned first future when it contains the target.
-Once a future window starts ahead of the actual target, its start stays fixed;
+Once an admitted future window starts ahead of the actual target, its start stays fixed;
 release waits for the real target and verified coverage to meet again.
 Startup contains at most four objects within its chosen byte allowance. The first
 genuine response verifies before future requests begin, so this reservoir's
@@ -3115,6 +3121,36 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased moving-room startup admission (29 October 2026)
+
+When the original fragment is obsolete, merely selecting metadata ahead of the
+room target no longer freezes a window before it passes the existing recovery
+and verified-service projection. Freezing follows successful reservation and
+current ownership; a cancellation during that check stops before future HTTP.
+Verified original coverage, contiguous fourth-slot extensions and already
+admitted windows retain their behaviour. Deadlines and capacity limits are
+unchanged.
+
+A controlled moving-target regression fails the original twelve-second deadline
+before the fix and releases at 9.91 seconds afterwards. Captured scalar inputs
+are identified separately from synthetic one-second services for unrequested
+fragments; this is not a field counterfactual. All 149 warm/startup tests pass.
+Four older fixture starting positions now make their claimed windows genuinely
+admissible; their recovery requirements, durations, budgets and assertions remain.
+The existing logical-policy held-allocation test also now requires a matching
+real Worker reply before advancing its policy clock, then verifies the exact
+25 ms fallback, unchanged budgets and retirement without credit or a leaked lease.
+This is policy coverage, not elapsed-performance evidence.
+
+Hosted checks on the preceding `b77f9c4` head passed the macOS and Linux native
+jobs, Rust and interoperability checks. The low-latency browser job failed,
+the Windows native job was cancelled, and dependent live-relay coverage was
+skipped. The browser capture stalls even with peers disabled and
+later records playlist HTTP500s; the first stall precedes those responses, and
+the underlying server exception was not retained. Warm/startup and mixed ranges
+were disabled in that fixture. Its failure remains unresolved. The current
+admission fix still requires fresh field and physical-device qualification.
 
 ## Unreleased room-start publication boundary (29 October 2026)
 

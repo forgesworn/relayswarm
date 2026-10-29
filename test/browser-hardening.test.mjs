@@ -9619,19 +9619,63 @@ test('buffered mixed rechecks the25ms guard after the original range loader cons
 });
 
 test('buffered mixed ignores a late real worker allocation reply after the fixed setup cutoff', async t => {
-  const { WorkerImpl, workers } = transferWorkerFixture(t), clock = virtualClock(t); let f;
+  const nativeSetTimeout = setTimeout;
+  let frees = 0;
+  const { WorkerImpl, workers } = transferWorkerFixture(t, { onFree: () => { frees++; }, onRpc: () => {} }), clock = virtualClock(t); let f;
+  // Real IPC has its own finite wall bound. Policy time stays stationary while
+  // the actual Rust worker posts/holds its matching allocation reply; none of
+  // these logical25ms observations is an elapsed-performance measurement.
+  const waitForIPC = async predicate => {
+    const deadline = process.hrtime.bigint() + 2_000_000_000n;
+    while (!predicate()) {
+      assert(process.hrtime.bigint() < deadline, 'actual worker IPC phase did not occur within its real2s bound');
+      await new Promise(resolve => nativeSetTimeout(resolve, 1));
+    }
+  };
   try {
     f = await bufferedMixedFixture(t, clock, { swarmOptions: { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl } });
     await clock.advanceUntil(() => f.swarm.metrics().core.transferWorker.state === 'ready', 500);
-    workers[0].holdNew = true;
-    const before = f.wholeLoads.length, pending = beginCountedMultiLoad(f, f.ctx);
-    await clock.advance(25);
-    assert.equal(f.wholeLoads.length, before + 1); assert.equal(f.ranges.length, 0); assert.deepEqual(f.channels[0].wants, []);
+    await waitForIPC(() => { const state = f.swarm.metrics().core.transferWorker; return state.transfers === 0 && state.pending === 0; });
+    const worker = workers[0], priorNew = worker.newCount ?? 0, priorFree = frees, before = f.wholeLoads.length,
+      originalParent = f.loaderConfig.loadPolicy.maxLoadTimeMs, originalTtfb = f.loaderConfig.loadPolicy.maxTimeToFirstByteMs;
+    const began = clock.now(), connection = f.connections[0], channel = f.channels[0];
+    worker.holdNew = true;
+    const pending = beginCountedMultiLoad(f, f.ctx);
+    await waitForIPC(() => (worker.newCount ?? 0) === priorNew + 1 && worker.newRequests?.length === 1);
+    assert.equal(clock.now(), began, 'native IPC waits must not consume or move the logical setup clock');
+    const held = worker.newRequests[0].data, posted = worker.rpcSent?.get(held.id);
+    assert.equal(held.v, 1); assert.equal(held.ok, true); assert.equal(held.result, true);
+    assert(posted); assert.equal(posted.id, held.id); assert.equal(posted.op, 'new'); assert.equal(posted.sentAtMs, began);
+    assert.equal(worker.newIds.has(held.id), false, 'the actual posted allocation received this exact held reply');
+    assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 1);
+    assert.equal(f.wholeLoads.length, before); assert.equal(pending.calls.success.length, 0);
+    await clock.advance(24); assert.equal(f.wholeLoads.length, before, 'held allocation cannot start recovery before its original cutoff');
+    await clock.advance(1);
+    assert.equal(clock.now(), began + 25); assert.equal(f.wholeLoads.length, before + 1);
+    const source = f.wholeLoads.at(-1);
+    assert.equal(source.config.loadPolicy.maxLoadTimeMs, originalParent - 25);
+    assert.equal(source.config.loadPolicy.maxTimeToFirstByteMs, originalTtfb - 25);
+    assert.equal(f.ranges.length, 0); assert.deepEqual(f.channels[0].wants, []); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    worker.releaseNew();
+    await waitForIPC(() => { const state = f.swarm.metrics().core.transferWorker; return state.transfers === 0 && state.pending === 0; });
+    assert.equal(clock.now(), began + 25, 'retirement IPC cannot move the source deadline either');
+    assert.equal(frees, priorFree + 1); assert.equal(f.swarm.metrics().core.transferWorker.activeBytes, 0);
+    assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 0, 'the held transaction releases its admitted link lease');
+    assert.equal(pending.calls.success.length, 0, 'the source still owns its incomplete whole body when the old reply is released');
     sameBytes(await clock.settle(pending.response), f.bytes);
-    await clock.advanceUntil(() => workers[0].newRequests?.length > 0, 1000);
-    workers[0].releaseNew(); await clock.advance(100);
-    assert.equal(pending.calls.success.length, 1); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    await clock.advance(100);
+    assert.equal(pending.calls.success.length, 1); assert.equal(pending.calls.error.length, 0); assert.equal(pending.calls.abort.length, 0);
+    assert.equal(f.wholeLoads.length, before + 1); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
     assert.equal(f.ranges.length, 0); assert.deepEqual(f.channels[0].wants, []);
+    assert.equal(f.swarm.metrics().core.transferWorker.transfers, 0); assert.equal(f.swarm.metrics().core.transferWorker.pending, 0);
+    assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 0);
+    assert.equal(f.connections[0], connection); assert.equal(f.channels[0], channel); assert.equal(channel.readyState, 'open');
+    console.log(JSON.stringify({ fixture: 'held-allocation-logical-policy', clockScope: 'logical-policy-inputs-not-elapsed-performance',
+      newPosts: worker.newCount - priorNew, matchingHeldReply: true, policyAtPost: began, setupCutoffOffsetMs: 25,
+      remainingParentMs: source.config.loadPolicy.maxLoadTimeMs, remainingTtfbMs: source.config.loadPolicy.maxTimeToFirstByteMs,
+      wholeFallbacks: f.wholeLoads.length - before, successfulCallbacks: pending.calls.success.length,
+      freePosts: frees - priorFree, claimedLinks: f.swarm.metrics().peerAdmission.claimedLinks,
+      rangeInvocations: f.ranges.length, peerRequests: channel.wants.length, acceptedPeerBytes: f.swarm.metrics().bytes.peerFirst }));
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 

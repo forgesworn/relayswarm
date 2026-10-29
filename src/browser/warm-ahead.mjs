@@ -130,6 +130,13 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         row.reserved = permit.size;
         if (!reserve(reserved())) { row.reserved = 0; counters.rejected++; return null; }
         if (controller.signal.aborted || closed || revision !== generation || !live(row)) return null;
+        // Freeze only an admitted, reserved future, never a skipped metadata
+        // candidate or a request refused by the object/byte budget.
+        if (startup.state === 'buffering') {
+          if (!startupCurrent()) return null;
+          if (startup.frozenStart === null && item.context.frag.start > startup.targetTime)
+            startup.frozenStart = item.context.frag.start;
+        }
         counters.highWaterBytes = Math.max(counters.highWaterBytes, counters.cacheBytes + reserved());
         const warm = item.context[WARM_AHEAD] = { peerBytes: 0, genuine: () => row.genuine(),
           startupDependency: () => {
@@ -334,13 +341,15 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     if (!startupCurrent() || startup.checking || !queued.length) return false;
     // Once a future window starts ahead of the real target, fill it without
     // chasing another projected horizon. Release still needs actual coverage.
-    if (startup.frozenStart !== null && target < startup.frozenStart || startup.plan[0]?.context.frag.start > target) return true;
+    if (startup.frozenStart !== null && target < startup.frozenStart) return true;
     const item = queued[0], index = startup.plan.findIndex(future => future.key === item.key);
     if (index < 0) { endStartup('cancelled', 'context-changed'); return false; }
     // Keep the fourth-slot extension of two verified contiguous futures;
     // a previous service sample cannot turn their successor into a gap.
     if (startup.verified) {
       const covered = coverage(target);
+      if (covered.rows.some(row => row.context === startup.own.context) &&
+          Math.abs(item.context.frag.start - covered.end) <= 0.001) return true;
       if (covered.end !== null && covered.rows.filter(row => row.context !== startup.own.context).length >= 2 &&
           Math.abs(item.context.frag.start - covered.end) <= 0.001) return true;
     }
@@ -349,8 +358,6 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       startup.hopAvailable = false;
       startup.cursor = startup.plan[index]; startup.plan.splice(index, 1); queued.shift();
       rollStartup(target, recovery);
-      const selected = queued[0]?.context.frag.start;
-      if (selected > target) startup.frozenStart = selected;
       // Do not recurse through metadata. The existing bounded poll is the
       // only source of another skip allowance; no deadline is renewed.
       return false;

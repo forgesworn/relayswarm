@@ -10,6 +10,36 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased moving-room startup admission (29 October 2026)
+
+When the original fragment is obsolete, merely selecting metadata ahead of the
+room target no longer freezes a window before it passes the existing recovery
+and verified-service projection. Freezing follows successful reservation and
+current ownership; a cancellation during that check stops before future HTTP.
+Verified original coverage, contiguous fourth-slot extensions and already
+admitted windows retain their behaviour. Deadlines and capacity limits are
+unchanged.
+
+A controlled moving-target regression fails the original twelve-second deadline
+before the fix and releases at 9.91 seconds afterwards. Captured scalar inputs
+are identified separately from synthetic one-second services for unrequested
+fragments; this is not a field counterfactual. All 149 warm/startup tests pass.
+Four older fixture starting positions now make their claimed windows genuinely
+admissible; their recovery requirements, durations, budgets and assertions remain.
+The existing logical-policy held-allocation test also now requires a matching
+real Worker reply before advancing its policy clock, then verifies the exact
+25 ms fallback, unchanged budgets and retirement without credit or a leaked lease.
+This is policy coverage, not elapsed-performance evidence.
+
+Hosted checks on the preceding `b77f9c4` head passed the macOS and Linux native
+jobs, Rust and interoperability checks. The low-latency browser job failed,
+the Windows native job was cancelled, and dependent live-relay coverage was
+skipped. The browser capture stalls even with peers disabled and
+later records playlist HTTP500s; the first stall precedes those responses, and
+the underlying server exception was not retained. Warm/startup and mixed ranges
+were disabled in that fixture. Its failure remains unresolved. The current
+admission fix still requires fresh field and physical-device qualification.
+
 ## Unreleased room-start publication boundary (29 October 2026)
 
 An optional startup commit hook now requires verified coverage strictly above

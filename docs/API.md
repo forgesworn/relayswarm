@@ -202,6 +202,12 @@ behind the required recovery horizon, with at most one metadata hop per poll.
 When available, the last verified future fragment's measured whole-load time
 adds a scheduling lead to that admission horizon. This is a time observation,
 not a throughput estimate or a change to the required release headroom.
+An ahead-only window with no verified coverage of the actual target must pass
+that projection before its first future request is admitted. Skipped metadata
+does not freeze a window. A reserved, admitted window remains fixed while the
+target is before its start, so later service observations cannot skip its
+contiguous successors. Verified original coverage and the fourth-slot extension
+below retain their contiguous successors.
 The fourth-slot successor extending two contiguous verified futures covering
 the current target is retained instead of being skipped by that horizon. Its
 bytes still pass the existing reservation, verification and final release checks.
@@ -215,7 +221,7 @@ response continues to occupy one of the four residency slots. Capacity is consid
 before retiring a useful completed prefix. An adequate window or a timeline gap
 does not trigger this extension. Otherwise the existing rolling policy may
 retire its completed, unpinned first future when it contains the target.
-Once a future window starts ahead of the actual target, its start stays fixed;
+Once an admitted future window starts ahead of the actual target, its start stays fixed;
 release waits for the real target and verified coverage to meet again.
 Startup contains at most four objects within its chosen byte allowance. The first
 genuine response verifies before future requests begin, so this reservoir's
