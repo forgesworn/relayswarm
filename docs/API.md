@@ -471,6 +471,12 @@ ID, and each multi-holder scheduler call with its inputs and the commands it
 returned, so a recorded transfer replays against the module offline. Times are
 whole milliseconds from the swarm's creation; holders are session labels, not
 keys. It is kept out of `metrics()`, which receipts snapshot repeatedly.
+Buffered mixed loads also retain `mixedScope` decisions and `xferFinish`
+reasons when tracing is enabled. Scope rows record the predicates and fragment
+geometry actually read by the existing checks; a skipped predicate remains
+unknown. These observations distinguish fallback and expiry branches without
+rechecking authority or changing transfer policy. They do not establish network
+throughput or explain a stall without the corresponding player observations.
 Whole HTTP legs have an early numeric load alias, including synchronous cached
 HTTP winners, immediate fallback and the immutable context of a late peer arm.
 Their fixed `leg` is `fallback`, `cached` or `late`. `originStart` observes

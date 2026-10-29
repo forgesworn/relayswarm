@@ -8976,6 +8976,84 @@ async function bufferedMixedFixture(t, clock, options = {}) {
   return f;
 }
 
+test('buffered mixed scope trace reports the actual fragment rejection before transfer finish without extra getter reads', async t => {
+  for (const field of ['start', 'duration']) {
+    const counts = [];
+    for (const capacity of [0, 128]) {
+      const clock = virtualClock(t); let f, reads = 0, changed = false;
+      try {
+        f = await bufferedMixedFixture(t, clock, { traceRequests: capacity });
+        const captured = f.ctx.frag[field], next = captured + .125;
+        Object.defineProperty(f.ctx.frag, field, { configurable: true, get() { reads++; return changed ? next : captured; } });
+        const pending = beginCountedMultiLoad(f, f.ctx);
+        await clock.advance(5); assert(f.ranges.length > 0, 'the current real Core transfer has already issued its source range');
+        changed = true;
+        sameBytes(await clock.settle(pending.response), f.bytes);
+        assert.equal(pending.calls.success.length, 1); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+        const rows = f.swarm.trace().rows;
+        if (!capacity) assert.deepEqual(rows, [], 'traceRequests0 retains no observation rows');
+        else {
+          const rejection = rows.find(row => row.k === 'mixedScope' && row.reason === 'scope-' + field);
+          assert(rejection); assert.equal(rejection.scope[field], false);
+          const geometryField = field === 'start' ? 'fragmentStart' : 'fragmentDurationSeconds';
+          assert.equal(rejection.capturedGeometry[geometryField], captured);
+          assert.equal(rejection.currentGeometry[geometryField], next);
+          assert.equal(rejection.capturedGeometry.durationMs, 100, 'budget duration remains explicitly milliseconds');
+          const terminal = rows.find(row => row.k === 'xferFinish' && row.load === rejection.load);
+          assert.equal(terminal?.reason, 'reply-current-invalid'); assert.equal(terminal.delivered, false);
+          assert(rows.indexOf(rejection) < rows.indexOf(terminal), 'the evaluated scope failure precedes its terminal observation');
+          assert(rows.some(row => row.k === 'mixedScope' && row.load === rejection.load && row.reason === 'peer-result-empty'));
+          const text = JSON.stringify(rows.filter(row => ['mixedScope', 'xferFinish'].includes(row.k)));
+          assert(!text.includes(f.ctx.url) && !text.includes(f.key) && !text.includes(f.swarm.metrics().pubkey), 'new observations omit URLs, keys and public identities');
+        }
+        counts.push(reads);
+      } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+    }
+    assert.equal(counts[1], counts[0], field + ' getter is evaluated identically with tracing off and on');
+  }
+});
+
+test('buffered mixed scope trace retains the actual immediate budget branch and successful transfer terminal', async t => {
+  for (const parentMs of [100, 10000]) {
+    const clock = virtualClock(t); let f;
+    try {
+      f = await bufferedMixedFixture(t, clock, { traceRequests: 128 });
+      f.loaderConfig.timeout = parentMs;
+      const pending = beginCountedMultiLoad(f, f.ctx);
+      if (parentMs !== 100) sameBytes(await clock.settle(pending.response), f.bytes);
+      const rows = f.swarm.trace().rows, load = rows.filter(row => row.k === 'load').at(-1).load;
+      const scoped = rows.filter(row => row.k === 'mixedScope' && row.load === load);
+      assert(scoped.some(row => row.reason === 'entry'));
+      if (parentMs === 100) {
+        assert(scoped.some(row => row.reason === 'entry-peer-budget' && row.ms === 0));
+        assert.equal(rows.filter(row => row.k === 'xferFinish' && row.load === load).length, 0, 'an immediate source decline never allocates a Core transfer');
+        pending.loader.abort(); assert.equal(pending.calls.abort.length, 1);
+      } else {
+        const terminal = rows.filter(row => row.k === 'xferFinish' && row.load === load);
+        assert.equal(terminal.length, 1); assert.equal(terminal[0].reason, 'delivered'); assert.equal(terminal[0].delivered, true);
+        assert.equal(terminal[0].verifiedBytes, f.bytes.length);
+        assert(scoped.some(row => row.reason === 'origin-invoked') && scoped.some(row => row.reason === 'peer-result-delivered'));
+      }
+      assert.equal(pending.calls.success.length, parentMs === 100 ? 0 : 1);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  }
+});
+
+test('buffered mixed scope trace cannot change delivery when its observation sink throws', async t => {
+  const clock = virtualClock(t), push = Array.prototype.push; let f, rejected = 0;
+  try {
+    f = await bufferedMixedFixture(t, clock);
+    Array.prototype.push = function (...items) {
+      if (items.length === 1 && ['mixedScope', 'xferFinish'].includes(items[0]?.k)) { rejected++; throw new Error('fixture trace sink'); }
+      return Reflect.apply(push, this, items);
+    };
+    const pending = beginCountedMultiLoad(f, f.ctx);
+    sameBytes(await clock.settle(pending.response), f.bytes);
+    assert.equal(pending.calls.success.length, 1); assert(rejected > 0);
+    assert(f.swarm.metrics().bytes.peerFirst > 0, 'the same mixed transfer still accepts its verified peer contribution');
+  } finally { Array.prototype.push = push; if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
 for (const worker of [false, true]) test("buffered mixed missing ownership capability uses one whole source and preserves its engine " + (worker ? "(worker)" : "(main)"), async t => {
   // Keep all real verifier/link exports; hide only this optional capability
   // export to model a module that cannot promise exclusive origin ownership.
