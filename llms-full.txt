@@ -3231,8 +3231,35 @@ windows, aggregate byte and reservation refusal, and callback cancellation.
 Two earlier scheduling expectations now describe the intentional reachable
 window/fourth-slot behaviour while retaining their original parent limits
 and explicit actual-target recovery assertions.
-These controller checks do not establish a field remedy, throughput, useful
-peer contribution or physical-device playback. A new field result is required.
+These controller checks do not establish throughput, useful peer contribution
+or physical-device playback. The subsequent private field observation below
+records the current runtime's measured result.
+
+## Private reachable-startup field observation (29 October 2026)
+
+Full [e2e CI](https://github.com/forgesworn/relayswarm/actions/runs/40964038776)
+and [realtime CI](https://github.com/forgesworn/relayswarm/actions/runs/40964038705)
+passed at `399ab4f`. Its runtime objects equal the compiled `a85f8134` candidate.
+The previously intermittent HTTP-renewal and browser credential-rollover checks
+passed in this run; their earlier failures remain unexplained.
+
+One fresh, restricted private Spry test on the M4 produced trusted 3840×2160
+first frames in 4.93 and 7.95 seconds. Both viewers completed 340.002 seconds
+of monotonic observation and 340.015 seconds of wall observation, advancing
+339.29 and 339.23 seconds through natural track wrap and another 79.8 seconds.
+Neither recorded post-qualification waiting, stalls, player errors or dropped
+frames. Automatic credentials and literal selected succeeded local relay/TLS
+and remote-relay pairs were observed at both original boundaries.
+
+The overall verdict remains **RED**. Accepted peer media was 294,912 and
+5,544,673 bytes: 0.02645% and 0.5054% of accepted peer plus loaded source media,
+below the original 5% and eight-MiB requirements. Viewer 1 also exceeded the
+HTTP recorder's 131,072 data-event cap; later body events were not aggregated,
+so its inclusive HTTP total remains unknown. These observations establish
+neither traffic savings nor a physical-phone, public-default or NAT result.
+The original failed receipt remains unchanged. All 32 sealed files were
+reverified; temporary relay, browser profiles, raw credential input and rendered
+secrets were removed, with the paired private relay and firewall unchanged.
 
 ## Setup-proof and native CI scheduling correction (29 October 2026)
 
