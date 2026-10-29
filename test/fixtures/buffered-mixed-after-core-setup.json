@@ -1,0 +1,366 @@
+{
+  "schema": 1,
+  "scope": "Sanitized immutable observations from an actual SDK/Core/HTTP unit fault injection; not field, performance or qualification evidence. Original RED remains unchanged.",
+  "provenance": {
+    "sourceCommit": "502dc8c860e8182973ac55e2f8dccf21a9ce34fa",
+    "hlsSwarmSha256": "794342625fdbcc9aa0adbfc7e6b3bf4b87b5f08b8e16e253ae01be6c9fe930c6",
+    "originalLogSha256": "611430a6cb010212a89de6b5d22fa991f6819ece59ad8e397b1a8051da793ad9",
+    "originalExitCode": 1
+  },
+  "trace": {
+    "dropped": 0,
+    "rows": [
+      {
+        "k": "load",
+        "load": 2,
+        "at": 2146,
+        "sn": 1,
+        "level": 0,
+        "cc": 0,
+        "budgetMs": 0,
+        "limitMs": 2500,
+        "budgetGeometry": {
+          "source": "buffer",
+          "positionSource": "fragment",
+          "currentTime": 10,
+          "bufferedEnd": 20,
+          "playableEnd": 20,
+          "fragmentStart": 10,
+          "originReserveMs": 2703.75,
+          "uncappedMs": 7296.25,
+          "durationMs": 2000,
+          "originRecoveryMs": 2703.75,
+          "sustainableMs": 0
+        }
+      },
+      {
+        "k": "mixedScope",
+        "load": 2,
+        "at": 2146,
+        "phase": "mixed",
+        "reason": "entry",
+        "ms": 1,
+        "setupRemainingMs": 24,
+        "peerRemainingMs": 2499,
+        "recoveryRemainingMs": 9999,
+        "firstByteRemainingMs": 9999,
+        "originInvoked": false,
+        "capturedGeometry": {
+          "currentTime": 10,
+          "playableEnd": 20,
+          "fragmentStart": 10,
+          "originReserveMs": 2703.75,
+          "originRecoveryMs": 2703.75,
+          "uncappedMs": 7296.25,
+          "sustainableMs": 0,
+          "durationMs": 2000,
+          "fragmentDurationSeconds": 2
+        },
+        "currentGeometry": null,
+        "scope": null
+      },
+      {
+        "k": "xfer",
+        "load": 2,
+        "op": "start",
+        "at": 2159,
+        "size": 6291456,
+        "pieces": 64,
+        "pieceSize": 98304,
+        "deadline": 4645,
+        "maxHolders": 3,
+        "originReserveMs": 0,
+        "exclusiveOrigin": true,
+        "peers": [
+          [
+            1,
+            null,
+            null
+          ]
+        ],
+        "origin": [
+          0,
+          3020.382141142583
+        ],
+        "sharedFirstByteMs": null,
+        "sharedRate": null,
+        "probePeers": [
+          1
+        ],
+        "holders": [
+          [
+            1,
+            1
+          ]
+        ],
+        "out": {
+          "c": [
+            {
+              "t": "request",
+              "peer": 1,
+              "p": [
+                0,
+                1
+              ]
+            },
+            {
+              "t": "origin",
+              "p": [
+                1,
+                60
+              ]
+            }
+          ],
+          "next": 4645,
+          "late": true,
+          "finished": false
+        }
+      },
+      {
+        "k": "mixedScope",
+        "load": 2,
+        "at": 2193,
+        "phase": "mixed",
+        "reason": "current-setup",
+        "ms": 48,
+        "setupRemainingMs": -23,
+        "peerRemainingMs": 2452,
+        "recoveryRemainingMs": 9952,
+        "firstByteRemainingMs": 9952,
+        "originInvoked": false,
+        "capturedGeometry": {
+          "currentTime": 10,
+          "playableEnd": 20,
+          "fragmentStart": 10,
+          "originReserveMs": 2703.75,
+          "originRecoveryMs": 2703.75,
+          "uncappedMs": 7296.25,
+          "sustainableMs": 0,
+          "durationMs": 2000,
+          "fragmentDurationSeconds": 2
+        },
+        "currentGeometry": {
+          "playbackRate": 1,
+          "readyState": 4,
+          "fragmentStart": 10,
+          "fragmentDurationSeconds": 2
+        },
+        "scope": {
+          "notStopped": true,
+          "hls": true,
+          "media": true,
+          "generation": true,
+          "stream": true,
+          "unpaused": true,
+          "unended": true,
+          "unseeking": true,
+          "unitRate": true,
+          "ready": true,
+          "fragment": true,
+          "start": true,
+          "duration": true,
+          "identity": true,
+          "owns": true,
+          "mixed": true,
+          "signal": true,
+          "currentNotStopped": true,
+          "recovery": true,
+          "setup": false
+        }
+      },
+      {
+        "k": "mixedScope",
+        "load": 2,
+        "at": 2193,
+        "phase": "mixed",
+        "reason": "before-origin-invalid",
+        "ms": 48,
+        "setupRemainingMs": -23,
+        "peerRemainingMs": 2452,
+        "recoveryRemainingMs": 9952,
+        "firstByteRemainingMs": 9952,
+        "originInvoked": false,
+        "capturedGeometry": {
+          "currentTime": 10,
+          "playableEnd": 20,
+          "fragmentStart": 10,
+          "originReserveMs": 2703.75,
+          "originRecoveryMs": 2703.75,
+          "uncappedMs": 7296.25,
+          "sustainableMs": 0,
+          "durationMs": 2000,
+          "fragmentDurationSeconds": 2
+        },
+        "currentGeometry": {
+          "playbackRate": 1,
+          "readyState": 4,
+          "fragmentStart": 10,
+          "fragmentDurationSeconds": 2
+        },
+        "scope": {
+          "notStopped": true,
+          "hls": true,
+          "media": true,
+          "generation": true,
+          "stream": true,
+          "unpaused": true,
+          "unended": true,
+          "unseeking": true,
+          "unitRate": true,
+          "ready": true,
+          "fragment": true,
+          "start": true,
+          "duration": true,
+          "identity": true,
+          "owns": true,
+          "mixed": true,
+          "signal": true,
+          "currentNotStopped": true,
+          "recovery": true,
+          "setup": false
+        }
+      },
+      {
+        "k": "xferFinish",
+        "load": 2,
+        "at": 2193,
+        "ms": 38,
+        "reason": "signal-abort",
+        "delivered": false,
+        "peerRemainingMs": 2451,
+        "recoveryRemainingMs": 9951,
+        "bufferedMixed": true,
+        "peerOnly": false,
+        "verifiedBytes": 0,
+        "originBytes": 0
+      },
+      {
+        "k": "originStart",
+        "load": 2,
+        "leg": "fallback",
+        "at": 2194,
+        "ms": 0,
+        "ranged": false
+      },
+      {
+        "k": "origin",
+        "load": 2,
+        "at": 2162,
+        "ms": 32,
+        "ranged": true,
+        "range": [
+          1,
+          60
+        ],
+        "outcome": "abort",
+        "httpStatus": null,
+        "bytes": null
+      },
+      {
+        "k": "origin",
+        "load": 2,
+        "leg": "fallback",
+        "at": 2194,
+        "ms": 2091,
+        "ranged": false,
+        "outcome": "payload",
+        "bytes": 6291456,
+        "stale": false,
+        "loaderLoadedBytes": 6291456,
+        "loaderTotalBytes": null
+      },
+      {
+        "k": "mixedScope",
+        "load": 2,
+        "at": 4286,
+        "phase": "origin",
+        "reason": "onSuccess",
+        "ms": 2141,
+        "setupRemainingMs": -2116,
+        "peerRemainingMs": 359,
+        "recoveryRemainingMs": 7859,
+        "firstByteRemainingMs": 7859,
+        "originInvoked": false,
+        "capturedGeometry": {
+          "currentTime": 10,
+          "playableEnd": 20,
+          "fragmentStart": 10,
+          "originReserveMs": 2703.75,
+          "originRecoveryMs": 2703.75,
+          "uncappedMs": 7296.25,
+          "sustainableMs": 0,
+          "durationMs": 2000,
+          "fragmentDurationSeconds": 2
+        },
+        "currentGeometry": {
+          "playbackRate": 1,
+          "readyState": 4,
+          "fragmentStart": 10,
+          "fragmentDurationSeconds": 2
+        },
+        "scope": {
+          "notStopped": true,
+          "hls": true,
+          "media": true,
+          "generation": true,
+          "stream": true,
+          "unpaused": true,
+          "unended": true,
+          "unseeking": true,
+          "unitRate": true,
+          "ready": true,
+          "fragment": true,
+          "start": true,
+          "duration": true,
+          "identity": true,
+          "owns": true,
+          "mixed": true,
+          "signal": true,
+          "currentNotStopped": true,
+          "recovery": true,
+          "setup": false
+        }
+      }
+    ]
+  },
+  "expected": {
+    "load": 2,
+    "sn": 1,
+    "cc": 0,
+    "level": 0,
+    "size": 6291456,
+    "fragmentStart": 10,
+    "fragmentDurationSeconds": 2,
+    "enteredAtMs": 2656.186667,
+    "invokedAtMs": 2705.383625,
+    "parentMs": 10000,
+    "ttfbMs": 10000,
+    "remainingLoadMs": 9950.814459000001,
+    "remainingTtfbMs": 9950.814459000001,
+    "coreTransfersDelta": 1,
+    "originRangeAttempts": 1,
+    "physicalRangeGets": 0,
+    "clientRangeLoads": 0,
+    "peerRequests": 0,
+    "acceptedPeerBytes": 0
+  },
+  "observedCounts": {
+    "coreTransfers": 1,
+    "originRangeAttempts": 1,
+    "peerRequests": 0,
+    "acceptedPeerBytes": 0,
+    "physicalWholeGets": 2,
+    "physicalRangeGets": 0,
+    "clientRangeBodies": 0,
+    "successfulCallbacks": 1
+  },
+  "injectedConstructorWork": {
+    "armed": false,
+    "calls": 1,
+    "coreStarts": 1,
+    "coreReturnedAtMs": 2673.021,
+    "startedAtMs": 2674.1005,
+    "finishedAtMs": 2704.131792
+  },
+  "clockScope": "SDK trace at is relative operation time; ms is the corresponding duration. Ring order is emission order; the aborted range is emitted asynchronously. No cross-engine clock conversion."
+}

@@ -8772,19 +8772,20 @@ const MIXED_SCOPE_CHECKS = ['notStopped', 'hls', 'media', 'generation', 'stream'
 function mixedScopeSetupProof(trace, expected) {
   try {
     if (trace.dropped !== 0 || !Array.isArray(trace.rows) || !Number.isSafeInteger(expected.load) ||
-        !Number.isFinite(expected.enteredAtMs) || !Number.isFinite(expected.invokedAtMs) || expected.coreTransfersDelta !== 0) return null;
+        !Number.isFinite(expected.enteredAtMs) || !Number.isFinite(expected.invokedAtMs) ||
+        ['physicalRangeGets', 'clientRangeLoads', 'peerRequests', 'acceptedPeerBytes'].some(name => expected[name] !== 0)) return null;
     const rows = trace.rows, same = row => row?.load === expected.load;
     const load = rows.findIndex(row => same(row) && row.k === 'load');
     const entry = rows.findIndex(row => same(row) && row.k === 'mixedScope' && row.reason === 'entry');
     const failure = rows.findIndex(row => same(row) && row.k === 'mixedScope' && row.reason === 'current-setup');
-    const fallback = rows.findIndex(row => same(row) && row.k === 'mixedScope' && row.reason === 'peer-result-empty');
+    const fallback = rows.findIndex(row => same(row) && row.k === 'mixedScope' && ['peer-result-empty', 'before-origin-invalid'].includes(row.reason));
     const origin = rows.findIndex(row => same(row) && row.k === 'originStart');
     if (!(load >= 0 && load < entry && entry < failure && failure < fallback && fallback < origin)) return null;
     const sequence = [load, entry, failure, fallback, origin].map(index => rows[index]);
     if (sequence.some((row, index) => !Number.isSafeInteger(row.at) || row.at < 0 || index > 0 && row.at < sequence[index - 1].at)) return null;
     if (rows.filter(row => same(row) && row.k === 'load').length !== 1 ||
         ['sn', 'cc', 'level'].some(name => !Number.isSafeInteger(expected[name]) || rows[load][name] !== expected[name])) return null;
-    if (rows.some(row => same(row) && (['request', 'xfer', 'xferFinish'].includes(row.k) || row.k === 'origin' && row.ranged === true))) return null;
+    if (rows.some(row => same(row) && row.k === 'request')) return null;
     if (rows.slice(entry + 1, origin).some((row, index) => same(row) && row.k === 'mixedScope' &&
         ![failure, fallback].includes(entry + 1 + index))) return null;
     const rejected = rows[failure], state = rejected.scope, g = rejected.capturedGeometry, current = rejected.currentGeometry;
@@ -8804,7 +8805,41 @@ function mixedScopeSetupProof(trace, expected) {
     if (!(expected.invokedAtMs >= proofTime && expected.remainingLoadMs > 0 && expected.remainingTtfbMs > 0 &&
         expected.remainingLoadMs <= recoveryMs - 25 && expected.remainingLoadMs >= recoveryMs - elapsed &&
         expected.remainingTtfbMs <= firstMs - 25 && expected.remainingTtfbMs >= firstMs - elapsed)) return null;
-    return { proofTime, sequence };
+    const xfers = rows.map((row, index) => ({ row, index })).filter(item => same(item.row) && item.row.k === 'xfer');
+    const finishes = rows.map((row, index) => ({ row, index })).filter(item => same(item.row) && item.row.k === 'xferFinish');
+    const ranges = rows.map((row, index) => ({ row, index })).filter(item => same(item.row) && item.row.k === 'origin' && item.row.ranged === true);
+    if (rows[fallback].reason === 'peer-result-empty') {
+      if (xfers.length || finishes.length || ranges.length || expected.coreTransfersDelta !== 0 || expected.originRangeAttempts !== 0) return null;
+      return { stage: 'before-core', proofTime, sequence };
+    }
+    // A Core plan is not physical I/O: the mandatory source arm is attempted
+    // first, and its existing beforeLoad guard can retire the whole plan before
+    // either a Range loader invocation or the queued peer command is issued.
+    if (xfers.length !== 1 || finishes.length !== 1 || ranges.length !== 1 ||
+        expected.coreTransfersDelta !== 1 || expected.originRangeAttempts !== 1) return null;
+    const { row: started, index: startIndex } = xfers[0], { row: finished, index: finishIndex } = finishes[0],
+      { row: range, index: rangeIndex } = ranges[0];
+    if ([started, finished, range].some(row => !Number.isSafeInteger(row.at)) || !Number.isFinite(range.ms)) return null;
+    if (!(entry < startIndex && startIndex < failure && fallback < finishIndex && finishIndex < origin && finishIndex < rangeIndex &&
+        started.at >= rows[entry].at && started.at <= rejected.at && finished.at >= rows[fallback].at && finished.at <= rows[origin].at)) return null;
+    if (started.op !== 'start' || started.exclusiveOrigin !== true || started.peerOnly === true || started.size !== expected.size ||
+        !Number.isSafeInteger(started.pieces) || !Number.isSafeInteger(started.pieceSize) || started.pieceSize <= 0 ||
+        Math.ceil(started.size / started.pieceSize) !== started.pieces || !(started.deadline > started.at) ||
+        started.out?.finished !== false || typeof started.out?.late !== 'boolean' || !Array.isArray(started.out?.c)) return null;
+    const commands = started.out.c, sources = commands.filter(command => command.t === 'origin'), peers = commands.filter(command => command.t === 'request');
+    if (commands.length !== 2 || sources.length !== 1 || peers.length !== 1 || commands.some(command =>
+        !Array.isArray(command.p) || command.p.length !== 2 || !command.p.every(Number.isSafeInteger) ||
+        command.p[0] < 0 || command.p[0] >= command.p[1] || command.p[1] > started.pieces) ||
+        !started.peers?.some(([id]) => id === peers[0].peer) ||
+        !(sources[0].p[1] <= peers[0].p[0] || peers[0].p[1] <= sources[0].p[0])) return null;
+    if (finished.reason !== 'signal-abort' || finished.delivered !== false || finished.bufferedMixed !== true || finished.peerOnly !== false ||
+        finished.verifiedBytes !== 0 || finished.originBytes !== 0 || range.outcome !== 'abort' || range.bytes !== null || range.httpStatus !== null ||
+        !Array.isArray(range.range) || range.range.length !== 2 || range.range.some((value, index) => value !== sources[0].p[index]) ||
+        !(range.at >= started.at && range.at <= rejected.at && range.ms >= 0)) return null;
+    return { stage: 'after-core-before-io', proofTime,
+      // Ranged `at` is the operation start; ring order is emission order, so an
+      // asynchronous abort observation can appear after the whole originStart.
+      sequence: [load, entry, startIndex, failure, fallback, finishIndex, origin, rangeIndex].sort((a, b) => a - b).map(index => rows[index]) };
   } catch { return null; }
 }
 
@@ -8826,7 +8861,8 @@ test('buffered mixed setup scope proof rejects forged or incomplete decline obse
     ] },
     expected: { load: 7, sn: 1, cc: 0, level: 0, fragmentStart: 10, fragmentDurationSeconds: 2,
       enteredAtMs: 1000, invokedAtMs: 1031, parentMs: 10000, ttfbMs: 10000,
-      remainingLoadMs: 9969, remainingTtfbMs: 9969, coreTransfersDelta: 0 },
+      remainingLoadMs: 9969, remainingTtfbMs: 9969, coreTransfersDelta: 0, originRangeAttempts: 0,
+      physicalRangeGets: 0, clientRangeLoads: 0, peerRequests: 0, acceptedPeerBytes: 0 },
   };
   assert.equal(mixedScopeSetupProof(vector.trace, vector.expected)?.proofTime, 1025);
   const controls = [
@@ -8861,6 +8897,78 @@ test('buffered mixed setup scope proof rejects forged or incomplete decline obse
   }
 });
 
+test('buffered mixed after-Core setup proof requires the exact aborted transaction and zero physical I/O', () => {
+  // Pure metadata vectors; the real paused-constructor case independently
+  // proves this sequence through the actual SDK, Core and HTTP loader.
+  const geometry = { currentTime: 10, playableEnd: 20, fragmentStart: 10, durationMs: 2000,
+    fragmentDurationSeconds: 2, originReserveMs: 3000 };
+  const state = Object.fromEntries(MIXED_SCOPE_CHECKS.map(name => [name, name !== 'setup']));
+  const vector = { trace: { dropped: 0, rows: [
+    { k: 'load', load: 7, at: 100, sn: 1, cc: 0, level: 0, budgetMs: 0, limitMs: 2500, budgetGeometry: geometry },
+    { k: 'mixedScope', load: 7, at: 100, phase: 'mixed', reason: 'entry', ms: 0, originInvoked: false },
+    { k: 'xfer', load: 7, at: 110, op: 'start', size: 6291456, pieces: 64, pieceSize: 98304, deadline: 2600,
+      exclusiveOrigin: true, peers: [[1, null, null]],
+      out: { c: [{ t: 'request', peer: 1, p: [0, 1] }, { t: 'origin', p: [1, 60] }], late: true, finished: false } },
+    { k: 'mixedScope', load: 7, at: 140, phase: 'mixed', reason: 'current-setup', ms: 40, setupRemainingMs: -15,
+      originInvoked: false, scope: state, capturedGeometry: geometry,
+      currentGeometry: { fragmentStart: 10, fragmentDurationSeconds: 2, playbackRate: 1, readyState: 4 } },
+    { k: 'mixedScope', load: 7, at: 140, phase: 'mixed', reason: 'before-origin-invalid', ms: 40, originInvoked: false },
+    { k: 'xferFinish', load: 7, at: 140, reason: 'signal-abort', delivered: false, bufferedMixed: true, peerOnly: false,
+      verifiedBytes: 0, originBytes: 0 },
+    { k: 'originStart', load: 7, at: 141, ranged: false },
+    { k: 'origin', load: 7, at: 111, ms: 30, ranged: true, range: [1, 60], outcome: 'abort', httpStatus: null, bytes: null },
+  ] }, expected: { load: 7, sn: 1, cc: 0, level: 0, size: 6291456, fragmentStart: 10, fragmentDurationSeconds: 2,
+    enteredAtMs: 1000, invokedAtMs: 1041, parentMs: 10000, ttfbMs: 10000, remainingLoadMs: 9959, remainingTtfbMs: 9959,
+    coreTransfersDelta: 1, originRangeAttempts: 1, physicalRangeGets: 0, clientRangeLoads: 0, peerRequests: 0, acceptedPeerBytes: 0 } };
+  assert.equal(mixedScopeSetupProof(vector.trace, vector.expected)?.stage, 'after-core-before-io');
+  const controls = [
+    ['wrong fallback reason', v => { v.trace.rows[4].reason = 'peer-result-empty'; }],
+    ['non-setup scope', v => { v.trace.rows[3].reason = 'scope-ready'; }],
+    ['cross-load start', v => { v.trace.rows[2].load = 8; }],
+    ['wrong terminal', v => { v.trace.rows[5].reason = 'core-fail-command'; }],
+    ['delivered terminal', v => { v.trace.rows[5].delivered = true; }],
+    ['credited peer', v => { v.expected.acceptedPeerBytes = 1; }],
+    ['verified Core bytes', v => { v.trace.rows[5].verifiedBytes = 1; }],
+    ['verified source bytes', v => { v.trace.rows[5].originBytes = 1; }],
+    ['actual Range GET', v => { v.expected.physicalRangeGets = 1; }],
+    ['invoked range loader', v => { v.expected.clientRangeLoads = 1; }],
+    ['actual peer WANT', v => { v.expected.peerRequests = 1; }],
+    ['physical request trace', v => { v.trace.rows.splice(3, 0, { k: 'request', load: 7, at: 111 }); }],
+    ['extra Core call', v => { v.trace.rows.splice(3, 0, { k: 'xfer', load: 7, at: 111, op: 'tick' }); }],
+    ['wrong Core mode', v => { v.trace.rows[2].exclusiveOrigin = false; }],
+    ['unexpected command', v => { v.trace.rows[2].out.c.push({ t: 'deliver' }); }],
+    ['missing origin command', v => { v.trace.rows[2].out.c.pop(); }],
+    ['overlapping commands', v => { v.trace.rows[2].out.c[1].p = [0, 60]; }],
+    ['outside object', v => { v.trace.rows[2].out.c[1].p[1] = 65; }],
+    ['unknown peer', v => { v.trace.rows[2].out.c[0].peer = 2; }],
+    ['range already received', v => { v.trace.rows[7].bytes = 1; }],
+    ['range has HTTP response', v => { v.trace.rows[7].httpStatus = 206; }],
+    ['range outcome mismatch', v => { v.trace.rows[7].outcome = 'timeout'; }],
+    ['range identity mismatch', v => { v.trace.rows[7].range = [2, 60]; }],
+    ['hidden attempted range', v => { v.expected.originRangeAttempts = 0; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const copy = structuredClone(vector); mutate(copy);
+    assert.equal(mixedScopeSetupProof(copy.trace, copy.expected), null, name);
+  }
+});
+
+test('buffered mixed immutable actual after-Core receipt proves the aborted pre-I/O transaction', async () => {
+  const text = (await readFile(new URL('./fixtures/buffered-mixed-after-core-setup.json', import.meta.url), 'utf8')).replace(/\r\n/gu, '\n');
+  assert.equal(createHash('sha256').update(text).digest('hex'), 'cdcf0280343555f1e52f8f6519f6b37cb67c2b9e4440e6081ab39a03da49d8de');
+  const receipt = JSON.parse(text);
+  assert.equal(receipt.provenance.sourceCommit, '502dc8c860e8182973ac55e2f8dccf21a9ce34fa');
+  assert.equal(receipt.provenance.originalLogSha256, '611430a6cb010212a89de6b5d22fa991f6819ece59ad8e397b1a8051da793ad9');
+  assert.equal(receipt.provenance.originalExitCode, 1, 'the archived attempt remains RED under its original classifier');
+  const proof = mixedScopeSetupProof(receipt.trace, receipt.expected);
+  assert.equal(proof?.stage, 'after-core-before-io');
+  assert.equal(receipt.observedCounts.originRangeAttempts, 1);
+  assert.equal(receipt.observedCounts.physicalRangeGets, 0); assert.equal(receipt.observedCounts.clientRangeBodies, 0);
+  assert.equal(receipt.observedCounts.peerRequests, 0); assert.equal(receipt.observedCounts.acceptedPeerBytes, 0);
+  assert.equal(receipt.observedCounts.physicalWholeGets, 2); assert.equal(receipt.observedCounts.successfulCallbacks, 1);
+  assert.equal(proof.sequence.find(row => row.k === 'xfer').out.late, true, 'retain the actual planning prediction without treating it as physical I/O');
+});
+
 test('buffered mixed timer observer preserves native receiver arguments handle and synchronous scope', async () => {
   const native = globalThis.setTimeout, observer = realTimerInvocationContext(), argument = {};
   try {
@@ -8881,7 +8989,7 @@ test('buffered mixed timer observer preserves native receiver arguments handle a
   assert.equal(globalThis.setTimeout, native);
 });
 
-for (const [knownFlow, worker, forceSetupExpiry, forceScopeExpiry] of [[true, false, false], [true, true, false], [false, false, false], [false, true, false], [false, true, true], [false, false, false, true]]) test(`buffered mixed ${knownFlow ? '' : 'untrained '}six-MiB object retains exact206 assembly or proven bounded setup decline (${worker ? 'committed-WASM worker' : 'main-thread'}${forceSetupExpiry ? ', held allocation' : ''}${forceScopeExpiry ? ', real callback pause' : ''})`, { timeout: 20000 }, async t => {
+for (const [knownFlow, worker, forceSetupExpiry = false, forceScopeExpiry = false] of [[true, false, false], [true, true, false], [false, false, false], [false, true, false], [false, true, true], [false, false, false, true]]) test(`buffered mixed ${knownFlow ? '' : 'untrained '}six-MiB object retains exact206 assembly or proven bounded setup decline (${worker ? 'committed-WASM worker' : 'main-thread'}${forceSetupExpiry ? ', held allocation' : ''}${forceScopeExpiry ? ', real callback pause' : ''})`, { timeout: 20000 }, async t => {
   const timers = realTimerInvocationContext();
   t.after(() => timers.restore());
   const rpc = [], bridge = worker ? transferWorkerFixture(t, { onRpc: row => rpc.push(row) }) : null;
@@ -8947,8 +9055,11 @@ for (const [knownFlow, worker, forceSetupExpiry, forceScopeExpiry] of [[true, fa
     }
     sameBytes(await response, bytes, 'one complete correct object reaches the genuine demand');
     assert.deepEqual(calls, { success: 1, error: 0, abort: 0, timeout: 0 });
-    if (forceScopeExpiry) { assert.equal(callbackPause.calls, 1); assert(callbackPause.finishedAtMs - callbackPause.startedAtMs >= 30); }
     const trace = f.swarm.trace(), start = trace.rows.filter(row => row.k === 'xfer' && row.op === 'start').at(-1);
+    const mixedLoad = trace.rows.filter(row => row.k === 'mixedScope' && row.reason === 'entry').at(-1)?.load;
+    const diagnosticRows = trace.rows.filter(row => row.load === mixedLoad &&
+      ['load', 'mixedScope', 'xfer', 'xferFinish', 'request', 'origin', 'originStart', 'originProgress', 'originTerminal'].includes(row.k));
+    if (forceScopeExpiry) { assert.equal(callbackPause.calls, 1); assert(callbackPause.finishedAtMs - callbackPause.startedAtMs >= 30); }
     if (requests.filter(row => !row.range).length !== 1) {
       const fallback = received.at(-1), metrics = f.swarm.metrics(), enteredAt = fallback.sdkEnteredAtMs, cutoff = enteredAt + 25;
       const timer = fallback.invocationProbe;
@@ -8959,19 +9070,27 @@ for (const [knownFlow, worker, forceSetupExpiry, forceScopeExpiry] of [[true, fa
         row.sentAtMs >= enteredAt && row.sentAtMs <= timer.firedAtMs && timer.firedAtMs <= row.replyAtMs);
       const lateReply = rpc.find(row => row.success && ['new', 'start'].includes(row.op) &&
         row.sentAtMs >= enteredAt && row.sentAtMs < cutoff && row.replyAtMs >= cutoff && row.replyAtMs <= fallback.invokedAtMs);
-      const mixedLoad = trace.rows.filter(row => row.k === 'mixedScope' && row.reason === 'entry').at(-1)?.load;
       const scopeProof = mixedScopeSetupProof(trace, { load: mixedLoad, sn: ctx.frag.sn, cc: ctx.frag.cc, level: ctx.frag.level,
         fragmentStart: authority.start, fragmentDurationSeconds: authority.duration, enteredAtMs: enteredAt, invokedAtMs: fallback.invokedAtMs,
         parentMs: f.loaderConfig.loadPolicy.maxLoadTimeMs, ttfbMs: f.loaderConfig.loadPolicy.maxTimeToFirstByteMs,
         remainingLoadMs: fallback.maxLoadTimeMs, remainingTtfbMs: fallback.maxTimeToFirstByteMs,
-        coreTransfersDelta: metrics.core.multiHolder.transfers - before.core.multiHolder.transfers });
+        coreTransfersDelta: metrics.core.multiHolder.transfers - before.core.multiHolder.transfers,
+        size, originRangeAttempts: metrics.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+        physicalRangeGets: requests.filter(row => row.range).length, clientRangeLoads: received.filter(row => row.range).length,
+        peerRequests: f.channels[0].wants.length - wantsBefore, acceptedPeerBytes: metrics.bytes.peerFirst - peerBefore });
       const proofTime = pendingAtTimer ? timer.firedAtMs : lateReply?.replyAtMs ?? scopeProof?.proofTime;
       assert(Number.isFinite(enteredAt) && enteredAt > 0 && Number.isFinite(proofTime) && (worker && (pendingAtTimer || lateReply) || scopeProof),
         JSON.stringify({ message: 'whole fallback needs an observed pending-RPC timer, completed exact late RPC, or actual same-load setup-scope proof',
           knownFlow, worker, rpc, timer, enteredAt, invokedAtMs: fallback.invokedAtMs,
           remainingLoadMs: fallback.maxLoadTimeMs, remainingTtfbMs: fallback.maxTimeToFirstByteMs,
           callbackPause: forceScopeExpiry ? callbackPause : null, mixedLoad, traceDropped: trace.dropped,
-          scopeRows: trace.rows.filter(row => row.load === mixedLoad && ['mixedScope', 'xferFinish'].includes(row.k)).slice(-32) }));
+          counters: { coreTransfers: metrics.core.multiHolder.transfers - before.core.multiHolder.transfers,
+            originRangeAttempts: metrics.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+            peerRequests: f.channels[0].wants.length - wantsBefore, acceptedPeerBytes: metrics.bytes.peerFirst - peerBefore,
+            physicalWholeGets: requests.filter(row => !row.range).length, physicalRangeGets: requests.filter(row => row.range).length,
+            clientRangeBodies: received.filter(row => row.range).length, successfulCallbacks: calls.success },
+          diagnosticRows: diagnosticRows.length <= 64 ? diagnosticRows : [...diagnosticRows.slice(0, 32), ...diagnosticRows.slice(-32)],
+          diagnosticRowsOmitted: Math.max(0, diagnosticRows.length - 64) }));
       assert(fallback.invokedAtMs >= proofTime, 'the real source invocation follows its observed setup-decline proof');
       if (forceSetupExpiry) assert(pendingAtTimer, 'held allocation must exercise the actual timer-context proof');
       if (forceScopeExpiry) assert(scopeProof, 'the real callback pause must exercise the exact SDK scope predicate proof');
@@ -8979,7 +9098,9 @@ for (const [knownFlow, worker, forceSetupExpiry, forceScopeExpiry] of [[true, fa
       assert.equal(received.length, 2); assert(received.every(row => !row.range && row.complete && row.bytes === size));
       assert.equal(f.channels[0].wants.length, wantsBefore, 'decline issues no demand peer request');
       assert.equal(metrics.bytes.peerFirst, peerBefore); assert.equal(observed.length, observedBefore);
-      assert.equal(metrics.core.multiHolder.originRanges, before.core.multiHolder.originRanges);
+      const attemptedOriginRanges = metrics.core.multiHolder.originRanges - before.core.multiHolder.originRanges;
+      assert.equal(attemptedOriginRanges, scopeProof?.stage === 'after-core-before-io' ? 1 : 0,
+        'a rejected pre-invocation origin attempt is counted honestly; physical Range GETs remain zero');
       const proofElapsed = proofTime - enteredAt, invokedElapsed = fallback.invokedAtMs - enteredAt;
       assert(fallback.maxLoadTimeMs > 0 && fallback.maxLoadTimeMs <= f.loaderConfig.loadPolicy.maxLoadTimeMs - proofElapsed);
       assert(fallback.maxLoadTimeMs >= f.loaderConfig.loadPolicy.maxLoadTimeMs - invokedElapsed,
@@ -9006,9 +9127,11 @@ for (const [knownFlow, worker, forceSetupExpiry, forceScopeExpiry] of [[true, fa
       assert.deepEqual(calls, { success: 1, error: 0, abort: 0, timeout: 0 });
       console.log(JSON.stringify({ fixture: 'buffered-mixed-206', outcome: pendingAtTimer ? 'observed-timer-yield' : lateReply ? 'proven-exact-late-rpc' : 'proven-setup-scope', knownFlow, worker,
         setupBudgetMs: 25, enteredAtMs: enteredAt, timer, proofTimeMs: proofTime,
-        setupRpc: pendingAtTimer || lateReply || null, scopeProof, callbackPause: forceScopeExpiry ? callbackPause : null, sourceInvokedAtMs: fallback.invokedAtMs,
+        setupRpc: pendingAtTimer || lateReply || null, scopeProof, callbackPause: forceScopeExpiry ? callbackPause : null,
+        sourceInvokedAtMs: fallback.invokedAtMs,
         remainingLoadMs: fallback.maxLoadTimeMs, remainingTtfbMs: fallback.maxTimeToFirstByteMs,
-        wholeDemandGets: 1, originRanges: 0, demandPeerRequests: 0, acceptedDemandPeerBytes: 0 }));
+        wholeDemandGets: 1, originRangeAttempts: attemptedOriginRanges, physicalRangeGets: 0, clientRangeLoads: 0,
+        demandPeerRequests: 0, acceptedDemandPeerBytes: 0 }));
       return;
     }
     assert.equal(forceSetupExpiry, false, 'held allocation must prove the guarded-decline branch');
@@ -9323,7 +9446,7 @@ test('buffered mixed rechecks the25ms guard after the original range loader cons
   class ConstructorRace extends Loader {
     constructor() { super(); constructions++; if (arm) { arm = false; shift = 26; } }
     load(ctx, config, callbacks) {
-      (ctx.rangeEnd ? ranges : whole).push({ ctx, config });
+      (ctx.rangeEnd ? ranges : whole).push({ ctx, config, invokedAtMs: performance.now() });
       setTimeout(() => callbacks.onSuccess({ data: bytes.slice(ctx.rangeStart ?? 0, ctx.rangeEnd ?? bytes.length).buffer }, this.stats, ctx, null), ctx.rangeEnd ? 100 : 500);
     }
   }
@@ -9331,11 +9454,29 @@ test('buffered mixed rechecks the25ms guard after the original range loader cons
     t.mock.method(performance, 'now', () => clock.now() + shift);
     f = await bufferedMixedFixture(t, clock, { OriginLoader: ConstructorRace });
     const loader = new f.hls.config.fLoader(f.hlsConfig); arm = true;
-    const response = new Promise(resolve => loader.load(f.ctx, f.loaderConfig, { onSuccess: resolve }));
+    const before = f.swarm.metrics(), enteredAtMs = performance.now(); let successfulCallbacks = 0;
+    const response = new Promise(resolve => loader.load(f.ctx, f.loaderConfig, { onSuccess: value => { successfulCallbacks++; resolve(value); } }));
     sameBytes(new Uint8Array((await clock.settle(response)).data), f.bytes);
     assert.equal(arm, false, 'the guard is reached inside the origin-range constructor');
     assert.equal(ranges.length, 0); assert.equal(whole.length, 2); assert.deepEqual(f.channels[0].wants, []);
     assert.equal(whole.at(-1).config.loadPolicy.maxLoadTimeMs, 9974);
+    assert.equal(successfulCallbacks, 1);
+    const trace = f.swarm.trace(), metrics = f.swarm.metrics(), source = whole.at(-1);
+    const load = trace.rows.filter(row => row.k === 'mixedScope' && row.reason === 'entry').at(-1).load;
+    const proof = mixedScopeSetupProof(trace, { load, sn: f.ctx.frag.sn, cc: f.ctx.frag.cc, level: f.ctx.frag.level,
+      size: f.bytes.length, fragmentStart: f.ctx.frag.start, fragmentDurationSeconds: f.ctx.frag.duration,
+      enteredAtMs, invokedAtMs: source.invokedAtMs, parentMs: f.loaderConfig.loadPolicy.maxLoadTimeMs,
+      ttfbMs: f.loaderConfig.loadPolicy.maxTimeToFirstByteMs, remainingLoadMs: source.config.loadPolicy.maxLoadTimeMs,
+      remainingTtfbMs: source.config.loadPolicy.maxTimeToFirstByteMs,
+      coreTransfersDelta: metrics.core.multiHolder.transfers - before.core.multiHolder.transfers,
+      originRangeAttempts: metrics.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+      physicalRangeGets: 0, clientRangeLoads: ranges.length, peerRequests: f.channels[0].wants.length,
+      acceptedPeerBytes: metrics.bytes.peerFirst - before.bytes.peerFirst });
+    assert.equal(proof?.stage, 'after-core-before-io', JSON.stringify({ traceDropped: trace.dropped,
+      rows: trace.rows.filter(row => row.load === load), enteredAtMs, sourceInvokedAtMs: source.invokedAtMs }));
+    console.log(JSON.stringify({ fixture: 'after-core-setup-policy', clockScope: 'logical-policy-inputs-not-elapsed-performance',
+      stage: proof.stage, originRangeAttempts: 1, rangeLoaderInvocations: ranges.length, peerRequests: f.channels[0].wants.length,
+      acceptedPeerBytes: metrics.bytes.peerFirst - before.bytes.peerFirst, successfulCallbacks, sequence: proof.sequence }));
   } finally { shift = 0; if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
