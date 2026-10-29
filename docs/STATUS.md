@@ -10,6 +10,23 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Draft steady warm mixed delivery (29 October 2026)
+
+The draft now lets eligible steady future work choose disjoint source ranges
+and verified peer pieces before a whole GET starts, when both existing opt-ins
+are enabled. Startup work keeps its existing transport. The internal work owner
+retains the original speculative expiry and cancellation signal; promotion
+keeps the original parent deadline. Accepted peer credit waits for genuine
+consumption of the complete verified object.
+
+All 191 warm/startup policy checks pass. The main-thread and committed-WASM
+Worker warm mixed checks pass 2/2: each 6 MiB target uses 688,128 verified
+peer bytes and 5,603,328 HTTP206 body bytes, with no whole GET. Credit remains
+zero before genuine consumption and is not duplicated by repeated reuse. These controlled
+checks are not a sustained playback, physical-device or public-operator result.
+Warm mixed lifecycle/failure qualification and a fresh finite field run remain
+pending. No experimental SDK is deployed; this PR is not ready to merge.
+
 ## Unreleased promoted-source admission (29 October 2026)
 
 A promoted genuine source no longer automatically admits a second speculative
@@ -36,7 +53,7 @@ the otherwise eligible genuine target uses 5,603,328 HTTP206 body bytes plus
 explicit synthetic pacing, media geometry and deadlines; calibration and lead
 traffic are accounted separately. This is policy evidence, not a field speed or
 traffic-saving qualification. Warm mixed planning must own its source ranges
-before a whole GET starts. This correction does not yet implement that path or
+before a whole GET starts. The draft implementation described above addresses that path; it does not
 establish a sustained playback improvement. The draft remains unqualified.
 
 ## Unreleased moving-room startup admission (29 October 2026)

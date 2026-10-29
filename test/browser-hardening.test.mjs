@@ -9331,7 +9331,7 @@ for (const [knownFlow, worker, forceSetupExpiry = false, forceScopeExpiry = fals
   } finally { try { await f.close(); } finally { timers.restore(); } }
 });
 
-test('real Core contrasts an owned warm whole source with otherwise eligible genuine mixed ranges', { timeout: 25000 }, async t => {
+async function realCoreWarmContrast(t, { ownedWarm = false, worker = false } = {}) {
   const size = 6 * 1024 * 1024, bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
   const secret = generateSecretKey(), seconds = Math.floor(Date.now() / 1000);
   const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds, tags: [['d', 'contrast'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
@@ -9349,7 +9349,8 @@ test('real Core contrasts an owned warm whole source with otherwise eligible gen
       return super.send(data);
     }
   }
-  for (const warming of [true, false]) {
+  for (const warming of ownedWarm ? [true] : [true, false]) {
+    const bridge = worker ? transferWorkerFixture(t) : null;
     const origin = await mixedHttpOrigin(t, bytes, Loader), { received, requests, url } = origin;
     class AccountedHTTP extends origin.HttpLoader {
       load(ctx, config, callbacks) {
@@ -9365,7 +9366,8 @@ test('real Core contrasts an owned warm whole source with otherwise eligible gen
         rendition: '/media/index.m3u8', playlist: '/media/index.m3u8', mediaType: 'main', encryption: null,
         sequence: ctx.frag.sn, discontinuity: ctx.frag.cc, part: null, sha256, size, pieceSize, pieces, expiresAt: seconds + 60 }) }, secret);
     const f = await multiFixture(t, { size, OriginLoader: AccountedHTTP, holders: [{ Channel: ContrastPeer }], traceRequests: 4096,
-      swarmOptions: { streamEvent, getCommitment, serve: true, warmAhead: warming, bufferedMixedRanges: true,
+      swarmOptions: { streamEvent, getCommitment, serve: true, warmAhead: warming, bufferedMixedRanges: ownedWarm || !warming,
+        ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}),
         zeroBudgetPeerRace: true, sustainablePeerWait: true, maxPeerWaitMs: 2500 } });
     const invoke = ctx => {
       const loader = new f.hls.config.fLoader(f.hlsConfig), calls = { success: 0, error: 0, abort: 0, timeout: 0 };
@@ -9380,6 +9382,7 @@ test('real Core contrasts an owned warm whole source with otherwise eligible gen
     };
     try {
       assert.equal(f.swarm.metrics().core.state, 'ready');
+      if (worker) await until(() => f.swarm.metrics().core.transferWorker.state === 'ready');
       const details = M3U8Parser.parseLevelPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nlead.ts\n#EXTINF:2,\nseg.ts\n#EXT-X-ENDLIST\n',
         new URL('index.m3u8', url).href, 0, 'main', 0, null);
       const contextFor = frag => ({ url: frag.url, frag, responseType: 'arraybuffer', type: LoaderContextType.MEDIA_FRAGMENT, headers: {}, part: null, rangeStart: 0, rangeEnd: 0 });
@@ -9398,8 +9401,15 @@ test('real Core contrasts an owned warm whole source with otherwise eligible gen
       const previous = invoke(lead); previous.response.catch(() => {});
       await until(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/lead.ts'));
       if (warming) await until(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/seg.ts' && row.warm));
+      if (ownedWarm) {
+        const targetOrigin = received.slice(beforeReceived).find(row => row.path === '/media/seg.ts');
+        assert(targetOrigin.range, 'eligible owned warm work starts origin206 before any whole GET');
+        await until(() => f.swarm.metrics().warmAhead.verified > before.warmAhead.verified);
+        assert(f.swarm.metrics().warmAhead.verifiedPeerBytes > before.warmAhead.verifiedPeerBytes);
+        assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst, 'verified warm assembly defers accepted credit before genuine consumption');
+      }
       const demand = invoke(target); demand.response.catch(() => {});
-      if (warming) {
+      if (warming && !ownedWarm) {
         assert.equal(f.swarm.metrics().warmAhead.coalesced, before.warmAhead.coalesced + 1);
         assert.equal(f.swarm.metrics().warmAhead.promotions, before.warmAhead.promotions + 1);
         assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst, 'pending warm ownership cannot claim accepted peer bytes');
@@ -9413,7 +9423,7 @@ test('real Core contrasts an owned warm whole source with otherwise eligible gen
       assert(client.every(row => row.complete && row.bytes === (row.range ? row.range[1] - row.range[0] : size)));
       assert.equal(client.reduce((sum, row) => sum + row.bytes, 0), server.reduce((sum, row) => sum + row.sent, 0));
       const starts = rows.filter(row => row.k === 'xfer' && row.op === 'start' && row.at >= (rows.filter(row => row.k === 'load' && row.sn === 0).at(-1)?.at ?? 0));
-      if (warming) {
+      if (warming && !ownedWarm) {
         assert.equal(client.length, 1); assert.equal(client[0].range, null); assert.equal(client[0].warm, true);
         assert.equal(server.length, 1); assert.equal(server[0].status, 200); assert.equal(peer, 0);
         const warmLoad = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
@@ -9428,7 +9438,13 @@ test('real Core contrasts an owned warm whole source with otherwise eligible gen
         assert(start.out.c.some(row => row.t === 'origin') && start.out.c.some(row => row.t === 'request'));
         assert(peer > 0 && peer < size); assert.equal(peer + client.reduce((sum, row) => sum + row.bytes, 0), size);
       }
-      observations.push({ warming, objectBytes: size, acceptedPeerBytes: peer,
+      if (ownedWarm) {
+        assert.equal(after.warmAhead.consumedPeerBytes - before.warmAhead.consumedPeerBytes, peer);
+        assert.equal(after.core.transferWorker.state, worker ? 'ready' : 'off');
+        const again = invoke(target); sameBytes(await again.response, bytes);
+        assert.equal(again.calls.success, 1); assert.equal(f.swarm.metrics().bytes.peerFirst, after.bytes.peerFirst, 'repeated consumption cannot double-credit the same warm object');
+      }
+      observations.push({ warming, ownedWarm, worker, objectBytes: size, acceptedPeerBytes: peer,
         actualTargetHttpBytes: client.reduce((sum, row) => sum + row.bytes, 0), targetWholeGets: server.filter(row => !row.range).length,
         target206Gets: server.filter(row => row.range).length, targetClientBodies: client.map(({ bytes, status, complete, range, warm }) => ({ bytes, status, complete, range, warm })),
         excludedLeadBodyBytes: received.slice(beforeReceived).filter(row => row.path === '/media/lead.ts').reduce((sum, row) => sum + row.bytes, 0),
@@ -9438,7 +9454,12 @@ test('real Core contrasts an owned warm whole source with otherwise eligible gen
     } finally { await f.close(); }
   }
   console.log(JSON.stringify({ fixture: 'real-core-warm-vs-genuine-mixed', policyContrastOnly: true, observations }));
-});
+}
+
+test('real Core contrasts legacy warm whole source with otherwise eligible genuine mixed ranges', { timeout: 25000 }, t => realCoreWarmContrast(t));
+
+for (const worker of [false, true]) test(`owned steady warm work assembles disjoint206 and defers peer credit until genuine consumption (${worker ? 'worker' : 'main'})`, { timeout: 20000 },
+  t => realCoreWarmContrast(t, { ownedWarm: true, worker }));
 
 async function bufferedMixedFixture(t, clock, options = {}) {
   lateRaceKeyClock(t);

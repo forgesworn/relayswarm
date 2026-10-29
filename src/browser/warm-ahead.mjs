@@ -122,6 +122,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     while (tracked() >= MAX_OBJECTS && cache.size && startup.state !== 'buffering') drop(cache.keys().next().value);
     if (tracked() >= objectLimit()) return;
     const controller = new AbortController(), revision = generation, cfg = config, policy = loaderConfig;
+    const workContext = item.context, workFragment = workContext.frag, workIdentity = metadataOnly(item);
     let loader, timer, finish;
     const row = { ...item, reserved: 0, finished: false, waiters: new Set(), genuineAt: null,
       promise: new Promise(resolve => { finish = resolve; }),
@@ -185,6 +186,18 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         }
         counters.highWaterBytes = Math.max(counters.highWaterBytes, counters.cacheBytes + reserved());
         const warm = item.context[WARM_AHEAD] = { peerBytes: 0, genuine: () => row.genuine(),
+          ...(steady && startup.state !== 'buffering' ? { work: () => {
+            try {
+              if (!allowed()) return null;
+              const current = warmContext(workContext), genuine = row.genuine();
+              const identityCurrent = item.context === workContext && workContext.frag === workFragment &&
+                workContext.url === workIdentity.context.url && workFragment.url === workIdentity.context.frag.url &&
+                samePosition(current, workIdentity);
+              if (!identityCurrent || closed || revision !== generation || !live(row) || controller.signal.aborted ||
+                  scope !== workIdentity.scope || !genuine && performance.now() >= deadline) return null;
+              return { context: workContext, enteredAt: deadline - DEADLINE_MS, deadline, signal: controller.signal, genuine };
+            } catch { return null; }
+          } } : {}),
           startupDependency: () => {
             if (!startupCurrent() || !live(row) || !allowed() || !startupFutureCurrent(item)) return null;
             try {

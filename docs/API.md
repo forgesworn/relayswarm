@@ -154,8 +154,8 @@ window. This is an admission bound, not a smooth-playback guarantee.
 
 The unreleased experimental `warmAhead: true` option requires peer-first and
 explicit `serve: true`. It observes this player's actual parsed main-media
-fragments, loads at most the next two, and keeps one speculative whole-object
-HTTP arm in flight. Existing demanded whole/range request limits still apply;
+fragments, loads at most the next two, and keeps one speculative object
+transport in flight. By default this uses a whole-object HTTP arm. Existing demanded whole/range request limits still apply;
 this is not a two-request global HTTP limit. Demand starts immediately and
 joins already-running exact-object work instead of downloading it again.
 That work becomes genuine demand and frees the single speculative slot, so
@@ -170,6 +170,18 @@ The combined cache and in-flight
 set remains bounded to three distinct objects and 24 MiB; all in-flight
 reservations reduce the existing held-cache budget together.
 This option alone adds no startup gate, pause, hidden player, clock offset or automatic seek.
+
+With both `warmAhead` and `bufferedMixedRanges` enabled, an eligible steady
+future request may choose disjoint source ranges and verified peer pieces
+before any whole GET starts. This requires the same measured recovery,
+healthy media, signed authority, ready Core and captured holder checks as
+genuine mixed demand. Startup work and already-running whole GETs retain
+their existing transport. Internal ownership checks retain the original
+speculative expiry, cancellation signal and parent deadlines; promotion does
+not restart those deadlines. Verified peer credit remains deferred until a
+genuine consumer accepts the complete object, and repeated reuse cannot
+credit that object twice. This draft path still needs lifecycle/failure and
+field qualification; it does not establish a performance improvement.
 
 The separate unreleased `startupBufferTarget` option defaults to `null`. A host
 may supply a synchronous function returning its fresh raw HLS target time in

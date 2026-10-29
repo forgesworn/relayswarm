@@ -1194,12 +1194,41 @@ class HlsSwarm {
         if (context?.frag) swarm.peerFragments.delete(context.frag);
         const budgetGeometry = { source: "unobserved", positionSource: null, currentTime: null, bufferedEnd: null, playableEnd: null, fragmentStart: null, originReserveMs: null, uncappedMs: null };
         const budgetMs = swarm.#peerBudget(context, budgetGeometry);
+        let warmOwner = null, mixedGeometry = budgetGeometry, mixedSource = budgetGeometry.source;
+        const marker = context?.[WARM_AHEAD];
+        if (swarm.options.warmAhead && swarm.options.bufferedMixedRanges && typeof marker?.work === 'function') {
+          const work = marker.work, identity = warmContext(context);
+          let initial;
+          try { initial = work(); } catch {}
+          const current = () => {
+            try {
+              const value = work(), at = now(), genuine = value?.genuine, demand = genuine && warmContext(genuine.context);
+              return Boolean(identity && initial && value && context[WARM_AHEAD] === marker && marker.work === work &&
+                value.context === context && value.signal === initial.signal && !value.signal.aborted &&
+                value.enteredAt === initial.enteredAt && value.deadline === initial.deadline &&
+                Number.isFinite(value.enteredAt) && Number.isFinite(value.deadline) && value.enteredAt <= at &&
+                value.deadline > value.enteredAt && value.deadline - value.enteredAt <= 8000 &&
+                (at < value.deadline || genuine && Number.isFinite(genuine.at) && genuine.at >= value.enteredAt && genuine.at <= at &&
+                  demand?.key === identity.key && demand.scope === identity.scope &&
+                  Math.abs(demand.context.frag.start - identity.context.frag.start) <= 1e-9 &&
+                  Math.abs(demand.context.frag.duration - identity.context.frag.duration) <= 1e-9));
+            } catch { return false; }
+          };
+          warmOwner = { current };
+          if (!current()) { this.inner.stats.aborted = true; return callbacks.onAbort?.(this.inner.stats, context, null); }
+          // Read the ordinary buffer formula without removing the real owner's
+          // marker: speculative credit and the original eight-second row stay intact.
+          const shadow = { ...context }; delete shadow[WARM_AHEAD];
+          const measured = { ...budgetGeometry }; swarm.#peerBudget(shadow, measured);
+          mixedSource = measured.source; mixedGeometry = { ...measured, source: 'warm-ahead' };
+          if (!current()) { this.inner.stats.aborted = true; return callbacks.onAbort?.(this.inner.stats, context, null); }
+        }
         swarm.#contributionContext(context);
         if (swarm.options.peerSupplyHint) swarm.#guard("player-hint", () => swarm.#reportPlayerHints(context, budgetMs));
         if (swarm.stopped || !context.frag || context.frag.sn === "initSegment" || (context.part && !swarm.options.swarmParts)
           || (!swarm.options.serveOnCellular && onCellular())) return this.inner.load(context, config, callbacks);
-        if (swarm.options.bufferedMixedRanges && budgetMs === 0 && !context[WARM_AHEAD] && !this.hlsConfig.progressive && warmContext(context) &&
-            budgetGeometry.source === 'buffer' && budgetGeometry.uncappedMs > 25 &&
+        if (swarm.options.bufferedMixedRanges && budgetMs === 0 && (!context[WARM_AHEAD] || warmOwner) && !this.hlsConfig.progressive && warmContext(context) &&
+            mixedSource === 'buffer' && mixedGeometry.uncappedMs > 25 &&
             Number.isFinite(percentile(swarm.#originSamples(context), .9)) &&
             swarm.hls?.media?.paused === false && swarm.hls.media.ended === false && swarm.hls.media.seeking === false &&
             swarm.hls.media.readyState >= 3 && swarm.hls.media.playbackRate === 1) {
@@ -1211,7 +1240,7 @@ class HlsSwarm {
               (swarm.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !swarm.banned.has(link.pubkey) && link.have.size &&
               (!swarm.options.admit || validTicket(swarm.admitted.get(link.pubkey)?.ticket)) && swarm.#bufferedRangeFlowAvailable(link))
               .map(link => [link, { pc: link.pc, channel: link.channel, ticket: swarm.admitted.get(link.pubkey)?.ticket, have: new Set(link.have) }]));
-            if (cached.size) return this.loadBufferedMixed(context, config, callbacks, budgetGeometry, cached, enteredAt, parentMs);
+            if (cached.size) return this.loadBufferedMixed(context, config, callbacks, mixedGeometry, cached, enteredAt, parentMs, warmOwner);
           }
         }
         if (budgetMs === 0 && swarm.options.zeroBudgetPeerRace && !this.hlsConfig.progressive
@@ -1300,7 +1329,7 @@ class HlsSwarm {
           }
         });
       }
-      loadBufferedMixed(context, config, callbacks, geometry, captured, enteredAt, parentMs) {
+      loadBufferedMixed(context, config, callbacks, geometry, captured, enteredAt, parentMs, warmOwner = null) {
         config = { ...config, loadPolicy: { ...config?.loadPolicy } };
         const token = {}, controller = new AbortController(), media = swarm.hls.media, hls = swarm.hls;
         const generation = swarm.latePeerGeneration, stream = swarm.options.streamEvent?.id, identity = warmContext(context);
@@ -1354,7 +1383,7 @@ class HlsSwarm {
         };
         const deliver = (name, args) => {
           if (!owns()) return false;
-          if (now() >= recoveryDeadline) { expire('terminal-after-recovery'); return false; }
+          if (now() >= recoveryDeadline || warmOwner && !warmOwner.current()) { expire('terminal-after-recovery'); return false; }
           traceMixed(name);
           this.active = null; this.pendingCallbacks = null; phase = 'done'; cleanup(); controller.abort();
           callbacks[name]?.(...args);
@@ -1363,20 +1392,21 @@ class HlsSwarm {
         const fallback = (reason = 'setup-timer') => {
           if (!owns() || phase === 'origin') return;
           traceMixed(typeof reason === 'string' ? reason : 'lifecycle-abort');
+          if (warmOwner && !warmOwner.current()) return expire('warm-owner-expired');
           phase = 'origin'; clearTimeout(setupTimer); controller.abort();
           const remaining = remainingOriginConfig(config, recoveryDeadline, firstDeadline);
           if (!remaining) return expire('fallback-budget-expired');
           const wrapped = { ...callbacks, onProgress: (...args) => {
-            if (owns() && now() < recoveryDeadline) callbacks.onProgress?.(...args);
+            if (owns() && now() < recoveryDeadline && (!warmOwner || warmOwner.current())) callbacks.onProgress?.(...args);
             else if (owns()) expire('progress-after-recovery');
           } };
           for (const name of ['onSuccess', 'onError', 'onTimeout', 'onAbort']) wrapped[name] = (...args) => deliver(name, args);
           try {
             retireSource = this.loadWholeOrigin(context, remaining, wrapped, traceLoad, () => {
-              if (owns() && now() >= recoveryDeadline) expire('source-owner-after-recovery');
+              if (owns() && (now() >= recoveryDeadline || warmOwner && !warmOwner.current())) expire('source-owner-after-recovery');
               return owns() && phase === 'origin';
             }, () => {
-              const ready = remainingOriginConfig(config, recoveryDeadline, firstDeadline);
+              const ready = (!warmOwner || warmOwner.current()) && remainingOriginConfig(config, recoveryDeadline, firstDeadline);
               if (!ready) expire('source-invocation-budget-expired');
               return ready;
             });
@@ -1399,7 +1429,7 @@ class HlsSwarm {
           const measured = (name, value) => { if (swarm.options.traceRequests) currentGeometry[name] = Number.isFinite(value) ? value : null; return value; };
           try {
             const currentIdentity = warmContext(context);
-            const valid = seen('notStopped', !swarm.stopped) && seen('hls', swarm.hls === hls) && seen('media', hls.media === media) &&
+            const valid = seen('notStopped', !swarm.stopped) && seen('warmOwner', !warmOwner || warmOwner.current()) && seen('hls', swarm.hls === hls) && seen('media', hls.media === media) &&
               seen('generation', swarm.latePeerGeneration === generation) && seen('stream', swarm.options.streamEvent?.id === stream) &&
               seen('unpaused', media.paused === false) && seen('unended', media.ended === false) && seen('unseeking', media.seeking === false) &&
               seen('unitRate', measured('playbackRate', media.playbackRate) === 1) && seen('ready', measured('readyState', media.readyState) >= 3) &&
@@ -1461,7 +1491,7 @@ class HlsSwarm {
                 if (settled) return; settled = true; callbacks[name]?.(...args);
               };
               try { return this.loadCachedRace(context, remaining, handed, geometry, cached,
-                { enteredAt, recoveryDeadline, firstDeadline, scopeCurrent, entryLinkCurrent }); }
+                { enteredAt, recoveryDeadline, firstDeadline, scopeCurrent, entryLinkCurrent, ownerCurrent: warmOwner?.current }); }
               catch {
                 traceMixed('cached-handoff-threw');
                 this.cancel?.(); this.pendingCallbacks = null;
@@ -1606,9 +1636,11 @@ class HlsSwarm {
         swarm.#peerEligibility(context, 0, "no-budget", null, budgetGeometry);
         // Start HTTP before hashing a key or fetching/verifying metadata.
         const originTrace = this.originTrace = swarm.#traceWholeOrigin(traceLoad, "cached", () => this.inner.stats);
+        if (absolute?.ownerCurrent && !absolute.ownerCurrent()) return expireOrigin();
         try { this.inner.load(context, config, {
           ...callbacks,
           onProgress: (...args) => {
+            if (absolute?.ownerCurrent && !absolute.ownerCurrent()) return expireOrigin();
             if (!originPending || this.active !== token) { originTrace?.progress(undefined, null, true); return; }
             if (absolute && now() >= absolute.recoveryDeadline) return expireOrigin();
             const payload = args[2], hasPayload = payload?.byteLength > 0;
@@ -1626,6 +1658,7 @@ class HlsSwarm {
           onTimeout: (...args) => { originTrace?.terminal("timeout", null, args[0], !originPending || this.active !== token); if (finishOrigin()) callbacks.onTimeout?.(...args); },
           onAbort: (...args) => { originTrace?.terminal("abort", null, args[0], !originPending || this.active !== token); if (finishOrigin()) callbacks.onAbort?.(...args); },
           onSuccess: (response, stats, ctx, details) => {
+            if (absolute?.ownerCurrent && !absolute.ownerCurrent()) return expireOrigin();
             if (!originPending || this.active !== token) originTrace?.terminal("payload", null, undefined, true);
             if (!originPending || this.active !== token) return;
             if (absolute && now() >= absolute.recoveryDeadline) return expireOrigin();

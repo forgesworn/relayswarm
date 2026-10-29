@@ -830,7 +830,7 @@ function startupFixture(t, options = {}) {
     stats = { loading: { start: 0 }, loaded: 0 };
     load(ctx, _policy, callbacks) {
       if (options.timedStats) this.stats.loading = { start: performance.now() };
-      const row = { context: ctx, callbacks, aborted: false, stats: this.stats,
+      const row = { context: ctx, config: _policy, callbacks, aborted: false, stats: this.stats,
         finish: (force = false, body = bytes) => {
           if (row.aborted && !force) return;
           row.response = { data: body.slice().buffer, url: ctx.url, code: 200 };
@@ -887,6 +887,116 @@ function startupFixture(t, options = {}) {
 }
 const flushStartup = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
 
+test('warm work ownership appears only after authority and reservation with exact fresh descriptors', async t => {
+  let authorised, release, reserved = false;
+  const f = startupFixture(t, { startup: false, steady: true, permit: ctx => {
+    authorised = ctx; assert.equal(ctx[STARTUP_MARKER], undefined);
+    return new Promise(resolve => { release = () => resolve({ key: ctx.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true }); });
+  }, reserve: () => { reserved = true; assert.equal(authorised[STARTUP_MARKER], undefined); return true; } });
+  t.after(() => release?.());
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  assert.equal(reserved, false); assert.equal(authorised[STARTUP_MARKER], undefined);
+  release(); await flushStartup();
+  const row = f.requests.find(item => item.context.frag.sn === 1), marker = row.context[STARTUP_MARKER];
+  assert.equal(typeof marker.work, 'function');
+  const first = marker.work(), second = marker.work();
+  assert(first); assert(second); assert.notEqual(first, second);
+  assert.deepEqual(Object.keys(first).sort(), ['context','deadline','enteredAt','genuine','signal']);
+  assert.equal(first.context, row.context); assert.equal(first.signal, second.signal);
+  assert.equal(first.signal.aborted, false); assert.equal(first.genuine, null);
+  assert.equal(first.deadline - first.enteredAt, 8000); assert(first.enteredAt <= performance.now());
+});
+
+test('warm work ownership remains absent for the held original and startup-dependent futures', async t => {
+  const f = startupFixture(t, { steady: true });
+  f.load(0, 12000); await flushStartup();
+  assert.equal(f.requests[0].context[STARTUP_MARKER].work, undefined);
+  f.requests[0].finish(); await flushStartup();
+  assert.equal(f.engine.startupSnapshot().state, 'buffering');
+  const future = f.requests.find(item => item.context.frag.sn === 1); assert(future);
+  assert.equal(future.context[STARTUP_MARKER].work, undefined);
+  future.finish(); await flushStartup();
+  assert.equal(f.engine.startupSnapshot().state, 'ready');
+  assert.equal(future.context[STARTUP_MARKER].work, undefined, 'startup release cannot retrofit a work owner onto an existing transport');
+});
+
+test('warm work ownership preserves original entry and signal across genuine promotion past eight seconds', async t => {
+  // Logical clock exercises owner phases only; these values are not elapsed performance evidence.
+  t.mock.timers.enable({ apis: ['setTimeout'] }); let clock = 1000;
+  t.mock.method(performance, 'now', () => clock);
+  const f = startupFixture(t, { startup: false, steady: true, reuseBudget: () => 25 });
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  const row = f.requests.find(item => item.context.frag.sn === 1), work = row.context[STARTUP_MARKER].work;
+  assert.equal(typeof work, 'function'); const original = work(), originalConfig = row.config;
+  clock += 6000; t.mock.timers.tick(6000); const demand = f.load(1, 12000); await flushStartup();
+  clock += 2001; t.mock.timers.tick(2001); await flushStartup();
+  const promoted = work(); assert(promoted); assert(clock > original.deadline);
+  assert.equal(promoted.enteredAt, original.enteredAt); assert.equal(promoted.deadline, original.deadline);
+  assert.equal(promoted.signal, original.signal); assert.equal(promoted.context, original.context);
+  assert.equal(promoted.genuine.context, demand.context); assert.equal(row.config, originalConfig);
+  assert.equal(row.config.loadPolicy.maxLoadTimeMs, 12000); assert.equal(row.aborted, false);
+  row.finish(); await flushStartup(); assert.equal(demand.calls.success, 1); assert.equal(work(), null);
+});
+
+for (const change of ['url','frag-url','scope','sn','cc','level','start','duration','fragment'])
+  test(`warm work ownership rejects changed ${change} identity`, async t => {
+    const f = startupFixture(t, { startup: false, steady: true });
+    f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+    const context = f.requests.find(item => item.context.frag.sn === 1).context, work = context[STARTUP_MARKER].work;
+    assert.equal(typeof work, 'function'); assert(work());
+    if (change === 'url') context.url += '?changed';
+    else if (change === 'frag-url') context.frag.url += '?changed';
+    else if (change === 'scope') context.frag.baseurl += '?changed';
+    else if (change === 'fragment') context.frag = { ...context.frag };
+    else context.frag[change] += 1;
+    assert.equal(work(), null);
+  });
+
+for (const ending of ['clear','stop','disallowed','cancel','replacement'])
+  test(`warm work ownership retires after ${ending}`, async t => {
+    const f = startupFixture(t, { startup: false, steady: true, reuseBudget: () => 25 });
+    f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+    const row = f.requests.find(item => item.context.frag.sn === 1), work = row.context[STARTUP_MARKER].work;
+    assert.equal(typeof work, 'function'); assert(work());
+    if (ending === 'clear') f.engine.clear();
+    if (ending === 'stop') f.engine.stop();
+    if (ending === 'disallowed') f.state.allowed = false;
+    if (ending === 'cancel') { const demand = f.load(1, 12000); demand.loader.abort(); }
+    if (ending === 'replacement') f.load(5, 12000);
+    assert.equal(work(), null); await flushStartup(); assert.equal(work(), null);
+  });
+
+test('warm work ownership cannot survive a paused actual SDK media owner', async t => {
+  const f = await fixture(t, { held: [1] });
+  await f.load(0).result; await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const work = f.requests.find(row => row.context.frag.sn === 1).context[STARTUP_MARKER].work;
+  assert.equal(typeof work, 'function'); assert(work());
+  f.media.paused = true; f.media.dispatchEvent(new Event('pause'));
+  assert.equal(work(), null);
+});
+
+test('warm work ownership remains invalid while a cancelled validator still owns its body', async t => {
+  let release; const f = startupFixture(t, { startup: false, steady: true,
+    beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
+  t.after(() => release?.());
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  const row = f.requests.find(item => item.context.frag.sn === 1), work = row.context[STARTUP_MARKER].work;
+  assert.equal(typeof work, 'function'); assert(work()); row.finish(); await flushStartup();
+  assert.equal(typeof release, 'function'); f.engine.clear();
+  assert.equal(f.engine.snapshot().active, 1); assert.equal(f.engine.snapshot().reservationBytes, 4);
+  assert.equal(work(), null); release(); await flushStartup();
+  assert.equal(work(), null); assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.retained.length, 0);
+});
+
+test('warm work ownership rechecks lifecycle after a reentrant allowed getter', async t => {
+  const f = startupFixture(t, { startup: false, steady: true });
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  const work = f.requests.find(item => item.context.frag.sn === 1).context[STARTUP_MARKER].work;
+  assert.equal(typeof work, 'function'); assert(work());
+  Object.defineProperty(f.state, 'allowed', { get() { f.engine.clear(); return true; } });
+  assert.equal(work(), null);
+});
+
 for (const change of ['authorisation', 'reservation']) test(`promoted source headroom is rechecked after ${change} before speculative transport`, async t => {
   let budget = 25, release, changed = false;
   const permit = context => ({ key: context.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true });
@@ -923,6 +1033,8 @@ test('deferred speculation retains its original eight-second expiry on re-admiss
   assert.equal(f.requests.some(row => row.context.frag.sn === 2), false);
   clock += 1000; t.mock.timers.tick(1000); f.requests.find(row => row.context.frag.sn === 1).finish(); await flushStartup();
   assert.equal(demand.calls.success, 1); const deferred = f.requests.find(row => row.context.frag.sn === 2); assert(deferred);
+  const work = deferred.context[STARTUP_MARKER].work;
+  assert.equal(typeof work, 'function'); assert.equal(work().enteredAt, 1000); assert.equal(work().deadline, 9000);
   clock += 3999; t.mock.timers.tick(3999); await flushStartup(); assert.equal(deferred.aborted, false);
   clock += 1; t.mock.timers.tick(1); await flushStartup(); assert.equal(deferred.aborted, true, 'four seconds spent waiting do not buy a fresh eight seconds');
 });
