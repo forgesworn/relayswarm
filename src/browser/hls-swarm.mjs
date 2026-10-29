@@ -66,7 +66,6 @@ const DEFAULTS = Object.freeze({
   warmAhead: false,
   startupBufferTarget: null,
   startupBufferMaxBytes: 24 * 1024 * 1024,
-  startupBufferConcurrency: 1,
   startupBufferCommit: null,
   lateWindowMs: 6_000,
   maxPeers: 6,
@@ -626,9 +625,6 @@ class HlsSwarm {
         this.options.startupBufferMaxBytes > 32 * 1024 * 1024 ||
         this.options.startupBufferMaxBytes !== 24 * 1024 * 1024 && typeof this.options.startupBufferTarget !== 'function')
       return 'invalid-startup-buffer-max-bytes';
-    if (![1, 2].includes(this.options.startupBufferConcurrency) ||
-        this.options.startupBufferConcurrency !== 1 && typeof this.options.startupBufferTarget !== 'function')
-      return 'invalid-startup-buffer-concurrency';
     if (this.options.startupBufferCommit !== null && (typeof this.options.startupBufferCommit !== 'function' ||
         typeof this.options.startupBufferTarget !== 'function')) return 'invalid-startup-buffer-commit';
     if (this.options.admit !== undefined && typeof this.options.admit !== "function") return "invalid-admit";
@@ -658,7 +654,6 @@ class HlsSwarm {
         this.warmAhead = createWarmAhead({ Loader: hls.config.fLoader,
           steady: this.options.warmAhead, startupTarget: this.options.startupBufferTarget, startupCommit: this.options.startupBufferCommit,
           startupMaxBytes: this.options.startupBufferMaxBytes,
-          startupConcurrency: this.options.startupBufferConcurrency,
           startupRecovery: context => Math.max(this.options.originReserveMs,
             (percentile(this.#originSamples(context), 0.9) || 0) * 1.25 + 100),
           allowed: () => this.#servingAllowed() && hls.media?.paused !== true && !onCellular(),

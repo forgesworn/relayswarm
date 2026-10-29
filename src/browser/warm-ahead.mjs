@@ -42,13 +42,11 @@ export function warmContext(context) {
 }
 
 export function createWarmAhead({ Loader, next, authorise, verify, reserve = () => true, onVerified, onReuse,
-  reuseBudget = () => 0, allowed = () => true, steady = true, startupTarget = null, startupCommit = null, startupMaxBytes = MAX_BYTES, startupConcurrency = 1, startupRecovery = () => 2_000 }) {
+  reuseBudget = () => 0, allowed = () => true, steady = true, startupTarget = null, startupCommit = null, startupMaxBytes = MAX_BYTES, startupRecovery = () => 2_000 }) {
   if (!Number.isSafeInteger(startupMaxBytes) || startupMaxBytes < MAX_BYTES || startupMaxBytes > 32 * 1024 * 1024 ||
       startupMaxBytes !== MAX_BYTES && typeof startupTarget !== 'function') throw new RangeError('Invalid startup byte budget');
-  if (![1, 2].includes(startupConcurrency) || startupConcurrency !== 1 && typeof startupTarget !== 'function')
-    throw new RangeError('Invalid startup concurrency');
-  let closed = false, generation = 0, scope = null, queued = [], config, loaderConfig, latestDemand = null, loadId = 0;
-  const active = new Set(), cache = new Map(), demand = new Set(), jobs = new Map(), promoted = new Set(), reuseWaiters = new Set(), pins = new Map();
+  let closed = false, generation = 0, active = null, scope = null, queued = [], config, loaderConfig, latestDemand = null, loadId = 0;
+  const cache = new Map(), demand = new Set(), jobs = new Map(), promoted = new Set(), reuseWaiters = new Set(), pins = new Map();
   const startup = { enabled: typeof startupTarget === 'function', state: startupTarget ? 'idle' : 'off', reason: null,
     owner: null, terminal: null, own: null, permit: null, response: null, verified: false, reserved: 0,
     controller: null, timer: null, poll: null, plan: [], cursor: null, frozenStart: null, hopAvailable: true, checking: false, targetTime: null, verifiedStart: null, verifiedEnd: null,
@@ -62,14 +60,13 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     counters.cacheBytes + reserved() + size <= byteLimit();
   const tracked = () => new Set([...cache.keys(), ...jobs.keys(), ...(startup.owner ? [startup.own.key] : [])]).size;
   const objectLimit = () => startup.state === 'buffering' ? MAX_STARTUP_OBJECTS : MAX_OBJECTS;
-  const requestLimit = () => startup.state === 'buffering' ? startupConcurrency : 1;
   const owns = row => jobs.get(row.key) === row && !row.finished;
   const live = row => owns(row) && !row.cancelled;
   const drop = key => { const row = cache.get(key); if (row) { counters.cacheBytes -= row.data.byteLength; cache.delete(key); } };
   const finishJob = (row, result) => {
     if (!owns(row)) return;
     row.finished = true; jobs.delete(row.key); promoted.delete(row);
-    active.delete(row);
+    if (active === row) active = null;
     row.reserved = 0; row.finish(result);
     if (startup.checking) startup.recheck = true;
     void checkStartup();
@@ -91,7 +88,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     for (const resume of [...reuseWaiters]) resume(true);
   };
   const pump = () => {
-    if (closed || active.size >= requestLimit() || !allowed() || !queued.length || demand.size + promoted.size > 1 ||
+    if (closed || active || !allowed() || !queued.length || demand.size + promoted.size > 1 ||
         (!steady && startup.state !== 'buffering') || (startup.state === 'buffering' && (!startup.permit || startup.checking))) return;
     if (startup.state === 'buffering' && !prepareStartupAdmission()) return;
     // A pending bootstrap may replace obsolete future rows, but cannot evict
@@ -118,7 +115,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       finish: result => finish(result), cancel() {
         controller.abort(); clearTimeout(timer); try { loader?.abort(); loader?.destroy(); } catch {}
       } };
-    active.add(row); jobs.set(row.key, row);
+    active = row; jobs.set(row.key, row);
     timer = setTimeout(() => cancelJob(row), DEADLINE_MS);
     void (async () => {
       try {
@@ -178,9 +175,6 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       } catch { if (!controller.signal.aborted) counters.rejected++; return null; }
       finally { clearTimeout(timer); try { loader?.destroy(); } catch {} }
     })().then(result => finishJob(row, result));
-    // Claim slots before authorisation can yield. Each live job keeps its
-    // slot through verification and shares the existing byte/object admission.
-    queueMicrotask(pump);
   };
   const noteDemand = (context, cfg, policy, owner) => {
     latestDemand = null;
@@ -289,47 +283,19 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     // Preserve a fully verified contiguous future prefix when the fourth
     // startup residency slot can extend it. The original held first body
     // still owns a slot even after its interval is behind the room target.
-    let futureLimit = 2, verifiedExtension = null;
+    let futureLimit = 2;
     if (startup.verified && startup.response && startup.plan.length === 2 && cache.size === 2 &&
-        !active.size && !jobs.size && !demand.size && !promoted.size &&
+        !active && !jobs.size && !demand.size && !promoted.size &&
         startup.plan.every(item => cache.has(item.key) && !pins.has(cache.get(item.key).permit.key))) {
       const covered = coverage(target);
       if (covered.end !== null && startup.plan.every(item => covered.rows.includes(cache.get(item.key))) &&
           (covered.end - target) * 1000 < recovery) futureLimit = MAX_STARTUP_OBJECTS - 1;
     }
-    // A full verified window cannot gain headroom merely by waiting. The
-    // opt-in two-job mode may recycle its unowned head before expiry, while
-    // keeping the next start fixed and readiness based on actual coverage.
-    if (startupConcurrency === 2 && startup.verified && startup.response && startup.plan.length === MAX_STARTUP_OBJECTS - 1) {
-      const rows = startup.plan.map(item => cache.get(item.key));
-      const resident = () => startup.plan.length === rows.length && cache.size === rows.length &&
-        !active.size && !jobs.size && !demand.size && !promoted.size &&
-        startup.plan.every((item, i) => cache.get(item.key) === rows[i] && rows[i] &&
-          !pins.has(rows[i].permit.key) && samePosition(warmContext(rows[i].context), item.identity));
-      const head = startup.plan[0];
-      if (resident() && inside(head, target)) {
-        const covered = coverage(target);
-        if (covered.end !== null && rows.every(row => covered.rows.includes(row)) && (covered.end - target) * 1000 < recovery) {
-          try {
-            const last = startup.plan.at(-1), item = parsedNext(last)[0];
-            if (item && Math.abs(item.context.frag.start - (last.context.frag.start + last.context.frag.duration)) <= 0.001 &&
-                item.key !== startup.own.key && !startup.plan.some(future => future.key === item.key) &&
-                plannedCurrent(planFuture(item, last))) verifiedExtension = item;
-          } catch { /* An unavailable successor must not destroy verified coverage. */ }
-          if (!startupCurrent() || startup.checking) return;
-          if (verifiedExtension && resident()) {
-            startup.cursor = head; startup.plan.shift(); drop(head.key);
-            startup.frozenStart = startup.plan[0].context.frag.start;
-            futureLimit = MAX_STARTUP_OBJECTS - 1;
-          } else verifiedExtension = null;
-        }
-      }
-    }
     // Without a usable contiguous prefix, preserve the original rolling
     // policy: free its first future once and wait for the new window start.
     const first = startup.plan[0];
     if (futureLimit === 2 && startup.verified && startup.response && startup.plan.length === 2 && cache.size === 2 &&
-        !active.size && !jobs.size && !demand.size && !promoted.size && inside(first, target) &&
+        !active && !jobs.size && !demand.size && !promoted.size && inside(first, target) &&
         startup.plan.every(item => cache.has(item.key) && !pins.has(cache.get(item.key).permit.key))) {
       const covered = coverage(target);
       if (covered.end !== null && (covered.end - target) * 1000 < recovery) {
@@ -342,7 +308,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       const parent = startup.cursor && (!last || startup.cursor.context.frag.start > last.context.frag.start)
         ? startup.cursor : last ?? startup.own;
       let item;
-      try { item = verifiedExtension ?? parsedNext(parent)[0]; verifiedExtension = null; } catch { return endStartup('cancelled', 'context-changed'); }
+      try { item = parsedNext(parent)[0]; } catch { return endStartup('cancelled', 'context-changed'); }
       if (!item) return;
       const boundary = parent.context.frag.start + parent.context.frag.duration;
       if (Math.abs(item.context.frag.start - boundary) > 0.001 || item.key === startup.own.key ||
@@ -551,7 +517,6 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       const completedController = startup.controller;
       startup.owner = null; startup.terminal = null; startup.response = null; startup.plan = []; startup.cursor = null; startup.frozenStart = null;
       if (!steady) { queued = []; for (const row of [...jobs.values()]) cancelJob(row); }
-      else for (const row of [...active].slice(1)) cancelJob(row);
       try { owner.deliver(terminal, 'onSuccess', args); }
       finally {
         // The hook exposes this signal to host code. Its normal cleanup may
@@ -662,7 +627,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
           counters.coalesced++;
           pending.waiters.add(this); this.warmPending = pending;
           pending.noteDemand();
-          if (active.has(pending) && promoted.size === 0) { active.delete(pending); promoted.add(pending); pending.promote(); counters.promotions++; }
+          if (active === pending && promoted.size === 0) { active = null; promoted.add(pending); pending.promote(); counters.promotions++; }
         }
         this.reuseAbort = new AbortController();
         const revision = generation;
@@ -728,7 +693,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     }
     start(context, policy, callbacks, token) {
       demand.add(this);
-      if (demand.size + promoted.size > 1) for (const row of [...active]) cancelJob(row);
+      if (demand.size + promoted.size > 1 && active) cancelJob(active);
       const terminal = this.pendingTerminal;
       const end = () => { demand.delete(this); queueMicrotask(pump); };
       const wrapped = { ...callbacks };
@@ -810,7 +775,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       requiredHeadroomMs: startup.requiredHeadroomMs, planningServiceMs: startup.planningServiceMs,
       released: startup.released, failures: startup.failures,
       cancellations: startup.cancellations, commitStarted: startup.commitStarted, commitCompleted: startup.commitCompleted,
-      limits: { objects: MAX_STARTUP_OBJECTS, bytes: startupMaxBytes, futureBytes: MAX_BYTES, futureRequests: startupConcurrency, deadlineMs: STARTUP_DEADLINE_MS } }),
+      limits: { objects: MAX_STARTUP_OBJECTS, bytes: startupMaxBytes, futureBytes: MAX_BYTES, deadlineMs: STARTUP_DEADLINE_MS } }),
     contains(time) {
       if (closed || !allowed() || !Number.isFinite(time)) return false;
       const currentJobs = [...jobs].filter(([, row]) => live(row));
@@ -835,8 +800,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     },
     pinned: key => pins.has(key), release(key) { for (const [id, row] of cache) if (row.permit.key === key) drop(id); },
     stop() { closed = true; clear(); }, snapshot: () => ({ ...counters,
-      reservationBytes: reserved(), active: active.size, retiring: [...active].filter(row => row.cancelled).length,
-      promoted: promoted.size, trackedObjects: tracked(),
+      reservationBytes: reserved(), active: Number(Boolean(active)), promoted: promoted.size, trackedObjects: tracked(),
       queued: queued.length, cacheObjects: cache.size,
-      limits: { objects: objectLimit(), bytes: byteLimit(), speculativeWholeRequests: requestLimit(), deadlineMs: startup.state === 'buffering' ? STARTUP_DEADLINE_MS : DEADLINE_MS, revalidationMs: 25 } }) };
+      limits: { objects: objectLimit(), bytes: byteLimit(), speculativeWholeRequests: 1, deadlineMs: startup.state === 'buffering' ? STARTUP_DEADLINE_MS : DEADLINE_MS, revalidationMs: 25 } }) };
 }
