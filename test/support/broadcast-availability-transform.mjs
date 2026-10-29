@@ -7,8 +7,8 @@ export const SEAMS = Object.freeze({
   ],
   swarm: [
     ['    const key = plan.knownKey ?? await this.#segmentKey(context);\n    if (signal.aborted || this.stopped || plan.currentValid && !plan.currentValid()) {', '    availabilityObservation.key(context, key, deadline, budgetMs);\n'],
-    ['              // the loader and withdraws its already-advertised FETCH claim.\n              if (originKey && copy) swarm.#hold(originKey, new Uint8Array(copy));', '              if (originKey) availabilityObservation.key(context, originKey);\n'],
-    ['                  const key = await keyPromise;\n                  if (copy && !swarm.stopped)', '                  availabilityObservation.key(context, key);\n'],
+    ['            // the loader and withdraws its already-advertised FETCH claim.\n            if (originKey && copy) swarm.#hold(originKey, new Uint8Array(copy));', '            if (originKey) availabilityObservation.key(context, originKey);\n'],
+    ['                const key = await keyPromise;\n                if (copy && !swarm.stopped)', '                availabilityObservation.key(context, key);\n'],
   ],
   peer: [
     ['      this.channel.send(JSON.stringify(message));', '\n      availabilityObservation.queued(this, message);'],
