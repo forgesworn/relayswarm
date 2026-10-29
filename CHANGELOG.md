@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Decline peer-only whole-object races when the accepted holders' known
+  same-link first-byte and payload-rate estimates cannot jointly carry the
+  signed object within the existing deadline. Whole HTTP still starts
+  immediately; origin-backed partial transfers and bounded unknown-flow
+  refreshes retain their existing behaviour. No default or deadline changes.
+
 - Keep waiting for the first ICE candidate when local offer or answer SDP is
   empty at the existing 1.2-second gathering soft cap. SDP that already contains
   a candidate keeps that cap. The wait shares the original negotiation and dial
