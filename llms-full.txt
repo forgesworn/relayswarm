@@ -3196,6 +3196,26 @@ observation is 340002 ms while wall observation is 339996 ms, below its separate
 relay, browser profiles and rendered credentials were removed, and the paired
 private relay and firewall are unchanged. No experimental SDK was deployed.
 
+A separate forty-second diagnostic retains bounded channel-control and warm
+cache observations. Both start TLS proofs succeed; one ordered, reliable
+channel per viewer stays open. Three observed cancellations receive matching
+EOF within 393, 543 and 2241 ms. This does not explain the earlier closures.
+Warm reuse reaches about 110/155 MB, with no verified or consumed peer bytes
+from warming. Of 29/34 SDK loads, 22/27 are marked warm-ahead, including the
+held startup originals. Every retained transfer finish is peer-only, and the
+HTTP captures contain no ranges: no origin-backed mixed transfer ran in this
+episode, although peer piece probes and refills did run.
+
+The forty-second run still records two stalls, two player errors and fifteen
+dropped frames on one viewer; the other records zero. Both accept no peer
+media. One speculative source request reaches its eight-second cap after
+receiving 5.44 MB, then a genuine whole-object refetch overlaps a stall. That
+observed duplication warrants a controlled ownership and scheduling test; it
+does not justify increasing the cap or identify a complete field fix. The
+diagnostic stops intentionally and cannot pass the original 340-second gate.
+Its temporary resources are removed and its evidence remains separate from
+the earlier full observation.
+
 ## Unreleased room-start publication boundary (29 October 2026)
 
 An optional startup commit hook now requires verified coverage strictly above
