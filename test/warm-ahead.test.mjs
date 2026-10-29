@@ -848,7 +848,9 @@ function startupFixture(t, options = {}) {
         } };
       this.row = row; requests.push(row);
     }
-    abort() { if (this.row && !this.row.aborted) { this.row.aborted = true; this.stats.aborted = true; this.row.callbacks.onAbort?.(this.stats, this.row.context, null); } }
+    abort() { if (this.row && !this.row.aborted) { this.row.aborted = true; this.stats.aborted = true;
+      options.onAbort?.(this.row.context, this.row);
+      this.row.callbacks.onAbort?.(this.stats, this.row.context, null); } }
     destroy() { this.abort(); }
   }
   const engine = createWarmAhead({ Loader, steady: options.steady ?? false,
@@ -922,6 +924,7 @@ async function declinedWarmFixture(t, hooks = {}) {
       return have.has(permit.key);
     },
     onNext: ctx => hooks.next?.(ctx, state), onConstructor: () => hooks.constructor?.(state),
+    onAbort: (ctx, row) => hooks.abort?.(ctx, row, state),
     reserve: size => hooks.reserve?.(size, state) ?? true,
     reuseBudget: ctx => hooks.budget?.(ctx, state) ?? 25,
   });
@@ -1044,6 +1047,76 @@ test('warm HAVE reconsideration preserves genuine promotion during fresh authori
   source.finish(); await flushStartup();
   assert.equal(demand.calls.success, 1); assert.equal(demand.calls.abort, 0); assert.equal(demand.calls.error, 0);
   assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+});
+
+test('warm HAVE abandon retires optional ownership before any late completion or HAVE retry', async t => {
+  startupLogicalClock(t);
+  const { f, have, key } = await declinedWarmFixture(t);
+  have.add(key(1)); assert.equal(f.engine.reconsiderHave([key(1)]), 1); await flushStartup();
+  const source = f.requests.find(row => row.context.frag.sn === 1), marker = source.context[STARTUP_MARKER];
+  const work = marker.work(); assert.equal(work.reconsidered, true); assert.equal(typeof marker.abandon, 'function');
+  Reflect.set(work, 'reconsidered', false);
+  assert.equal(marker.work().reconsidered, true, 'mutating a returned descriptor cannot change the owned mode');
+  assert.equal(marker.abandon(), true); assert.equal(source.aborted, true); assert.equal(work.signal.aborted, true);
+  assert.equal(marker.work(), null); assert.equal(marker.abandon(), false); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  assert.equal(f.engine.snapshot().cacheObjects, 0); const count = f.state.authCalls;
+  assert.equal(f.engine.reconsiderHave([key(1)]), 0);
+  source.finish(true); await flushStartup();
+  assert.equal(f.state.authCalls, count); assert.equal(f.engine.snapshot().verified, 0); assert.equal(f.retained.length, 0);
+});
+
+test('warm HAVE abandon refuses a genuine promotion and keeps its original source parent', async t => {
+  const tick = startupLogicalClock(t), { f, have, key } = await declinedWarmFixture(t);
+  have.add(key(1)); f.engine.reconsiderHave([key(1)]); await flushStartup();
+  const source = f.requests.find(row => row.context.frag.sn === 1), marker = source.context[STARTUP_MARKER], first = marker.work();
+  const parent = source.config;
+  const demand = f.load(1, 12000); await flushStartup();
+  assert.equal(marker.work().genuine.context, demand.context); assert.equal(marker.abandon(), false);
+  assert.equal(source.aborted, false); assert.equal(marker.work().signal, first.signal);
+  tick(8001); await flushStartup();
+  assert.equal(marker.abandon(), false); assert.equal(source.aborted, false);
+  assert.equal(marker.work().enteredAt, first.enteredAt); assert.equal(marker.work().deadline, first.deadline);
+  assert.equal(source.config, parent); assert.equal(parent.loadPolicy.maxLoadTimeMs, 12000);
+  source.finish(); await flushStartup();
+  assert.equal(demand.calls.success, 1); assert.equal(demand.calls.abort, 0); assert.equal(demand.calls.error, 0);
+  assert.deepEqual([...new Uint8Array(demand.calls.args[0].data)], [2,4,6,8]);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+});
+
+test('warm HAVE abandon abort reentry gives genuine demand its own immediate source', async t => {
+  startupLogicalClock(t); let armed = false, demand, oldMarker, abortCalls = 0;
+  const { f, have, key, first } = await declinedWarmFixture(t, { abort: (ctx, _row, state) => {
+    if (!armed || ctx.frag.sn !== 1) return;
+    armed = false; abortCalls++;
+    assert.equal(oldMarker.work(), null, 'cancelled ownership is already unavailable inside BaseLoader.abort');
+    assert.equal(oldMarker.abandon(), false);
+    demand = state.f.load(1, 12000);
+  } });
+  have.add(key(1)); f.engine.reconsiderHave([key(1)]); await flushStartup();
+  const oldSource = f.requests.find(row => row.context.frag.sn === 1); oldMarker = oldSource.context[STARTUP_MARKER];
+  armed = true; assert.equal(oldMarker.abandon(), true); assert.equal(abortCalls, 1); assert(demand);
+  const sources = f.requests.filter(row => row.context.frag.sn === 1);
+  assert.equal(sources.length, 2, 'the reentrant genuine consumer starts source immediately instead of joining the dying row');
+  assert.equal(sources[0], oldSource); assert.equal(oldSource.aborted, true); assert.equal(sources[1].aborted, false);
+  assert.equal(f.engine.snapshot().coalesced, 0); assert.equal(demand.calls.abort, 0);
+  oldSource.finish(true); await flushStartup();
+  assert.equal(demand.calls.success, 0); assert.equal(demand.calls.abort, 0); assert.equal(sources[1].aborted, false);
+  sources[1].finish(); await flushStartup();
+  assert.equal(demand.calls.success, 1); assert.equal(demand.calls.abort, 0); assert.equal(demand.calls.error, 0);
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.abort, 0);
+  assert.equal(f.engine.snapshot().verified, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+});
+
+for (const ending of ['clear', 'stop', 'expiry']) test(`warm HAVE abandon cannot revive retired ownership after ${ending}`, async t => {
+  const tick = startupLogicalClock(t), { f, have, key } = await declinedWarmFixture(t);
+  have.add(key(1)); f.engine.reconsiderHave([key(1)]); await flushStartup();
+  const source = f.requests.find(row => row.context.frag.sn === 1), marker = source.context[STARTUP_MARKER];
+  if (ending === 'expiry') tick(8000); else f.engine[ending]();
+  await flushStartup(); assert.equal(marker.work(), null); assert.equal(marker.abandon(), false);
+  source.finish(true); await flushStartup();
+  assert.equal(f.engine.snapshot().active, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  assert.equal(f.engine.snapshot().verified, 0); assert.equal(f.engine.reconsiderHave([key(1)]), 0);
 });
 
 test('warm HAVE reconsideration preserves one-shot routing through promoted-headroom deferral', async t => {

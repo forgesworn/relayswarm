@@ -171,6 +171,11 @@ losing that supply before loading refuses the optional work. Deferred work
 keeps both the original deadline and one-shot marker. New demand, changed
 context, expiry or stop invalidates the descriptor. This adds no timer or
 source wait and leaves genuine loading independent of speculative ownership.
+While such a retry is still purely speculative, failed mixed admission cancels
+it instead of starting a duplicate whole GET or cached whole-object race.
+The warm row retires before abort callbacks run. A genuine consumer that has
+already joined keeps normal source recovery and its existing parent deadline;
+a consumer reentered during cancellation starts its own ordinary load.
 
 Offer and answer gathering retain the 1.2-second soft cap when the local SDP
 already contains a candidate. If it is still empty at that point, gathering

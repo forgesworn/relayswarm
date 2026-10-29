@@ -203,6 +203,13 @@ refused. Deferring a reconsideration retains its deadline and one-shot marker.
 The notification adds no timer, source wait, deadline renewal or playback
 credit. Genuine loading continues independently.
 
+An unconsumed reconsideration uses mixed loading only. If admission fails,
+the optional row is retired before abort callbacks instead of starting a
+whole GET or cached whole-object race. Genuine or promoted demand retains
+normal source recovery within the captured parent deadline. A genuine load
+reentered by an abort callback cannot join the retired row and uses its own
+ordinary loading path. Other warm work and startup behaviour are unchanged.
+
 The separate unreleased `startupBufferTarget` option defaults to `null`. A host
 may supply a synchronous function returning its fresh raw HLS target time in
 seconds. Return `null` when the player, room epoch or playback intent is no

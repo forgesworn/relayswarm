@@ -4,3 +4,4 @@ docs/interop/*.patch -whitespace
 scripts/native-patches/*.patch text eol=lf -whitespace
 # Preserve the original CI receipt bytes used by its SHA-256 regression.
 test/fixtures/owned-warm-897-incomplete.json text eol=lf
+test/fixtures/owned-warm-precutoff-allocation-timer.json text eol=lf

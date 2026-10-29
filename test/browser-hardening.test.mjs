@@ -5774,7 +5774,7 @@ test('verified piece flow never pools separate transfers, connections or time to
 });
 
 test('owned warm reciprocal future owners supply real mixed consumption without duplicate whole source', { timeout: 15000 }, async t => {
-  // Deterministic policy proof: simulated source/native RTC, real sessions,
+  // Functional-controller policy proof: simulated source/native RTC, real sessions,
   // commitments, Core, ordered protocol bytes, verification and consumption.
   // No source server, preloaded cache/HAVE, timing model or claimed WAN rate.
   const pair = await framingPairFixture(t, { pairedState: true }), actors = [], source = [], loaders = new Set(), objects = new Map(), events = new Map();
@@ -5782,6 +5782,23 @@ test('owned warm reciprocal future owners supply real mixed consumption without 
   const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds,
     tags: [['d', 'reciprocal-futures'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
   const keyFor = path => createHash('sha256').update(`${base.swarmId}\n${path}`).digest('hex');
+  let diagnosticPhase = 'setup', clock;
+  const settle = promise => clock ? clock.settle(promise) : promise;
+  const wait = predicate => clock ? clock.advanceUntil(predicate) : until(predicate);
+  const diagnostic = (reason, actor = null, sn = null) => console.log(JSON.stringify({ fixture: 'reciprocal-timeout-diagnostic',
+    reason, actor, sn, controllerClock: clock ? 'logical-functional' : 'native', phase: diagnosticPhase, atMs: performance.now(),
+    source: source.slice(-16), sourceOmitted: Math.max(0, source.length - 16),
+    actors: actors.map((f, actor) => { const m = f.swarm.metrics(); return { actor, warm: m.warmAhead,
+      acceptedPeerBytes: m.bytes.peerFirst, core: { state: m.core.state, transfers: m.core.multiHolder.transfers,
+        delivered: m.core.multiHolder.delivered, failed: m.core.multiHolder.failed, peerBytes: m.core.multiHolder.peerBytes },
+      requests: m.peerRequestDiagnostics.records.slice(-8).map(r => ({ atMs:r.atMs,outcome:r.outcome,elapsedMs:r.elapsedMs,receivedBytes:r.receivedBytes })),
+      trace: f.swarm.trace().rows.filter(r => ['load','mixedScope','eligibility','xfer','xferFinish','originStart','origin'].includes(r.k)).slice(-32)
+        .map(r => ({ k:r.k,load:r.load,at:r.at,sn:r.sn,reason:r.reason,ms:r.ms,role:r.budgetGeometry?.source,
+          phase:r.phase,scope:r.scope,setupRemainingMs:r.setupRemainingMs,originInvoked:r.originInvoked,
+          op:r.op,peerOnly:r.peerOnly,exclusiveOrigin:r.exclusiveOrigin,delivered:r.delivered,
+          ranged:r.ranged,outcome:r.outcome,bytes:r.bytes,
+          commands:r.out?.c?.slice(0,8).map(c=>({t:c.t,p:c.p})) })) }; }) }));
+
   const getCommitment = ctx => {
     const path = new URL(ctx.url).pathname, data = objects.get(path); assert(data);
     const id = `${path}:${ctx.frag.sn}:${ctx.frag.cc}`;
@@ -5806,10 +5823,22 @@ test('owned warm reciprocal future owners supply real mixed consumption without 
       onSuccess: value => { calls.success++; resolve(new Uint8Array(value.data)); },
       onError: () => { calls.error++; reject(new Error('reciprocal source error')); },
       onAbort: () => { calls.abort++; reject(new Error('reciprocal source abort')); },
-      onTimeout: () => { calls.timeout++; reject(new Error('reciprocal source timeout')); },
+      onTimeout: () => { calls.timeout++; diagnostic('timeout', actor, frag.sn); reject(new Error('reciprocal source timeout')); },
     }));
     response.catch(() => {}); return { response, calls };
   };
+  // Install before SDK creation so reentrant stop can clear every fixture timer.
+    // Optional native setup admission is separately tested. Here the mandatory
+    // owner/protocol proof holds only its async setup phase until ANY original
+    // source invocation, whole or range; no favourable result gates time.
+    clock = warmFunctionalClock(t, () => actors.some((f, actor) => {
+      const rows = f.swarm.trace().rows;
+      return [1, 2].some(sn => {
+        const load = rows.findLast(row => row.k === 'load' && row.sn === sn && row.budgetGeometry?.source === 'warm-ahead');
+        return load && rows.some(row => row.k === 'mixedScope' && row.load === load.load && row.reason === 'entry') &&
+          !source.some(row => row.actor === actor && row.sn === sn);
+      });
+    }));
   try {
     for (const actor of [0, 1]) {
       class Source extends Loader {
@@ -5818,31 +5847,32 @@ test('owned warm reciprocal future owners supply real mixed consumption without 
           const data = objects.get(new URL(ctx.url).pathname); assert(data);
           const from = ctx.rangeEnd ? ctx.rangeStart : 0, to = ctx.rangeEnd || data.length;
           const row = { actor, sn: ctx.frag.sn, warm: Boolean(ctx[WARM_AHEAD]), range: ctx.rangeEnd ? [from, to] : null,
-            bytes: 0, complete: false, aborted: false }; source.push(row); loaders.add(this);
+            bytes: 0, complete: false, aborted: false, invokedAtMs: performance.now(),
+            timeoutMs: config.timeout ?? null, maxLoadTimeMs: config.loadPolicy?.maxLoadTimeMs ?? null }; source.push(row); loaders.add(this);
           this.stats.loading.start = performance.now();
           this.complete = () => {
             if (row.complete || row.aborted) return;
-            row.complete = true; row.bytes = to - from; this.stats.loaded = this.stats.total = row.bytes;
+            row.complete = true; row.completedAtMs = performance.now(); row.bytes = to - from; this.stats.loaded = this.stats.total = row.bytes;
             this.stats.loading.first = this.stats.loading.end = performance.now();
             callbacks.onSuccess({ data: data.slice(from, to).buffer, code: row.range ? 206 : 200 }, this.stats, ctx, null);
           };
           this.row = row;
-          // Real callback latency calibrates recovery above the two-second
-          // future duration; no measured model or test clock is injected.
+          // Explicit functional service scalars calibrate recovery above the
+          // two-second future duration. No native elapsed/rate claim is made.
           if (ctx.frag.sn === 0 || row.range) this.timer = setTimeout(this.complete, ctx.frag.sn === 0 ? 1600 : 20);
           // Whole speculative futures stay pending until their owner ledger is
           // checked, so no holder can have advertised either future yet.
         }
-        abort() { clearTimeout(this.timer); if (this.row && !this.row.complete) this.row.aborted = true; }
+        abort() { clearTimeout(this.timer); if (this.row && !this.row.complete) { this.row.aborted = true; this.row.abortedAtMs = performance.now(); } }
         destroy() { this.abort(); loaders.delete(this); }
       }
       const media = Object.assign(new EventTarget(), { currentTime: 0, paused: false, ended: false, seeking: false,
         readyState: 4, playbackRate: 1, buffered: { length: 0 } });
-      actors.push(await pair.make({ OriginLoader: Source, player: { media }, swarmOptions: {
+      actors.push(await settle(pair.make({ OriginLoader: Source, player: { media }, swarmOptions: {
         streamEvent, getCommitment, warmAhead: true, bufferedMixedRanges: true, zeroBudgetPeerRace: true,
-        sustainablePeerWait: true, originReserveMs: 2000, maxPeerWaitMs: 2500, traceRequests: 4096 } }));
+        sustainablePeerWait: true, originReserveMs: 2000, maxPeerWaitMs: 2500, traceRequests: 4096 } })));
     }
-    await until(() => actors.every(f => f.swarm.metrics().peers.connected === 1));
+    await wait(() => actors.every(f => f.swarm.metrics().peers.connected === 1));
     const pubkeys = actors.map(f => f.swarm.metrics().pubkey), winner = path => {
       const key = BigInt('0x' + keyFor(path));
       return (key ^ BigInt('0x' + pubkeys[0])) < (key ^ BigInt('0x' + pubkeys[1])) ? 0 : 1;
@@ -5865,28 +5895,32 @@ test('owned warm reciprocal future owners supply real mixed consumption without 
     });
     for (const f of actors) assert.deepEqual([f.swarm.metrics().core.verifier, f.swarm.metrics().core.selection, f.swarm.metrics().core.discovery], ['wasm', 'wasm', 'wasm']);
     const lead = actors.map((_, actor) => invoke(actor, details[actor].fragments[0]));
-    await Promise.all(lead.map(x => x.response));
+    await settle(Promise.all(lead.map(x => x.response)));
     for (const f of actors) f.hls.media.buffered = { length: 1, start: () => 0, end: () => 10 };
-    await until(() => source.filter(row => row.sn > 0).length >= 2);
+    await wait(() => source.filter(row => row.sn > 0).length >= 2);
+    diagnosticPhase = 'owner-ledger';
     const initial = source.filter(row => row.sn > 0);
     const advertised = pair.channels.flatMap(channel => channel.sent.filter(row => row?.t === 'have').flatMap(row => row.keys ?? row.add ?? []));
     assert(paths.every(path => !advertised.includes(keyFor(path))), 'neither held future body has been seeded or advertised');
     assert(actors.every(f => f.swarm.metrics().bytes.peerFirst === 0 && f.swarm.metrics().warmAhead.verifiedPeerBytes === 0));
-    console.log(JSON.stringify({ fixture: 'reciprocal-warm-source-policy', simulatedSourceAndRtc: true,
+    console.log(JSON.stringify({ fixture: 'reciprocal-warm-source-policy', controllerClock: 'logical-functional', simulatedSourceAndRtc: true,
       coreReady: actors.map(f => f.swarm.metrics().core.state), expectedOwners: [{ actor: 0, sn: 1 }, { actor: 1, sn: 2 }],
       actualSourceStarts: initial.map(({ actor, sn, warm, range }) => ({ actor, sn, warm, range })),
       futureHaveCount: paths.filter(path => advertised.includes(keyFor(path))).length }));
     assert.deepEqual(initial.map(({ actor, sn }) => ({ actor, sn })).sort((a, b) => a.actor - b.actor),
       [{ actor: 0, sn: 1 }, { actor: 1, sn: 2 }], 'one deterministic source owner per future; current simultaneous whole duplication is the regression');
     assert(initial.every(row => row.warm && !row.range));
+    diagnosticPhase = 'owner-body-completion';
     for (const loader of loaders) if (loader.row?.sn > 0) loader.complete();
-    await until(() => actors.every(f => f.swarm.metrics().warmAhead.verified >= 1));
-    await until(() => paths.every(path => pair.channels.some(channel => channel.sent.some(row => row?.t === 'have' && (row.keys ?? row.add ?? []).includes(keyFor(path))))));
+    await wait(() => actors.every(f => f.swarm.metrics().warmAhead.verified >= 1));
+    await wait(() => paths.every(path => pair.channels.some(channel => channel.sent.some(row => row?.t === 'have' && (row.keys ?? row.add ?? []).includes(keyFor(path))))));
     for (const sn of [1, 2]) {
+      diagnosticPhase = 'genuine-sn' + sn;
       const demands = actors.map((_, actor) => invoke(actor, details[actor].fragments[sn]));
       const data = objects.get(paths[sn - 1]);
-      await Promise.all(demands.map(async demand => { sameBytes(await demand.response, data); assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 }); }));
+      await settle(Promise.all(demands.map(async demand => { sameBytes(await demand.response, data); assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 }); })));
     }
+    diagnosticPhase = 'repeat-cache-consumption';
     for (const actor of [0, 1]) {
       const f = actors[actor], metrics = f.swarm.metrics(), rows = source.filter(row => row.actor === actor && row.sn > 0);
       assert(metrics.bytes.peerFirst > 0 && metrics.bytes.peerFirst < size, JSON.stringify({ actor,
@@ -5904,11 +5938,12 @@ test('owned warm reciprocal future owners supply real mixed consumption without 
       assert(f.swarm.trace().rows.some(row => row.k === 'xfer' && row.op === 'start' && row.exclusiveOrigin === true &&
         row.out.c.some(command => command.t === 'request') && row.out.c.some(command => command.t === 'origin')), 'actual Core mixed plan consumes the other holder');
       const credit = metrics.bytes.peerFirst, before = source.length;
-      sameBytes(await invoke(actor, details[actor].fragments[2]).response, objects.get(paths[1]));
+      sameBytes(await settle(invoke(actor, details[actor].fragments[2]).response), objects.get(paths[1]));
       assert.equal(f.swarm.metrics().bytes.peerFirst, credit, 'reusing the same future cannot credit it twice');
       assert.equal(source.length, before);
     }
-  } finally { pair.close(); for (const loader of [...loaders]) loader.destroy(); }
+    diagnosticPhase = 'done';
+  } finally { if (diagnosticPhase !== 'done') diagnostic('finally'); clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy(); }
 });
 
 test('verified piece flow waits for real worker verification and rejects invalidated replies', async t => {
@@ -9749,6 +9784,28 @@ function warmSetupDeclineProof({ trace, expected, timer, rpc }) {
         [rows[0], rows[entry], rows[fired], rows[finishIndex], rows[origin]].some((row, i, sequence) =>
           !Number.isSafeInteger(row?.at) || row.at < 0 || i > 0 && row.at < sequence[i - 1].at) ||
         !(fired < finishIndex && finishIndex < origin)) return null;
+    // Captured cc6: NEW replied before the cutoff, no START was posted, and
+    // the original setup timer actually fired after entry+25. No pending RPC
+    // is needed to prove that elapsed bound; keep its older proof separate.
+    if (!pending && expected.coreTransfersDelta === 1 && starts.length === 0 &&
+        Number.isFinite(allocation.sentAtMs) && Number.isFinite(allocation.replyAtMs) &&
+        allocation.sentAtMs <= allocation.replyAtMs && allocation.replyAtMs < cutoff && timer.firedAtMs >= cutoff) {
+      const finished = finishes[0], recent = rpc.filter(row => row.sentAtMs >= at);
+      if (rows[0] !== load || finishes.length !== 1 || recent.length !== 1 || recent[0] !== allocation ||
+          rpc.some(row => !['new', 'start'].includes(row.op) || !Number.isSafeInteger(row.id) || row.id < 1 ||
+            !Number.isSafeInteger(row.handle) || row.handle < 1 || !Number.isFinite(row.sentAtMs) ||
+            !Number.isFinite(row.replyAtMs) || row.sentAtMs > row.replyAtMs || row !== allocation &&
+            (row.id === allocation.id || row.op === 'new' && row.handle === allocation.handle)) ||
+          rows.some(row => row.k === 'origin' && row.ranged === true) ||
+          !Number.isFinite(rows[fired].ms) || rows[fired].ms < 25 ||
+          !Number.isFinite(rows[fired].setupRemainingMs) || rows[fired].setupRemainingMs > 0 ||
+          ![expected.parentMs, expected.ttfbMs].every(Number.isFinite) || g.durationMs !== expected.fragmentDurationSeconds * 1000 ||
+          finished.reason !== 'signal-abort' || finished.delivered !== false || finished.bufferedMixed !== true || finished.peerOnly !== false ||
+          finished.verifiedBytes !== 0 || finished.originBytes !== 0 ||
+          ![finished.ms, finished.peerRemainingMs, finished.recoveryRemainingMs].every(Number.isFinite) || finished.ms < 0 ||
+          !(finished.peerRemainingMs > 0 && finished.recoveryRemainingMs > 0)) return null;
+      return { stage: 'warm-protected-timer-after-precutoff-allocation', proofTime: timer.firedAtMs, rpc: allocation };
+    }
     if (!pending || finishes.length !== 1 || finishes[0].delivered !== false || finishes[0].bufferedMixed !== true ||
         finishes[0].peerOnly !== false || finishes[0].verifiedBytes !== 0 || finishes[0].originBytes !== 0 ||
         ![0, 1].includes(expected.coreTransfersDelta) ||
@@ -9757,6 +9814,87 @@ function warmSetupDeclineProof({ trace, expected, timer, rpc }) {
     return { stage: 'warm-observed-pending-rpc-timer', proofTime: timer.firedAtMs, rpc: pending };
   } catch { return null; }
 }
+
+test('owned warm captured precutoff allocation timer proves a protected setup decline', async () => {
+  const raw = await readFile(new URL('./fixtures/owned-warm-precutoff-allocation-timer.json', import.meta.url));
+  assert.equal(createHash('sha256').update(raw).digest('hex'), 'c709ac06143be329e88dc0c676e5a0b579ace2445961975106baccd7dc227c8f');
+  const receipt = JSON.parse(raw);
+  assert.equal(receipt.provenance.sourceCommit, 'cc6df86ebfa14dbe8825bf33c3d4769d4c6e3f4b');
+  assert.equal(receipt.provenance.rawLogSha256, 'c7be5c3b26612050085fe9137e60ca4146d677b98d7256ba853ad8ddffe81813');
+  const proof = warmSetupDeclineProof(receipt.proofInput);
+  assert.equal(proof?.stage, 'warm-protected-timer-after-precutoff-allocation');
+  assert.equal(proof.proofTime, receipt.proofInput.timer.firedAtMs);
+});
+
+test('owned warm captured precutoff allocation proof rejects incomplete or contradictory evidence', async () => {
+  const receipt = JSON.parse(await readFile(new URL('./fixtures/owned-warm-precutoff-allocation-timer.json', import.meta.url)));
+  const input = receipt.proofInput, at = input.expected.enteredAtMs;
+  const allocation = v => v.rpc.find(row => row.op === 'new' && row.sentAtMs >= at);
+  const row = (v, kind) => v.trace.rows.find(item => item.load === v.expected.load && item.k === kind);
+  const fired = v => v.trace.rows.find(item => item.load === v.expected.load && item.reason === 'setup-timer');
+  const controls = [
+    ['early timer', v => { v.timer.firedAtMs = at + 24; }],
+    ['missing timer', v => { v.timer = null; }],
+    ['late timer schedule', v => { v.timer.scheduledAtMs = at + 26; }],
+    ['wrong timer delay', v => { v.timer.requestedDelayMs = 26; }],
+    ['missing allocation', v => { v.rpc = v.rpc.filter(item => item !== allocation(v)); }],
+    ['duplicate allocation', v => { v.rpc.push({ ...allocation(v) }); }],
+    ['wrong RPC operation', v => { allocation(v).op = 'tick'; }],
+    ['failed allocation', v => { allocation(v).success = false; }],
+    ['late allocation reply', v => { allocation(v).replyAtMs = at + 26; }],
+    ['reversed RPC times', v => { allocation(v).replyAtMs = allocation(v).sentAtMs - 1; }],
+    ['nonfinite RPC time', v => { allocation(v).replyAtMs = NaN; }],
+    ['missing handle', v => { delete allocation(v).handle; }],
+    ['invalid handle', v => { allocation(v).handle = 0; }],
+    ['reused previous handle', v => { allocation(v).handle = v.rpc.find(item => item.op === 'new').handle; }],
+    ['reused RPC identity', v => { allocation(v).id = v.rpc[0].id; }],
+    ['changed object size', v => { allocation(v).configSize++; }],
+    ['changed peer deadline', v => { allocation(v).configDeadline++; }],
+    ['nonexclusive allocation', v => { allocation(v).exclusiveOrigin = false; }],
+    ['peer-only allocation', v => { allocation(v).peerOnly = true; }],
+    ['unexpected START', v => { const a = allocation(v); v.rpc.push({ id: a.id + 1, op: 'start', handle: a.handle,
+      sentAtMs: a.replyAtMs + 1, replyAtMs: a.replyAtMs + 2, success: true }); }],
+    ['Core command trace', v => { v.trace.rows.push({ k: 'xfer', load: v.expected.load, at: 2424, op: 'start' }); }],
+    ['range trace', v => { v.trace.rows.push({ k: 'origin', load: v.expected.load, at: 2424, ranged: true }); }],
+    ...['originRangeAttempts','physicalRangeGets','clientRangeLoads','peerRequests','acceptedPeerBytes','verifiedWarmPeerBytes']
+      .map(name => [name, v => { v.expected[name] = 1; }]),
+    ['wrong allocation delta', v => { v.expected.coreTransfersDelta = 0; }],
+    ['verified transfer bytes', v => { row(v, 'xferFinish').verifiedBytes = 1; }],
+    ['origin transfer bytes', v => { row(v, 'xferFinish').originBytes = 1; }],
+    ['delivered transfer', v => { row(v, 'xferFinish').delivered = true; }],
+    ['wrong finish reason', v => { row(v, 'xferFinish').reason = 'core-fail-command'; }],
+    ['duplicate finish', v => { v.trace.rows.push({ ...row(v, 'xferFinish') }); }],
+    ['different load', v => { v.expected.load++; }],
+    ['different fragment', v => { v.expected.sn++; }],
+    ['lost warm owner', v => { fired(v).scope.warmOwner = false; }],
+    ['other false predicate', v => { fired(v).scope.unpaused = false; }],
+    ['wrong timer reason', v => { fired(v).reason = 'scope-ready'; }],
+    ['nonexpired row', v => { fired(v).setupRemainingMs = 1; }],
+    ['nonfinite elapsed row', v => { fired(v).ms = NaN; }],
+    ['nonfinite remaining row', v => { fired(v).setupRemainingMs = NaN; }],
+    ['nonfinite parent', v => { v.expected.parentMs = Infinity; }],
+    ['contradictory duration', v => { fired(v).capturedGeometry.durationMs++;
+      row(v, 'load').budgetGeometry.durationMs++; }],
+    ['finish precedes timer', v => { const rows = v.trace.rows, index = rows.indexOf(row(v, 'xferFinish'));
+      const [finish] = rows.splice(index, 1); rows.splice(rows.indexOf(fired(v)), 0, finish); }],
+    ['source precedes timer', v => { const rows = v.trace.rows, index = rows.indexOf(row(v, 'originStart'));
+      const [source] = rows.splice(index, 1); rows.splice(rows.indexOf(fired(v)), 0, source); }],
+    ['invocation precedes timer', v => { v.expected.invokedAtMs = v.timer.firedAtMs - 1; }],
+    ['renewed parent', v => { v.expected.remainingLoadMs = v.expected.parentMs; }],
+    ['renewed first byte', v => { v.expected.remainingTtfbMs = v.expected.ttfbMs; }],
+    ['underclipped parent', v => { v.expected.remainingLoadMs--; }],
+    ['dropped trace', v => { v.trace.dropped = 1; }],
+    ['dropped RPC', v => { v.expected.rpcDropped = 1; }],
+    ['omitted RPC', v => { v.expected.rpcOmitted = 1; }],
+    ['omitted rows', v => { v.expected.rowsOmitted = 1; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const v = structuredClone(input); mutate(v);
+    assert.equal(warmSetupDeclineProof(v), null, name);
+  }
+  console.log(JSON.stringify({ fixture: 'captured-precutoff-allocation-timer-proof', rejected: controls.length,
+    scope: 'Receipt classifier counterexamples only; not new traffic or a CI rescore' }));
+});
 
 // Mutate the ACTUAL held-response observation below. These controls classify
 // evidence only; none introduces or changes controller time or source policy.
@@ -10984,12 +11122,12 @@ test('buffered mixed origin recovery cannot outlive its original absolute parent
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
-async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConstructor = false) {
+async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConstructor = false, declineMode = null) {
   // Deterministic policy proof: simulated source/native RTC, real sessions,
   // commitments, Core, ordered protocol bytes, verification and consumption.
   // No source server, preloaded cache/HAVE, timing model or claimed WAN rate.
   const pair = await framingPairFixture(t, { pairedState: true }), actors = [], source = [], loaders = new Set(), objects = new Map(), events = new Map();
-  let clock, revokeOnConstructor = null;
+  let clock, revokeOnConstructor = null, metadataHeld = false, metadataHeldAt = null, releaseMetadata, reenterAbort = null, stopAtContribution = false, contributionStopped = false;
   const settle = promise => clock ? clock.settle(promise) : promise;
   const wait = predicate => clock ? clock.advanceUntil(predicate) : until(predicate);
   const size = 1024 * 1024, secret = generateSecretKey(), seconds = Math.floor(Date.now() / 1000);
@@ -11024,19 +11162,38 @@ async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConst
     }));
     response.catch(() => {}); return { response, calls };
   };
+  if (declineMode === 'callback-stop') {
+    const original = CoreNeighbourDiscovery.prototype.context;
+    t.mock.method(CoreNeighbourDiscovery.prototype, 'context', function (...args) {
+      const result = original.apply(this, args);
+      if (stopAtContribution) { stopAtContribution = false; contributionStopped = true; actors[1].swarm.stop(); }
+      return result;
+    });
+  }
+  // Own SDK/session timers too, including a stop reentered during a callback.
+    // Functional controller only: hold actual async setup until either source
+    // lane is invoked, without selecting a favourable result or seeding a model.
+    clock = warmFunctionalClock(t, () => !metadataHeld && actors.some((f, actor) => {
+      const rows = f.swarm.trace().rows;
+      const load = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
+      return load && rows.some(row => row.k === 'mixedScope' && row.load === load.load && row.reason === 'entry') &&
+        !source.some(row => row.actor === actor && row.sn === 1);
+    }));
   try {
     for (const actor of [0, 1]) {
       class Source extends Loader {
         stats = new LoadStats();
         constructor(...args) {
           super(...args);
+          if (actor === 1 && declineMode === 'callback-stop' && source.some(row => row.actor === 0 && row.sn === 1 && row.complete)) stopAtContribution = true;
           if (actor === 1 && revokeOnConstructor) { const revoke = revokeOnConstructor; revokeOnConstructor = null; revoke(); }
         }
         load(ctx, config, callbacks) {
           const data = objects.get(new URL(ctx.url).pathname); assert(data);
           const from = ctx.rangeEnd ? ctx.rangeStart : 0, to = ctx.rangeEnd || data.length;
           const row = { actor, sn: ctx.frag.sn, warm: Boolean(ctx[WARM_AHEAD]), range: ctx.rangeEnd ? [from, to] : null,
-            bytes: 0, complete: false, aborted: false }; source.push(row); loaders.add(this);
+            bytes: 0, complete: false, aborted: false, invokedAtMs: performance.now(),
+            maxLoadTimeMs: config.loadPolicy?.maxLoadTimeMs ?? config.timeout }; source.push(row); loaders.add(this);
           this.stats.loading.start = performance.now();
           this.complete = () => {
             if (row.complete || row.aborted) return;
@@ -11052,24 +11209,25 @@ async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConst
           // Whole speculative futures stay pending until their owner ledger is
           // checked, so no holder can have advertised either future yet.
         }
-        abort() { clearTimeout(this.timer); if (this.row && !this.row.complete) this.row.aborted = true; }
+        abort() { clearTimeout(this.timer); if (this.row && !this.row.complete) this.row.aborted = true;
+          if (actor === 1 && reenterAbort) { const enter = reenterAbort; reenterAbort = null; enter(); } }
         destroy() { this.abort(); loaders.delete(this); }
       }
       const media = Object.assign(new EventTarget(), { currentTime: 0, paused: false, ended: false, seeking: false,
         readyState: 4, playbackRate: 1, buffered: { length: 0 } });
-      actors.push(await pair.make({ OriginLoader: Source, player: { media }, swarmOptions: {
-        streamEvent, getCommitment, warmAhead: true, bufferedMixedRanges: true, zeroBudgetPeerRace: true,
-        sustainablePeerWait: true, originReserveMs: 2000, maxPeerWaitMs: 2500, traceRequests: 4096 } }));
+      const commitment = ctx => {
+        const event = getCommitment(ctx);
+        if (declineMode && actor === 1 && ctx.frag.sn === 1 && ctx[WARM_AHEAD]?.work && !metadataHeld) {
+          metadataHeld = true; metadataHeldAt = performance.now();
+          return new Promise(resolve => { releaseMetadata = () => resolve(event); });
+        }
+        return event;
+      };
+      actors.push(await settle(pair.make({ OriginLoader: Source, player: { media }, swarmOptions: {
+        streamEvent, getCommitment: commitment, warmAhead: true, bufferedMixedRanges: true, zeroBudgetPeerRace: true,
+        sustainablePeerWait: true, originReserveMs: 2000, maxPeerWaitMs: 2500, traceRequests: 4096 } })));
     }
-    await until(() => actors.every(f => f.swarm.metrics().peers.connected === 1));
-    // Functional controller only: hold actual async setup until either source
-    // lane is invoked, without selecting a favourable result or seeding a model.
-    clock = warmFunctionalClock(t, () => actors.some((f, actor) => {
-      const rows = f.swarm.trace().rows;
-      const load = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
-      return load && rows.some(row => row.k === 'mixedScope' && row.load === load.load && row.reason === 'entry') &&
-        !source.some(row => row.actor === actor && row.sn === 1);
-    }));
+    await wait(() => actors.every(f => f.swarm.metrics().peers.connected === 1));
     const pubkeys = actors.map(f => f.swarm.metrics().pubkey), winner = path => {
       const key = BigInt('0x' + keyFor(path));
       return (key ^ BigInt('0x' + pubkeys[0])) < (key ^ BigInt('0x' + pubkeys[1])) ? 0 : 1;
@@ -11127,6 +11285,43 @@ async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConst
     for (const loader of loaders) if (loader.row?.actor === 0 && loader.row?.sn === 1) loader.complete();
     await wait(() => actors[0].swarm.metrics().warmAhead.verified === 1 && exactHaveDelivered);
     const atHave = performance.now();
+    if (declineMode === 'callback-stop') {
+      await wait(() => contributionStopped); await clock.advance(25);
+      assert.equal(source.filter(row => row.actor === 1 && row.sn === 1).length, 0,
+        'contribution callback stop cannot bypass optional ownership through direct inner.load');
+      assert.equal(actors[1].swarm.metrics().bytes.peerFirst, 0); return;
+    }
+    if (declineMode) {
+      await wait(() => metadataHeld);
+      assert.equal(actors[1].swarm.metrics().warmAhead.haveReconsidered, 1);
+      let demand;
+      if (declineMode === 'genuine') demand = invoke(1, details[1].fragments[1]);
+      if (declineMode === 'reentrant') reenterAbort = () => { demand = invoke(1, details[1].fragments[1]); };
+      await clock.advance(Math.max(0, metadataHeldAt + 25 - performance.now()));
+      await wait(() => actors[1].swarm.trace().rows.some(row => row.k === 'mixedScope' && row.reason === 'setup-timer'));
+      const optionalStarts = () => source.filter(row => row.actor === 1 && row.sn === 1 && row.warm);
+      console.log(JSON.stringify({ fixture: 'reconsidered-warm-setup-decline', controllerClock: 'logical-functional',
+        mode: declineMode, elapsedMs: performance.now() - metadataHeldAt,
+        optionalSources: optionalStarts().map(({ range, warm, maxLoadTimeMs }) => ({ range, warm, maxLoadTimeMs })),
+        warm: actors[1].swarm.metrics().warmAhead }));
+      if (declineMode === 'optional') {
+        assert.equal(optionalStarts().length, 0, 'pure optional reconsideration must abandon setup decline instead of duplicate whole HTTP');
+        assert.equal(actors[1].swarm.metrics().bytes.peerFirst, 0);
+      } else {
+        assert(demand, 'genuine entry was observed before or during abort cleanup');
+        await wait(() => source.some(row => row.actor === 1 && row.sn === 1));
+        for (const loader of loaders) if (loader.row?.actor === 1 && loader.row?.sn === 1) loader.complete();
+        sameBytes(await settle(demand.response), objects.get(paths[0]));
+        assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+        if (declineMode === 'genuine') {
+          assert.equal(optionalStarts().length, 1); assert.equal(optionalStarts()[0].range, null);
+          assert.equal(optionalStarts()[0].maxLoadTimeMs, 9975, 'promotion retains the original10s parent minus25ms setup');
+        } else assert.equal(optionalStarts().length, 0, 'reentrant genuine must own new source, not dying optional work');
+      }
+      releaseMetadata(); await clock.advance(50);
+      if (declineMode === 'optional') assert.equal(optionalStarts().length, 0, 'late metadata cannot revive cancelled optional work');
+      return;
+    }
     // One short observation of an event-driven opportunity. This is not a
     // larger setup/peer/row deadline; no genuine request is made to wake it.
     await clock.advance(100);
@@ -11163,7 +11358,7 @@ async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConst
     if (paused || withdrawAtConstructor) assert.equal(targetStarts.length, 0, 'pause or withdrawn exact supply before entry cannot start whole or ranged I/O');
     else assert(targetStarts.some(row => row.warm && row.range),
       'exact verified HAVE reconsiders the still-current skipped future without a new genuine request');
-  } finally { clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy(); }
+  } finally { releaseMetadata?.(); clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy(); }
 }
 
 test('owned warm exact HAVE wakes an idle skipped future through real Core mixed assembly', { timeout: 15000 },
@@ -11172,3 +11367,7 @@ test('owned warm exact HAVE cannot restart skipped work after pause', { timeout:
   t => cooperativeHaveReconsideration(t, true));
 test('owned warm exact HAVE withdrawal during final constructor cannot fall through to whole HTTP', { timeout: 15000 },
   t => cooperativeHaveReconsideration(t, false, true));
+for (const mode of ['optional', 'genuine', 'reentrant']) test(`owned warm reconsidered setup decline ${mode} retains correct source ownership`, { timeout: 15000 },
+  t => cooperativeHaveReconsideration(t, false, false, mode));
+test('owned warm reconsidered contribution callback stop cannot bypass source ownership', { timeout: 15000 },
+  t => cooperativeHaveReconsideration(t, false, false, 'callback-stop'));

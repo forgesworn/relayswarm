@@ -83,6 +83,39 @@ credit, pause and constructor-time supply withdrawal, the earlier reciprocal
 owner case, full six-MiB main/Worker positives and capability fallbacks. These
 are functional controller/protocol checks, not native throughput measurements.
 
+The subsequent `cc6df86` e2e run remains failed: macOS passed 939 of 940
+checks, and the Windows mixed partition passed 46 of 47. A native local
+reproduction exposed a purely speculative HAVE retry falling back to a whole
+GET after its original 25 ms setup decline. The reciprocal protocol fixture
+deliberately held that unexpected whole body, so genuine demand later joined
+it and reached the unchanged parent timeout. That reproduction establishes
+the local mechanism; the original Windows log lacks that internal trace.
+
+Purely speculative reconsiderations now abandon work on mixed admission
+failure instead of duplicating the owner's completed body. Cancellation marks
+the outer row retired before abort callbacks can reenter genuine demand.
+Controlled tests first observed one unwanted whole GET, then zero with this
+change. Genuine promotion keeps normal fallback with the original reduced
+parent; callback-reentered genuine demand starts its own ordinary source path.
+Six focused cancellation controls and all 237 manager checks pass.
+
+The macOS failure records allocation replying before the setup cutoff, no
+START RPC or optional I/O, and the original timer firing afterwards. A separate
+strict captured-input proof recognises that ordering; the existing pending-RPC
+proof is unchanged. Its 54 hostile controls reject incomplete or contradictory
+inputs. An unchanged native Worker check subsequently completed exact mixed
+assembly and the original whole-body/hash/callback assertions. Neither that
+run nor the classifier rescored the earlier CI failure; its internal scheduling
+delay remains unknown.
+
+The reciprocal owner/mixed protocol fixture now uses an explicitly functional
+controller with its original payloads, deadlines and assertions. Its logical
+clock is installed before its SDK sessions so callback-driven stop can clean
+up those same timers. All six native six-MiB cases and both ordinary native
+warm callsites remain unchanged. The final 22-case selection passes, including
+those native cases, mandatory main/Worker assembly and the ownership/proof
+controls. These results still require fresh CI and field qualification.
+
 ## Setup-proof and native CI scheduling correction (29 October 2026)
 
 The `a007c07` hosted run passed its reciprocal future-owner and existing

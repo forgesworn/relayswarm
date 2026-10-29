@@ -244,7 +244,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
                 samePosition(current, workIdentity);
               if (!identityCurrent || closed || revision !== generation || !live(row) || controller.signal.aborted ||
                   scope !== workIdentity.scope || !genuine && performance.now() >= deadline) return null;
-              return { context: workContext, enteredAt: deadline - DEADLINE_MS, deadline, signal: controller.signal, genuine };
+              return { context: workContext, enteredAt: deadline - DEADLINE_MS, deadline, signal: controller.signal, genuine,
+                ...(row.reconsidered ? { reconsidered: true } : {}) };
             } catch { return null; }
           } } : {}),
           startupDependency: () => {
@@ -254,6 +255,11 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
               return { at: startup.entryAt, deadline: startup.deadline, signal: startup.controller.signal, context: item.context };
             } catch { return null; }
           } };
+        if (row.reconsidered) warm.abandon = () => {
+          if (!live(row) || row.genuine()) return false;
+          // Retire before loader.abort can synchronously reenter a genuine load.
+          cancelJob(row); return true;
+        };
         loader = new Loader(cfg);
         if (controller.signal.aborted || closed || revision !== generation || !live(row) || !reconsiderCurrent()) return null;
         counters.started++;

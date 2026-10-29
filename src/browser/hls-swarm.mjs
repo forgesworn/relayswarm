@@ -1231,13 +1231,15 @@ class HlsSwarm {
         const marker = context?.[WARM_AHEAD];
         if (swarm.options.warmAhead && swarm.options.bufferedMixedRanges && typeof marker?.work === 'function') {
           const work = marker.work, identity = warmContext(context);
-          let initial;
-          try { initial = work(); } catch {}
+          let initial, abandonWarm;
+          try { initial = work(); if (initial?.reconsidered === true) abandonWarm = marker.abandon; } catch {}
           const current = () => {
             try {
               const value = work(), at = now(), genuine = value?.genuine, demand = genuine && warmContext(genuine.context);
               return Boolean(identity && initial && value && context[WARM_AHEAD] === marker && marker.work === work &&
                 value.context === context && value.signal === initial.signal && !value.signal.aborted &&
+                (value.reconsidered === true) === (initial.reconsidered === true) &&
+                (initial.reconsidered !== true || typeof abandonWarm === 'function' && marker.abandon === abandonWarm) &&
                 value.enteredAt === initial.enteredAt && value.deadline === initial.deadline &&
                 Number.isFinite(value.enteredAt) && Number.isFinite(value.deadline) && value.enteredAt <= at &&
                 value.deadline > value.enteredAt && value.deadline - value.enteredAt <= 8000 &&
@@ -1247,7 +1249,17 @@ class HlsSwarm {
                   Math.abs(demand.context.frag.duration - identity.context.frag.duration) <= 1e-9));
             } catch { return false; }
           };
-          warmOwner = { current };
+          warmOwner = { current, reconsidered: initial?.reconsidered === true,
+            abandonOptional: () => {
+              try {
+                if (!abandonWarm || !current()) return false;
+                const value = work();
+                if (value?.reconsidered !== true || value.genuine !== null || !current()) return false;
+                // The engine atomically refuses abandonment if a genuine
+                // waiter joined; normal source fallback then keeps its parent.
+                return abandonWarm.call(marker) === true;
+              } catch { return false; }
+            } };
           if (!current()) { this.inner.stats.aborted = true; return callbacks.onAbort?.(this.inner.stats, context, null); }
           // Read the ordinary buffer formula without removing the real owner's
           // marker: speculative credit and the original eight-second row stay intact.
@@ -1256,10 +1268,19 @@ class HlsSwarm {
           mixedSource = measured.source; mixedGeometry = { ...measured, source: 'warm-ahead' };
           if (!current()) { this.inner.stats.aborted = true; return callbacks.onAbort?.(this.inner.stats, context, null); }
         }
+        const abandonBeforeMixed = () => {
+          if (!warmOwner?.reconsidered) return false;
+          if (!warmOwner.abandonOptional() && warmOwner.current()) return false;
+          // No mixed callback owner exists yet; settle the future explicitly.
+          this.inner.stats.aborted = true; callbacks.onAbort?.(this.inner.stats, context, null); return true;
+        };
         swarm.#contributionContext(context);
         if (swarm.options.peerSupplyHint) swarm.#guard("player-hint", () => swarm.#reportPlayerHints(context, budgetMs));
         if (swarm.stopped || !context.frag || context.frag.sn === "initSegment" || (context.part && !swarm.options.swarmParts)
-          || (!swarm.options.serveOnCellular && onCellular())) return this.inner.load(context, config, callbacks);
+          || (!swarm.options.serveOnCellular && onCellular())) {
+          if (abandonBeforeMixed()) return;
+          return this.inner.load(context, config, callbacks);
+        }
         if (swarm.options.bufferedMixedRanges && budgetMs === 0 && (!context[WARM_AHEAD] || warmOwner) && !this.hlsConfig.progressive && warmContext(context) &&
             mixedSource === 'buffer' && mixedGeometry.uncappedMs > 25 &&
             Number.isFinite(percentile(swarm.#originSamples(context), .9)) &&
@@ -1276,6 +1297,7 @@ class HlsSwarm {
             if (cached.size) return this.loadBufferedMixed(context, config, callbacks, mixedGeometry, cached, enteredAt, parentMs, warmOwner);
           }
         }
+        if (abandonBeforeMixed()) return;
         if (budgetMs === 0 && swarm.options.zeroBudgetPeerRace && !this.hlsConfig.progressive
           && swarm.#rangesEnabled() && swarm.#peerRaceCapacity()) {
           const cached = new Map([...swarm.links.values()].filter(link => swarm.#peerEntryAvailable(link, context) && link.supportsRanges
@@ -1426,6 +1448,8 @@ class HlsSwarm {
           if (!owns() || phase === 'origin') return;
           traceMixed(typeof reason === 'string' ? reason : 'lifecycle-abort');
           if (warmOwner && !warmOwner.current()) return expire('warm-owner-expired');
+          if (!originInvoked && warmOwner?.abandonOptional()) { traceMixed('optional-reconsideration-abandoned'); return; }
+          if (!owns()) return;
           phase = 'origin'; clearTimeout(setupTimer); controller.abort();
           const remaining = remainingOriginConfig(config, recoveryDeadline, firstDeadline);
           if (!remaining) return expire('fallback-budget-expired');
@@ -1513,6 +1537,8 @@ class HlsSwarm {
         swarm.#peerFirst(context, controller.signal, plan, 0, geometry).then(result => {
           if (!owns() || phase !== 'mixed') return;
           if (plan.declineToCached && current() && swarm.options.zeroBudgetPeerRace) {
+            if (warmOwner?.abandonOptional()) { traceMixed('optional-reconsideration-abandoned'); return; }
+            if (!owns()) return;
             const remaining = remainingOriginConfig(config, recoveryDeadline, firstDeadline);
             const cached = new Map([...captured].filter(([link]) => entryLinkCurrent(link)).map(([link, entry]) => [link, entry.have]));
             if (remaining && cached.size) {
