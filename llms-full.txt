@@ -332,6 +332,20 @@ was configured, and `stop()` puts the original back, closes every peer
 connection and relay socket, drops held segments and emits one final
 `onMetrics`. Requires a secure context (https, or localhost) for WebCrypto.
 
+A host whose connection factory has newly usable local ICE configuration may
+call `swarm.retryLocalCandidates()`. It synchronously returns a bounded count
+of normal dial attempts, not promises of admission or connectivity. Only an
+readable completed local gather with no candidate creates a one-shot retry entry;
+notification consumes the remembered batch (at most 256). Existing admission,
+capacity, bans and discovery suppression still apply. Generic/native failures,
+remote refusals, unreadable native descriptions and dial timeouts retain their original cooldowns.
+
+The host must make its future connection factory use the new configuration
+before notifying. This method neither changes `iceServers` nor updates or
+restarts an existing connection. It leaves Hls, retained media and accepted
+credit alone, adds no periodic retry, and keeps the original gather and dial
+clocks. Repeated notifications cannot reuse an already-consumed failure.
+
 For a same-identity admission renewal, `updateTicket(ticket)` replaces only this
 viewer's opaque ticket and schedules a bounded presence announcement. Established
 links, the loader, held segments, counters and upload reservations remain intact.
@@ -2126,7 +2140,7 @@ presence; `close()` also unregisters the relay-open handler.
 ## Browser loader
 
 `createHlsSwarm(options)` returns
-`{ attach(hls), updateTicket(ticket), stop(), metrics(), peerConnections(), peerConnectionDetails(), trace() }`.
+`{ attach(hls), updateTicket(ticket), retryLocalCandidates(), stop(), metrics(), peerConnections(), peerConnectionDetails(), trace() }`.
 `attach` wraps `hls.config.fLoader`; call it before `loadSource`. `stop` is the
 origin-only kill switch and closes connections, cancels pending work, releases
 held bytes and restores the original loader. Create a new swarm to participate
@@ -2741,6 +2755,30 @@ Relay-only is an explicit operator privacy/compatibility choice, not a TLS
 selection or a proved transfer repair. It never downgrades to `"all"`; if usable
 relay connectivity is unavailable, playback retains its existing origin fallback.
 
+## Explicit local-candidate recovery
+
+`retryLocalCandidates()` synchronously returns an integer from 0 through 256:
+the number of remembered local failures handed to the normal dial path.
+Admission may still refuse an attempt or asynchronous negotiation may fail;
+the count does not promise a new or connected peer. Notification consumes the
+current remembered batch, including entries blocked by current capacity or
+policy. There is no automatic notification, periodic retry or deferred queue.
+
+Only a readable string SDP with no local candidate at completed gathering is
+remembered, using the existing SDP evaluation. A throwing description getter,
+nonstring SDP, cancelled/unknown gather or original dial timeout does not qualify. Each entry is
+one-shot, bounded to the newest 256, and forgotten on stop, a new attempt or
+negotiation, or another cooldown write. A newer unrelated cooldown invalidates
+the entry even when both writes occur in the same millisecond. Remote refusal,
+admission, generic/native-failure, timeout and ban handling are unchanged.
+
+The host calls this after making newly usable ICE configuration available to
+its future connection factory. The existing current admission, outgoing slot,
+capacity, ban and discovery checks still guard every attempt. The API does not
+mutate constructor-captured `iceServers`, call `setConfiguration()`, restart
+ICE, recreate established links, reset Hls/cache/credit or renew deadlines.
+The original 1200 ms gather soft cap and existing dial timeout remain unchanged.
+
 ## Optional demo TURN renewal
 
 `startDemoServer({turnCredentials: {url: 'https://issuer.example/turn'}})` enables
@@ -3160,6 +3198,27 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased local-candidate retry notification (29 October 2026)
+
+An explicit host notification can retry remembered local no-candidate gather
+failures after the host makes a new configuration available to its future
+connection factory. The bounded one-shot API retains ordinary current
+admission, capacity and discovery checks. It does not update existing peers or
+release unrelated cooldowns, and it adds no timer or automatic presence retry.
+
+A regression first fails for the missing API after a real SDK no-candidate
+gather failure. Twenty-four focused signalling controls then pass, including
+future-constructor configuration, incoming and outgoing failures, same-millisecond
+generic cooldown replacement, repeated notification, connected links,
+admission revocation, timeout/refusal preservation and stop across an awaited
+admission. Two additional regressions first reject the old treatment of an
+unreadable native description as a definite empty gather; after correction,
+both retain the ordinary cooldown and exact original SDP read count. Native RTC
+and relay transport boundaries are simulated; signed and
+encrypted SDK/session handling is real. This unit proves local lifecycle
+behaviour, not browser ICE, field playback, useful contribution or release
+qualification. Earlier fixture setup failures and field failures remain retained.
 
 ## Unreleased cached setup diagnostics (29 October 2026)
 

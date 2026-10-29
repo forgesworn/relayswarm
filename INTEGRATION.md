@@ -62,6 +62,20 @@ was configured, and `stop()` puts the original back, closes every peer
 connection and relay socket, drops held segments and emits one final
 `onMetrics`. Requires a secure context (https, or localhost) for WebCrypto.
 
+A host whose connection factory has newly usable local ICE configuration may
+call `swarm.retryLocalCandidates()`. It synchronously returns a bounded count
+of normal dial attempts, not promises of admission or connectivity. Only an
+readable completed local gather with no candidate creates a one-shot retry entry;
+notification consumes the remembered batch (at most 256). Existing admission,
+capacity, bans and discovery suppression still apply. Generic/native failures,
+remote refusals, unreadable native descriptions and dial timeouts retain their original cooldowns.
+
+The host must make its future connection factory use the new configuration
+before notifying. This method neither changes `iceServers` nor updates or
+restarts an existing connection. It leaves Hls, retained media and accepted
+credit alone, adds no periodic retry, and keeps the original gather and dial
+clocks. Repeated notifications cannot reuse an already-consumed failure.
+
 For a same-identity admission renewal, `updateTicket(ticket)` replaces only this
 viewer's opaque ticket and schedules a bounded presence announcement. Established
 links, the loader, held segments, counters and upload reservations remain intact.

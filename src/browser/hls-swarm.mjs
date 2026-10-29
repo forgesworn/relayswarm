@@ -255,13 +255,20 @@ const UPLOAD_REFUSAL_REASONS = Object.freeze([
 
 function gathered(pc, capMs = 1_200, signal, observed) {
   return new Promise((resolve) => {
+    let knownEmpty = false;
     const hasCandidate = () => {
-      try { const sdp = pc.localDescription?.sdp; return typeof sdp === "string" && /^a=candidate:/m.test(sdp); }
-      catch { return false; }
+      knownEmpty = false;
+      try {
+        const sdp = pc.localDescription?.sdp;
+        if (typeof sdp !== "string") return false;
+        const present = /^a=candidate:/m.test(sdp);
+        knownEmpty = !present;
+        return present;
+      } catch { return false; }
     };
     const done = (outcome) => {
       const ready = outcome !== "aborted" && hasCandidate();
-      try { observed?.(outcome); } catch {} resolve(ready);
+      try { observed?.(outcome, outcome === "complete" && knownEmpty); } catch {} resolve(ready);
     };
     if (pc.iceGatheringState === "complete" || signal?.aborted) return done(signal?.aborted ? "aborted" : "complete");
     let capped = false, settled = false;
@@ -272,8 +279,8 @@ function gathered(pc, capMs = 1_200, signal, observed) {
       pc.removeEventListener("icegatheringstatechange", changed);
       pc.removeEventListener("icecandidate", candidate);
       signal?.removeEventListener("abort", finish);
-      // Classification is diagnostic only. A getter failure must not prevent
-      // the original timer/abort completion from resolving its wait.
+      // A getter failure must not prevent the original timer/abort completion
+      // from resolving its wait or authorise an unknown gather as known empty.
       let outcome = "unknown";
       try { outcome = signal?.aborted ? "aborted" : pc.iceGatheringState === "complete" ? "complete" : "capped"; } catch {}
       done(outcome);
@@ -387,6 +394,7 @@ export function createHlsSwarm(options = {}) {
   return {
     attach: (hls) => swarm.attach(hls),
     updateTicket: (ticket) => swarm.updateTicket(ticket),
+    retryLocalCandidates: () => swarm.retryLocalCandidates(),
     stop: () => swarm.stop(),
     metrics: () => swarm.metrics(),
     peerConnections: () => swarm.peerConnections(),
@@ -477,6 +485,7 @@ class HlsSwarm {
     this.dials = new Map();
     this.receivedOffers = new Set();
     this.cooldowns = new Map();
+    this.localCandidateFailures = new Map();
     this.retries = new Map();
     this.openPeers = new Map();
     this.discovery = new NeighbourDiscovery();
@@ -777,9 +786,30 @@ class HlsSwarm {
     return true;
   }
 
+  // A host may notify newly usable local ICE configuration. Only an actual
+  // gathered() no-candidate failure can release its own cooldown, once.
+  retryLocalCandidates() {
+    let attempted = 0;
+    this.#guard("local-candidates", () => {
+      if (this.stopped || this.disabledReason || !this.session?.pubkey) return;
+      const failures = [...this.localCandidateFailures];
+      this.localCandidateFailures.clear();
+      for (const [pubkey, until] of failures) {
+        if (this.stopped || this.cooldowns.get(pubkey) !== until || this.links.has(pubkey) || this.dials.has(pubkey) ||
+            this.dialChecks.has(pubkey) || this.banned.has(pubkey) || this.discovery.suppresses(pubkey) ||
+            !this.#hasCapacity() || !this.#hasOutgoingSlot()) continue;
+        this.cooldowns.delete(pubkey);
+        attempted++;
+        this.#guard("dial", () => this.#dial(pubkey));
+      }
+    });
+    return attempted;
+  }
+
   stop() {
     if (this.stopped) return;
     this.stopped = true;
+    this.localCandidateFailures.clear();
     this.#retireLatePeers('stop');
     this.uploadPacer?.stop();
     this.warmAhead?.stop();
@@ -4145,11 +4175,13 @@ class HlsSwarm {
       this.counters.retriesScheduled += 1;
       this.#after(retryAfterMs + Math.random() * 1_000, () => {
         if (this.discovery.reserved()) {
+          this.localCandidateFailures.delete(from);
           this.cooldowns.delete(from);
           this.#seekNeighbours();
           return;
         }
         if (this.links.has(from) || this.dials.has(from) || this.banned.has(from) || !this.#hasCapacity()) return;
+        this.localCandidateFailures.delete(from);
         this.cooldowns.delete(from);
         return this.#dial(from);
       });
@@ -4172,6 +4204,11 @@ class HlsSwarm {
 
   #hasOutgoingSlot() {
     return [...this.dials.values()].filter((dial) => dial.outgoing).length + this.dialChecks.size < this.options.maxDialsInFlight;
+  }
+
+  #setCooldown(pubkey, until) {
+    this.localCandidateFailures.delete(pubkey);
+    this.cooldowns.set(pubkey, until);
   }
 
   #coolingDown(pubkey) {
@@ -4367,6 +4404,7 @@ class HlsSwarm {
   }
 
   #beginNegotiation(dial, requestId, outgoing) {
+    this.localCandidateFailures.delete(dial.pubkey);
     if (!outgoing && dial.discovery) {
       this.#endDiscovery(dial.discovery.window, false);
       dial.discovery = null;
@@ -4413,10 +4451,11 @@ class HlsSwarm {
       if (discovery) this.discovery.abandoned(discovery);
       return;
     }
+    this.localCandidateFailures.delete(pubkey);
     this.dialChecks.add(pubkey);
     try {
       if (!(await this.#admits(pubkey, discovery ? discovery.ticket : this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket, "dialStart"))) {
-        if (discovery) { this.discovery.abandoned(discovery); this.cooldowns.set(pubkey, Date.now() + 60_000); }
+        if (discovery) { this.discovery.abandoned(discovery); this.#setCooldown(pubkey, Date.now() + 60_000); }
         return;
       }
     } finally { this.dialChecks.delete(pubkey); }
@@ -4431,7 +4470,7 @@ class HlsSwarm {
       if (!victim || !this.discovery.replaced(discovery, victim.pubkey)) { this.discovery.abandoned(discovery); return; }
       this.lastEvictionAt = Date.now(); this.counters.evicted++;
       this.#noteVictimTier(this.discovery.counters, choice.tier, "victim");
-      this.cooldowns.set(victim.pubkey, discovery.window.expiresAt);
+      this.#setCooldown(victim.pubkey, discovery.window.expiresAt);
       victim.close("rotation");
     }
     const pc = this.#newPeerConnection(true);
@@ -4450,9 +4489,13 @@ class HlsSwarm {
         if (!this.#currentNegotiation(dial, negotiation)) return;
         await pc.setLocalDescription(offer);
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        const ready = await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "offer", outcome); });
+        let knownEmpty = false;
+        const ready = await gathered(pc, 1_200, negotiation.controller.signal, (outcome, empty) => {
+          knownEmpty = empty;
+          if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "offer", outcome);
+        });
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        if (!ready) { this.#failDial(dial, "failed"); return; }
+        if (!ready) { this.#failDial(dial, "failed", 0, "failed", knownEmpty); return; }
         if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket, "offerBeforeSend"))) {
           if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
           return;
@@ -4475,8 +4518,9 @@ class HlsSwarm {
     }
   }
 
-  #failDial(dial, reason, cooldownMs = 0, diagnosticReason = reason) {
+  #failDial(dial, reason, cooldownMs = 0, diagnosticReason = reason, localCandidates = false) {
     if (this.dials.get(dial.pubkey) !== dial) return;
+    this.localCandidateFailures.delete(dial.pubkey);
     this.dials.delete(dial.pubkey);
     this.discovery.failed(dial);
     this.#retireNegotiation(dial);
@@ -4491,7 +4535,11 @@ class HlsSwarm {
     // A refusal that named a time is a better wait than a flat cooldown: the
     // peer knows when it could rotate somebody out.
     const fallback = reason === "rejected" ? 30_000 : 60_000;
-    this.cooldowns.set(dial.pubkey, Date.now() + (cooldownMs > 0 ? cooldownMs : fallback));
+    this.#setCooldown(dial.pubkey, Date.now() + (cooldownMs > 0 ? cooldownMs : fallback));
+    if (localCandidates) {
+      this.localCandidateFailures.set(dial.pubkey, this.cooldowns.get(dial.pubkey));
+      if (this.localCandidateFailures.size > 256) this.localCandidateFailures.delete(this.localCandidateFailures.keys().next().value);
+    }
     this.#seekNeighbours();
   }
 
@@ -4578,6 +4626,7 @@ class HlsSwarm {
         this.#sendSignal(from, "reject", payload.requestId, this.#refusalPayload(from));
         return;
       }
+      this.localCandidateFailures.delete(from);
       const pc = this.#newPeerConnection(false);
       dial = { pubkey: from, pc, startedAt: now(), offerSentAt: now() };
       this.dials.set(from, dial);
@@ -4623,9 +4672,13 @@ class HlsSwarm {
         if (!this.#currentNegotiation(dial, negotiation)) return;
         await pc.setLocalDescription(answer);
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        const ready = await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "answer", outcome); });
+        let knownEmpty = false;
+        const ready = await gathered(pc, 1_200, negotiation.controller.signal, (outcome, empty) => {
+          knownEmpty = empty;
+          if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "answer", outcome);
+        });
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        if (!ready) { this.#failDial(dial, "failed"); return; }
+        if (!ready) { this.#failDial(dial, "failed", 0, "failed", knownEmpty); return; }
         if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null, "answerBeforeSend"))) {
           if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
           return;

@@ -2533,7 +2533,7 @@ async function glareFixture(t, { polite = true, hold, gathering = false, emptyCa
   const secretKey = secretKeys[polite ? 1 : 0], remoteKey = secretKeys[polite ? 0 : 1];
   const connections = [], received = [], gates = new Map();
   if (hold) gates.set(hold, glareDeferred());
-  const state = { allow: true, onNative: () => {}, checks: [] };
+  const state = { allow: true, onNative: () => {}, checks: [], candidatesAvailable: !emptyCandidates, localServers: null };
   class StatefulPC extends EventTarget {
     signalingState = "stable";
     connectionState = "new";
@@ -2545,7 +2545,7 @@ async function glareFixture(t, { polite = true, hold, gathering = false, emptyCa
     closes = 0;
     busy = 0;
     listeners = new Map();
-    constructor() { super(); connections.push(this); }
+    constructor(configuration) { super(); this.configuration = state.localServers ? { ...configuration, iceServers: structuredClone(state.localServers) } : configuration; connections.push(this); }
     addEventListener(type, callback, options) {
       if (!this.listeners.has(type)) this.listeners.set(type, new Set());
       this.listeners.get(type).add(callback); super.addEventListener(type, callback, options);
@@ -2566,8 +2566,8 @@ async function glareFixture(t, { polite = true, hold, gathering = false, emptyCa
       return this.native(`local:${description.type}`, () => {
         if (description.type === "rollback") { assert.ok(rollbackSupported, "Native rollback unavailable"); assert.equal(this.signalingState, "have-local-offer"); this.signalingState = "stable"; this.localDescription = null; }
         else if (description.type === "offer") { assert.equal(this.signalingState, "stable"); this.signalingState = "have-local-offer"; this.localDescription = description; }
-        else { assert.equal(description.type, "answer"); assert.equal(this.signalingState, "have-remote-offer"); this.signalingState = "stable"; this.localDescription = description; if (!emptyCandidates) this.iceGatheringState = "complete"; }
-        if (description.type !== "rollback" && !emptyCandidates) this.localDescription = { ...description, sdp: `${description.sdp}\r\na=candidate:fixture 1 udp 1 fixture.local 9 typ host\r\n` };
+        else { assert.equal(description.type, "answer"); assert.equal(this.signalingState, "have-remote-offer"); this.signalingState = "stable"; this.localDescription = description; if (state.candidatesAvailable) this.iceGatheringState = "complete"; }
+        if (description.type !== "rollback" && state.candidatesAvailable) this.localDescription = { ...description, sdp: `${description.sdp}\r\na=candidate:fixture 1 udp 1 fixture.local 9 typ ${state.localServers ? "relay" : "host"}\r\n` };
       });
     }
     candidate() {
@@ -2660,6 +2660,88 @@ for (const type of ["offer", "answer"]) test(`completed candidate-free ${type} f
   assert.equal(f.swarm.metrics().peers.dialsTimedOut, 0);
   assert.equal(pc.listeners.get("icecandidate")?.size ?? 0, 0);
   assert.equal(pc.listeners.get("icegatheringstatechange")?.size ?? 0, 0);
+});
+
+test("explicit local candidate retry replaces only a remembered empty-candidate dial using the future factory configuration", async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 }), old = await f.start();
+  old.complete(); await glareFlush();
+  assert.equal(old.closes, 1); assert.equal(f.swarm.metrics().peers.dialsFailed, 1);
+  assert.equal(f.received.length, 0, 'the failed actual gathered() path disclosed no candidate-free offer');
+  const servers = [{ urls: 'turns:changed.example:5549?transport=tcp', username: 'local-test-lease', credential: 'fixture-only' }];
+  f.state.localServers = servers; f.state.candidatesAvailable = true;
+  assert.equal(typeof f.swarm.retryLocalCandidates, 'function', 'explicit local-candidate retry API is missing');
+  assert.equal(f.swarm.retryLocalCandidates(), 1);
+  assert.equal(f.swarm.retryLocalCandidates(), 0, 'the same local failure authorises only one attempt');
+  await glareFlush();
+  assert.equal(f.connections.length, 2, 'a new current-config PC starts without advancing the old60s cooldown');
+  const fresh = f.connections[1]; assert.deepEqual(fresh.configuration.iceServers, servers);
+  fresh.complete(); await glareFlush();
+  const sent = f.received.find(value => value.type === 'offer'); assert(sent); assert.match(sent.payload.sdp, /typ relay/);
+  f.signal('answer', sent.requestId); await glareFlush(); fresh.localChannel.open(); await glareFlush();
+  assert.deepEqual(f.swarm.peerConnections(), [fresh]);
+  assert.equal(f.swarm.retryLocalCandidates(), 0); assert.equal(f.connections.length, 2, 'a connected link is never recreated');
+});
+
+for (const invalid of ['throwing-description', 'nonstring-sdp']) test(`local candidate retry never treats ${invalid} as a known empty gather`, async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 }), old = await f.start();
+  const readable = old.localDescription; let reads = 0;
+  Object.defineProperty(old, 'localDescription', { configurable: true, get() {
+    reads++;
+    if (invalid === 'throwing-description') throw new Error('fixture unreadable native description');
+    return { ...readable, sdp: 42 };
+  } });
+  old.complete(); await glareFlush();
+  assert.equal(reads, 2, 'classification reuses the existing gather read plus the existing diagnostic read');
+  assert.equal(old.closes, 1); assert.equal(f.swarm.metrics().peers.dialsFailed, 1); assert.equal(f.received.length, 0);
+  Object.defineProperty(old, 'localDescription', { configurable: true, writable: true, value: readable });
+  f.state.candidatesAvailable = true; f.state.localServers = [{ urls: 'turns:changed.example:5549?transport=tcp' }];
+  assert.equal(typeof old.localDescription.sdp, 'string', 'the invalid getter is repaired before notification');
+  assert.equal(f.swarm.retryLocalCandidates(), 0, 'unknown/native read failure must retain its ordinary cooldown');
+  await glareFlush(); assert.equal(f.connections.length, 1);
+});
+
+test("local candidate retry also remembers an actual completed empty-answer failure", async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 });
+  f.offer(); await glareFlush(); const old = f.connections[0]; old.complete(); await glareFlush();
+  assert.equal(f.swarm.metrics().peers.dialsFailed, 1); assert.equal(f.received.length, 0);
+  f.state.candidatesAvailable = true;
+  assert.equal(f.swarm.retryLocalCandidates(), 1); await glareFlush();
+  assert.equal(f.connections.length, 2); f.connections[1].complete(); await glareFlush();
+  assert.equal(f.received.filter(value => value.type === 'offer').length, 1);
+  assert.equal(f.swarm.retryLocalCandidates(), 0);
+});
+
+test("local candidate retry cannot release a newer generic cooldown written in the same millisecond", async t => {
+  t.mock.method(Date, 'now', () => 2000000000000);
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 }), old = await f.start();
+  old.complete(); await glareFlush(); assert.equal(f.swarm.metrics().peers.dialsFailed, 1);
+  t.mock.method(Object.getPrototypeOf(old), 'createAnswer', async () => { throw new Error('fixture native failure'); });
+  f.offer('new-unrelated-native-failure'); await glareFlush();
+  assert.equal(f.connections.length, 2); assert.equal(f.swarm.metrics().peers.dialsFailed, 2);
+  assert.equal(f.swarm.retryLocalCandidates(), 0, 'the old local-candidate marker cannot unlock an equal-timestamp generic cooldown');
+  f.peer.announcePresence({ role: 'viewer', transports: [{ type: 'webrtc', publicKey: f.peer.pubkey }], ticket: 'remote-ticket' });
+  await f.tick(1500); assert.equal(f.connections.length, 2);
+});
+
+for (const ending of ['timeout', 'refusal']) test(`local candidate retry leaves ${ending} cooldown unchanged`, async t => {
+  const f = await glareFixture(t, { gathering: ending === 'timeout', emptyCandidates: ending === 'timeout', timeout: 8000 }), pc = await f.start();
+  if (ending === 'timeout') { await f.tick(7999); assert.equal(pc.closes, 0); await f.tick(1); assert.equal(f.swarm.metrics().peers.dialsTimedOut, 1); }
+  else { const sent = f.received.find(value => value.type === 'offer'); f.signal('reject', sent.requestId); await glareFlush(); assert.equal(f.swarm.metrics().peers.dialsRejected, 1); }
+  assert.equal(f.swarm.retryLocalCandidates(), 0); await glareFlush(); assert.equal(f.connections.length, 1);
+});
+
+for (const ending of ['admission-revoked', 'stop', 'stop-during-admission']) test(`local candidate retry respects ${ending}`, async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 }), old = await f.start();
+  old.complete(); await glareFlush(); assert.equal(f.swarm.metrics().peers.dialsFailed, 1);
+  f.state.candidatesAvailable = true; let release;
+  if (ending === 'stop') { f.swarm.stop(); assert.equal(f.swarm.retryLocalCandidates(), 0); }
+  else {
+    if (ending === 'admission-revoked') f.state.allow = false;
+    else f.state.admit = () => new Promise(resolve => { release = resolve; });
+    assert.equal(f.swarm.retryLocalCandidates(), 1, 'count denotes a normal admission attempt, not an admitted PC');
+    if (ending === 'stop-during-admission') { await glareFlush(); assert(release); f.swarm.stop(); release(true); }
+  }
+  await glareFlush(); assert.equal(f.connections.length, 1); assert.equal(f.swarm.retryLocalCandidates(), 0);
 });
 
 test("stop retires candidate-free gathering before a late candidate can signal", async t => {

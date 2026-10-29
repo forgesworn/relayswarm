@@ -55,7 +55,7 @@ presence; `close()` also unregisters the relay-open handler.
 ## Browser loader
 
 `createHlsSwarm(options)` returns
-`{ attach(hls), updateTicket(ticket), stop(), metrics(), peerConnections(), peerConnectionDetails(), trace() }`.
+`{ attach(hls), updateTicket(ticket), retryLocalCandidates(), stop(), metrics(), peerConnections(), peerConnectionDetails(), trace() }`.
 `attach` wraps `hls.config.fLoader`; call it before `loadSource`. `stop` is the
 origin-only kill switch and closes connections, cancels pending work, releases
 held bytes and restores the original loader. Create a new swarm to participate
@@ -669,6 +669,30 @@ Apply and upload consent; an absent legacy descriptor means `"all"`.
 Relay-only is an explicit operator privacy/compatibility choice, not a TLS
 selection or a proved transfer repair. It never downgrades to `"all"`; if usable
 relay connectivity is unavailable, playback retains its existing origin fallback.
+
+## Explicit local-candidate recovery
+
+`retryLocalCandidates()` synchronously returns an integer from 0 through 256:
+the number of remembered local failures handed to the normal dial path.
+Admission may still refuse an attempt or asynchronous negotiation may fail;
+the count does not promise a new or connected peer. Notification consumes the
+current remembered batch, including entries blocked by current capacity or
+policy. There is no automatic notification, periodic retry or deferred queue.
+
+Only a readable string SDP with no local candidate at completed gathering is
+remembered, using the existing SDP evaluation. A throwing description getter,
+nonstring SDP, cancelled/unknown gather or original dial timeout does not qualify. Each entry is
+one-shot, bounded to the newest 256, and forgotten on stop, a new attempt or
+negotiation, or another cooldown write. A newer unrelated cooldown invalidates
+the entry even when both writes occur in the same millisecond. Remote refusal,
+admission, generic/native-failure, timeout and ban handling are unchanged.
+
+The host calls this after making newly usable ICE configuration available to
+its future connection factory. The existing current admission, outgoing slot,
+capacity, ban and discovery checks still guard every attempt. The API does not
+mutate constructor-captured `iceServers`, call `setConfiguration()`, restart
+ICE, recreate established links, reset Hls/cache/credit or renew deadlines.
+The original 1200 ms gather soft cap and existing dial timeout remain unchanged.
 
 ## Optional demo TURN renewal
 

@@ -10,6 +10,27 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased local-candidate retry notification (29 October 2026)
+
+An explicit host notification can retry remembered local no-candidate gather
+failures after the host makes a new configuration available to its future
+connection factory. The bounded one-shot API retains ordinary current
+admission, capacity and discovery checks. It does not update existing peers or
+release unrelated cooldowns, and it adds no timer or automatic presence retry.
+
+A regression first fails for the missing API after a real SDK no-candidate
+gather failure. Twenty-four focused signalling controls then pass, including
+future-constructor configuration, incoming and outgoing failures, same-millisecond
+generic cooldown replacement, repeated notification, connected links,
+admission revocation, timeout/refusal preservation and stop across an awaited
+admission. Two additional regressions first reject the old treatment of an
+unreadable native description as a definite empty gather; after correction,
+both retain the ordinary cooldown and exact original SDP read count. Native RTC
+and relay transport boundaries are simulated; signed and
+encrypted SDK/session handling is real. This unit proves local lifecycle
+behaviour, not browser ICE, field playback, useful contribution or release
+qualification. Earlier fixture setup failures and field failures remain retained.
+
 ## Unreleased cached setup diagnostics (29 October 2026)
 
 Cached mixed setup now identifies a missing exact captured HAVE and an
