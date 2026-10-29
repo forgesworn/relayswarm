@@ -875,7 +875,7 @@ function startupFixture(t, options = {}) {
       return permit.sha256 === sha(new Uint8Array(data));
     },
     onVerified: (_permit, data) => { retained.push(data); return true; },
-    onReuse: options.onReuse, reuseBudget: options.reuseBudget,
+    onReuse: options.onReuse, reuseBudget: options.reuseBudget, prefetch: options.prefetch,
   });
   const load = (sn = 0, parentMs = 1_000) => {
     const loader = new engine.Loader({ progressive: options.progressive ?? false }), ctx = context(sn), calls = { success: 0, error: 0, abort: 0, progress: 0 };
@@ -3042,4 +3042,68 @@ test('retired warm rows outside a new demand plan do not invalidate its actual s
   assert.equal(f.engine.contains(9), true, 'the current genuine8–10s demand remains valid despite an old canceled2–4s row');
   assert.equal(f.engine.contains(2.5), false);
   release(); await flushStartup(); assert.equal(f.engine.snapshot().reservationBytes, 0);
+});
+
+
+for (const refusal of ['false', 'throw']) test(`warm speculative source refusal ${refusal} leaves genuine demand immediate`, async t => {
+  const decisions = [];
+  const f = startupFixture(t, { startup: false, steady: true, prefetch: context => {
+    decisions.push(context.frag.sn);
+    if (context.frag.sn !== 1) return true;
+    if (refusal === 'throw') throw Error('fixture unavailable owner');
+    return false;
+  } });
+  const first = f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  assert.equal(first.calls.success, 1);
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 2], 'unowned future is skipped while the next authorised future can run');
+  const demand = f.load(1, 12000);
+  const genuine = f.requests.find(row => row.context === demand.context);
+  assert(genuine, 'genuine source begins synchronously despite speculative refusal');
+  genuine.finish(); await flushStartup();
+  assert.equal(demand.calls.success, 1); assert.equal(demand.calls.error, 0); assert.equal(demand.calls.abort, 0);
+  assert.deepEqual(decisions, [1, 2]);
+  assert.equal(f.engine.snapshot().verifiedPeerBytes, 0); assert.equal(f.engine.snapshot().consumedPeerBytes, 0);
+});
+
+for (const ending of ['clear', 'stop']) test(`warm speculative owner callback cannot start work after reentrant ${ending}`, async t => {
+  let f, checks = 0;
+  f = startupFixture(t, { startup: false, steady: true, prefetch: () => {
+    checks++; f.engine[ending](); return true;
+  } });
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  assert.equal(checks, 1);
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0]);
+  assert.equal(f.engine.snapshot().active, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+});
+
+test('warm speculative owner decision cannot deny a genuine promotion awaiting authority', async t => {
+  let release, held = false;
+  const checks = [];
+  const f = startupFixture(t, { startup: false, steady: true, reuseBudget: () => 25,
+    permit: context => {
+      const permit = { key: context.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true };
+      if (context.frag.sn !== 1 || held) return permit;
+      held = true; return new Promise(resolve => { release = () => resolve(permit); });
+    },
+    prefetch: context => { checks.push(context.frag.sn); return false; } });
+  t.after(() => release?.());
+  f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  assert.equal(typeof release, 'function');
+  const demand = f.load(1, 12000); release(); await flushStartup();
+  const promoted = f.requests.find(row => row.context.frag.sn === 1);
+  assert(promoted); assert(!checks.includes(1), 'the speculative policy is bypassed after real promotion');
+  promoted.finish(); await flushStartup();
+  assert.equal(demand.calls.success, 1); assert.equal(demand.calls.error, 0);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+});
+
+test('warm speculative owner refusal does not limit startup coverage', async t => {
+  let f; const states = [];
+  f = startupFixture(t, { steady: true, prefetch: () => { states.push(f.engine.startupSnapshot().state); return false; } });
+  const first = f.load(0, 12000); f.requests[0].finish(); await flushStartup();
+  assert.equal(f.engine.startupSnapshot().state, 'buffering');
+  const future = f.requests.find(row => row.context.frag.sn === 1); assert(future);
+  future.finish(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(f.engine.startupSnapshot().state, 'ready');
+  assert(states.every(state => state === 'ready'), 'startup admits its own required coverage before steady ownership decisions');
 });

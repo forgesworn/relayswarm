@@ -42,7 +42,7 @@ export function warmContext(context) {
 }
 
 export function createWarmAhead({ Loader, next, authorise, verify, reserve = () => true, onVerified, onReuse,
-  reuseBudget = () => 0, allowed = () => true, steady = true, startupTarget = null, startupCommit = null, startupMaxBytes = MAX_BYTES, startupRecovery = () => 2_000 }) {
+  reuseBudget = () => 0, allowed = () => true, prefetch = () => true, steady = true, startupTarget = null, startupCommit = null, startupMaxBytes = MAX_BYTES, startupRecovery = () => 2_000 }) {
   if (!Number.isSafeInteger(startupMaxBytes) || startupMaxBytes < MAX_BYTES || startupMaxBytes > 32 * 1024 * 1024 ||
       startupMaxBytes !== MAX_BYTES && typeof startupTarget !== 'function') throw new RangeError('Invalid startup byte budget');
   let closed = false, generation = 0, active = null, scope = null, queued = [], config, loaderConfig, latestDemand = null, loadId = 0;
@@ -170,6 +170,15 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         if (controller.signal.aborted || closed || revision !== generation || !live(row) || !allowed()) return null;
         if (!permit || !Number.isSafeInteger(permit.size) || permit.size < 1 || permit.size > MAX_BYTES) { counters.rejected++; return null; }
         if (deferSpeculation()) return null;
+        // Only optional steady work may yield to another contributor. Startup
+        // coverage and a genuine demand promoted during authorisation retain
+        // their existing source path, without a wait or a renewed deadline.
+        if ((startup.state === 'off' || startup.state === 'ready') && !row.genuine()) {
+          let proceed = false;
+          try { proceed = prefetch(item.context, permit) === true; } catch {}
+          if (!row.genuine() && !proceed) return null;
+          if (controller.signal.aborted || closed || revision !== generation || !live(row) || !allowed()) return null;
+        }
         while (!bytesFit(permit.size) && cache.size && startup.state !== 'buffering') drop(cache.keys().next().value);
         if (!bytesFit(permit.size)) { counters.rejected++; return null; }
         row.reserved = permit.size;

@@ -5767,6 +5767,144 @@ test('verified piece flow never pools separate transfers, connections or time to
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
+test('owned warm reciprocal future owners supply real mixed consumption without duplicate whole source', { timeout: 15000 }, async t => {
+  // Deterministic policy proof: simulated source/native RTC, real sessions,
+  // commitments, Core, ordered protocol bytes, verification and consumption.
+  // No source server, preloaded cache/HAVE, timing model or claimed WAN rate.
+  const pair = await framingPairFixture(t, { pairedState: true }), actors = [], source = [], loaders = new Set(), objects = new Map(), events = new Map();
+  const size = 1024 * 1024, secret = generateSecretKey(), seconds = Math.floor(Date.now() / 1000);
+  const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds,
+    tags: [['d', 'reciprocal-futures'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
+  const keyFor = path => createHash('sha256').update(`${base.swarmId}\n${path}`).digest('hex');
+  const getCommitment = ctx => {
+    const path = new URL(ctx.url).pathname, data = objects.get(path); assert(data);
+    const id = `${path}:${ctx.frag.sn}:${ctx.frag.cc}`;
+    if (!events.has(id)) {
+      const pieceSize = commitmentPieceSize(data.length), pieces = [];
+      for (let at = 0; at < data.length; at += pieceSize) pieces.push(createHash('sha256').update(data.subarray(at, at + pieceSize)).digest('hex'));
+      events.set(id, finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds,
+        tags: [['x', base.swarmId], ['e', streamEvent.id]], content: commitmentContent({ v: 3,
+          streamEventId: streamEvent.id, swarmId: base.swarmId, key: keyFor(path), rendition: '/media/index.m3u8',
+          playlist: '/media/index.m3u8', mediaType: 'main', encryption: null, sequence: ctx.frag.sn,
+          discontinuity: ctx.frag.cc, part: null, sha256: createHash('sha256').update(data).digest('hex'),
+          size: data.length, pieceSize, pieces, expiresAt: seconds + 60 }) }, secret));
+    }
+    return events.get(id);
+  };
+  const invoke = (actor, frag) => {
+    const f = actors[actor], ctx = { url: frag.url, frag, part: null, type: LoaderContextType.MEDIA_FRAGMENT,
+      responseType: 'arraybuffer', headers: {}, rangeStart: 0, rangeEnd: 0 };
+    const loader = new f.hls.config.fLoader(f.hls.config), calls = { success: 0, error: 0, abort: 0, timeout: 0 };
+    frag.stats = loader.stats;
+    const response = new Promise((resolve, reject) => loader.load(ctx, { timeout: 10000 }, {
+      onSuccess: value => { calls.success++; resolve(new Uint8Array(value.data)); },
+      onError: () => { calls.error++; reject(new Error('reciprocal source error')); },
+      onAbort: () => { calls.abort++; reject(new Error('reciprocal source abort')); },
+      onTimeout: () => { calls.timeout++; reject(new Error('reciprocal source timeout')); },
+    }));
+    response.catch(() => {}); return { response, calls };
+  };
+  try {
+    for (const actor of [0, 1]) {
+      class Source extends Loader {
+        stats = new LoadStats();
+        load(ctx, config, callbacks) {
+          const data = objects.get(new URL(ctx.url).pathname); assert(data);
+          const from = ctx.rangeEnd ? ctx.rangeStart : 0, to = ctx.rangeEnd || data.length;
+          const row = { actor, sn: ctx.frag.sn, warm: Boolean(ctx[WARM_AHEAD]), range: ctx.rangeEnd ? [from, to] : null,
+            bytes: 0, complete: false, aborted: false }; source.push(row); loaders.add(this);
+          this.stats.loading.start = performance.now();
+          this.complete = () => {
+            if (row.complete || row.aborted) return;
+            row.complete = true; row.bytes = to - from; this.stats.loaded = this.stats.total = row.bytes;
+            this.stats.loading.first = this.stats.loading.end = performance.now();
+            callbacks.onSuccess({ data: data.slice(from, to).buffer, code: row.range ? 206 : 200 }, this.stats, ctx, null);
+          };
+          this.row = row;
+          // Real callback latency calibrates recovery above the two-second
+          // future duration; no measured model or test clock is injected.
+          if (ctx.frag.sn === 0 || row.range) this.timer = setTimeout(this.complete, ctx.frag.sn === 0 ? 1600 : 20);
+          // Whole speculative futures stay pending until their owner ledger is
+          // checked, so no holder can have advertised either future yet.
+        }
+        abort() { clearTimeout(this.timer); if (this.row && !this.row.complete) this.row.aborted = true; }
+        destroy() { this.abort(); loaders.delete(this); }
+      }
+      const media = Object.assign(new EventTarget(), { currentTime: 0, paused: false, ended: false, seeking: false,
+        readyState: 4, playbackRate: 1, buffered: { length: 0 } });
+      actors.push(await pair.make({ OriginLoader: Source, player: { media }, swarmOptions: {
+        streamEvent, getCommitment, warmAhead: true, bufferedMixedRanges: true, zeroBudgetPeerRace: true,
+        sustainablePeerWait: true, originReserveMs: 2000, maxPeerWaitMs: 2500, traceRequests: 4096 } }));
+    }
+    await until(() => actors.every(f => f.swarm.metrics().peers.connected === 1));
+    const pubkeys = actors.map(f => f.swarm.metrics().pubkey), winner = path => {
+      const key = BigInt('0x' + keyFor(path));
+      return (key ^ BigInt('0x' + pubkeys[0])) < (key ^ BigInt('0x' + pubkeys[1])) ? 0 : 1;
+    };
+    const paths = [];
+    for (const owner of [0, 1]) {
+      for (let n = 0; n < 256; n++) {
+        const path = `/media/future-${owner}-${n}.ts`;
+        if (winner(path) === owner) { paths.push(path); break; }
+      }
+    }
+    assert.equal(paths.length, 2, 'actual peer identities yield opposite deterministic future owners');
+    objects.set('/media/lead.ts', new Uint8Array(32768).fill(9));
+    paths.forEach((path, index) => objects.set(path, Uint8Array.from({ length: size }, (_, i) => (i * 131 + index * 17) % 251)));
+    const playlist = '#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nlead.ts\n' +
+      paths.map(path => `#EXTINF:2,\n${path.split('/').at(-1)}\n`).join('') + '#EXT-X-ENDLIST\n';
+    const details = actors.map(f => {
+      const parsed = M3U8Parser.parseLevelPlaylist(playlist, 'https://origin.example/media/index.m3u8', 0, 'main', 0, null);
+      f.hls.levels = [{ details: parsed }]; return parsed;
+    });
+    for (const f of actors) assert.deepEqual([f.swarm.metrics().core.verifier, f.swarm.metrics().core.selection, f.swarm.metrics().core.discovery], ['wasm', 'wasm', 'wasm']);
+    const lead = actors.map((_, actor) => invoke(actor, details[actor].fragments[0]));
+    await Promise.all(lead.map(x => x.response));
+    for (const f of actors) f.hls.media.buffered = { length: 1, start: () => 0, end: () => 10 };
+    await until(() => source.filter(row => row.sn > 0).length >= 2);
+    const initial = source.filter(row => row.sn > 0);
+    const advertised = pair.channels.flatMap(channel => channel.sent.filter(row => row?.t === 'have').flatMap(row => row.keys ?? row.add ?? []));
+    assert(paths.every(path => !advertised.includes(keyFor(path))), 'neither held future body has been seeded or advertised');
+    assert(actors.every(f => f.swarm.metrics().bytes.peerFirst === 0 && f.swarm.metrics().warmAhead.verifiedPeerBytes === 0));
+    console.log(JSON.stringify({ fixture: 'reciprocal-warm-source-policy', simulatedSourceAndRtc: true,
+      coreReady: actors.map(f => f.swarm.metrics().core.state), expectedOwners: [{ actor: 0, sn: 1 }, { actor: 1, sn: 2 }],
+      actualSourceStarts: initial.map(({ actor, sn, warm, range }) => ({ actor, sn, warm, range })),
+      futureHaveCount: paths.filter(path => advertised.includes(keyFor(path))).length }));
+    assert.deepEqual(initial.map(({ actor, sn }) => ({ actor, sn })).sort((a, b) => a.actor - b.actor),
+      [{ actor: 0, sn: 1 }, { actor: 1, sn: 2 }], 'one deterministic source owner per future; current simultaneous whole duplication is the regression');
+    assert(initial.every(row => row.warm && !row.range));
+    for (const loader of loaders) if (loader.row?.sn > 0) loader.complete();
+    await until(() => actors.every(f => f.swarm.metrics().warmAhead.verified >= 1));
+    await until(() => paths.every(path => pair.channels.some(channel => channel.sent.some(row => row?.t === 'have' && (row.keys ?? row.add ?? []).includes(keyFor(path))))));
+    for (const sn of [1, 2]) {
+      const demands = actors.map((_, actor) => invoke(actor, details[actor].fragments[sn]));
+      const data = objects.get(paths[sn - 1]);
+      await Promise.all(demands.map(async demand => { sameBytes(await demand.response, data); assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 }); }));
+    }
+    for (const actor of [0, 1]) {
+      const f = actors[actor], metrics = f.swarm.metrics(), rows = source.filter(row => row.actor === actor && row.sn > 0);
+      assert(metrics.bytes.peerFirst > 0 && metrics.bytes.peerFirst < size, JSON.stringify({ actor,
+        message: 'reciprocal consumer must exercise partial Core assembly, not an unobserved whole-peer or source fallback',
+        peerBytes: metrics.bytes.peerFirst, warm: Object.fromEntries(['started', 'verified', 'coalesced', 'promotions',
+          'localReuseBytes', 'verifiedPeerBytes', 'consumedPeerBytes'].map(key => [key, metrics.warmAhead[key]])),
+        source: rows.slice(-16), transfers: metrics.core.multiHolder.transfers, delivered: metrics.core.multiHolder.delivered,
+        trace: f.swarm.trace().rows.filter(row => ['load', 'eligibility', 'mixedScope', 'xfer', 'xferFinish'].includes(row.k)).slice(-40)
+          .map(row => ({ k: row.k, load: row.load, sn: row.sn, op: row.op, reason: row.reason, budgetMs: row.budgetMs,
+            role: row.budgetGeometry?.source, exclusiveOrigin: row.exclusiveOrigin, peerOnly: row.peerOnly,
+            commands: row.out?.c?.slice(0, 8).map(command => ({ t: command.t, p: command.p })) })) }));
+      assert.equal(rows.reduce((sum, row) => sum + row.bytes, 0) + metrics.bytes.peerFirst, 2 * size, 'actual source slices and accepted peer bytes are disjoint');
+      assert.equal(rows.filter(row => !row.range).length, 1, 'consumer adds no duplicate future whole GET');
+      assert(rows.every(row => row.complete && !row.aborted));
+      assert(f.swarm.trace().rows.some(row => row.k === 'xfer' && row.op === 'start' && row.exclusiveOrigin === true &&
+        row.out.c.some(command => command.t === 'request') && row.out.c.some(command => command.t === 'origin')), 'actual Core mixed plan consumes the other holder');
+      const credit = metrics.bytes.peerFirst, before = source.length;
+      sameBytes(await invoke(actor, details[actor].fragments[2]).response, objects.get(paths[1]));
+      assert.equal(f.swarm.metrics().bytes.peerFirst, credit, 'reusing the same future cannot credit it twice');
+      assert.equal(source.length, before);
+    }
+  } finally { pair.close(); for (const loader of [...loaders]) loader.destroy(); }
+});
+
 test('verified piece flow waits for real worker verification and rejects invalidated replies', async t => {
   for (const invalidation of ['none', 'closed-link', 'media-replaced', 'deadline']) await t.test(invalidation, async t => {
     const { WorkerImpl, workers } = transferWorkerFixture(t, { holdFinal: true });
@@ -8639,7 +8777,7 @@ test("a holder that failed verification as a trial is banned and closed, and is 
 
 // Real signed/encrypted rendezvous and both public factories; only ordered RTC
 // delivery is bridged. No retained relay history or artificial HAVE payloads.
-async function framingPairFixture(t, {omitPresenceCapability=false, capability={}, staleAnswer=false, deniedOffer=false}={}) {
+async function framingPairFixture(t, {omitPresenceCapability=false, capability={}, staleAnswer=false, deniedOffer=false, pairedState=false}={}) {
   const pcs=new Map(),channels=[],presences=[],signals=[],swarms=[],pendingSignals=[];let next=0;
   class Ordered extends RecordedChannel {
     readyState='connecting';ordered=true;maxRetransmits=null;maxPacketLifeTime=null;
@@ -8659,9 +8797,12 @@ async function framingPairFixture(t, {omitPresenceCapability=false, capability={
       if(description.type==='offer'){
         this.channel=new Ordered();channels.push(this.channel);this.channel.other=peer.channel;peer.channel.other=this.channel;
         const event=new Event('datachannel');event.channel=this.channel;this.dispatchEvent(event);
-      }else queueMicrotask(()=>{for(const channel of [this.channel,peer.channel]){channel.readyState='open';channel.dispatchEvent(new Event('open'));}});
+      }else queueMicrotask(()=>{
+        if(pairedState)for(const pc of [this,peer]){pc.connectionState='connected';pc.dispatchEvent(new Event('connectionstatechange'));}
+        for(const channel of [this.channel,peer.channel]){channel.readyState='open';channel.dispatchEvent(new Event('open'));}
+      });
     }
-    close(){super.close();this.channel?.close();}
+    close(){super.close();if(pairedState)this.connectionState='closed';this.channel?.close();}
   }
   const Memory=memoryRelaySocket();
   class Socket extends Memory {send(text){const [type,event]=JSON.parse(text);if(type==='EVENT'&&event.kind===24170)presences.push(event);super.send(text);}}
@@ -8684,7 +8825,7 @@ async function framingPairFixture(t, {omitPresenceCapability=false, capability={
   const bytes=new Uint8Array(32).fill(9),key=createHash('sha256').update(`${base.swarmId}\n/media/seg.ts`).digest('hex');
   const hash=createHash('sha256').update(bytes).digest('hex');
   const signed=signedFixture({v:3,key,sha256:hash,rendition:'/media/index.m3u8',playlist:'/media/index.m3u8',mediaType:'main',encryption:null,pieceSize:commitmentPieceSize(bytes.length),pieces:[hash]});
-  const make=async({cold=false,delay=0,legacy=false,admit}={})=>{
+  const make=async({cold=false,delay=0,legacy=false,admit,OriginLoader=null,swarmOptions={},player={}}={})=>{
     let http=0,bodies=0,aborts=0;class Origin extends Loader {
       stats=new LoadStats();
       load(ctx,config,callbacks){http++;const complete=()=>{bodies++;this.stats.loaded=this.stats.total=bytes.length;callbacks.onSuccess({data:bytes.slice().buffer},this.stats,ctx,null);};
@@ -8695,8 +8836,8 @@ async function framingPairFixture(t, {omitPresenceCapability=false, capability={
       mode:'peer-first',coreWasm:multiCore,multiHolder:true,serve:true,maxPeers:1,getCommitment:()=>signed.event,streamEvent:signed.options.streamEvent,
       originReserveMs:100,originFallbackMs:1000,maxPeerWaitMs:1500,traceRequests:128,ticket:"granted",
       ...(legacy?{multiHolder:false}:{}),...(admit?{admit}:{}),
-      ...(cold?{sustainablePeerWait:true,zeroBudgetPeerRace:true,lateHaveRace:true,latePeerRace:true,uploadPacing:true}:{})});swarms.push(swarm);
-    const hls={config:{loader:Origin},media:{currentTime:0,buffered:{length:cold?0:1,start:()=>0,end:()=>8}}};swarm.attach(hls);
+      ...(cold?{sustainablePeerWait:true,zeroBudgetPeerRace:true,lateHaveRace:true,latePeerRace:true,uploadPacing:true}:{}),...swarmOptions});swarms.push(swarm);
+    const hls={...player,config:{...player.config,loader:OriginLoader??Origin},media:player.media??{currentTime:0,buffered:{length:cold?0:1,start:()=>0,end:()=>8}}};swarm.attach(hls);
     await until(()=>swarm.metrics().core.state==='ready'&&presences.some(event=>event.pubkey===swarm.metrics().pubkey));
     const frag=M3U8Parser.parseLevelPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n#EXTINF:2,\nseg.ts\n','https://origin.example/media/index.m3u8',0,'main',0,null).fragments[0];
     const load=()=>new Promise((resolve,reject)=>{const loader=new hls.config.fLoader({});frag.stats=loader.stats;

@@ -10,6 +10,55 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased cooperative VOD futures (29 October 2026)
+
+When both warm-ahead and buffered mixed ranges are enabled on explicit main
+VOD, optional future source work now chooses a per-key contributor rather than
+always starting the same whole fetch on every viewer. Only current connected,
+serving, admitted range peers participate; unavailable local Core/Worker paths
+retain the existing warming behaviour. Exact cached holders can still feed
+mixed delivery. Startup coverage and genuine or already-promoted demand do
+not wait for owner agreement, and all original budgets and credit rules remain.
+
+A two-SDK regression first records both viewers starting the same future whole
+source before either has advertised that object. With the new policy, distinct
+future owners supply reciprocal actual Core mixed transfers, with disjoint
+source slices and verified peer bytes, exact object hashes and no duplicate
+whole future source or repeated accepted credit. Source and native transport
+are simulated; sessions, commitments, protocol bytes, Core verification and
+consumption are real. Genuine zero-wait eligibility comes from actual delayed
+source callbacks and measured recovery, without seeding rates or clocks.
+The full warm-manager suite passes 199 checks; 20 focused SDK checks also pass,
+including existing framing and main/Worker mixed positives. These local checks
+are not a field-throughput or public/physical-device qualification.
+
+## Latest private playback and contribution result (29 October 2026)
+
+The `f5c0760` runtime candidate completed a real two-browser private test with
+340.001 seconds of wall observation and 340.001 seconds of monotonic observation
+(rounded). Each player advanced 339.278 seconds. First 3840x2160 frames arrived
+in approximately 4.8 and 6.0 seconds. Both recorded zero post-qualification
+waiting, stalls, errors and dropped frames, including a natural wrap followed
+by 79.5 seconds of playback. Both initially selected local relay/TLS and literal
+remote-relay candidates with succeeded pairs.
+
+The overall result remains failed. Accepted peer media was 5,788,148 bytes
+(0.519%) and 884,736 bytes (0.0802%), below the unchanged 5% and 8 MiB per-viewer
+requirements. One final selected pair was `in-progress`, failing the required
+final succeeded-pair proof despite its connected PC/ICE/SCTP/DTLS. The driver
+therefore failed its final assertion after the observation. These results are
+private desktop-browser evidence, not public operator, physical iPhone or
+source-traffic savings qualification. Temporary test resources were removed;
+the paired private relay was preserved.
+
+Both viewers completed real range responses, so the low contribution does not
+show a global range-transfer failure. Of 109 matching first whole-source
+objects, 97 started on both viewers before either response completed. Incomplete
+retained HAVE and warm-reuse history prevents a complete causal attribution.
+The next local candidate coordinates optional future source ownership while
+preserving immediate genuine demand and the original deadlines. Its local
+policy controls do not qualify the field contribution target.
+
 ## Unreleased local-candidate retry notification (29 October 2026)
 
 An explicit host notification can retry remembered local no-candidate gather
