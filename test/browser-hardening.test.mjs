@@ -9058,8 +9058,21 @@ function mixedScopeSetupProof(trace, expected) {
         sequence: [load, entry, startIndex, failure, finishIndex, fallback, origin].map(index => rows[index]) };
     }
     if (rows[fallback].reason === 'peer-result-empty') {
-      if (xfers.length || finishes.length || ranges.length || expected.coreTransfersDelta !== 0 || expected.originRangeAttempts !== 0) return null;
-      return { stage: 'before-core', proofTime, sequence };
+      if (xfers.length || ranges.length || expected.coreTransfersDelta !== 0 || expected.originRangeAttempts !== 0) return null;
+      if (!finishes.length) return { stage: 'before-core', proofTime, sequence };
+      // A synchronous transfer allocation can return after the setup cutoff.
+      // This guard frees it before transfers++, start(), commands or I/O.
+      if (finishes.length !== 1 || rows.slice(entry + 1, origin).some(row => same(row) && row.k === 'origin')) return null;
+      const { row: finished, index: finishIndex } = finishes[0];
+      if (!Number.isSafeInteger(finished.at) || !(failure < finishIndex && finishIndex < fallback &&
+          finished.at >= rejected.at && finished.at <= rows[fallback].at) ||
+          finished.reason !== 'allocation-state-deadline-authority-holder' || finished.delivered !== false ||
+          finished.bufferedMixed !== true || finished.peerOnly !== false || finished.verifiedBytes !== 0 || finished.originBytes !== 0 ||
+          ![finished.ms, finished.peerRemainingMs, finished.recoveryRemainingMs].every(Number.isFinite) || finished.ms < 0 ||
+          !(finished.peerRemainingMs > 0 && finished.recoveryRemainingMs > 0) ||
+          rows[origin].leg !== 'fallback' || rows[origin].ranged !== false || rows[origin].ms !== 0) return null;
+      return { stage: 'after-allocation-before-start', proofTime,
+        sequence: [load, entry, failure, finishIndex, fallback, origin].map(index => rows[index]) };
     }
     // A Core plan is not physical I/O: the mandatory source arm is attempted
     // first, and its existing beforeLoad guard can retire the whole plan before
@@ -9216,6 +9229,72 @@ test('buffered mixed immutable actual after-Core receipt proves the aborted pre-
   assert.equal(receipt.observedCounts.peerRequests, 0); assert.equal(receipt.observedCounts.acceptedPeerBytes, 0);
   assert.equal(receipt.observedCounts.physicalWholeGets, 2); assert.equal(receipt.observedCounts.successfulCallbacks, 1);
   assert.equal(proof.sequence.find(row => row.k === 'xfer').out.late, true, 'retain the actual planning prediction without treating it as physical I/O');
+});
+
+test('buffered mixed immutable actual pre-start allocation receipt proves zero attempted I/O', async () => {
+  const text = (await readFile(new URL('./fixtures/buffered-mixed-allocation-setup.json', import.meta.url), 'utf8')).replace(/\r\n/gu, '\n');
+  assert.equal(createHash('sha256').update(text).digest('hex'), '3cb6b5a67b13f8ccc2aac626a2d0950bfcd9bea26ddf51675abe35c74ba9ed2e');
+  const receipt = JSON.parse(text), { expected } = receipt;
+  assert.equal(receipt.provenance.sourceCommit, 'a007c075c2477b653b40a359531d3dbf8a2792a0');
+  assert.equal(receipt.provenance.originalLogSha256, '2eefe10e1ac781ea6d51db049e2f4ddba2cae992d84696fb6a9646684416ad82');
+  assert.equal(receipt.provenance.originalPayloadSha256, '7ecfc2d68fa1b514b579bdb9ea0622d6727a2650f9134581c9e3c899d045d038');
+  assert.equal(receipt.provenance.originalExitCode, 1, 'original hosted898/899 result remains RED');
+  const proof = mixedScopeSetupProof(receipt.trace, expected);
+  assert.equal(proof?.stage, 'after-allocation-before-start');
+  assert.equal(proof.proofTime, expected.enteredAtMs + 25);
+  assert.deepEqual(proof.sequence.map(row => row.k), ['load', 'mixedScope', 'mixedScope', 'xferFinish', 'mixedScope', 'originStart']);
+  assert.equal(receipt.trace.rows.some(row => row.k === 'xfer'), false, 'allocation abort precedes Core start or commands');
+  assert.deepEqual(receipt.observedCounts, { coreTransfers: 0, originRangeAttempts: 0, peerRequests: 0, acceptedPeerBytes: 0,
+    physicalWholeGets: 2, physicalRangeGets: 0, clientRangeBodies: 0, successfulCallbacks: 1 });
+});
+
+test('buffered mixed pre-start allocation proof rejects other transactions and hidden I/O', async () => {
+  const vector = JSON.parse(await readFile(new URL('./fixtures/buffered-mixed-allocation-setup.json', import.meta.url), 'utf8'));
+  const started = JSON.parse(await readFile(new URL('./fixtures/buffered-mixed-after-core-reply-setup.json', import.meta.url), 'utf8'))
+    .trace.rows.find(row => row.k === 'xfer' && row.op === 'start');
+  assert.equal(mixedScopeSetupProof(vector.trace, vector.expected)?.stage, 'after-allocation-before-start');
+  // Pure counterexamples to an actual immutable receipt, not new traffic or
+  // elapsed measurements. None can use the allocation-abort exception.
+  const controls = [
+    ['wrong finish reason', v => { v.trace.rows[3].reason = 'signal-abort'; }],
+    ['extra finish', v => { v.trace.rows.splice(4, 0, structuredClone(v.trace.rows[3])); }],
+    ['Core started before rejection', v => { v.trace.rows.splice(2, 0, { ...structuredClone(started), load: 2, at: 2422 }); }],
+    ['Core transfer counted', v => { v.expected.coreTransfersDelta = 1; }],
+    ['origin attempt counted', v => { v.expected.originRangeAttempts = 1; }],
+    ['physical Range GET', v => { v.expected.physicalRangeGets = 1; }],
+    ['Range loader invoked', v => { v.expected.clientRangeLoads = 1; }],
+    ['peer request sent', v => { v.expected.peerRequests = 1; }],
+    ['accepted peer credit', v => { v.expected.acceptedPeerBytes = 1; }],
+    ['hidden request command', v => { v.trace.rows.splice(4, 0, { k: 'request', load: 2, at: 2423 }); }],
+    ['hidden range callback', v => { v.trace.rows.splice(4, 0, { k: 'origin', load: 2, at: 2423, ranged: true }); }],
+    ['source arm before fallback', v => { v.trace.rows.splice(4, 0, { k: 'origin', load: 2, at: 2423, ranged: false }); }],
+    ['finish claims delivery', v => { v.trace.rows[3].delivered = true; }],
+    ['finish claims verified bytes', v => { v.trace.rows[3].verifiedBytes = 1; }],
+    ['finish claims origin bytes', v => { v.trace.rows[3].originBytes = 1; }],
+    ['peer-only finish', v => { v.trace.rows[3].peerOnly = true; }],
+    ['unrelated signal failure', v => { v.trace.rows[2].scope.signal = false; }],
+    ['unrelated authority identity failure', v => { v.trace.rows[2].scope.identity = false; }],
+    ['missing current predicate', v => { delete v.trace.rows[2].scope.owns; }],
+    ['scope before25ms', v => { v.trace.rows[2].ms = 24; }],
+    ['setup still live', v => { v.trace.rows[2].scope.setup = true; }],
+    ['positive setup remainder', v => { v.trace.rows[2].setupRemainingMs = 1; }],
+    ['other load rejected', v => { v.trace.rows[2].load = 3; }],
+    ['other expected load', v => { v.expected.load = 3; }],
+    ['finish precedes failed check', v => { v.trace.rows[3].at = 2422; }],
+    ['finish after fallback', v => { [v.trace.rows[3], v.trace.rows[4]] = [v.trace.rows[4], v.trace.rows[3]]; }],
+    ['expired peer window', v => { v.trace.rows[3].peerRemainingMs = 0; }],
+    ['unknown recovery window', v => { v.trace.rows[3].recoveryRemainingMs = null; }],
+    ['wrong fallback leg', v => { v.trace.rows[5].leg = 'cached'; }],
+    ['ranged fallback', v => { v.trace.rows[5].ranged = true; }],
+    ['renewed parent budget', v => { v.expected.remainingLoadMs = 10000; }],
+    ['renewed first-byte budget', v => { v.expected.remainingTtfbMs = 10000; }],
+    ['source before original cutoff', v => { v.expected.invokedAtMs = v.expected.enteredAtMs + 24; }],
+    ['trace evidence dropped', v => { v.trace.dropped = 1; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const copy = structuredClone(vector); mutate(copy);
+    assert.equal(mixedScopeSetupProof(copy.trace, copy.expected), null, name);
+  }
 });
 
 test('buffered mixed immutable actual Core-reply receipt proves zero attempted I/O', async () => {

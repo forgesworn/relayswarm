@@ -3210,6 +3210,32 @@ the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Setup-proof and native CI scheduling correction (29 October 2026)
+
+The `a007c07` hosted run passed its reciprocal future-owner and existing
+main/Worker warm mixed positives. Its required CI verdict still failed:
+macOS rejected a protected setup decline that allocated and freed a Core
+transfer before any start or I/O; Ubuntu reached its ten-minute job limit
+although all reported test steps had passed. Those original failed/cancelled
+results remain unchanged.
+
+The test-only proof classifier now recognises that exact same-load pre-start
+allocation-abort shape. It still requires the original setup cutoff, all other
+current predicates, zero transfer starts, attempted ranges, peer requests and
+accepted credit, plus correctly reduced source deadlines. An immutable CI-input
+regression first fails with the old helper; 14 focused controls then pass,
+including 34 rejecting mutations, all six real-clock six-MiB cases and the
+mandatory actual Core/Worker mixed positive. Application code, clocks, budgets
+and the required actual range-transfer assertions are unchanged.
+
+Publisher tests now run separately on each original Ubuntu/macOS platform.
+The required per-platform checks require both the original native suite and
+publisher job to succeed, rejecting failed, cancelled, skipped or missing jobs.
+Original commands, platform coverage and job caps are retained; Windows
+partitions remain unchanged. Static coverage/dependency controls pass; a new
+hosted run must establish the corrected configuration's result. None of these
+CI controls qualifies public operation, physical phones or field performance.
+
 ## Unreleased cooperative VOD futures (29 October 2026)
 
 When both warm-ahead and buffered mixed ranges are enabled on explicit main

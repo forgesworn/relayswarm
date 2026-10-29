@@ -157,17 +157,11 @@ jobs:
           name: hls-${{ matrix.mode }}-receipt
           path: browser-receipts/hls-swarm-${{ matrix.mode }}-rotation-*.json
 
-  native:
+  native-ubuntu-tests:
     if: ${{ !inputs.core_packages }}
-    name: native (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    # macOS can spend nine minutes on the swarm suite; publisher fixtures
-    # also require a real 121-second idle-socket check.
-    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 10 || 15 }}
+    name: native Ubuntu tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -179,7 +173,79 @@ jobs:
       - run: node --test test/fixture-ice.test.mjs
       - run: npm run test:native
       - run: npm run test:swarm
+
+  native-macos-tests:
+    if: ${{ !inputs.core_packages }}
+    name: native macOS tests
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: node --test test/fixture-ice.test.mjs
+      - run: npm run test:native
+      - run: npm run test:swarm
+
+  # The publisher includes a real 121-second idle-socket fixture. Retain it
+  # separately on EACH original platform, without extending either job cap.
+  native-ubuntu-publisher:
+    if: ${{ !inputs.core_packages }}
+    name: native Ubuntu publisher
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
       - run: npm run test:publisher
+
+  native-macos-publisher:
+    if: ${{ !inputs.core_packages }}
+    name: native macOS publisher
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:publisher
+
+  native-ubuntu:
+    if: ${{ !inputs.core_packages && always() }}
+    name: native (ubuntu-latest)
+    needs: [native-ubuntu-tests, native-ubuntu-publisher]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require both Ubuntu jobs
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module -e 'const results = JSON.parse(process.env.RESULTS); const required = ["native-ubuntu-tests", "native-ubuntu-publisher"]; if (Object.keys(results).length !== required.length || required.some(id => results[id]?.result !== "success")) process.exit(1);'
+
+  native-macos:
+    if: ${{ !inputs.core_packages && always() }}
+    name: native (macos-latest)
+    needs: [native-macos-tests, native-macos-publisher]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require both macOS jobs
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module -e 'const results = JSON.parse(process.env.RESULTS); const required = ["native-macos-tests", "native-macos-publisher"]; if (Object.keys(results).length !== required.length || required.some(id => results[id]?.result !== "success")) process.exit(1);'
 
   native-windows-base:
     if: ${{ !inputs.core_packages }}
@@ -356,7 +422,7 @@ jobs:
   live-relays:
     if: ${{ !inputs.core_packages }}
     name: browser transport against live relays
-    needs: [native, native-windows]
+    needs: [native-ubuntu, native-macos, native-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
