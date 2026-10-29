@@ -772,6 +772,104 @@ function startupFixture(t, options = {}) {
   return { engine, state, requests, retained, verified, load };
 }
 const flushStartup = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
+const requireOriginalVerified = async (f, body, beforeFinish = () => {}) => {
+  await flushStartup();
+  assert.equal(f.requests.length, 1, 'only the genuine source is admitted before its first verification');
+  beforeFinish(f.requests[0]); f.requests[0].finish(false, body); await flushStartup();
+  assert(f.engine.snapshot().verified >= 1, 'the actual original body verifies before future completion is driven');
+};
+
+test('startup shared source preserves measured recovery while a late-join room clock advances', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let elapsed = 0;
+  t.mock.method(performance, 'now', () => 1000 + elapsed);
+  const bytes = Uint8Array.from({ length: 6 * 1024 * 1024 }, (_, index) => index % 251), digest = sha(bytes);
+  const sourceSamples = [], remaining = new Map(), samples = [], completions = [];
+  // A controlled shared source, not a replay or an inferred WAN capacity:
+  // every active whole GET receives an equal share of3MiB/s. Recovery uses
+  // completed source service, with the SDK's unchanged p90*1.25+100 margin.
+  const f = startupFixture(t, { timedStats: true, startupMaxBytes: 32 * 1024 * 1024,
+    permit: ctx => ({ key: ctx.url, size: bytes.length, sha256: digest, current: () => true }),
+    beforeSuccess: (ctx, stats) => {
+      sourceSamples.push(stats.loading.end - stats.loading.start);
+      const sorted = [...sourceSamples].sort((a, b) => a - b);
+      f.state.recovery = Math.max(2000, Math.round(sorted[Math.floor(sorted.length * .9)]) * 1.25 + 100);
+      completions.push({ sn: ctx.frag.sn, elapsed, serviceMs: stats.loading.end - stats.loading.start });
+    } });
+  f.state.target = 2.4;
+  const first = f.load(1, 20000);
+  await flushStartup();
+  const initialActive = f.requests.length;
+  while (elapsed < 12000 && !first.calls.success && !first.calls.error) {
+    const active = f.requests.filter(row => !row.response && !row.aborted);
+    for (const row of active) if (!remaining.has(row)) remaining.set(row, bytes.length);
+    const step = 10, allowance = 3 * 1024 * 1024 * step / 1000 / Math.max(1, active.length);
+    for (const row of active) remaining.set(row, remaining.get(row) - allowance);
+    elapsed += step; f.state.target = 2.4 + elapsed / 1000;
+    t.mock.timers.tick(step);
+    for (const row of active) if (!row.aborted && remaining.get(row) <= .001) row.finish(false, bytes);
+    await flushStartup();
+    samples.push({ elapsed, startup: f.engine.startupSnapshot(), warm: f.engine.snapshot() });
+  }
+  const last = f.engine.startupSnapshot();
+  console.log(JSON.stringify({ fixture: 'startup-shared-source', initialActive, elapsed, completions,
+    requests: f.requests.map(row => row.context.frag.sn), recoveryMs: f.state.recovery,
+    state: last.state, target: last.targetTime, verifiedStart: last.verifiedStart, verifiedEnd: last.verifiedEnd,
+    calls: { success: first.calls.success, error: first.calls.error, abort: first.calls.abort } }));
+  assert.equal(first.calls.success, 1, 'a bounded source must provide verified contiguous recovery before the original12s deadline');
+  assert.equal(first.calls.error, 0); assert.equal(first.calls.abort, 0); assert(elapsed < 12000);
+  assert(last.verifiedEnd - last.targetTime >= last.requiredHeadroomMs / 1000);
+  assert.strictEqual(first.calls.args[0], f.requests[0].response);
+  assert.strictEqual(first.calls.args[2], first.context);
+  assert(samples.every(({ startup, warm }) => startup.heldObjects <= 4 && startup.heldBytes <= 32 * 1024 * 1024 &&
+    warm.cacheBytes + warm.reservationBytes <= 24 * 1024 * 1024 && warm.active <= 1));
+  assert(f.state.reservations.every(size => size <= 32 * 1024 * 1024));
+});
+
+test('startup future HTTP waits for genuine whole verification and wakes without a new timer', async t => {
+  let release;
+  const f = startupFixture(t, { beforeVerify: ctx => ctx.frag.sn === 0
+    ? new Promise(resolve => { release = resolve; }) : undefined });
+  const first = f.load(0, 12000);
+  await flushStartup();
+  assert.equal(f.requests.length, 1);
+  f.requests[0].finish(); await flushStartup();
+  assert.equal(typeof release, 'function');
+  assert.equal(f.requests.length, 1, 'a complete but still-unverified first body cannot start future HTTP');
+  assert.equal(first.calls.success, 0);
+  release(); await flushStartup();
+  assert.equal(f.requests.length, 2, 'verification completion unblocks the existing admission pump');
+  assert.equal(f.requests[1].context.frag.sn, 1);
+  f.requests[1].finish(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(first.calls.abort, 0);
+});
+
+test('startup preserves its verified genuine prefix while the unpublished room clock is frozen', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 1000;
+  t.mock.method(performance, 'now', () => clock);
+  const sourceSamples = [];
+  const f = startupFixture(t, { timedStats: true, beforeSuccess: (_ctx, stats) => {
+    sourceSamples.push(stats.loading.end - stats.loading.start);
+    const sorted = [...sourceSamples].sort((a, b) => a - b);
+    f.state.recovery = Math.max(2000, Math.round(sorted[Math.floor(sorted.length * .9)]) * 1.25 + 100);
+  } });
+  f.state.target = .02;
+  const first = f.load(0, 20000); await flushStartup();
+  clock += 4000; t.mock.timers.tick(4000); f.requests[0].finish(); await flushStartup();
+  assert.equal(f.state.recovery, 5100);
+  assert.equal(first.calls.success, 0);
+  assert.equal(f.requests[1]?.context.frag.sn, 1, 'the verified demanded[0,2] must retain its contiguous[2,4] successor');
+  for (const index of [1, 2]) {
+    clock += 2000; t.mock.timers.tick(2000); f.requests[index].finish(); await flushStartup();
+  }
+  const snapshot = f.engine.startupSnapshot();
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(first.calls.abort, 0);
+  assert.equal(snapshot.verifiedStart, 0); assert.equal(snapshot.verifiedEnd, 6);
+  assert(snapshot.verifiedEnd - snapshot.targetTime >= snapshot.requiredHeadroomMs / 1000);
+  assert.equal(snapshot.requiredHeadroomMs, 5100); assert.equal(snapshot.limits.deadlineMs, 12000);
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2]);
+});
 
 test('startup admits one extra verified contiguous future only when dynamic recovery exceeds its full three-object window', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -779,11 +877,10 @@ test('startup admits one extra verified contiguous future only when dynamic reco
     let commits = 0;
     const f = startupFixture(t, { commit: () => { commits++; } });
     f.state.target = firstSn * 2;
-    const first = f.load(firstSn, 8000); await flushStartup();
+    const first = f.load(firstSn, 8000); f.state.recovery = 6550;
+    await requireOriginalVerified(f);
     f.requests[1].finish(); await flushStartup();
     f.requests[2].finish(); await flushStartup();
-    f.state.recovery = 6550;
-    f.requests[0].finish(); await flushStartup();
     t.mock.timers.tick(100); await flushStartup();
     assert.equal(f.requests.length, 4, 'verified six-second coverage must admit its parsed contiguous successor');
     assert.equal(f.requests[3].context.frag.sn, firstSn + 3);
@@ -812,9 +909,9 @@ test('startup admits one extra verified contiguous future only when dynamic reco
 test('startup expansion leaves a sufficient window unchanged and never admits a fifth held object', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   for (const recovery of [6000, 9000]) {
-    const f = startupFixture(t); f.state.target = 0; const first = f.load(0, 8000); await flushStartup();
+    const f = startupFixture(t); f.state.target = 0; f.state.recovery = recovery;
+    const first = f.load(0, 8000); await requireOriginalVerified(f);
     f.requests[1].finish(); await flushStartup(); f.requests[2].finish(); await flushStartup();
-    f.state.recovery = recovery; f.requests[0].finish(); await flushStartup();
     t.mock.timers.tick(100); await flushStartup();
     if (recovery === 6000) {
       assert.equal(first.calls.success, 1); assert.equal(f.requests.length, 3, 'do not expand an adequate verified window');
@@ -841,9 +938,8 @@ test('startup expansion keeps cancellation, context, authority and original pare
       return { key, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)),
         current: value => warmContext(value)?.key === key && !f.state.revoked.has(sn) };
     } }); f.state.target = 0;
-    const first = f.load(0, 500); await flushStartup();
+    const first = f.load(0, 500); f.state.recovery = 6550; await requireOriginalVerified(f);
     f.requests[1].finish(); await flushStartup(); f.requests[2].finish(); await flushStartup();
-    f.state.recovery = 6550; f.requests[0].finish(); await flushStartup();
     t.mock.timers.tick(100); await flushStartup();
     assert.equal(f.requests.length, 4); const fourth = f.requests[3];
     if (action === 'abort') first.loader.abort();
@@ -910,9 +1006,10 @@ test('startup byte budget keeps future cache and in-flight reservations within24
   const f = startupFixture(t, { startupMaxBytes: 32 * 1024 * 1024,
     permit: ctx => ({ key: ctx.url, size: bodies.get(ctx.frag.sn)?.length ?? 4,
       sha256: hashes.get(ctx.frag.sn), current: () => true }) });
-  const first = f.load(0, 8000); await flushStartup();
-  for (const i of [1, 2]) { f.requests[i].finish(false, bodies.get(i)); await flushStartup(); }
-  f.state.target = 3.885; f.state.recovery = 3627.5; f.requests[0].finish(); await flushStartup();
+  const first = f.load(0, 8000); f.state.recovery = 3627.5; await requireOriginalVerified(f);
+  f.requests[1].finish(false, bodies.get(1)); await flushStartup();
+  f.state.target = 3.885;
+  f.requests[2].finish(false, bodies.get(2)); await flushStartup();
   t.mock.timers.tick(100); await flushStartup();
   assert.equal(f.engine.snapshot().rejected, 1, '25MiB of futures is refused even though the aggregate fits32MiB');
   assert.equal(f.requests.length, 3); assert.equal(f.engine.snapshot().active, 0);
@@ -950,13 +1047,13 @@ test('startup byte budget admits the pinned 4K original plus three contiguous fu
       permit: ctx => ({ key: ctx.url, size: sizes.get(ctx.frag.sn) ?? 4,
         sha256: hashes.get(ctx.frag.sn) ?? sha(Uint8Array.of(2, 4, 6, 8)), current: () => true }) });
     f.state.target = 4.1; f.state.recovery = 4587.5;
-    const first = f.load(0, 12000); await flushStartup();
+    const first = f.load(0, 12000); await requireOriginalVerified(f, bodies.get(0));
     for (let i = 0; i < 3; i++) { t.mock.timers.tick(100); await flushStartup(); }
     assert.equal(f.requests[1].context.frag.sn, 3);
     f.requests[1].finish(false, bodies.get(3)); await flushStartup();
     assert.equal(f.requests[2].context.frag.sn, 4);
     f.requests[2].finish(false, bodies.get(4)); await flushStartup();
-    f.state.target = 7.459; f.requests[0].finish(false, bodies.get(0)); await flushStartup();
+    f.state.target = 7.459;
     t.mock.timers.tick(100); await flushStartup();
     if (!opted) {
       assert.equal(f.requests.length, 3); assert.equal(f.engine.snapshot().rejected, 1);
@@ -981,9 +1078,8 @@ test('startup byte budget admits the pinned 4K original plus three contiguous fu
 test('startup extra-future admission refuses the same 24MiB byte cap without a source request or unsafe release', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = startupFixture(t, { permitSize: sn => sn === 3 ? 24 * 1024 * 1024 : 4 });
-  f.state.target = 0; const first = f.load(0, 8000); await flushStartup();
+  f.state.target = 0; f.state.recovery = 6550; const first = f.load(0, 8000); await requireOriginalVerified(f);
   f.requests[1].finish(); await flushStartup(); f.requests[2].finish(); await flushStartup();
-  f.state.recovery = 6550; f.requests[0].finish(); await flushStartup();
   t.mock.timers.tick(100); await flushStartup();
   assert.equal(f.engine.snapshot().rejected, 1, 'the additional signed size exceeds remaining shared bytes');
   assert.equal(f.requests.length, 3); assert.equal(first.calls.success, 0);
@@ -998,9 +1094,8 @@ test('startup expansion uses fresh moved targets during its request and final au
   for (const duringAuthority of [false, true]) {
     let commits = 0;
     const f = startupFixture(t, { commit: () => { commits++; } }); f.state.target = 0;
-    const first = f.load(0, 500); await flushStartup();
+    const first = f.load(0, 500); f.state.recovery = 6550; await requireOriginalVerified(f);
     f.requests[1].finish(); await flushStartup(); f.requests[2].finish(); await flushStartup();
-    f.state.recovery = 6550; f.requests[0].finish(); await flushStartup();
     t.mock.timers.tick(100); await flushStartup();
     assert.equal(f.requests.length, 4); assert.equal(f.engine.contains(0), true);
     if (duringAuthority) {
@@ -1026,13 +1121,13 @@ test('startup expansion uses fresh moved targets during its request and final au
 });
 
 const fillStartupWindow = async (f, beforeFinish = () => {}) => {
-  // Futures can verify before a slower original first body. Admit them with
-  // the initial target, then expose the captured full-window deficit only
-  // when that original response verifies. No test bypasses admission policy.
-  await flushStartup();
-  for (const i of [1, 2]) { beforeFinish(f.requests[i]); f.requests[i].finish(); await flushStartup(); }
+  // Verify the genuine first body before future HTTP, then form the same
+  // controlled deficit without any early Hls callback or admission bypass.
+  f.state.recovery = 2762.5;
+  await requireOriginalVerified(f, undefined, beforeFinish);
+  beforeFinish(f.requests[1]); f.requests[1].finish(); await flushStartup();
   f.state.target = 3.885; f.state.recovery = 2762.5;
-  beforeFinish(f.requests[0]); f.requests[0].finish(); await flushStartup();
+  beforeFinish(f.requests[2]); f.requests[2].finish(); await flushStartup();
 };
 
 test('startup service lead plans beyond measured retrieval cost in the sourceSN2 offset replay', async t => {
@@ -1040,16 +1135,16 @@ test('startup service lead plans beyond measured retrieval cost in the sourceSN2
   let clock = 10000, elapsed = 0; t.mock.method(performance, 'now', () => clock);
   const f = startupFixture(t, { timedStats: true,
     starts: [0, 2, 0, 2, 4, 6.64, 8.64, 10.56], durations: [2, 2, 2, 2, 2.64, 2, 1.92, 2] });
-  f.state.target = 0; const first = f.load(2, 8000), samples = [];
+  f.state.target = .02; const first = f.load(2, 8000), samples = [];
   const advance = async ms => {
     for (let left = ms; left > 0;) {
       const step = Math.min(100, left); elapsed += step; left -= step; clock += step;
-      f.state.target = elapsed / 1000; t.mock.timers.tick(step); await flushStartup();
+      f.state.target = .02 + elapsed / 1000; t.mock.timers.tick(step); await flushStartup();
       samples.push(f.engine.startupSnapshot().planningServiceMs);
     }
   };
-  await flushStartup();
-  await advance(2636); f.requests[0].finish(); await flushStartup();
+  await requireOriginalVerified(f);
+  await advance(2636);
   await advance(607); f.requests[1].finish(); await flushStartup();
   // Raw times are offset from actual sourceSN2, whose programme start is4s.
   // Successful stats below model the observed cancelled-HTTP cadence; those
@@ -1080,12 +1175,13 @@ test('startup service lead plans beyond measured retrieval cost in the sourceSN2
 test('startup service lead accepts a verified50ms future without a rate floor or slow-path baseline', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let clock = 1000; t.mock.method(performance, 'now', () => clock);
-  const f = startupFixture(t, { timedStats: true }), first = f.load(0, 8000); await flushStartup();
+  const f = startupFixture(t, { timedStats: true }), first = f.load(0, 8000); await requireOriginalVerified(f);
+  f.state.target = 3.9;
   clock += 50; f.requests[1].finish(); await flushStartup();
   assert.equal(f.engine.startupSnapshot().planningServiceMs, 50);
   assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2]);
   clock += 50; f.requests[2].finish(); await flushStartup();
-  clock += 10; f.requests[0].finish(); await flushStartup();
+  clock += 10;
   assert.equal(first.calls.success, 1);
   assert.equal(f.engine.startupSnapshot().requiredHeadroomMs, 2000);
 });
@@ -1104,7 +1200,7 @@ test('startup service lead ignores unknown, invalid and foreign-operation timest
       if (bad === 'nan') stats.loading.end = NaN;
       if (bad === 'aborted') stats.aborted = true;
       if (bad === 'partial') stats.loaded--;
-    } }), first = f.load(0, 8000); await flushStartup();
+    } }), first = f.load(0, 8000); await requireOriginalVerified(f);
     f.state.target = 3.9; clock += 50; f.requests[1].finish(); await flushStartup();
     assert.equal(f.engine.startupSnapshot().planningServiceMs, null, bad);
     assert.equal(first.calls.success, 0, bad);
@@ -1118,7 +1214,7 @@ test('startup service lead snapshots scalar timing before stats mutation during 
   let clock = 1000, release; t.mock.method(performance, 'now', () => clock); t.after(() => release?.());
   const f = startupFixture(t, { timedStats: true,
     beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
-  const first = f.load(0, 8000); await flushStartup(); f.state.target = 3.9;
+  const first = f.load(0, 8000); await requireOriginalVerified(f); f.state.target = 3.9;
   clock += 50; f.requests[1].finish(); await flushStartup();
   assert.equal(f.engine.startupSnapshot().planningServiceMs, null);
   Object.assign(f.requests[1].stats, { aborted: true, loaded: 0, loading: { start: -1, end: 999999 } });
@@ -1134,7 +1230,7 @@ test('startup service lead learns nothing from corrupt or cancelled pending veri
     let release; t.after(() => release?.());
     const f = startupFixture(t, { timedStats: true,
       beforeVerify: ctx => action !== 'corrupt' && ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
-    const first = f.load(0, 8000); await flushStartup(); f.state.target = 3.9;
+    const first = f.load(0, 8000); await requireOriginalVerified(f); f.state.target = 3.9;
     clock += 50;
     f.requests[1].finish(false, action === 'corrupt' ? Uint8Array.of(9, 8, 7, 6) : undefined); await flushStartup();
     if (action === 'abort') first.loader.abort();
@@ -1151,12 +1247,12 @@ test('startup service lead retains a contiguous fourth-slot extension after the 
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let clock = 1000; t.mock.method(performance, 'now', () => clock);
   const f = startupFixture(t, { timedStats: true }), first = f.load(0, 8000);
-  await flushStartup();
-  // Both futures verify before the held first body. Their last measured
-  // service is a planning sample, not a minimum cost for the next object.
-  for (const index of [1, 2]) { clock += 2100; f.requests[index].finish(); await flushStartup(); }
-  f.state.target = 3.885; f.state.recovery = 3627.5;
-  f.requests[0].finish(); await flushStartup();
+  f.state.recovery = 3627.5; await requireOriginalVerified(f);
+  // Futures begin after the genuine verifier. Their measured service is a
+  // planning sample, not a minimum cost imposed on the next object.
+  clock += 2100; f.requests[1].finish(); await flushStartup();
+  f.state.target = 3.885;
+  clock += 2100; f.requests[2].finish(); await flushStartup();
   assert.equal(f.engine.startupSnapshot().planningServiceMs, 2100);
   assert.equal(first.calls.success, 0);
   clock += 100; t.mock.timers.tick(100); await flushStartup();
@@ -1175,13 +1271,12 @@ test('startup service lead changes cannot move an already selected forward start
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let clock = 1000; t.mock.method(performance, 'now', () => clock);
   const f = startupFixture(t, { timedStats: true, starts: [0, 2, 4, 5, 6, 9], durations: [2, 2, 1, 1, 3, 2] });
-  const first = f.load(0, 8000); await flushStartup(); f.state.target = 3.5; f.state.recovery = 3500;
+  const first = f.load(0, 8000); await requireOriginalVerified(f); f.state.target = 3.5; f.state.recovery = 3500;
   clock += 50; f.requests[1].finish(); await flushStartup();
   clock += 100; t.mock.timers.tick(100); await flushStartup();
   assert.equal(f.requests[2]?.context.frag.sn, 3);
   clock += 500; f.requests[2].finish(); await flushStartup();
   assert.equal(f.engine.startupSnapshot().planningServiceMs, 500);
-  f.requests[0].finish(); await flushStartup();
   clock += 100; t.mock.timers.tick(100); await flushStartup();
   assert.equal(f.requests[3]?.context.frag.sn, 4, 'changed service fills contiguous[6,9] rather than selecting a later start');
   assert.equal(first.calls.success, 0);
@@ -1200,9 +1295,13 @@ test('startup horizon planner survives the captured serial peer cadence without 
     }
   };
   await flushStartup();
-  await advance(2241); f.requests[0].finish(); await flushStartup();
+  await advance(2241);
   await advance(771);
+  // The genuine source now verifies before any speculative HTTP is admitted.
+  // Keep the same3.012s observed planning point and original8s parent budget.
+  f.requests[0].finish(); await flushStartup();
   assert.equal(f.state.target, 4.612);
+  await advance(100); // The unchanged bounded poll advances one skipped metadata hop.
   assert.equal(f.engine.snapshot().cacheObjects, 0);
   assert.equal(f.engine.snapshot().active, 1);
   assert.equal(f.engine.snapshot().queued, 1);
@@ -1232,9 +1331,9 @@ test('startup horizon planner survives the captured serial peer cadence without 
 test('startup horizon planner retains a completed deficit and fills one contiguous successor', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = startupFixture(t), first = f.load(0, 8000);
-  await flushStartup(); f.requests[1].finish(); await flushStartup();
+  f.state.recovery = 2762.5; await requireOriginalVerified(f); f.requests[1].finish(); await flushStartup();
   f.state.target = 3.885; f.state.recovery = 2762.5;
-  f.requests[2].finish(); await flushStartup(); f.requests[0].finish(); await flushStartup();
+  f.requests[2].finish(); await flushStartup();
   assert.equal(f.engine.startupSnapshot().heldObjects, 3);
   assert.equal(first.calls.success, 0);
   t.mock.timers.tick(100); await flushStartup();
@@ -1274,14 +1373,13 @@ test('startup horizon planner freezes an ahead window instead of skipping every 
 for (const recovery of [3500, 1500]) test(`startup horizon planner freezes a selected successor behind a cached prefix (${recovery}ms)`, async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = startupFixture(t, { starts: [0, 2, 4, 5, 6, 9], durations: [2, 2, 1, 1, 3, 2] });
-  const first = f.load(0, 8000); await flushStartup();
+  const first = f.load(0, 8000); await requireOriginalVerified(f);
   f.state.target = 3.5; f.state.recovery = recovery;
   f.requests[1].finish(); await flushStartup();
   t.mock.timers.tick(100); await flushStartup();
   assert.equal(f.requests[2]?.context.frag.sn, 3,
     'one hop selects [5,6]; an earlier cached [2,4] cannot allow another skip');
   f.requests[2].finish(); await flushStartup();
-  f.requests[0].finish(); await flushStartup();
   t.mock.timers.tick(100); await flushStartup();
   assert.equal(first.calls.success, 0);
   assert.equal(f.requests[3]?.context.frag.sn, 4);
@@ -1392,8 +1490,8 @@ test('rolling startup retains an obsolete verification job reservation until its
   t.after(() => release?.());
   const f = startupFixture(t, { beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
   const first = f.load(0, 8000);
-  await flushStartup(); f.state.target = 3.885; f.state.recovery = 2762.5;
-  f.requests[0].finish(); await flushStartup(); f.requests[1].finish(); await flushStartup();
+  await requireOriginalVerified(f); f.state.target = 3.885; f.state.recovery = 2762.5;
+  f.requests[1].finish(); await flushStartup();
   assert.equal(typeof release, 'function');
   f.state.target = 4.085;
   t.mock.timers.tick(100); await flushStartup();
@@ -1559,9 +1657,9 @@ test('rolling startup rechecks new parsed geometry and signed authority after ve
 test('rolling startup does not evict still-needed verified bytes for an oversized next reservation', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = startupFixture(t, { permitSize: sn => sn === 2 ? 24 * 1024 * 1024 - 4 : 4 }), first = f.load(0, 8000);
-  await flushStartup(); f.requests[1].finish(); await flushStartup();
-  f.state.target = 3.885; f.state.recovery = 2762.5;
-  f.requests[0].finish(); await flushStartup();
+  f.state.recovery = 2762.5; await requireOriginalVerified(f);
+  f.requests[1].finish(); await flushStartup();
+  f.state.target = 3.885;
   assert.equal(f.requests.length, 2, 'the new object does not fit beside first and current future');
   assert.equal(f.engine.snapshot().rejected, 1);
   assert.equal(f.engine.snapshot().cacheObjects, 1, 'required [2,4] stays resident');
@@ -1574,9 +1672,10 @@ test('rolling startup real SDK uses currently parsed future fragments without ea
   let target = 1.3;
   const f = await fixture(t, { enabled: false, startupTarget: () => target, held: [0, 1, 2, 3] });
   const first = f.load(0);
-  for (const sn of [1, 2, 0]) {
+  for (const sn of [0, 1, 2]) {
     await until(() => f.requests.some(row => row.context.frag.sn === sn));
-    if (sn === 0) target = 4.085;
+    if (sn === 1) target = 2.1;
+    if (sn === 2) target = 4.085;
     f.requests.find(row => row.context.frag.sn === sn).finish();
   }
   await until(() => f.requests.some(row => row.context.frag.sn === 3));
@@ -2177,7 +2276,7 @@ test('rolling startup can retain a third future after the held first interval is
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let elapsed = 0; const origin = 1000;
   t.mock.method(performance, 'now', () => origin + elapsed);
-  const f = startupFixture(t, { timedStats: true }); f.state.target = 0;
+  const f = startupFixture(t, { timedStats: true }); f.state.target = 0; f.state.recovery = 5000;
   const first = f.load(0, 8000), observations = [];
   const capture = () => observations.push({ startup: f.engine.startupSnapshot(), warm: f.engine.snapshot() });
   const advanceTo = async end => {
@@ -2186,15 +2285,15 @@ test('rolling startup can retain a third future after the held first interval is
       f.state.target = elapsed / 1000; t.mock.timers.tick(step); await flushStartup();
     }
   };
-  await flushStartup();
+  await requireOriginalVerified(f);
   await advanceTo(50); f.requests[1].finish(); await flushStartup();
-  await advanceTo(100); f.requests[2].finish(); await flushStartup();
+  await advanceTo(1100); f.requests[2].finish(); await flushStartup();
   await advanceTo(4000);
   const successor = f.requests.find(row => row.context.frag.sn === 3);
   assert(successor, 'the original rolling planner requests its next contiguous future');
   await advanceTo(4050); successor.finish(); await flushStartup();
   await advanceTo(4500); f.state.recovery = 5000;
-  f.requests[0].finish(); await flushStartup(); capture();
+  capture();
   await advanceTo(4600); capture();
   const extra = f.requests.find(row => row.context.frag.sn === 4);
   assert(extra, 'the next [8,10] interval is parsed, authorised and admitted under the existing byte budget');
@@ -2268,8 +2367,8 @@ async function startupBudgetCadence(t, parentMs = 20000) {
     }
     capture();
   };
-  await flushStartup(); capture();
-  await to(6000); f.requests[0].finish(); f.requests[1].finish(); await flushStartup(); capture();
+  await requireOriginalVerified(f); capture();
+  await to(6000); f.requests[1].finish(); await flushStartup(); capture();
   assert.equal(f.requests[2].context.frag.sn, 2);
   await to(7000); f.requests[2].finish(); await flushStartup(); capture();
   await to(7100); // Existing100ms poll admits the fourth verified-coverage successor.
@@ -2315,7 +2414,7 @@ test('a canceled warm verifier retains its default slot and body reservation unt
   let release; t.after(() => release?.());
   const f = startupFixture(t, {
     beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
-  const first = f.load(0, 12000); await flushStartup();
+  const first = f.load(0, 12000); await requireOriginalVerified(f);
   f.requests[1].finish(); await flushStartup();
   first.loader.abort(); await flushStartup();
   assert.equal(first.calls.abort, 1); assert.equal(f.engine.snapshot().active, 1);
@@ -2331,7 +2430,7 @@ test('canceled warm authorisation retains its slot until rejection without start
   const f = startupFixture(t, { permit: ctx => ctx.frag.sn === 1
     ? new Promise((_resolve, fail) => { reject = fail; })
     : { key: ctx.url, size: bytes.length, sha256: sha(bytes), current: () => true } });
-  const first = f.load(0, 12000); await flushStartup();
+  const first = f.load(0, 12000); await requireOriginalVerified(f);
   assert.equal(typeof reject, 'function');
   first.loader.abort(); await flushStartup();
   assert.equal(first.calls.abort, 1);
@@ -2348,7 +2447,7 @@ test('a canceled warm verifier releases its retained body on rejection without d
   let reject; t.after(() => reject?.(new Error('fixture retired')));
   const f = startupFixture(t, {
     beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise((_resolve, fail) => { reject = fail; }) : undefined });
-  const first = f.load(0, 12000); await flushStartup();
+  const first = f.load(0, 12000); await requireOriginalVerified(f);
   f.requests[1].finish(); await flushStartup();
   first.loader.abort(); await flushStartup();
   assert.equal(f.engine.snapshot().active, 1);
@@ -2362,7 +2461,7 @@ test('retired warm rows keep ownership but cannot cover a seek position', async 
   let release; t.after(() => release?.());
   const f = startupFixture(t, {
     beforeVerify: ctx => ctx.frag.sn === 1 ? new Promise(resolve => { release = resolve; }) : undefined });
-  const first = f.load(0, 12000); await flushStartup();
+  const first = f.load(0, 12000); await requireOriginalVerified(f);
   f.requests[1].finish(); await flushStartup();
   first.loader.abort(); await flushStartup();
   assert.equal(f.engine.snapshot().active, 1);
