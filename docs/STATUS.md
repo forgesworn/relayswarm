@@ -70,16 +70,30 @@ yield, an exact HAVE still proceeding uncounted, an older high key keeping the
 peer a candidate, the early-HAVE case above, and that another rendition's
 objects give no frontier. The behind/adjacent, unknown-frontier and exact-HAVE
 cases run with either actor as the evaluator; the rest run with one. The
-512-entry bound and the 60 s window are proved by a direct unit test. Not
-proved: any field effect. The expected effect in a two-viewer shared-position
-room is that the leader's `sourceYielded` falls while the late joiner is behind,
-its promotions fall, and its lead is kept, so the late joiner's accepted peer
-share should rise. The leader's own accepted peer share does not rise and may
-fall; the 5 % per-viewer gate for the leader is a gate-wording decision, not
-something this change targets. Yields fall but need not reach zero, since level
-viewers still decide by rank. Nothing here changes a remote forced-relay
-topology where every peer byte crosses one link twice. A new private field run
-is required.
+512-entry bound and the 60 s window are proved by a direct unit test.
+
+Field result (30 October 2026, one private LAN two-viewer attempt of this exact
+runtime, same packet shape as the run above): playback passed (trusted 4K first
+frames 7.664 s and 9.539 s, 340,001 ms observed, zero stalls, player errors,
+dropped frames or waits for both), but accepted peer media was 2.87 % and
+3.87 %, below the 5 % per-viewer gate for both and below the 1.91 % and 13.63 %
+of the run above; total accepted peer bytes fell from 167 MB to 73 MB.
+`sourceYielded` fell to 10 and 14 (from 162 and 70) and `peersBehindProceeds`
+was 50 and 47. In this run the two viewers were level from the start (first
+frames 4.0 s apart, playhead lag 0.00 s, equal median buffer depth), whereas in
+the run above the leader was about 10 s ahead when the late joiner started. In a
+level pair the derived frontier lags by one in-flight object plus HAVE
+propagation, so each viewer judged the other to be behind, both proceeded and
+both fetched from the origin; the rank coordination was lost. The leader-ahead
+regime the rule targets did not occur, so its intended benefit is untested, and
+the comparison is confounded by regime because no level-regime control of the
+previous runtime was run and the diagnostic driver does not control start
+stagger. The expectation stated for this change before the run is withdrawn.
+This change is not for merge as implemented; any revision needs lag tolerance
+in the exclusion or a current signal such as the existing origin-fetch claims,
+a chosen start stagger in the driver, and a level-regime control. Nothing here
+changes a remote forced-relay topology where every peer byte crosses one link
+twice.
 
 ## Unreleased size-aware startup admission (30 October 2026)
 
