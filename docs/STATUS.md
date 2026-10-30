@@ -66,7 +66,7 @@ from the origin, and it was replaced by the derivation above.
 Proved: the controlled two-actor fixture on the real core shows the behind peer
 excluded, the adjacent peer still deciding by rank with its descriptor retained
 and exact-HAVE reconsideration unchanged, an unknown frontier keeping today's
-yield, an exact HAVE reached before the frontier, an older high key keeping the
+yield, an exact HAVE still proceeding uncounted, an older high key keeping the
 peer a candidate, the early-HAVE case above, and that another rendition's
 objects give no frontier. The behind/adjacent, unknown-frontier and exact-HAVE
 cases run with either actor as the evaluator; the rest run with one. The

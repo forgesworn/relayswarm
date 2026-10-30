@@ -6210,9 +6210,10 @@ for (const evaluator of [0, 1]) test(`frontier election: an unknown frontier kee
 for (const evaluator of [0, 1]) test(`frontier election: an exact HAVE for the candidate returns before any frontier logic (evaluator actor ${evaluator})`, { timeout: 30000 }, async t => {
   const f = await frontierFixture(t, evaluator);
   f.demand(1);
-  // The frontier is first + 1, as above, so first + 3 is excluded. The peer also
-  // advertises first + 3 by its exact key, which is not yet a mapped position:
-  // the exact holder is found first and the frontier rule is never reached.
+  // The peer advertises first + 3 by its exact key. Under the derived rule the
+  // local authorisation of first + 3 records its position before the election,
+  // so the peer is adjacent rather than excluded; the test proves that an exact
+  // HAVE still proceeds through the existing early return and is not counted.
   f.have([f.key(1)]);
   f.have([f.key(3)]);
   await f.wait(() => f.warm(evaluator).sourceYielded >= 3 && f.rows(evaluator).some(row => row.sn === f.first + 3));
