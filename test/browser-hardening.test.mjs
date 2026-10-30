@@ -5776,17 +5776,20 @@ test('verified piece flow never pools separate transfers, connections or time to
 test('owned warm reciprocal future owners supply real mixed consumption without duplicate whole source', { timeout: 15000 }, async t => {
   // Functional-controller policy proof: simulated source/native RTC, real sessions,
   // commitments, Core, ordered protocol bytes, verification and consumption.
-  // No source server, preloaded cache/HAVE, timing model or claimed WAN rate.
+  // No source server, preloaded cache/HAVE or claimed WAN rate. Native key-hash
+  // scheduling is excluded from this controller's synthetic policy time; the
+  // separate manager control retains the original 25 ms cache recovery boundary.
   const pair = await framingPairFixture(t, { pairedState: true }), actors = [], source = [], loaders = new Set(), objects = new Map(), events = new Map();
   const size = 1024 * 1024, secret = generateSecretKey(), seconds = Math.floor(Date.now() / 1000);
   const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds,
     tags: [['d', 'reciprocal-futures'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
   const keyFor = path => createHash('sha256').update(`${base.swarmId}\n${path}`).digest('hex');
-  let diagnosticPhase = 'setup', clock;
+  let diagnosticPhase = 'setup', clock, pendingKeyDigests = 0, keyDigestOperations = 0, maxPendingKeyDigests = 0;
   const settle = promise => clock ? clock.settle(promise) : promise;
   const wait = predicate => clock ? clock.advanceUntil(predicate) : until(predicate);
   const diagnostic = (reason, actor = null, sn = null) => console.log(JSON.stringify({ fixture: 'reciprocal-timeout-diagnostic',
     reason, actor, sn, controllerClock: clock ? 'logical-functional' : 'native', phase: diagnosticPhase, atMs: performance.now(),
+    excludedNativeKeyDigestScheduling: true, pendingKeyDigests, keyDigestOperations, maxPendingKeyDigests,
     source: source.slice(-16), sourceOmitted: Math.max(0, source.length - 16),
     actors: actors.map((f, actor) => { const m = f.swarm.metrics(); return { actor, warm: m.warmAhead,
       acceptedPeerBytes: m.bytes.peerFirst, core: { state: m.core.state, transfers: m.core.multiHolder.transfers,
@@ -5827,11 +5830,28 @@ test('owned warm reciprocal future owners supply real mixed consumption without 
     }));
     response.catch(() => {}); return { response, calls };
   };
+  // Keep the real digest, result and rejection. Only this fixed metadata phase
+  // is outside synthetic policy time, independently of source/Core outcomes.
+  const keyPrefix = new TextEncoder().encode(`${base.swarmId}\n`), originalDigest = crypto.subtle.digest;
+  const keyDigestMock = t.mock.method(crypto.subtle, 'digest', function (algorithm, data, ...args) {
+    const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      : data instanceof ArrayBuffer ? new Uint8Array(data) : null;
+    const keyDigest = algorithm === 'SHA-256' && bytes && bytes.byteLength > keyPrefix.byteLength &&
+      bytes.byteLength <= 4096 && keyPrefix.every((value, index) => bytes[index] === value);
+    if (!keyDigest) return originalDigest.call(this, algorithm, data, ...args);
+    pendingKeyDigests++; keyDigestOperations++;
+    maxPendingKeyDigests = Math.max(maxPendingKeyDigests, pendingKeyDigests);
+    try {
+      return Promise.resolve(originalDigest.call(this, algorithm, data, ...args)).then(value => {
+        pendingKeyDigests--; return value;
+      }, error => { pendingKeyDigests--; throw error; });
+    } catch (error) { pendingKeyDigests--; throw error; }
+  });
   // Install before SDK creation so reentrant stop can clear every fixture timer.
     // Optional native setup admission is separately tested. Here the mandatory
     // owner/protocol proof holds only its async setup phase until ANY original
     // source invocation, whole or range; no favourable result gates time.
-    clock = warmFunctionalClock(t, () => actors.some((f, actor) => {
+    clock = warmFunctionalClock(t, () => pendingKeyDigests > 0 || actors.some((f, actor) => {
       const rows = f.swarm.trace().rows;
       return [1, 2].some(sn => {
         const load = rows.findLast(row => row.k === 'load' && row.sn === sn && row.budgetGeometry?.source === 'warm-ahead');
@@ -5904,6 +5924,7 @@ test('owned warm reciprocal future owners supply real mixed consumption without 
     assert(paths.every(path => !advertised.includes(keyFor(path))), 'neither held future body has been seeded or advertised');
     assert(actors.every(f => f.swarm.metrics().bytes.peerFirst === 0 && f.swarm.metrics().warmAhead.verifiedPeerBytes === 0));
     console.log(JSON.stringify({ fixture: 'reciprocal-warm-source-policy', controllerClock: 'logical-functional', simulatedSourceAndRtc: true,
+      excludedNativeKeyDigestScheduling: true,
       coreReady: actors.map(f => f.swarm.metrics().core.state), expectedOwners: [{ actor: 0, sn: 1 }, { actor: 1, sn: 2 }],
       actualSourceStarts: initial.map(({ actor, sn, warm, range }) => ({ actor, sn, warm, range })),
       futureHaveCount: paths.filter(path => advertised.includes(keyFor(path))).length }));
@@ -5942,8 +5963,13 @@ test('owned warm reciprocal future owners supply real mixed consumption without 
       assert.equal(f.swarm.metrics().bytes.peerFirst, credit, 'reusing the same future cannot credit it twice');
       assert.equal(source.length, before);
     }
+    assert(keyDigestOperations > 0, 'the fixed metadata digest phase actually ran');
+    assert.equal(pendingKeyDigests, 0, 'all observed native key digests settled');
     diagnosticPhase = 'done';
-  } finally { if (diagnosticPhase !== 'done') diagnostic('finally'); clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy(); }
+  } finally {
+    if (diagnosticPhase !== 'done') diagnostic('finally');
+    keyDigestMock.mock.restore(); clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy();
+  }
 });
 
 test('verified piece flow waits for real worker verification and rejects invalidated replies', async t => {

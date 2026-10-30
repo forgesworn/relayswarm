@@ -662,6 +662,64 @@ test('buffered authority checks get at most 25 ms before independent source reco
   } finally { t.mock.timers.reset(); }
 });
 
+test('valid cached authority can win after the 25 ms recovery starts but before its source body', { timeout: 5000 }, async t => {
+  let hold = false, entered = 0, release;
+  const f = await fixture(t, { held: [1], beforeCommitment: context => {
+    if (hold && context.frag.sn === 1) {
+      hold = false; entered++;
+      return new Promise(resolve => { release = resolve; });
+    }
+  } });
+  assert.deepEqual(await f.load(0).result, f.bytes);
+  await until(() => f.requests.some(row => row.context.frag.sn === 1));
+  const initial = f.requests.find(row => row.context.frag.sn === 1);
+  initial.finish();
+  await until(() => f.swarm.metrics().warmAhead.verified >= 2);
+  const before = f.swarm.metrics();
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+  hold = true;
+  // Only timer delivery is controlled; signing, cache verification and the
+  // actual SDK/manager callbacks are real. This is not elapsed-time evidence.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const demand = f.load(1);
+    for (let i = 0; i < 2000 && !entered; i++) await new Promise(setImmediate);
+    assert.equal(entered, 1, 'the cached object reaches its real signed-authority revalidation');
+    assert.equal(typeof release, 'function');
+    t.mock.timers.tick(24);
+    assert.equal(f.requests.filter(row => row.context.frag.sn === 1).length, 1);
+    assert.deepEqual(demand.calls, { success: 0, abort: 0, error: 0, timeout: 0 });
+    t.mock.timers.tick(1);
+    for (let i = 0; i < 2000 && f.requests.filter(row => row.context.frag.sn === 1).length < 2; i++)
+      await new Promise(setImmediate);
+    const target = f.requests.filter(row => row.context.frag.sn === 1);
+    assert.equal(target.length, 2, 'the original 25 ms bound starts independent source recovery');
+    const recovery = target[1];
+    assert.equal(recovery.completed, false);
+    assert.equal(recovery.aborted, false);
+    assert.equal(recovery.loader.stats.loaded, 0, 'the recovery has produced no body bytes');
+    release();
+    assert.deepEqual(await demand.result, f.bytes);
+    assert.equal(recovery.aborted, true, 'valid cache authority cancels the pending recovery');
+    assert.equal(recovery.completed, false, 'the recovery attempt never supplies a body');
+    assert.deepEqual(demand.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
+    const after = f.swarm.metrics();
+    assert.equal(after.warmAhead.localReuseBytes - before.warmAhead.localReuseBytes, f.bytes.length);
+    assert.equal(after.bytes.peerFirst, before.bytes.peerFirst);
+    assert.equal(after.bytes.peerFirst, 0);
+    assert.equal(after.warmAhead.consumedPeerBytes, 0);
+    recovery.finish(); recovery.finish();
+    await new Promise(setImmediate);
+    demand.loader.destroy(); demand.loader.abort();
+    assert.equal(recovery.completed, false);
+    assert.equal(target.filter(row => row.completed).length, 1, 'only the verified initial warm source completed');
+    assert.deepEqual(demand.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
+    assert.deepEqual(demand.terminals, [{ type: 'success', sn: 1 }]);
+    assert.equal(f.swarm.metrics().warmAhead.localReuseBytes, after.warmAhead.localReuseBytes);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  } finally { release?.(); t.mock.timers.reset(); }
+});
+
 test('stopping during buffered cache revalidation starts source without waiting for the provider', async t => {
   const f = await fixture(t);
   await f.load(0).result;
