@@ -189,7 +189,21 @@ steady future source owners by object-key/public-key XOR rank among current
 connected, admitted, serving range peers in the same rendition. An exact
 advertised holder can still feed the normal mixed path. Otherwise a lower-ranked
 peer causes only that optional future to be skipped, leaving the next parsed
-future eligible. Unknown playlist state retains ordinary source loading.
+future eligible, unless every such peer is known to be behind: a peer whose
+latest HAVE message maps to a sequence number more than one object below the
+candidate takes no part in the election for it, and when no peer remains the
+viewer fetches the object itself. The manager learns object positions only
+from signed permits it resolved itself for main fragments (at most 512, first
+in first out, an entry older than 60 s is ignored). A link's frontier per
+rendition is the largest mapped sequence number in its most recent HAVE
+message that maps (the initial list or an incremental addition); the latest
+such message replaces the previous value, so a wrap or a sliding window moves
+it back, and a frontier older than 30 s is unknown. Keys that do not map
+change nothing, and a peer with an unknown frontier stays in the election as
+before. This uses no new message and no core change: HAVE still carries keys
+only. `warmAhead.peersBehindProceeds` counts optional source decisions that
+proceeded under this rule where the unmodified rank rule would have skipped
+the object. Unknown playlist state retains ordinary source loading.
 Startup coverage and genuine or already-promoted demand keep their existing
 source and rendezvous rules. No peer claim creates a wait, source
 request, new deadline or accepted credit by itself. Membership differences can
@@ -471,6 +485,7 @@ create network bytes. These source tests do not establish sustained cold-cache
 4K, a public TURN route, network savings or physical-device continuity.
 
 `sourceYielded` counts optional source decisions declined by the prefetch hook;
+`peersBehindProceeds` counts those the frontier rule turned into a proceed;
 `haveReconsidered` counts exact-HAVE notifications admitted to the existing
 queue, not completed transfers. `declinedSourceObjects` is the current bounded
 metadata count. None represents delivered or accepted media.

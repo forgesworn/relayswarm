@@ -36,6 +36,39 @@ admission, link-aware upload pacing) is recorded with the packet; it is not
 built. This result is one Mac behind one link; it is not public, NAT, TLS
 relay route, physical phone or merge qualification.
 
+## Unreleased frontier-aware future source election (30 October 2026)
+
+The private LAN two-viewer run above ended with the leader yielding 162 optional
+future objects and the late joiner 70, while the late joiner accepted 13.63 % of
+its media from the leader. The rank rule in the optional future source election
+ignored which viewer was ahead: when the leader lost the object-key XOR it
+yielded to a peer that, being behind, could not fetch the object before the
+leader's own deadline, so the leader fetched it from the origin anyway.
+
+The election now drops any peer whose latest mapped HAVE is more than one object
+behind the candidate. The manager maps HAVE keys to positions only through
+signed permits it resolved itself (at most 512, entries older than 60 s
+ignored); a link's frontier per rendition is the largest mapped sequence number
+in its latest HAVE message, replaced outright by each later message and unknown
+after 30 s. A peer with an unknown frontier stays in the election, and when every
+peer is behind the viewer proceeds; `warmAhead.peersBehindProceeds` counts those
+proceeds where the rank rule alone would have skipped. No wire message, core
+or WASM file changed.
+
+Proved: the controlled two-actor fixture on the real core, in both lead orders,
+shows the behind peer excluded, the adjacent peer still deciding by rank with its
+descriptor retained and exact-HAVE reconsideration unchanged, an unknown
+frontier keeping today's yield, the 30 s and 60 s windows, latest-message
+replacement, and the 512-entry bound. Not proved: any field effect. The
+expected effect in a two-viewer shared-position room is that the leader's
+`sourceYielded` falls while the late joiner is behind, its promotions fall, and
+its lead is kept, so the late joiner's accepted peer share should rise. The
+leader's own accepted peer share does not rise and may fall; the 5 % per-viewer
+gate for the leader is a gate-wording decision, not something this change
+targets. Yields fall but need not reach zero, since level viewers still decide
+by rank. Nothing here changes a remote forced-relay topology where every peer
+byte crosses one link twice. A new private field run is required.
+
 ## Unreleased size-aware startup admission (30 October 2026)
 
 The private 4K failure below followed a request order of SN1, SN4, SN6 and
