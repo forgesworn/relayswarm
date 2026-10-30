@@ -9806,6 +9806,29 @@ function warmSetupDeclineProof({ trace, expected, timer, rpc }) {
       Number.isFinite(row.replyAtMs) && row.sentAtMs <= timer.firedAtMs && timer.firedAtMs <= row.replyAtMs);
     const finishes = rows.filter(row => row.k === 'xferFinish');
     const finishIndex = rows.findIndex(row => row.k === 'xferFinish');
+    // Aborting a pending NEW rejects its awaited allocation on a later
+    // microtask. Independent whole-source recovery may already have started;
+    // neither a Worker allocation acknowledgement nor cleanup is Core START.
+    if (expected.coreTransfersDelta === 0 && pending === allocation && starts.length === 0 &&
+        allocation.sentAtMs <= timer.firedAtMs && invoked <= allocation.replyAtMs &&
+        fired < origin && origin < finishIndex) {
+      const finished = finishes[0], recent = rpc.filter(row => row.sentAtMs >= at);
+      if (rows[0] !== load || rows.filter(row => row.k === 'load').length !== 1 || finishes.length !== 1 ||
+          rows.filter(row => row.k === 'originStart').length !== 1 || recent.length !== 1 || recent[0] !== allocation ||
+          new Set(rpc.map(row => row.id)).size !== rpc.length ||
+          rpc.some(row => !['new', 'start'].includes(row.op) || !Number.isSafeInteger(row.id) || row.id < 1 ||
+            !Number.isSafeInteger(row.handle) || row.handle < 1 || !Number.isFinite(row.sentAtMs) ||
+            !Number.isFinite(row.replyAtMs) || row.sentAtMs > row.replyAtMs || row !== allocation && row.handle === allocation.handle) ||
+          rows.some(row => row.k === 'origin' && row.ranged === true) ||
+          [rows[0], rows[entry], rows[fired], rows[origin], finished].some((row, i, sequence) =>
+            !Number.isSafeInteger(row?.at) || row.at < 0 || i > 0 && row.at < sequence[i - 1].at) ||
+          ![expected.parentMs, expected.ttfbMs].every(Number.isFinite) || g.durationMs !== expected.fragmentDurationSeconds * 1000 ||
+          finished.reason !== 'allocation-error' || finished.delivered !== false || finished.bufferedMixed !== true ||
+          finished.peerOnly !== false || finished.verifiedBytes !== 0 || finished.originBytes !== 0 ||
+          ![finished.ms, finished.peerRemainingMs, finished.recoveryRemainingMs].every(Number.isFinite) || finished.ms < 0 ||
+          !(finished.peerRemainingMs > 0 && finished.recoveryRemainingMs > 0)) return null;
+      return { stage: 'warm-pending-new-cleanup-after-origin', proofTime: timer.firedAtMs, rpc: allocation };
+    }
     if (rows.filter(row => row.k === 'load').length !== 1 ||
         [rows[0], rows[entry], rows[fired], rows[finishIndex], rows[origin]].some((row, i, sequence) =>
           !Number.isSafeInteger(row?.at) || row.at < 0 || i > 0 && row.at < sequence[i - 1].at) ||
@@ -9840,6 +9863,94 @@ function warmSetupDeclineProof({ trace, expected, timer, rpc }) {
     return { stage: 'warm-observed-pending-rpc-timer', proofTime: timer.firedAtMs, rpc: pending };
   } catch { return null; }
 }
+
+test('owned warm pending NEW cleanup follows independent source recovery in the immutable capture', async () => {
+  const raw = await readFile(new URL('./fixtures/owned-warm-pending-allocation-cleanup.json', import.meta.url));
+  assert.equal(createHash('sha256').update(raw).digest('hex'), '80a0ea59ffde2c95471f765a08ebfcc8eb0f399ff7f2edc32730bb1591c30449');
+  const receipt = JSON.parse(raw);
+  assert.equal(receipt.provenance.sourceCommit, '0ef581aa927d83d803ca7052eba8f72508ae2290');
+  assert.equal(receipt.provenance.rawLogSha256, '1025ce7cb967c768896a9a68f3cf019d77d80b04e6cb7325b92247dff78ada8b');
+  const proof = warmSetupDeclineProof(receipt.proofInput);
+  assert.equal(proof?.stage, 'warm-pending-new-cleanup-after-origin');
+  assert.equal(proof.proofTime, receipt.proofInput.timer.firedAtMs);
+});
+
+test('owned warm pending NEW cleanup rejects incomplete or contradictory evidence', async () => {
+  const { proofInput: input } = JSON.parse(await readFile(new URL('./fixtures/owned-warm-pending-allocation-cleanup.json', import.meta.url)));
+  assert.equal(warmSetupDeclineProof(input)?.stage, 'warm-pending-new-cleanup-after-origin');
+  const row = (v, kind) => v.trace.rows.find(r => r.load === v.expected.load && r.k === kind);
+  const fired = v => v.trace.rows.find(r => r.load === v.expected.load && r.reason === 'setup-timer');
+  const allocation = v => v.rpc.find(r => r.op === 'new' && r.sentAtMs >= v.expected.enteredAtMs);
+  const controls = [
+    ['missing NEW', v => { v.rpc = v.rpc.filter(r => r !== allocation(v)); }],
+    ['duplicate NEW', v => { v.rpc.push({ ...allocation(v) }); }],
+    ['wrong NEW operation', v => { allocation(v).op = 'tick'; }],
+    ['missing id', v => { delete allocation(v).id; }],
+    ['invalid id', v => { allocation(v).id = 0; }],
+    ['reused id', v => { allocation(v).id = v.rpc[0].id; }],
+    ['missing handle', v => { delete allocation(v).handle; }],
+    ['invalid handle', v => { allocation(v).handle = 0; }],
+    ['reused handle', v => { allocation(v).handle = v.rpc[0].handle; }],
+    ['historical START aliases target handle', v => { v.rpc.find(r => r.op === 'start').handle = allocation(v).handle; }],
+    ['failed NEW', v => { allocation(v).success = false; }],
+    ['wrong size', v => { allocation(v).configSize++; }],
+    ['wrong deadline', v => { allocation(v).configDeadline++; }],
+    ['nonexclusive', v => { allocation(v).exclusiveOrigin = false; }],
+    ['peer-only', v => { allocation(v).peerOnly = true; }],
+    ['not pending at timer', v => { allocation(v).replyAtMs = v.timer.firedAtMs - .1; }],
+    ['not pending at source', v => { allocation(v).replyAtMs = (v.timer.firedAtMs + v.expected.invokedAtMs) / 2; }],
+    ['NEW sent after timer', v => { allocation(v).sentAtMs = v.timer.firedAtMs + .1; }],
+    ['nonfinite RPC time', v => { allocation(v).replyAtMs = NaN; }],
+    ['unexpected START', v => { const a = allocation(v); v.rpc.push({ id: a.id + 1, op: 'start', handle: a.handle,
+      sentAtMs: a.replyAtMs, replyAtMs: a.replyAtMs + 1, success: true }); }],
+    ['Core command', v => { v.trace.rows.push({ k: 'xfer', load: v.expected.load, at: row(v, 'xferFinish').at, op: 'start' }); }],
+    ['peer request trace', v => { v.trace.rows.push({ k: 'request', load: v.expected.load, at: row(v, 'xferFinish').at }); }],
+    ['range trace', v => { v.trace.rows.push({ k: 'origin', load: v.expected.load, at: row(v, 'xferFinish').at, ranged: true }); }],
+    ...['originRangeAttempts', 'physicalRangeGets', 'clientRangeLoads', 'peerRequests', 'acceptedPeerBytes', 'verifiedWarmPeerBytes', 'coreTransfersDelta']
+      .map(name => [name, v => { v.expected[name] = 1; }]),
+    ['missing source', v => { v.trace.rows = v.trace.rows.filter(r => r !== row(v, 'originStart')); }],
+    ['duplicate source', v => { v.trace.rows.push({ ...row(v, 'originStart') }); }],
+    ['nonfallback source', v => { row(v, 'originStart').leg = 'cached'; }],
+    ['ranged source', v => { row(v, 'originStart').ranged = true; }],
+    ['source precedes timer', v => { const r = row(v, 'originStart'); v.trace.rows.splice(v.trace.rows.indexOf(r), 1);
+      v.trace.rows.splice(v.trace.rows.indexOf(fired(v)), 0, r); }],
+    ['missing finish', v => { v.trace.rows = v.trace.rows.filter(r => r !== row(v, 'xferFinish')); }],
+    ['duplicate finish', v => { v.trace.rows.push({ ...row(v, 'xferFinish') }); }],
+    ['finish precedes timer', v => { const r = row(v, 'xferFinish'); v.trace.rows.splice(v.trace.rows.indexOf(r), 1);
+      v.trace.rows.splice(v.trace.rows.indexOf(fired(v)), 0, r); }],
+    ['finish timestamp precedes source', v => { row(v, 'xferFinish').at = row(v, 'originStart').at - 1; }],
+    ['wrong finish reason', v => { row(v, 'xferFinish').reason = 'core-fail-command'; }],
+    ['delivered', v => { row(v, 'xferFinish').delivered = true; }],
+    ['verified bytes', v => { row(v, 'xferFinish').verifiedBytes = 1; }],
+    ['origin bytes', v => { row(v, 'xferFinish').originBytes = 1; }],
+    ['not mixed', v => { row(v, 'xferFinish').bufferedMixed = false; }],
+    ['peer-only finish', v => { row(v, 'xferFinish').peerOnly = true; }],
+    ['expired recovery', v => { row(v, 'xferFinish').recoveryRemainingMs = 0; }],
+    ['negative finish duration', v => { row(v, 'xferFinish').ms = -1; }],
+    ['wrong load', v => { v.expected.load++; }],
+    ['wrong fragment', v => { v.expected.sn++; }],
+    ['missing scope predicate', v => { delete fired(v).scope.generation; }],
+    ...MIXED_SCOPE_CHECKS.concat('warmOwner').map(name => [name, v => { fired(v).scope[name] = false; }]),
+    ['missing timer', v => { v.timer = null; }],
+    ['late schedule', v => { v.timer.scheduledAtMs = v.expected.enteredAtMs + 26; }],
+    ['wrong timer delay', v => { v.timer.requestedDelayMs = 26; }],
+    ['source before firing', v => { v.expected.invokedAtMs = v.timer.firedAtMs - 1; }],
+    ['nonfinite parent', v => { v.expected.parentMs = Infinity; }],
+    ['contradictory duration', v => { fired(v).capturedGeometry.durationMs++; row(v, 'load').budgetGeometry.durationMs++; }],
+    ['renewed parent', v => { v.expected.remainingLoadMs = v.expected.parentMs; }],
+    ['renewed first byte', v => { v.expected.remainingTtfbMs = v.expected.ttfbMs; }],
+    ['underclipped source', v => { v.expected.remainingLoadMs--; }],
+    ['trace dropped', v => { v.trace.dropped = 1; }],
+    ['RPC dropped', v => { v.expected.rpcDropped = 1; }],
+    ['RPC omitted', v => { v.expected.rpcOmitted = 1; }],
+    ['rows omitted', v => { v.expected.rowsOmitted = 1; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const v = structuredClone(input); mutate(v); assert.equal(warmSetupDeclineProof(v), null, name);
+  }
+  console.log(JSON.stringify({ fixture: 'pending-new-cleanup-proof-mutations', rejected: controls.length,
+    scope: 'Immutable classifier counterexamples only; not traffic, completion or CI rescore evidence' }));
+});
 
 test('owned warm captured precutoff allocation timer proves a protected setup decline', async () => {
   const raw = await readFile(new URL('./fixtures/owned-warm-precutoff-allocation-timer.json', import.meta.url));
@@ -9980,7 +10091,7 @@ test('warm setup proof rejects the immutable incomplete897 failure without recon
   assert.equal(warmSetupDeclineProof(input), null, 'old RED lacks independent evidence; later controls cannot rescore it');
 });
 
-async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logical = false, realAdmission = false, holdSetup = false } = {}) {
+async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logical = false, realAdmission = false, holdSetup = false, holdNewAllocation = false } = {}) {
   const size = 6 * 1024 * 1024, bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
   const secret = generateSecretKey(), seconds = Math.floor(Date.now() / 1000);
   const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds, tags: [['d', 'contrast'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
@@ -9999,7 +10110,7 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
     }
   }
   for (const warming of ownedWarm ? [true] : [true, false]) {
-    let f, received, declined = false, declineProof = null;
+    let f, received, declined = false, declineProof = null, heldAllocationObserved = false;
     const timers = realAdmission && !logical ? realTimerInvocationContext() : null;
     if (timers) t.after(() => timers.restore());
     const clock = logical ? warmFunctionalClock(t, () => {
@@ -10009,9 +10120,10 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
       // let actual metadata/allocation reach its REAL posted START, then let
       // the original25ms timer advance while that actual reply is held.
       // Neither range admission nor a favourable Core result controls time.
+      if (holdNewAllocation && bridge?.workers[0]?.newRequests?.length) heldAllocationObserved = true;
       return Boolean(warm && (holdSetup ? !bridge?.workers[0]?.heldStartPosted :
-        !received.some(row => row.path === '/media/seg.ts' && row.warm)));
-    }, holdSetup) : null;
+        holdNewAllocation ? !heldAllocationObserved : !received.some(row => row.path === '/media/seg.ts' && row.warm)));
+    }, holdSetup || holdNewAllocation) : null;
     const settle = promise => clock ? clock.settle(promise) : promise;
     const wait = predicate => clock ? clock.advanceUntil(predicate) : until(predicate);
     let rpcObserved = 0;
@@ -10071,6 +10183,7 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
       const before = f.swarm.metrics(), beforeReceived = received.length, beforeRequests = requests.length;
       const beforePeerRequests = f.channels.reduce((sum, channel) => sum + channel.wants.length, 0);
       if (holdSetup) { assert(worker && realAdmission); bridge.workers[0].holdStart = true; }
+      if (holdNewAllocation) { assert(worker && realAdmission && logical); bridge.workers[0].holdNew = true; }
       const previous = invoke(lead); previous.response.catch(() => {});
       await wait(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/lead.ts'));
       if (warming) await wait(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/seg.ts' && row.warm));
@@ -10088,6 +10201,17 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
               bridge.workers[0].holdStart = false; bridge.workers[0].releaseStart();
             }
             await wait(() => f.swarm.trace().rows.some(row => row.k === 'xferFinish' && row.load === load));
+            if (holdNewAllocation) {
+              const held = bridge.workers[0].newRequests;
+              assert(heldAllocationObserved && held?.length === 1, 'the actual NEW reply remains held across original timer/source recovery');
+              const pendingNew = bridge.workers[0].rpcSent.get(held[0].data.id);
+              assert.equal(pendingNew?.op, 'new');
+              assert.equal(targetOrigin.invocationProbe.firedAtMs, targetOrigin.sdkEnteredAtMs + 25);
+              assert(pendingNew.sentAtMs <= targetOrigin.invocationProbe.firedAtMs &&
+                targetOrigin.invokedAtMs >= targetOrigin.invocationProbe.firedAtMs);
+              assert.equal(targetOrigin.complete, false, 'the live proof is observed before its whole HTTP body completes');
+              bridge.workers[0].holdNew = false; bridge.workers[0].releaseNew();
+            }
             const fullTrace = f.swarm.trace(), now = f.swarm.metrics();
             const wants = f.channels.flatMap(channel => channel.wants);
             const proofInput = { trace: fullTrace, timer: targetOrigin.invocationProbe, rpc,
@@ -10107,6 +10231,13 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
                 rpcOmitted: Math.max(0, rpcObserved - rpc.length), rowsOmitted: 0 } };
             declineProof = warmSetupDeclineProof(proofInput);
             assert(declineProof, JSON.stringify({ message: 'real warm fallback requires complete same-load setup proof', proofInput }));
+            if (holdNewAllocation) {
+              assert.equal(declineProof.stage, 'warm-pending-new-cleanup-after-origin');
+              assert.equal(proofInput.expected.coreTransfersDelta, 0);
+              assert(!rpc.some(row => row.op === 'start' && row.sentAtMs >= proofInput.expected.enteredAtMs));
+              console.log(JSON.stringify({ fixture: 'actual-warm-held-new-cleanup-proof',
+                controllerClock: 'logical-functional', timerClockDomain: 'logical-performance', proofInput, proof: declineProof }));
+            }
             if (holdSetup) {
               assert.equal(declineProof.stage, 'warm-observed-pending-rpc-timer');
               assert.equal(proofInput.timer.firedAtMs, proofInput.expected.enteredAtMs + 25,
@@ -10213,6 +10344,14 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
         const again = invoke(target); sameBytes(await settle(again.response), bytes);
         assert.equal(again.calls.success, 1); assert.equal(f.swarm.metrics().bytes.peerFirst, after.bytes.peerFirst, 'repeated consumption cannot double-credit the same warm object');
       }
+      if (holdNewAllocation) {
+        await wait(() => { const snapshot = f.swarm.metrics().core.transferWorker;
+          return snapshot.transfers === 0 && snapshot.pending === 0; });
+        const snapshot = f.swarm.metrics().core.transferWorker;
+        for (const field of ['transfers', 'activeBytes', 'pending', 'pendingBytes']) assert.equal(snapshot[field], 0, field);
+        console.log(JSON.stringify({ fixture: 'actual-warm-held-new-worker-cleanup',
+          transfers: snapshot.transfers, activeBytes: snapshot.activeBytes, pending: snapshot.pending, pendingBytes: snapshot.pendingBytes }));
+      }
       observations.push({ warming, ownedWarm, worker, optionalAdmissionDeclined: declined, setupProof: declineProof?.stage ?? null, controllerClock: logical ? 'logical-functional' : 'real', objectBytes: size, acceptedPeerBytes: peer,
         actualTargetHttpBytes: client.reduce((sum, row) => sum + row.bytes, 0), targetWholeGets: server.filter(row => !row.range).length,
         target206Gets: server.filter(row => row.range).length, targetClientBodies: client.map(({ bytes, status, complete, range, warm }) => ({ bytes, status, complete, range, warm })),
@@ -10238,6 +10377,13 @@ for (const worker of [false, true]) test(`owned steady warm real-clock admission
 // cases above still require actual strict206 or a complete observed decline.
 test('owned steady warm held Worker reply proves setup-only whole fallback (logical controller)', { timeout: 20000 },
   t => realCoreWarmContrast(t, { ownedWarm: true, worker: true, logical: true, realAdmission: true, holdSetup: true }));
+
+
+// Functional allocation-cancellation proof: actual committed Worker NEW reply
+// is held before advancing the original setup timer. The real whole HTTP body,
+// hash/callbacks and reduced source budgets remain mandatory; no elapsed claim.
+test('owned steady warm held NEW reply proves cleanup after independent source and complete fallback (logical controller)', { timeout: 20000 },
+  t => realCoreWarmContrast(t, { ownedWarm: true, worker: true, logical: true, realAdmission: true, holdNewAllocation: true }));
 
 
 async function bufferedMixedFixture(t, clock, options = {}) {
