@@ -36,6 +36,65 @@ admission, link-aware upload pacing) is recorded with the packet; it is not
 built. This result is one Mac behind one link; it is not public, NAT, TLS
 relay route, physical phone or merge qualification.
 
+## Unreleased frontier-aware future source election (30 October 2026)
+
+The private LAN two-viewer run above ended with the leader yielding 162 optional
+future objects and the late joiner 70, while the late joiner accepted 13.63 % of
+its media from the leader. The rank rule in the optional future source election
+ignored which viewer was ahead: when the leader lost the object-key XOR it
+yielded to a peer that, being behind, could not fetch the object before the
+leader's own deadline, so the leader fetched it from the origin anyway.
+
+The election now drops any peer whose advertised objects end more than one object
+behind the candidate. The manager maps object keys to positions only through
+signed permits it resolved itself (at most 512, entries older than 60 s
+ignored). A peer's frontier is derived when the election runs, as the largest
+sequence number among the keys it currently advertises that map to a known
+position; nothing is stored per link, so a HAVE that arrived before the local
+authorisation of that object counts once the object is authorised. A peer with
+no mapped key stays in the election, as does one still advertising an old high
+sequence number after a wrap. When every peer is behind the viewer proceeds.
+`warmAhead.peersBehindProceeds` counts election decisions the exclusion turned
+into a proceed where the rank rule over all candidates would have skipped; the
+hook can decide again for one object and warm-ahead can still decline it, so the
+count may exceed the objects fetched. No wire message, core or WASM file
+changed. A first version stored a frontier per link at HAVE arrival; independent
+review showed it kept a stale view when the HAVE came before the local
+authorisation, so the late joiner could exclude the leader wrongly and fetch
+from the origin, and it was replaced by the derivation above.
+
+Proved: the controlled two-actor fixture on the real core shows the behind peer
+excluded, the adjacent peer still deciding by rank with its descriptor retained
+and exact-HAVE reconsideration unchanged, an unknown frontier keeping today's
+yield, an exact HAVE still proceeding uncounted, an older high key keeping the
+peer a candidate, the early-HAVE case above, and that another rendition's
+objects give no frontier. The behind/adjacent, unknown-frontier and exact-HAVE
+cases run with either actor as the evaluator; the rest run with one. The
+512-entry bound and the 60 s window are proved by a direct unit test.
+
+Field result (30 October 2026, one private LAN two-viewer attempt of this exact
+runtime, same packet shape as the run above): playback passed (trusted 4K first
+frames 7.664 s and 9.539 s, 340,001 ms observed, zero stalls, player errors,
+dropped frames or waits for both), but accepted peer media was 2.87 % and
+3.87 %, below the 5 % per-viewer gate for both and below the 1.91 % and 13.63 %
+of the run above; total accepted peer bytes fell from 167 MB to 73 MB.
+`sourceYielded` fell to 10 and 14 (from 162 and 70) and `peersBehindProceeds`
+was 50 and 47. In this run the two viewers were level from the start (first
+frames 4.0 s apart, playhead lag 0.00 s, equal median buffer depth), whereas in
+the run above the leader was about 10 s ahead when the late joiner started. In a
+level pair the derived frontier lags by one in-flight object plus HAVE
+propagation, so each viewer judged the other to be behind, both proceeded and
+both fetched from the origin; the rank coordination was lost. The leader-ahead
+regime the rule targets did not occur, so its intended benefit is untested, and
+the comparison is confounded by regime because no level-regime control of the
+previous runtime was run and the diagnostic driver does not control start
+stagger. The expectation stated for this change before the run is withdrawn.
+This change is not for merge as implemented; any revision needs lag tolerance
+in the exclusion or a current signal such as the existing origin-fetch claims,
+a chosen start stagger in the driver, and a level-regime control. Nothing here
+changes a remote forced-relay topology where every peer byte crosses one link
+twice.
+
 ## Unreleased size-aware startup admission (30 October 2026)
 
 The private 4K failure below followed a request order of SN1, SN4, SN6 and

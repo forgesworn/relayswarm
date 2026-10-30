@@ -34,6 +34,7 @@ import { PeerSelection } from "./peer-selection.mjs";
 import { VerifiedPieceFlow } from "./verified-piece-flow.mjs";
 import { NeighbourDiscovery } from "./neighbour-discovery.mjs";
 import { boundedOperation } from "./bounded-operation.mjs";
+import { FutureFrontier } from "./future-frontier.mjs";
 import { commitmentPieceSize, validStreamAuthorisation, verifySegmentCommitment, segmentMediaContext } from "./segment-commitment.mjs";
 import { loadCore } from "./core-wasm.mjs";
 import { createCoreTransferWorker } from "./core-transfer-worker.mjs";
@@ -501,6 +502,11 @@ class HlsSwarm {
     this.haveWaiters = new Set();
     this.rendition = null;
     this.renditions = new Map();
+    // Position knowledge for the optional future source election: object key to
+    // { rendition, sn, at } for permits this manager resolved. Bounded and local;
+    // a peer's frontier is derived from its advertised keys at election time.
+    this.frontier = new FutureFrontier();
+    this.peersBehindProceeds = 0;
     this.originFetches = new Map();
     this.uploadQuotaBytes = 0;
     this.uploadTokens = this.options.maxUploadBytesPerSecond;
@@ -684,6 +690,7 @@ class HlsSwarm {
               key, context, maxSegmentBytes: this.options.maxSegmentBytes, delegation: this.options.delegation,
               revokedDelegationIds: this.options.revokedDelegationIds, delegationRevocations: this.options.delegationRevocations });
             const commitment = current(context);
+            if (commitment) this.#notePosition(context, key);
             return commitment && commitment.size <= this.options.maxHeldBytes
               ? { ...commitment, key, current: context => {
                 const fresh = current(context);
@@ -854,6 +861,7 @@ class HlsSwarm {
     this.heldBytes = 0;
     this.originFetches.clear();
     this.renditions.clear();
+    this.frontier.clear();
     this.playerHints = [];
     this.hintSizes.clear();
     this.hintOriginRates = [];
@@ -976,7 +984,7 @@ class HlsSwarm {
       mode: this.disabledReason ? "off" : this.options.mode,
       disabledReason: this.disabledReason || null,
       stopped: this.stopped,
-      warmAhead: this.warmAhead?.snapshot() ?? null,
+      warmAhead: this.warmAhead ? { ...this.warmAhead.snapshot(), peersBehindProceeds: this.peersBehindProceeds, knownPositions: this.frontier.size } : null,
       startupBuffer: this.warmAhead?.startupSnapshot() ?? null,
       peerAdmission: { ...this.peerAdmission, claimedLinks: this.peerLeases.size, waiting: this.peerLeaseWaiters.size },
       uploadPacing: this.uploadPacer?.snapshot() ?? null,
@@ -2195,7 +2203,26 @@ class HlsSwarm {
     if (requireExact) return false;
     if (!candidates.length) return true;
     const target = BigInt('0x' + key), local = target ^ BigInt('0x' + this.session.pubkey);
-    return candidates.every(peer => (target ^ BigInt('0x' + peer.pubkey)) >= local);
+    const wins = peers => peers.every(peer => (target ^ BigInt('0x' + peer.pubkey)) >= local);
+    // A peer whose advertised objects, mapped through permits we resolved
+    // ourselves, end more than one object behind this candidate cannot own it
+    // before our deadline, so it takes no part. The frontier is derived here, not
+    // stored, from at most 256 advertised keys per candidate peer (256 map
+    // lookups). A peer with no mapped key stays in the election.
+    const now = Date.now();
+    const ahead = Number.isSafeInteger(frag.sn) ? candidates.filter(peer => !this.frontier.behind(peer.have, rendition, frag.sn, now)) : candidates;
+    const decision = ahead.length ? wins(ahead) : true;
+    // Counts election decisions the exclusion turned into a proceed. The hook can
+    // decide again for one object, and warm-ahead may still decline to fetch it.
+    if (decision && ahead.length < candidates.length && !wins(candidates)) this.peersBehindProceeds += 1;
+    return decision;
+  }
+
+  // Record where a signed permit this manager resolved sits in its playlist.
+  #notePosition(context, key) {
+    const frag = context?.frag;
+    if (this.stopped || frag?.type !== 'main' || context.part || !Number.isSafeInteger(frag.sn) || !/^[0-9a-f]{64}$/.test(key)) return;
+    try { this.frontier.note(key, this.#renditionContext(context), frag.sn, Date.now()); } catch {}
   }
 
   #shouldWaitForOrigin(key, rendition, context) {
@@ -2723,6 +2750,7 @@ class HlsSwarm {
       });
     } catch { if (!this.stopped) this.counters.commitmentUnavailable += 1; return null; }
     if (!commitment) { this.counters.commitmentRejected += 1; return null; }
+    this.#notePosition(context, key);
     if (plan.currentValid && !plan.currentValid()) return null;
     const revalidate = () => Boolean(this.#verifyCommitment(authorityEvent, {
       streamEvent: this.options.streamEvent, swarmId: this.options.swarmId, key, context,

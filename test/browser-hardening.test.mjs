@@ -23,6 +23,7 @@ import { NeighbourDiscovery } from "../src/browser/neighbour-discovery.mjs";
 import { CoreNeighbourDiscovery } from "../src/browser/core-discovery.mjs";
 import { PeerSelection } from "../src/browser/peer-selection.mjs";
 import { VerifiedPieceFlow } from "../src/browser/verified-piece-flow.mjs";
+import { FutureFrontier, POSITION_LIMIT, POSITION_TTL_MS } from "../src/browser/future-frontier.mjs";
 import { createOperatorControls } from "../demo/operator.mjs";
 
 const initialPeerFlow = () => ({ partialUsefulnessPreserved: 0, verifiedShortBatches: 0, verifiedShortBytes: 0, lastVerifiedShortBatch: null,
@@ -6021,6 +6022,302 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
     if (diagnosticPhase !== 'done') diagnostic('finally');
     keyWork.restore(); clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy();
   }
+});
+
+// Frontier-aware future source election. The same real-core two-actor fixture as
+// the reciprocal futures above, but the peer wins the object-key XOR for every
+// future, so the evaluator is the XOR loser for each candidate and only its view
+// of the peer's frontier decides whether it yields. The peer's HAVE messages are
+// injected on the evaluator's channel; the objects they name are never served.
+// The lead demand maps the first two futures (sn first + 1, first + 2) through
+// their permits and the evaluator yields both. A later demand on the first or
+// second future moves the window, and a HAVE injected in the same synchronous
+// step reaches the evaluator before any permit of the new window resolves. The
+// peer's frontier is derived from its advertised keys at election time.
+async function frontierFixture(t, evaluator, { first = 10, second = false } = {}) {
+  const pair = await framingPairFixture(t, { pairedState: true }), actors = [], source = [], loaders = new Set(), objects = new Map(), peer = 1 - evaluator;
+  const size = 1024 * 1024, secret = generateSecretKey();
+  const streamEvent = finalizeEvent({ kind: 30311, created_at: Math.floor(Date.now() / 1000),
+    tags: [['d', 'frontier-election'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
+  const keyFor = path => createHash('sha256').update(`${base.swarmId}\n${path}`).digest('hex');
+  const keyWork = logicalSegmentKeyDigests(t, base.swarmId), digests = new Map();
+  const getCommitment = async ctx => {
+    const path = new URL(ctx.url).pathname, data = objects.get(path); assert(data);
+    if (!digests.has(path)) {
+      const pieceSize = commitmentPieceSize(data.length), pieces = [];
+      for (let at = 0; at < data.length; at += pieceSize) pieces.push(createHash('sha256').update(data.subarray(at, at + pieceSize)).digest('hex'));
+      digests.set(path, { pieceSize, pieces, sha256: createHash('sha256').update(data).digest('hex') });
+    }
+    const { pieceSize, pieces, sha256 } = digests.get(path), now = Math.floor(Date.now() / 1000);
+    const playlist = path.startsWith('/media/b/') ? '/media/b/index.m3u8' : '/media/index.m3u8';
+    return finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: now, tags: [['x', base.swarmId], ['e', streamEvent.id]],
+      content: commitmentContent({ v: 3, streamEventId: streamEvent.id, swarmId: base.swarmId, key: keyFor(path),
+        rendition: playlist, playlist, mediaType: 'main', encryption: null,
+        sequence: ctx.frag.sn, discontinuity: ctx.frag.cc, part: null, sha256, size: data.length, pieceSize, pieces,
+        expiresAt: now + 120 }) }, secret);
+  };
+  const invoke = (actor, frag) => {
+    const f = actors[actor], ctx = { url: frag.url, frag, part: null, type: LoaderContextType.MEDIA_FRAGMENT,
+      responseType: 'arraybuffer', headers: {}, rangeStart: 0, rangeEnd: 0 };
+    const loader = new f.hls.config.fLoader(f.hls.config);
+    frag.stats = loader.stats;
+    const response = new Promise((resolve, reject) => loader.load(ctx, { timeout: 10000 }, {
+      onSuccess: value => resolve(new Uint8Array(value.data)), onError: () => reject(new Error('frontier source error')),
+      onAbort: () => reject(new Error('frontier source abort')), onTimeout: () => reject(new Error('frontier source timeout')) }));
+    response.catch(() => {});
+    return response;
+  };
+  const clock = warmFunctionalClock(t, () => keyWork.pending > 0 || actors.some((f, actor) => {
+    const rows = f.swarm.trace().rows;
+    return [first + 1, first + 2].some(sn => {
+      const load = rows.findLast(row => row.k === 'load' && row.sn === sn && row.budgetGeometry?.source === 'warm-ahead');
+      return load && rows.some(row => row.k === 'mixedScope' && row.load === load.load && row.reason === 'entry') &&
+        !source.some(row => row.actor === actor && row.sn === sn);
+    });
+  }));
+  t.after(() => { keyWork.restore(); clock.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy(); });
+  for (const actor of [0, 1]) {
+    class Source extends Loader {
+      stats = new LoadStats();
+      load(ctx, config, callbacks) {
+        const data = objects.get(new URL(ctx.url).pathname); assert(data);
+        const from = ctx.rangeEnd ? ctx.rangeStart : 0, to = ctx.rangeEnd || data.length;
+        const row = { actor, sn: ctx.frag.sn, warm: Boolean(ctx[WARM_AHEAD]), range: ctx.rangeEnd ? [from, to] : null, complete: false, aborted: false };
+        source.push(row); loaders.add(this);
+        this.stats.loading.start = performance.now();
+        this.complete = () => {
+          if (row.complete || row.aborted) return;
+          row.complete = true; this.stats.loaded = this.stats.total = to - from;
+          this.stats.loading.first = this.stats.loading.end = performance.now();
+          callbacks.onSuccess({ data: data.slice(from, to).buffer, code: row.range ? 206 : 200 }, this.stats, ctx, null);
+        };
+        this.row = row;
+        if (ctx.frag.sn === first || row.range) this.timer = setTimeout(this.complete, ctx.frag.sn === first ? 1600 : 20);
+        else if (ctx.url.endsWith('/media/b/b0.ts')) this.timer = setTimeout(this.complete, 1600);
+      }
+      abort() { clearTimeout(this.timer); if (this.row && !this.row.complete) this.row.aborted = true; }
+      destroy() { this.abort(); loaders.delete(this); }
+    }
+    const media = Object.assign(new EventTarget(), { currentTime: 0, paused: false, ended: false, seeking: false,
+      readyState: 4, playbackRate: 1, buffered: { length: 0 } });
+    actors.push(await clock.settle(pair.make({ OriginLoader: Source, player: { media }, swarmOptions: {
+      streamEvent, getCommitment, warmAhead: true, bufferedMixedRanges: true, zeroBudgetPeerRace: true,
+      sustainablePeerWait: true, originReserveMs: 2000, maxPeerWaitMs: 2500, traceRequests: 4096 } })));
+  }
+  await clock.advanceUntil(() => actors.every(f => f.swarm.metrics().peers.connected === 1));
+  const pubkeys = actors.map(f => f.swarm.metrics().pubkey), winner = path => {
+    const key = BigInt('0x' + keyFor(path));
+    return (key ^ BigInt('0x' + pubkeys[0])) < (key ^ BigInt('0x' + pubkeys[1])) ? 0 : 1;
+  };
+  const paths = ['/media/lead.ts'];
+  for (let future = 1; future <= 4; future++) {
+    for (let n = 0; n < 256; n++) {
+      const path = `/media/frontier-${future}-${n}.ts`;
+      if (winner(path) === peer) { paths.push(path); break; }
+    }
+  }
+  assert.equal(paths.length, 5, 'the peer wins the XOR for every future');
+  objects.set(paths[0], new Uint8Array(32768).fill(9));
+  paths.slice(1).forEach((path, index) => objects.set(path, Uint8Array.from({ length: size }, (_, i) => (i * 131 + index * 17) % 251)));
+  const playlist = `#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:${first}\n#EXTINF:10,\nlead.ts\n` +
+    paths.slice(1).map(path => `#EXTINF:2,\n${path.split('/').at(-1)}\n`).join('');
+  // An optional second rendition, a separate playlist with its own numbering
+  // (sequence numbers 1 to 3), loaded only when the test demands it.
+  const otherPaths = ['/media/b/b0.ts', '/media/b/b1.ts', '/media/b/b2.ts'];
+  if (second) otherPaths.forEach((path, index) => objects.set(path, index ? Uint8Array.from({ length: size }, (_, i) => (i * 7 + index) % 251) : new Uint8Array(32768).fill(5)));
+  const otherPlaylist = '#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:1\n#EXTINF:10,\nb0.ts\n#EXTINF:2,\nb1.ts\n#EXTINF:2,\nb2.ts\n';
+  const otherDetails = [];
+  const details = actors.map(f => {
+    const parsed = M3U8Parser.parseLevelPlaylist(playlist, 'https://origin.example/media/index.m3u8', 0, 'main', 0, null);
+    assert.equal(parsed.live, true);
+    f.hls.levels = [{ details: parsed }];
+    if (second) {
+      const other = M3U8Parser.parseLevelPlaylist(otherPlaylist, 'https://origin.example/media/b/index.m3u8', 1, 'main', 0, null);
+      f.hls.levels.push({ details: other }); otherDetails.push(other);
+    }
+    return parsed;
+  });
+  const wait = async predicate => {
+    try { await clock.advanceUntil(predicate); } catch (error) {
+      console.log(JSON.stringify({ fixture: 'frontier-election-diagnostic', evaluator, source,
+        warm: actors.map(f => f.swarm.metrics().warmAhead) }));
+      throw error;
+    }
+  };
+  const startedAt = performance.now();
+  const lead = actors.map((_, actor) => invoke(actor, details[actor].fragments[0]));
+  await clock.settle(Promise.all(lead));
+  for (const f of actors) f.hls.media.buffered = { length: 1, start: () => 0, end: () => 10 };
+  const offerer = pair.signals.find(row => row.type === 'offer').from;
+  const channelOf = actor => pubkeys[actor] === offerer ? pair.channels[0] : pair.channels[1];
+  const warm = actor => actors[actor].swarm.metrics().warmAhead;
+  const rows = actor => source.filter(row => row.actor === actor && row.warm && row.sn > first);
+  // The lead's window: the evaluator loses both futures to the peer and yields.
+  await wait(() => warm(evaluator).sourceYielded >= 2 && rows(peer).length >= 1);
+  await clock.advance(100);
+  assert.deepEqual([warm(evaluator).sourceYielded, rows(evaluator).length, warm(evaluator).peersBehindProceeds], [2, 0, 0]);
+  return { first, evaluator, peer, actors, source, paths, details, wait, channels: pair.channels, advance: clock.advance, warm, rows,
+    key: index => keyFor(paths[index]),
+    // Logical time this test advanced after the actors connected, for the CI budget.
+    report: () => t.diagnostic(`frontier election logical ms: ${Math.round(performance.now() - startedAt)}`),
+    // Demand fragment `index` on the evaluator; a HAVE sent now arrives before
+    // any permit of the new window resolves.
+    demand: index => invoke(evaluator, details[evaluator].fragments[index]),
+    demandOther: index => invoke(evaluator, otherDetails[evaluator].fragments[index]),
+    otherKey: index => keyFor(otherPaths[index]),
+    // A HAVE message from the peer, as the evaluator's link receives it.
+    have: (keys, field = 'add') => channelOf(evaluator).receive(JSON.stringify({ t: 'have', [field]: keys })) };
+}
+
+// The second demand is on the first future: its window is first + 2 and
+// first + 3. The peer advertises first + 1, so its frontier is first + 1:
+// first + 2 is adjacent (the XOR loser still yields) and first + 3 is two ahead.
+for (const evaluator of [0, 1]) test(`frontier election: a peer two objects behind takes no part, an adjacent one does (evaluator actor ${evaluator})`, { timeout: 30000 }, async t => {
+  const f = await frontierFixture(t, evaluator);
+  f.demand(1);
+  f.have([f.key(1)]);
+  await f.wait(() => f.warm(evaluator).sourceYielded >= 3 && f.rows(evaluator).length >= 1);
+  await f.advance(100);
+  const warm = f.warm(evaluator);
+  assert.deepEqual(f.rows(evaluator).map(row => row.sn), [f.first + 3], JSON.stringify(f.source));
+  assert.equal(warm.sourceYielded, 3, 'the adjacent future still follows the XOR outcome');
+  assert.equal(warm.declinedSourceObjects, 1, 'its descriptor is retained for exact-HAVE reconsideration');
+  assert.equal(warm.peersBehindProceeds, 1, 'only the future the peer is behind on counts');
+  // No wire change: HAVE frames still carry only keys, adds and deletes.
+  for (const frame of f.channels.flatMap(channel => channel.sent).filter(row => row?.t === 'have'))
+    assert(Object.keys(frame).every(name => ['t', 'keys', 'add', 'del'].includes(name)), JSON.stringify(frame));
+  // Exact-HAVE reconsideration of the retained descriptor is unchanged.
+  f.have([f.key(2)]);
+  await f.wait(() => f.warm(evaluator).haveReconsidered === 1);
+  assert.equal(f.warm(evaluator).declinedSourceObjects, 0);
+  assert.equal(f.warm(evaluator).sourceYielded, 3);
+  f.report();
+});
+
+for (const evaluator of [0, 1]) test(`frontier election: an unknown frontier keeps the XOR yield (evaluator actor ${evaluator})`, { timeout: 30000 }, async t => {
+  const f = await frontierFixture(t, evaluator);
+  f.demand(1);
+  await f.wait(() => f.warm(evaluator).sourceYielded >= 4);
+  await f.advance(100);
+  const warm = f.warm(evaluator);
+  assert.deepEqual(f.rows(evaluator), []);
+  assert.equal(warm.sourceYielded, 4);
+  assert.equal(warm.declinedSourceObjects, 2);
+  assert.equal(warm.peersBehindProceeds, 0);
+  f.report();
+});
+
+for (const evaluator of [0, 1]) test(`frontier election: an exact HAVE for the candidate returns before any frontier logic (evaluator actor ${evaluator})`, { timeout: 30000 }, async t => {
+  const f = await frontierFixture(t, evaluator);
+  f.demand(1);
+  // The peer advertises first + 3 by its exact key. Under the derived rule the
+  // local authorisation of first + 3 records its position before the election,
+  // so the peer is adjacent rather than excluded; the test proves that an exact
+  // HAVE still proceeds through the existing early return and is not counted.
+  f.have([f.key(1)]);
+  f.have([f.key(3)]);
+  await f.wait(() => f.warm(evaluator).sourceYielded >= 3 && f.rows(evaluator).some(row => row.sn === f.first + 3));
+  await f.advance(100);
+  assert.equal(f.warm(evaluator).sourceYielded, 3);
+  assert.equal(f.warm(evaluator).peersBehindProceeds, 0, 'an exact-HAVE proceed is not a frontier proceed');
+  f.report();
+});
+
+// The evaluator has resolved permits in another rendition whose sequence numbers
+// are far lower. Objects advertised from that rendition must not give this
+// rendition a frontier: had they, the peer would count as behind and the
+// evaluator would proceed. The positive control is that those positions were
+// learned.
+test('frontier election: objects that map to another rendition give this rendition no frontier', { timeout: 30000 }, async t => {
+  const f = await frontierFixture(t, 1, { second: true });
+  const known = f.warm(1).knownPositions;
+  f.demandOther(0);
+  await f.wait(() => f.warm(1).knownPositions >= known + 2);
+  const before = f.warm(1).sourceYielded;
+  f.demand(2);
+  f.have([f.otherKey(1), f.otherKey(2)]);
+  await f.wait(() => f.warm(1).sourceYielded >= before + 2);
+  await f.advance(100);
+  assert.deepEqual(f.rows(1), [], JSON.stringify(f.source));
+  assert.equal(f.warm(1).peersBehindProceeds, 0);
+  f.report();
+});
+
+// An older, higher sequence number that the peer still advertises keeps it a
+// candidate: its frontier is the largest advertised, here first + 2, which is
+// adjacent to first + 3 (the XOR loser yields) and two behind first + 4.
+test('frontier election: an older high-sequence key still advertised keeps the peer a candidate', { timeout: 30000 }, async t => {
+  const f = await frontierFixture(t, 1);
+  f.demand(2);
+  f.have([f.key(2)]);
+  f.have([f.key(1)]);
+  await f.wait(() => f.rows(1).some(row => row.sn === f.first + 4));
+  await f.advance(100);
+  assert.equal(f.rows(1).some(row => row.sn === f.first + 3), false, JSON.stringify(f.source));
+  assert.equal(f.warm(1).peersBehindProceeds, 1);
+  f.report();
+});
+
+// The review scenario. The peer's HAVE for first + 3 reaches the evaluator
+// before the evaluator has authorised that object, so it maps to nothing when it
+// arrives. The evaluator then authorises first + 3, and the peer is adjacent to
+// first + 4 and keeps the XOR yield. A frontier stored at arrival would hold only
+// first + 1 and wrongly exclude the peer for first + 4.
+test('frontier election: a HAVE that arrived before the local authorisation counts once the object is authorised', { timeout: 30000 }, async t => {
+  const f = await frontierFixture(t, 1);
+  const before = f.warm(1).sourceYielded;
+  f.demand(2);
+  f.have([f.key(1)]);
+  f.have([f.key(3)]);
+  await f.wait(() => f.warm(1).sourceYielded >= before + 1 && f.rows(1).some(row => row.sn === f.first + 3));
+  await f.advance(100);
+  assert.equal(f.rows(1).some(row => row.sn === f.first + 4), false, JSON.stringify(f.source));
+  assert.equal(f.warm(1).sourceYielded, before + 1);
+  assert.equal(f.warm(1).peersBehindProceeds, 0);
+  f.report();
+});
+
+// The position map and the frontier derived from it, directly: bounds, the
+// window, and the keys that must change nothing.
+test('frontier election: positions are bounded, expire, and a frontier is derived from the advertised keys', () => {
+  const hex = n => n.toString(16).padStart(64, '0'), rendition = 'main:/a.m3u8';
+  const store = new FutureFrontier();
+  // 600 permits: first in, first out at 512.
+  for (let n = 0; n < 600; n++) store.note(hex(n), rendition, n, 1_000);
+  assert.equal(store.size, POSITION_LIMIT);
+  assert.equal(store.frontier([hex(0), hex(87)], rendition, 1_000), null, 'evicted keys map to nothing');
+  assert.equal(store.frontier([hex(88)], rendition, 1_000), 88);
+  assert.equal(store.behind([hex(88)], rendition, 90, 1_000), true, '88 < 90 - 1');
+  assert.equal(store.behind([hex(88)], rendition, 89, 1_000), false, 'one behind is adjacent');
+  // The largest mapped number wins; unmapped and malformed keys change nothing.
+  const advertised = new Set([hex(300), hex(599), 'zz', 12, null, {}, 'A'.repeat(64), hex(9_999)]);
+  assert.equal(store.frontier(advertised, rendition, 1_000), 599);
+  assert.equal(store.frontier(['zz', 12, null], rendition, 1_000), null);
+  assert.equal(store.frontier(undefined, rendition, 1_000), null);
+  assert.equal(store.frontier(7, rendition, 1_000), null);
+  assert.equal(store.behind([hex(9_999)], rendition, 700, 1_000), false, 'unknown is never behind');
+  // Derived, not stored: a position learned after the key was advertised counts,
+  // and a key withdrawn from the advertised set no longer does.
+  store.note(hex(7_000), rendition, 900, 1_000);
+  assert.equal(store.frontier(new Set([hex(100), hex(7_000)]), rendition, 1_000), 900);
+  assert.equal(store.frontier(new Set([hex(100)]), rendition, 1_000), 100);
+  // A key of another rendition never gives this one a frontier.
+  store.note(hex(7_001), 'main:/b.m3u8', 5, 1_000);
+  assert.equal(store.frontier([hex(7_001)], rendition, 1_000), null);
+  assert.equal(store.frontier([hex(7_001)], 'main:/b.m3u8', 1_000), 5);
+  // Position window: 60 s from the permit, inclusive at 60 s.
+  const aged = new FutureFrontier();
+  aged.note(hex(1), rendition, 5, 0);
+  assert.equal(aged.frontier([hex(1)], rendition, POSITION_TTL_MS), 5);
+  assert.equal(aged.frontier([hex(1)], rendition, POSITION_TTL_MS + 1), null, 'an entry older than 60 s is ignored');
+  // Expired entries make room before live ones are evicted.
+  const room = new FutureFrontier();
+  for (let n = 0; n < POSITION_LIMIT; n++) room.note(hex(n), rendition, n, n < 2 ? 0 : 50_000);
+  room.note(hex(900), rendition, 900, 70_000);
+  assert.equal(room.size, POSITION_LIMIT - 1);
+  assert.equal(room.frontier([hex(2)], rendition, 70_000), 2, 'live entries survive');
+  room.clear();
+  assert.equal(room.size, 0);
 });
 
 test('verified piece flow waits for real worker verification and rejects invalidated replies', async t => {
