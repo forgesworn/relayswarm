@@ -298,9 +298,16 @@ fresh signed size and projects `ttfbMs + bodyMs * size / profile.size` in place
 of the last scalar sample; parsed identity is still checked before authority,
 and frozen windows, verified contiguous extensions, the one-hop-per-poll
 budget, reservations, release headroom and the original deadline are unchanged.
-A candidate held because the poll's hop is spent returns to the queue as
-metadata with its original deadline. This projection is a scheduling estimate
-from one measured transfer, not a throughput guarantee.
+A candidate held because the poll's hop is spent, or because a release check or
+commit acknowledgement is in progress, returns to the queue as metadata with its
+original deadline; a hop-spent hold pauses further startup admission until the
+next poll. A verified future whose permit is no longer current also clears the
+profile. Each profiled candidate is authorised before its skip decision, so a
+skipped candidate costs one authority request (two when held) where the scalar
+rule cost none. Only same-instant cache replies are refused: a cached reply with
+positive timing is indistinguishable from a fast source and projects like one,
+as the scalar sample already did. This projection is a scheduling estimate from
+one measured transfer, not a throughput guarantee.
 
 The optional `startupBufferCommit` function defaults to `null` and requires
 `startupBufferTarget`. It runs once after the encoded reservoir passes the

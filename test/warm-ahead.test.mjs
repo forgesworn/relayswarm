@@ -892,9 +892,10 @@ function startupFixture(t, options = {}) {
   const bytes = Uint8Array.of(2, 4, 6, 8), requests = [], retained = [], verified = [];
   const state = { target: 1.3, recovery: 2_000, targetCalls: 0, accepted: 0, allowed: true, authCalls: 0,
     holdRecheck: false, holdCheckSn: null, releaseRecheck: null, reservations: [], revoked: new Set() };
-  const context = sn => ({ url: `https://origin.example/media/s${sn}.m4s`, responseType: 'arraybuffer',
+  const urlFor = sn => options.urlFor?.(sn) ?? `https://origin.example/media/s${sn}.m4s`;
+  const context = sn => ({ url: urlFor(sn), responseType: 'arraybuffer',
     frag: { sn, cc: 0, level: 0, type: 'main', start: options.starts?.[sn] ?? sn * 2, duration: options.durations?.[sn] ?? 2,
-      url: `https://origin.example/media/s${sn}.m4s`, baseurl: 'https://origin.example/media/index.m3u8' } });
+      url: urlFor(sn), baseurl: 'https://origin.example/media/index.m3u8' } });
   class Loader {
     stats = { loading: { start: 0 }, loaded: 0 };
     constructor() { options.onConstructor?.(); }
@@ -2357,7 +2358,9 @@ const assertAuthAccounting = ({ f, authLog, releaseAt, requests, skipped }) => {
 };
 
 test('size-aware startup selects the smaller reachable futures from measured first-byte and body timing', async t => {
-  // SN1 is measured (2585 ms, TTFB 260 ms). SN5, SN6 and SN7 are HYPOTHETICAL at
+  // SN1 is measured (2585 ms; its 260 ms TTFB is responseAtWallMs minus the
+  // request start in viewer-1-origin-capture.json). The same 260 ms TTFB is
+  // applied to every later body. SN5, SN6 and SN7 are HYPOTHETICAL at
   // the first complete rate, 2350.149 bytes per ms; no SN5/SN6/SN7 service was observed.
   const rate = 2350.149, hypothetical = [];
   const services = sn => {
@@ -2386,28 +2389,106 @@ test('size-aware startup selects the smaller reachable futures from measured fir
 
 test('size-aware startup keeps the adverse fastest-body scenario green', async t => {
   // Every service (including SN1) is HYPOTHETICAL at the optimistic flow rate,
-  // 2598.6 bytes per ms, with a near-zero first-byte delay.
+  // 2598.6 bytes per ms. The frozen replay's zero-TTFB control would form no
+  // profile (a same-instant first byte is refused), so this profile-active
+  // variant uses a 1 ms first byte. The rejected scalar seed failed here by
+  // skipping SN3 for the larger SN4; the size-aware path must not.
   const r = await sizeAwareReplay(t, { firstByteMs: 1, services: sn => Math.round(FIELD_SIZES[sn] / 2598.6) });
   assertAuthAccounting(r);
   console.log(JSON.stringify({ fixture: 'size-aware-startup-fastest-body', ...r.summary }));
+  assert(r.samples.some(({ startup }) => startup.sourceProfile !== null), 'the size-aware profile is active in this scenario');
   assert.equal(r.first.calls.success, 1); assert(r.elapsed < 12000);
   assert.equal(r.first.calls.error, 0);
+  assert(!r.requests.includes(4), 'the largest fragment is not admitted ahead of smaller reachable ones');
   assertStartupGates(r);
 });
 
 test('size-aware startup classifies the slowest measured rate honestly', async t => {
   // Every service (including SN1) is HYPOTHETICAL at the slowest complete rate,
-  // 1994.4 bytes per ms. The outcome is recorded, not forced.
+  // 1994.4 bytes per ms. Under this logical clock the outcome is deterministic:
+  // no window reaches the recovery headroom before the unchanged deadline, and
+  // the manager reports that failure rather than releasing a short window.
   const r = await sizeAwareReplay(t, { firstByteMs: 260, services: sn => Math.round(FIELD_SIZES[sn] / 1994.4) });
   assertAuthAccounting(r);
   console.log(JSON.stringify({ fixture: 'size-aware-startup-slowest-rate', outcome: r.first.calls.success ? 'released' : 'failed', ...r.summary }));
+  assert(r.samples.some(({ startup }) => startup.sourceProfile !== null), 'the size-aware profile is active in this scenario');
   assertStartupGates(r);
-  if (r.first.calls.success === 0) {
-    assert.equal(r.first.calls.error, 1); assert.equal(r.first.calls.args[0].startupBufferReason, 'deadline');
-    t.mock.timers.tick(20000); await flushStartup();
-    assert.equal(r.first.calls.success, 0, 'no late success after the deadline');
-  }
+  assert.deepEqual(r.requests.slice(0, 3), [1, 5, 6]);
+  assert.equal(r.first.calls.success, 0); assert.equal(r.elapsed, 12000);
+  assert.equal(r.first.calls.error, 1); assert.equal(r.first.calls.args[0].startupBufferReason, 'deadline');
+  t.mock.timers.tick(20000); await flushStartup();
+  assert.equal(r.first.calls.success, 0, 'no late success after the deadline');
   assert.equal(r.f.engine.snapshot().reservationBytes, 0);
+});
+
+test('size-aware startup projection during a release check holds without reading the host target', async t => {
+  const tick = startupLogicalClock(t);
+  let releasePermit;
+  const f = startupFixture(t, { timedStats: true, permit: ctx => {
+    const permit = { key: ctx.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true };
+    return ctx.frag.sn === 2 && !releasePermit ? new Promise(resolve => { releasePermit = () => resolve(permit); }) : permit;
+  } });
+  t.after(() => releasePermit?.());
+  // Target 2.5 s is inside SN1 [2,4), past the owner [0,2). With recovery 1000 ms
+  // the projection admits SN1 (4 > 2.5 + 1.1) and, as SN1 starts before the
+  // target, no window freezes, so later candidates stay on the projection path.
+  f.state.target = 2.5; f.state.recovery = 1000;
+  const first = f.load(0, 20000); await flushStartup();
+  tick(100); f.requests[0].finish(); await flushStartup(); await flushStartup();
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1], 'SN1 is admitted by projection');
+  assert.deepEqual(f.engine.startupSnapshot().sourceProfile, { size: 4, ttfbMs: 1, bodyMs: 99 });
+  // A slow sample raises the host's recovery before SN1 verifies, so its 1.5 s
+  // of coverage no longer releases and SN2 is admitted; SN2's authority is pending.
+  f.state.recovery = 1600;
+  tick(100); f.requests[1].finish(); await flushStartup(); await flushStartup();
+  assert.equal(f.engine.snapshot().cacheObjects, 1); assert.equal(first.calls.success, 0);
+  assert.equal(typeof releasePermit, 'function', 'SN2 reached its permit through the size-aware path');
+  // Recovery falls again, so the next poll starts the release check from the
+  // cached SN1 coverage and blocks inside its authority recheck.
+  f.state.recovery = 1000; f.state.holdRecheck = true; f.state.holdCheckSn = 0;
+  tick(100); await flushStartup();
+  assert.equal(typeof f.state.releaseRecheck, 'function', 'the release check is pending');
+  const targetReads = f.state.targetCalls, reservations = f.state.reservations.length, requests = f.requests.length;
+  releasePermit(); await flushStartup(); await flushStartup();
+  assert.equal(f.state.targetCalls, targetReads, 'the projection reads no host target while the check owns it');
+  assert.equal(f.requests.length, requests, 'no load starts during the check');
+  assert.equal(f.state.reservations.length, reservations, 'no reservation is attempted during the check');
+  assert(f.engine.snapshot().queued >= 1, 'the candidate returns to the queue as metadata');
+  assert.equal(f.engine.snapshot().active, 0);
+  assert.equal(first.calls.success, 0);
+  f.state.releaseRecheck(); await flushStartup(); await flushStartup();
+  assert.equal(first.calls.success, 1, 'the pending release completes from the verified coverage');
+  assert.equal(f.engine.startupSnapshot().state, 'ready');
+  assert.equal(f.requests.length, requests, 'the held candidate never loads after release with steady speculation off');
+});
+
+test('size-aware startup profile from one origin leaves another origin on the scalar rule', async t => {
+  // The owner comes from origin A and every parsed future from origin B. A's
+  // profile must not project B's candidates: admission, authority traffic and
+  // request order must match the same geometry without any first-byte timing.
+  const tick = startupLogicalClock(t);
+  const run = async firstByteMs => {
+    const auth = [];
+    const f = startupFixture(t, { timedStats: true, firstByteMs,
+      urlFor: sn => `https://${sn === 0 ? 'origin.example' : 'other.example'}/media/s${sn}.m4s`,
+      permit: ctx => { auth.push(ctx.frag.sn); return { key: ctx.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true }; } });
+    f.state.target = 2.5; f.state.recovery = 3500;
+    const first = f.load(0, 20000); await flushStartup();
+    tick(100); f.requests[0].finish(); await flushStartup();
+    const profile = f.engine.startupSnapshot().sourceProfile;
+    const trace = [];
+    for (let i = 0; i < 6; i++) { trace.push({ requests: f.requests.map(row => row.context.frag.sn), auth: [...auth], queued: f.engine.snapshot().queued }); tick(100); await flushStartup(); }
+    assert.equal(first.calls.success, 0);
+    f.engine.stop();
+    return { profile, trace, auth };
+  };
+  const scalar = await run(null), profiled = await run(1);
+  assert.equal(scalar.profile, null);
+  assert.deepEqual(profiled.profile, { size: 4, ttfbMs: 1, bodyMs: 99 }, 'origin A measured a profile from the owner body');
+  assert.deepEqual(profiled.trace, scalar.trace, 'origin B candidates follow the scalar rule poll for poll');
+  assert.deepEqual(profiled.auth, scalar.auth, 'no origin B candidate is authorised early because of the origin A profile');
+  assert.deepEqual(scalar.auth, scalar.trace.at(-1).requests,
+    'the scalar rule authorises exactly the requested fragments; skipped candidates cost no authorisation');
 });
 
 // Real SDK fixture: real signed commitments, real sha256 and the real
@@ -2477,6 +2558,8 @@ const profiledStartup = async (t, tick, { target = 2.5, recovery = 2000, parentM
   beforeOwner?.(f, first);
   tick(100); f.requests[0].finish(); await flushStartup();
   assert(f.engine.snapshot().verified >= 1, 'the actual original body verifies');
+  if (f.engine.startupSnapshot().state === 'buffering')
+    assert.deepEqual(f.engine.startupSnapshot().sourceProfile, { size: 4, ttfbMs: 1, bodyMs: 99 }, 'the size-aware profile is active for every candidate below');
   return { f, first };
 };
 
@@ -2566,7 +2649,7 @@ test('size-aware startup projection tolerates target or recovery becoming invali
   }
 });
 
-test('size-aware startup never skips or holds a future that a genuine consumer already demands', async t => {
+test('size-aware startup projection is retired by supersession when a genuine load arrives while buffering', async t => {
   const tick = startupLogicalClock(t);
   // SN1 and SN2 are both inside target + recovery + projected service, so the
   // projection would skip SN1 and then hold SN2 (hop spent). SN2's permit is

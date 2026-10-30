@@ -129,9 +129,9 @@ and its span is shorter than recovery. Forecast skipping retains the last
 parsed window reachable within that lifetime. When a verified same-origin source
 body carries ordered first-byte and completion times, startup keeps one frozen
 service profile and projects each candidate's own fresh signed size through it
-before skipping, instead of reusing the last whole-load scalar; peer, cached,
-partial, non-200 or different-origin responses form no profile
-(metrics().startupBuffer.sourceProfile). These admission estimates never
+before skipping, instead of reusing the last whole-load scalar; peer-delivered, cached
+same-instant, partial, aborted, non-200 or different-origin responses form no
+profile (metrics().startupBuffer.sourceProfile). These admission estimates never
 replace fresh actual-target coverage, authority or the original release deadline.
 It can skip unrequested metadata
 or reclaim completed unowned coverage, retaining the first response, in-flight

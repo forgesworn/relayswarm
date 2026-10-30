@@ -37,7 +37,7 @@ const sourceServiceProfile = (stats, size, entry, success, response, context, pe
         !Number.isSafeInteger(size) || size < 1 ||
         ![entry, success, start, first, end].every(value => Number.isFinite(value) && value > 0) ||
         entry > start || start >= first || first >= end || end > success) return null;
-    return Object.freeze({ size, origin, ttfbMs: first - start, bodyMs: end - first, at: success });
+    return Object.freeze({ size, origin, ttfbMs: first - start, bodyMs: end - first });
   } catch { return null; }
 };
 
@@ -149,7 +149,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       try {
         // A held startup candidate returns through its plan parent's fresh
         // parsed metadata, never through its payload-free queue snapshot.
-        const planned = startup.state === 'buffering' && startupFutureCurrent(item)
+        const planned = item.held === true && startup.state === 'buffering' && startupFutureCurrent(item)
           ? startup.plan.find(future => samePosition(future.identity, item)) : null;
         current = planned ? parsedNext(planned.parent).find(future => samePosition(future, item))
           : latest && parsedNext(latest.own).find(future => samePosition(future, item));
@@ -594,6 +594,10 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
   // poll; nothing here reserves bytes, loads or renews a deadline.
   const projectAuthorisedStartup = (item, permit, identity, deadline) => {
     if (!startupCurrent()) return 'stop';
+    // A release check or pending commit ACK owns the target, plan and hop
+    // (the poll pauses its target reads then, too). Return this candidate as
+    // metadata without any host read; the post-check pump re-evaluates it.
+    if (startup.checking) { queued.unshift({ ...metadataOnly(item), deadline, held: true }); return 'hold'; }
     if (!startupFutureCurrent(item) || !samePosition(warmContext(item.context), identity)) {
       if (startupCurrent()) endStartup('cancelled', 'context-changed');
       return 'stop';
@@ -612,7 +616,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     }
     const decision = planStartupCandidate(item, index, target, recovery, service, false);
     if (decision === 'hold' && startupCurrent()) {
-      queued.unshift({ ...metadataOnly(item), deadline });
+      queued.unshift({ ...metadataOnly(item), deadline, held: true });
       startup.admissionWaiting = true;
     }
     return decision;
