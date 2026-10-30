@@ -10140,7 +10140,42 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
         assert(!rows.some(row => row.k === 'mixedScope' && row.load === warmLoad.load));
         assert.equal(after.warmAhead.consumedPeerBytes, 0); assert.equal(after.warmAhead.reservationBytes, 0);
       } else {
-        assert(client.length > 0 && client.every(row => row.range && row.status === 206));
+        const strictTargetRanges = client.length > 0 && client.every(row => row.range && row.status === 206);
+        let rangeFailure;
+        if (!strictTargetRanges) {
+          // Failure-only evidence: preserve the native clock, admission policy
+          // and strict range requirement; do not infer why a whole GET won.
+          const targetLoad = rows.findLast(row => row.k === 'load' && row.sn === target.frag.sn)?.load ?? null;
+          const targetLoads = new Set();
+          let ancestor = targetLoad;
+          while (Number.isSafeInteger(ancestor) && ancestor > 0 && !targetLoads.has(ancestor) && targetLoads.size < 4) {
+            targetLoads.add(ancestor);
+            ancestor = rows.find(row => row.k === 'load' && row.load === ancestor)?.parentLoad ?? null;
+          }
+          const targetRows = rows.filter(row => targetLoads.has(row.load) &&
+            ['load', 'mixedScope', 'eligibility', 'xfer', 'xferFinish', 'originStart', 'origin'].includes(row.k));
+          const retainedRows = targetRows.length <= 48 ? targetRows : [...targetRows.slice(0, 16), ...targetRows.slice(-32)];
+          const fields = ['k', 'at', 'load', 'parentLoad', 'sn', 'phase', 'reason', 'ms', 'budgetMs', 'limitMs', 'budgetGeometry',
+            'capturedGeometry', 'currentGeometry', 'scope', 'setupRemainingMs', 'originInvoked', 'leg', 'ranged',
+            'op', 'exclusiveOrigin', 'peerOnly', 'bufferedMixed', 'delivered', 'verifiedBytes', 'originBytes'];
+          rangeFailure = JSON.stringify({ fixture: 'real-core-warm-vs-genuine-mixed-range-failure',
+            warming, ownedWarm, worker, controllerClock: logical ? 'logical-functional' : 'real',
+            targetLoad, targetLoads: [...targetLoads], unresolvedAncestor: ancestor,
+            calls: demand.calls, acceptedPeerBytes: peer, traceDropped: f.swarm.trace().dropped,
+            originRangeAttempts: after.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+            coreTransfersDelta: after.core.multiHolder.transfers - before.core.multiHolder.transfers,
+            peerRequests: f.channels.reduce((sum, channel) => sum + channel.wants.length, 0) - beforePeerRequests,
+            clientRowsOmitted: Math.max(0, client.length - 16), serverRowsOmitted: Math.max(0, server.length - 16),
+            traceRowsOmitted: Math.max(0, targetRows.length - 48),
+            client: client.slice(0, 16).map(({ range, status, bytes, complete, warm, sdkEnteredAtMs, invokedAtMs,
+              completedAtMs, firstResponseAtMs, maxLoadTimeMs, maxTimeToFirstByteMs }) =>
+              ({ range, status, bytes, complete, warm, sdkEnteredAtMs, invokedAtMs, completedAtMs,
+                firstResponseAtMs, maxLoadTimeMs, maxTimeToFirstByteMs })),
+            server: server.slice(0, 16).map(({ range, status, sent }) => ({ range, status, sent })),
+            trace: retainedRows.map(row => Object.fromEntries(fields.filter(key => Object.hasOwn(row, key))
+              .map(key => [key, row[key]]))) });
+        }
+        assert(strictTargetRanges, rangeFailure);
         const start = starts.at(-1); assert(start && start.exclusiveOrigin === true);
         assert.deepEqual(start.probePeers, []); assert(start.peers.every(([, first, rate]) => Number.isFinite(first) && Number.isFinite(rate) && rate > 0));
         assert(start.out.c.some(row => row.t === 'origin') && start.out.c.some(row => row.t === 'request'));
