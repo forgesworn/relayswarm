@@ -10,6 +10,32 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Private LAN two-viewer field result for the size-aware build (30 October 2026)
+
+One authorised private attempt ran the exact b102ff4 SDK and worker on the
+unchanged public site, as two headless Chrome contexts on one M4 with native
+host candidates, controlled in-process signalling and a cold browser cache. No
+TURN, operator or public rendezvous was involved; the owner deferred the
+TURN-over-TLS route gate to a separate test and left every other gate as it was.
+Viewer 0 reached a trusted 3840x2160 frame in 3.899 s and the late joiner in
+10.613 s. Both played 340 s with zero stalls, player errors, dropped frames or
+waits, advanced 339.29 s of media each, passed a natural wrap with 83 s observed
+after it, and kept native sample gaps at or below 1.02 s. The late joiner
+accepted 13.63 % of its media from the leader (146,257,386 bytes) over a
+host-to-host link measured at 12.7 MB/s; its planner-selected startup futures
+were won by the existing cached and late peer races because the leader already
+held them. The leader accepted 1.91 % (21,021,971 bytes) from the late joiner,
+below the unchanged 5 % per-viewer gate, so the combined audit is RED on that
+one criterion and PASS on playback, observation and route evidence.
+
+An earlier labelled smoke under heavier machine and link load failed the late
+joiner's 12 s startup at 1.5 to 1.9 MB/s from the origin with zero peer bytes:
+peer-first has no wait budget during startup and the leader then held only the
+fragments the planner had to skip. That structural lead (peer-aware startup
+admission, link-aware upload pacing) is recorded with the packet; it is not
+built. This result is one Mac behind one link; it is not public, NAT, TLS
+relay route, physical phone or merge qualification.
+
 ## Unreleased size-aware startup admission (30 October 2026)
 
 The private 4K failure below followed a request order of SN1, SN4, SN6 and
