@@ -1275,8 +1275,18 @@ for (const sn7ServiceMs of [500, 1120, 1266, 3500, 5000]) {
       const ready = f.engine.startupSnapshot();
       assert(ready.verifiedStart <= f.state.target && ready.verifiedEnd > f.state.target);
       assert((ready.verifiedEnd - f.state.target) * 1000 >= f.state.recovery);
+      assert.equal(ready.releaseBasis, 'headroom', 'planning evidence: these reachable windows release by headroom');
       assert.equal(first.calls.args[2], first.context); assert.equal(first.calls.args[0].data.byteLength, 4);
       assert.equal(samples.some(({ startup }) => startup.heldObjects === 4), true);
+    } else if (sn7ServiceMs === 3500) {
+      // Late window: SN7 verifies at 10510 ms and covers the fresh target (14.56 s) inside the final 3 s,
+      // so it releases with 2 s of headroom rather than failing at the deadline.
+      assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(first.calls.abort, 0);
+      assert(elapsed < 12000);
+      const ready = f.engine.startupSnapshot();
+      assert.equal(ready.releaseBasis, 'late-window'); assert.deepEqual(ready.releases, { headroom: 0, capacity: 0, lateWindow: 1 });
+      assert.equal(ready.reason, null); assert.equal(ready.requiredHeadroomMs, 4745);
+      assert((ready.verifiedEnd - f.state.target) * 1000 < f.state.recovery, 'late window releases below the recovery requirement');
     } else {
       assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1); assert.equal(elapsed, 12000);
       assert.equal(f.engine.startupSnapshot().reason, 'deadline');
@@ -1295,12 +1305,13 @@ test('startup reachable window cannot extend an unverified ahead prefix', async 
   });
   assert(release, 'SN8 body reached the real verification boundary');
   assert.deepEqual(summary.requests, [1, 4, 7, 8]);
-  assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1);
-  assert.equal(f.engine.startupSnapshot().reason, 'deadline');
+  // Late window: verified SN7 covers the fresh target at 11.7 s of 12 s. The unverified SN8 never extends coverage.
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
+  assert.equal(f.engine.startupSnapshot().releaseBasis, 'late-window'); assert(Math.abs(f.engine.startupSnapshot().verifiedEnd - 16.56) < 1e-9);
   assert.equal(f.engine.snapshot().reservationBytes, 4, 'pending verification retains its reservation');
   release(); await flushStartup();
   assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().active, 0);
-  assert.equal(first.calls.success, 0); assert.equal(f.requests.length, 4);
+  assert.equal(first.calls.success, 1); assert.equal(f.requests.length, 4);
 });
 
 for (const refusal of ['reservation', 'future-bytes']) {
@@ -1314,8 +1325,9 @@ for (const refusal of ['reservation', 'future-bytes']) {
     } : { permitSize: sn => sn === 9 ? 24 * 1024 * 1024 : 4 });
     if (refusal === 'reservation') assert(refused > 0);
     assert.deepEqual(summary.requests, [1, 4, 7, 8]);
-    assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1);
-    assert.equal(f.engine.startupSnapshot().reason, 'deadline');
+    // Late window: verified SN7 and SN8 cover the fresh target; the refused SN9 is still never requested.
+    assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
+    assert.equal(f.engine.startupSnapshot().releaseBasis, 'late-window');
     assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().active, 0);
   });
 }
@@ -1881,18 +1893,20 @@ test('startup expansion leaves a sufficient window unchanged and never admits a 
       assert.equal(first.calls.success, 1); assert.equal(f.requests.length, 3, 'do not expand an adequate verified window');
     } else {
       assert.equal(f.requests.length, 4); f.requests[3].finish(); await flushStartup();
-      t.mock.timers.tick(7800); await flushStartup();
-      assert.equal(f.requests.length, 4); assert.equal(f.engine.startupSnapshot().heldObjects, 4);
-      assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 0);
-      t.mock.timers.tick(100); await flushStartup();
-      assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+      // Capacity: the fourth verified body fills every residency slot (coverage 0 to 8 s holds the target),
+      // so it releases at once, below the 9000 ms requirement, and still never requests a fifth object.
+      assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
+      const ready = f.engine.startupSnapshot();
+      assert.equal(ready.releaseBasis, 'capacity'); assert.equal(ready.releases.capacity, 1); assert.equal(ready.verifiedEnd, 8);
+      t.mock.timers.tick(8000); await flushStartup();
+      assert.equal(f.requests.length, 4); assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
     }
     f.engine.stop();
   }
 });
 
 test('startup expansion keeps cancellation, context, authority and original parent deadline ownership', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const tick = startupLogicalClock(t);
   for (const action of ['abort', 'clear', 'stop', 'scope', 'geometry', 'cc', 'authority', 'corrupt', 'deadline']) {
     let commits = 0;
     const f = startupFixture(t, { commit: () => { commits++; }, permit: ctx => {
@@ -1904,7 +1918,7 @@ test('startup expansion keeps cancellation, context, authority and original pare
     } }); f.state.target = 0;
     const first = f.load(0, 500); f.state.recovery = 6550; await requireOriginalVerified(f);
     f.requests[1].finish(); await flushStartup(); f.requests[2].finish(); await flushStartup();
-    t.mock.timers.tick(100); await flushStartup();
+    tick(100); await flushStartup();
     assert.equal(f.requests.length, 4); const fourth = f.requests[3];
     if (action === 'abort') first.loader.abort();
     else if (action === 'clear') f.engine.clear();
@@ -1913,12 +1927,16 @@ test('startup expansion keeps cancellation, context, authority and original pare
     else if (action === 'geometry') fourth.context.frag.start += 0.25;
     else if (action === 'cc') fourth.context.frag.cc++;
     else if (action === 'authority') f.state.revoked.add(3);
-    if (['scope', 'geometry'].includes(action)) { t.mock.timers.tick(100); await flushStartup(); }
+    // Arms that end at the deadline (the fourth body is never verified, or is discarded as corrupt) move the room
+    // target past the verified 0 to 6 s run, so no coverage includes it and neither the capacity nor the late-window
+    // rule (opens at 250 ms of 500) can release the intact prefix: a genuine deadline path.
+    if (['deadline', 'scope', 'geometry', 'corrupt'].includes(action)) f.state.target = 6.5;
+    if (['scope', 'geometry'].includes(action)) { tick(100); await flushStartup(); }
     if (['cc', 'authority', 'corrupt'].includes(action)) fourth.finish(false, action === 'corrupt' ? Uint8Array.of(9, 8, 7, 6) : undefined);
     await flushStartup();
-    t.mock.timers.tick(399 - (['scope', 'geometry'].includes(action) ? 100 : 0)); await flushStartup();
+    tick(399 - (['scope', 'geometry'].includes(action) ? 100 : 0)); await flushStartup();
     if (action === 'deadline') assert.equal(first.calls.error, 0);
-    t.mock.timers.tick(1); await flushStartup();
+    tick(1); await flushStartup();
     assert.equal(first.calls.success, 0, action); assert.equal(commits, 0, action);
     assert.equal(first.calls.error + first.calls.abort, action === 'stop' ? 0 : 1, action);
     if (action === 'deadline') assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
@@ -1983,14 +2001,16 @@ test('startup byte budget keeps future cache and in-flight reservations within24
 });
 
 test('startup byte budget keeps the original cancellation, deadline and individual-object bounds', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const tick = startupLogicalClock(t);
   for (const ending of ['abort', 'deadline', 'oversized']) {
     const f = startupFixture(t, { startupMaxBytes: 32 * 1024 * 1024,
       ...(ending === 'oversized' ? { permitSize: () => 24 * 1024 * 1024 + 1 } : {}) });
     const first = f.load(0, 200); await flushStartup();
     if (ending !== 'oversized') f.requests[0].finish(); await flushStartup();
     if (ending === 'abort') first.loader.abort();
-    else if (ending === 'deadline') { t.mock.timers.tick(200); await flushStartup(); }
+    // The deadline arm moves the target past the only verified body (0 to 2 s), so the late window (opens at 100 ms
+    // of 200) has no coverage of it and the deadline is genuine.
+    else if (ending === 'deadline') { f.state.target = 2.5; tick(200); await flushStartup(); }
     assert.equal(first.calls.success, 0); assert.equal(first.calls.abort, ending === 'abort' ? 1 : 0);
     assert.equal(first.calls.error, ending === 'abort' ? 0 : 1);
     if (ending !== 'abort') assert.equal(first.calls.args[0].startupBufferReason,
@@ -2039,18 +2059,25 @@ test('startup byte budget admits the pinned 4K original plus three contiguous fu
   }
 });
 
-test('startup extra-future admission refuses the same 24MiB byte cap without a source request or unsafe release', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+test('startup extra-future admission refuses the same 24MiB byte cap without a source request and releases only in the late window', async t => {
+  const tick = startupLogicalClock(t);
   const f = startupFixture(t, { permitSize: sn => sn === 3 ? 24 * 1024 * 1024 : 4 });
   f.state.target = 0; f.state.recovery = 6550; const first = f.load(0, 8000); await requireOriginalVerified(f);
   f.requests[1].finish(); await flushStartup(); f.requests[2].finish(); await flushStartup();
-  t.mock.timers.tick(100); await flushStartup();
+  tick(100); await flushStartup();
   assert.equal(f.engine.snapshot().rejected, 1, 'the additional signed size exceeds remaining shared bytes');
   assert.equal(f.requests.length, 3); assert.equal(first.calls.success, 0);
   assert.equal(f.engine.snapshot().active, 0); assert.ok(f.engine.snapshot().trackedObjects <= 4);
-  t.mock.timers.tick(8000); await flushStartup();
-  assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
-  assert.equal(f.engine.snapshot().cacheBytes, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  tick(4800); await flushStartup();
+  assert.equal(first.calls.success, 0, 'insufficient headroom holds until the late window (8000 - 3000 ms)');
+  // Late window: verified SN0 to SN2 cover the target (0 to 6 s). The earlier "unsafe release" meant insufficient
+  // headroom (6 s against 6550 ms), which is now the deliberate choice at the end of the hold, inside the deadline.
+  tick(100); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
+  assert.equal(f.engine.startupSnapshot().releaseBasis, 'late-window');
+  assert.equal(f.requests.length, 3, 'no source request and no fourth body');
+  assert.equal(f.engine.snapshot().reservationBytes, 0);
+  tick(8000); await flushStartup(); assert.equal(first.calls.success, 1); assert.equal(f.requests.length, 3);
 });
 
 test('startup expansion uses fresh moved targets during its request and final authority wait', async t => {
@@ -2070,16 +2097,14 @@ test('startup expansion uses fresh moved targets during its request and final au
     } else {
       f.state.target = 1.4; f.requests[3].finish(); await flushStartup();
     }
-    assert.equal(first.calls.success, duringAuthority ? 0 : 1);
-    assert.equal(commits, duringAuthority ? 0 : 1);
-    if (!duringAuthority) assert.equal(first.calls.args[0], f.requests[0].response, 'release preserves the original held response');
+    // Without the authority wait, 8 s - 1.4 s clears the 6550 ms requirement. With it the target moves to 1.5 s
+    // (6.5 s of headroom), which fails the requirement, but the fourth body fills every slot, so the capacity rule releases.
+    assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
+    assert.equal(commits, 1);
+    assert.equal(f.engine.startupSnapshot().releaseBasis, duringAuthority ? 'capacity' : 'headroom');
+    assert.equal(first.calls.args[0], f.requests[0].response, 'release preserves the original held response');
     assert.equal(first.context, f.requests[0].context, 'the original held response keeps its caller context');
-    if (duringAuthority) {
-      assert.equal(f.engine.contains(0), true);
-      t.mock.timers.tick(400); await flushStartup();
-      assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
-      assert.equal(f.requests.length, 4, 'an infeasible moving target does not admit a fifth held object');
-    }
+    assert.equal(f.requests.length, 4, 'a moving target does not admit a fifth held object');
     f.engine.stop();
   }
 });
@@ -2099,7 +2124,7 @@ test('startup service lead plans beyond measured retrieval cost in the sourceSN2
   let clock = 10000, elapsed = 0; t.mock.method(performance, 'now', () => clock);
   const f = startupFixture(t, { timedStats: true,
     starts: [0, 2, 0, 2, 4, 6.64, 8.64, 10.56], durations: [2, 2, 2, 2, 2.64, 2, 1.92, 2] });
-  f.state.target = .02; const first = f.load(2, 8000), samples = [];
+  f.state.target = .02; const first = f.load(2, 12000), samples = [];
   const advance = async ms => {
     for (let left = ms; left > 0;) {
       const step = Math.min(100, left); elapsed += step; left -= step; clock += step;
@@ -2116,22 +2141,24 @@ test('startup service lead plans beyond measured retrieval cost in the sourceSN2
   // was unknown, so2000ms is an explicit controlled completion for BOTH paths.
   const cadence = { 4: 2059, 5: 1449, 6: 2000, 7: 2000 };
   samples.push(f.engine.startupSnapshot().planningServiceMs);
-  while (!first.calls.success && !first.calls.error && elapsed < 8000) {
+  while (!first.calls.success && !first.calls.error && elapsed < 12000) {
     const row = f.requests.find(row => row.context.frag.sn >= 4 && !row.response && !row.aborted);
-    if (!row) { await advance(Math.min(100, 8000 - elapsed)); continue; }
-    await advance(Math.min(cadence[row.context.frag.sn] ?? 2000, 8000 - elapsed));
+    if (!row) { await advance(Math.min(100, 12000 - elapsed)); continue; }
+    await advance(Math.min(cadence[row.context.frag.sn] ?? 2000, 12000 - elapsed));
     if (!first.calls.error) { row.finish(); await flushStartup(); }
     assert.ok(f.engine.startupSnapshot().heldObjects <= 3);
     assert.ok(f.engine.snapshot().active <= 1);
   }
-  assert.equal(first.calls.success, 1, 'planning must account for verified future retrieval cost before the unchanged8s deadline');
-  assert.equal(first.calls.error, 0); assert.ok(elapsed < 8000);
+  assert.equal(first.calls.success, 1, 'planning must account for verified future retrieval cost before the unchanged 12 s deadline');
+  assert.equal(first.calls.error, 0); assert.ok(elapsed < 12000);
   assert.ok(samples.includes(3243));
   assert.ok(!f.requests.some(row => row.context.frag.sn === 4), 'unrequested raw[4,6.64] is too short after3.243s measured service');
   assert.strictEqual(first.calls.args[0], f.requests[0].response);
   assert.strictEqual(first.calls.args[1], f.requests[0].stats);
   assert.strictEqual(first.calls.args[2], first.context);
   assert.equal(f.engine.startupSnapshot().requiredHeadroomMs, 2000, 'service lead never becomes release recovery');
+  // Planning evidence: a 12 s parent keeps the late window (9 s) after the planned release, which must be by headroom.
+  assert.equal(f.engine.startupSnapshot().releaseBasis, 'headroom'); assert.ok(elapsed < 9000);
   assert.ok(f.engine.startupSnapshot().verifiedEnd - f.state.target >= 2);
   assert.equal(f.engine.startupSnapshot().planningServiceMs, null, 'active timing sample retires on terminal success');
 });
@@ -2283,6 +2310,7 @@ async function sizeAwareReplay(t, { firstByteMs, services, target = 2.1, ownSn =
   const first = f.load(ownSn, parentMs); await flushStartup();
   let releaseAt = null;
   while (elapsed < 12000 && !first.calls.success && !first.calls.error && !first.calls.abort) {
+    const mark = authLog.length; let completed = false;
     const active = f.requests.find(row => !row.response && !row.aborted);
     const sn = active?.context.frag.sn;
     if (active) assert(sn < FIELD_SIZES.length, `request beyond the retained programme: SN${sn}`);
@@ -2294,10 +2322,12 @@ async function sizeAwareReplay(t, { firstByteMs, services, target = 2.1, ownSn =
     if (active && !active.aborted && elapsed >= due) {
       served.push(service); f.state.recovery = fieldRecovery(served); recoveries.push(f.state.recovery);
       completions.push({ sn, elapsed, serviceMs: service });
-      releaseAt = authLog.length;
+      releaseAt = authLog.length; completed = true;
       active.finish(false, fieldBody(FIELD_SIZES[sn]).body);
     }
     await flushStartup();
+    // A late-window release is polled, not triggered by a completion: its validation starts at the iteration start.
+    if (first.calls.success && !completed) releaseAt = mark;
     samples.push({ elapsed, target: f.state.target, startup: f.engine.startupSnapshot(), warm: f.engine.snapshot() });
   }
   const requests = f.requests.map(row => row.context.frag.sn);
@@ -2321,7 +2351,14 @@ const assertStartupGates = ({ f, first, samples, recoveries, elapsed }) => {
     const ready = f.engine.startupSnapshot();
     assert(elapsed < 12000, 'release precedes the original deadline');
     assert(ready.verifiedStart <= f.state.target && f.state.target < ready.verifiedEnd, 'release covers the actual room target');
-    assert((ready.verifiedEnd - f.state.target) * 1000 >= f.state.recovery, 'release keeps the full measured recovery');
+    if (ready.releaseBasis === 'headroom')
+      assert((ready.verifiedEnd - f.state.target) * 1000 >= f.state.recovery, 'a headroom release keeps the full measured recovery');
+    else if (ready.releaseBasis === 'late-window')
+      assert(elapsed >= ready.limits.deadlineMs - ready.limits.releaseLeadMs, 'a late-window release happens inside the last lead of the deadline');
+    else {
+      assert.equal(ready.releaseBasis, 'capacity');
+      assert(samples.some(({ startup }) => startup.heldObjects === 4), 'a capacity release followed a full four-slot reservoir');
+    }
   } else {
     assert.equal(first.calls.success, 0);
     assert.equal(f.engine.startupSnapshot().reason, 'deadline');
@@ -2335,9 +2372,10 @@ test('size-aware startup replays the measured viewer order under legacy scalar p
     assert(sn in measured, `unexpected request SN${sn}`); return measured[sn]; } });
   console.log(JSON.stringify({ fixture: 'size-aware-startup-legacy-replay', hypotheticalSn7ServiceMs: 2514, ...r.summary }));
   assert.deepEqual(r.requests, [1, 4, 6, 7]);
-  assert.equal(r.first.calls.success, 0); assert.equal(r.first.calls.error, 1);
-  assert.equal(r.elapsed, 12000);
-  assert.equal(r.f.engine.startupSnapshot().reason, 'deadline');
+  // Late window: SN6 verifies at 9480 ms and covers the target (12.64 s) from 10540 ms, inside the final 3 s,
+  // so it releases at the next poll with under 2 s of headroom against the 5493 ms requirement.
+  assert.equal(r.first.calls.success, 1); assert.equal(r.first.calls.error, 0);
+  assert(r.elapsed >= 9000 && r.elapsed < 12000); assert.equal(r.f.engine.startupSnapshot().releaseBasis, 'late-window');
   assert.equal(r.f.engine.startupSnapshot().requiredHeadroomMs, 5493,
     'p90 of 2585/4314 is 4314 ms; 4314 * 1.25 + 100 = 5492.5 rounds to 5493');
   assert(r.samples.every(({ startup }) => startup.sourceProfile === null), 'no first-byte timing forms no profile');
@@ -2375,6 +2413,7 @@ test('size-aware startup selects the smaller reachable futures from measured fir
   for (const sn of [2, 3, 4]) assert(!requests.includes(sn), `SN${sn} is never requested`);
   assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(first.calls.abort, 0);
   assert(r.elapsed < 12000, 'release precedes the original 12000 ms deadline');
+  assert.equal(f.engine.startupSnapshot().releaseBasis, 'headroom', 'planning evidence: the planned window releases by headroom');
   assert.equal(r.recoveries[0], 3331, 'recovery after the measured SN1 service is 2585 * 1.25 + 100, rounded');
   assert(r.recoveries.every(value => value >= 3331), 'recovery is never reduced below its SN1 value');
   assertStartupGates(r);
@@ -2399,6 +2438,7 @@ test('size-aware startup keeps the adverse fastest-body scenario green', async t
   assert(r.samples.some(({ startup }) => startup.sourceProfile !== null), 'the size-aware profile is active in this scenario');
   assert.equal(r.first.calls.success, 1); assert(r.elapsed < 12000);
   assert.equal(r.first.calls.error, 0);
+  assert.equal(r.f.engine.startupSnapshot().releaseBasis, 'headroom', 'planning evidence: the planned window releases by headroom');
   assert(!r.requests.includes(4), 'the largest fragment is not admitted ahead of smaller reachable ones');
   assertStartupGates(r);
 });
@@ -2406,18 +2446,19 @@ test('size-aware startup keeps the adverse fastest-body scenario green', async t
 test('size-aware startup classifies the slowest measured rate honestly', async t => {
   // Every service (including SN1) is HYPOTHETICAL at the slowest complete rate,
   // 1994.4 bytes per ms. Under this logical clock the outcome is deterministic:
-  // no window reaches the recovery headroom before the unchanged deadline, and
-  // the manager reports that failure rather than releasing a short window.
+  // no window reaches the recovery headroom, but verified SN5 covers the target
+  // from 8540 ms, so the late window releases that short window at 9014 ms.
   const r = await sizeAwareReplay(t, { firstByteMs: 260, services: sn => Math.round(FIELD_SIZES[sn] / 1994.4) });
   assertAuthAccounting(r);
   console.log(JSON.stringify({ fixture: 'size-aware-startup-slowest-rate', outcome: r.first.calls.success ? 'released' : 'failed', ...r.summary }));
   assert(r.samples.some(({ startup }) => startup.sourceProfile !== null), 'the size-aware profile is active in this scenario');
   assertStartupGates(r);
   assert.deepEqual(r.requests.slice(0, 3), [1, 5, 6]);
-  assert.equal(r.first.calls.success, 0); assert.equal(r.elapsed, 12000);
-  assert.equal(r.first.calls.error, 1); assert.equal(r.first.calls.args[0].startupBufferReason, 'deadline');
+  assert.equal(r.first.calls.success, 1); assert.equal(r.first.calls.error, 0);
+  assert.equal(r.f.engine.startupSnapshot().releaseBasis, 'late-window'); assert(r.elapsed >= 9000 && r.elapsed < 12000);
+  assert((r.f.engine.startupSnapshot().verifiedEnd - r.f.state.target) * 1000 < r.f.state.recovery, 'the released window is short of the recovery requirement');
   t.mock.timers.tick(20000); await flushStartup();
-  assert.equal(r.first.calls.success, 0, 'no late success after the deadline');
+  assert.equal(r.first.calls.success, 1, 'the single release is never repeated');
   assert.equal(r.f.engine.snapshot().reservationBytes, 0);
 });
 
@@ -3106,15 +3147,18 @@ test('rolling startup retains an obsolete verification job reservation until its
 });
 
 test('rolling startup retains the original deadline and rejects retry or late completion', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const tick = startupLogicalClock(t);
   const f = startupFixture(t), first = f.load(0, 350);
   await fillStartupWindow(f);
   f.state.target = 4.085;
-  t.mock.timers.tick(100); await flushStartup();
+  tick(100); await flushStartup();
   assert.equal(f.requests[3].context.frag.sn, 3);
-  t.mock.timers.tick(249); await flushStartup();
+  // The 350 ms parent clamps the late window to open at 175 ms. Moving the target past the verified 2 to 6 s run
+  // leaves no coverage of it, so neither relaxed rule applies and the deadline is genuine.
+  f.state.target = 6.5;
+  tick(249); await flushStartup();
   assert.equal(first.calls.error, 0);
-  t.mock.timers.tick(1); await flushStartup();
+  tick(1); await flushStartup();
   assert.equal(first.calls.error, 1);
   assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
   assert.equal(f.requests[3].aborted, true);
@@ -3349,6 +3393,219 @@ test('startup buffer rechecks a moving target after authority yields instead of 
   assert.equal(first.calls.success, 1);
   assert.equal(f.engine.startupSnapshot().verifiedEnd, 6);
   assert.equal(f.engine.startupSnapshot().targetTime, 3.8);
+});
+
+// Startup reservoir release rules. Logical clock: performance.now and timers advance together in 100 ms
+// steps, so each poll sees the time at which it fires. Verified media is four-byte, two-second fragments.
+const startupSteps = (t, tick) => async ms => { for (let left = ms; left > 0; left -= 100) { tick(Math.min(100, left)); await flushStartup(); } };
+const verifyThreeFragments = async f => {
+  await requireOriginalVerified(f);
+  f.requests[1].finish(); await flushStartup(); f.requests[2].finish(); await flushStartup();
+};
+
+test('startup reservoir releases at capacity on the fourth verified body below the recovery requirement', async t => {
+  const tick = startupLogicalClock(t), run = startupSteps(t, tick);
+  let commits = 0;
+  const f = startupFixture(t, { commit: () => { commits++; } }); f.state.target = 0; f.state.recovery = 8073.75;
+  const first = f.load(0, 12000); await verifyThreeFragments(f);
+  await run(100);
+  assert.equal(f.requests.length, 4, 'the fourth residency slot is requested'); assert.equal(first.calls.success, 0); assert.equal(commits, 0);
+  assert.equal(f.engine.startupSnapshot().heldObjects, 4);
+  f.requests[3].finish(); await flushStartup();
+  // Hook guard: the one-shot hook starts the room clock at acknowledgement, so 8000 ms of headroom must also exceed
+  // the time left to the deadline (11.9 s here). Capacity is saturated, but the hook waits for the first poll
+  // after 4.0 s of the hold, when 8000 ms exceeds the 8000 ms remaining.
+  assert.equal(first.calls.success, 0); assert.equal(commits, 0, 'no hook call while the headroom cannot outlast the remaining hold');
+  await run(3900);
+  assert.equal(first.calls.success, 0); assert.equal(commits, 0);
+  await run(100);
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(commits, 1, 'the hook runs once');
+  const ready = f.engine.startupSnapshot();
+  assert.equal(ready.state, 'ready'); assert.equal(ready.reason, null);
+  assert.equal(ready.releaseBasis, 'capacity'); assert.deepEqual(ready.releases, { headroom: 0, capacity: 1, lateWindow: 0 });
+  assert.equal(ready.requiredHeadroomMs, 8073.75); assert.equal(ready.verifiedStart, 0); assert.equal(ready.verifiedEnd, 8);
+  assert.equal(ready.limits.releaseLeadMs, 3000); assert.equal(ready.limits.deadlineMs, 12000);
+  await run(12000);
+  assert.equal(f.requests.length, 4, 'no fifth request'); assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(commits, 1);
+});
+
+test('startup reservoir without a hook releases at capacity on the fourth verified body at once', async t => {
+  const tick = startupLogicalClock(t), run = startupSteps(t, tick);
+  const f = startupFixture(t); f.state.target = 0; f.state.recovery = 8073.75;
+  const first = f.load(0, 12000); await verifyThreeFragments(f);
+  await run(100); assert.equal(f.requests.length, 4); assert.equal(first.calls.success, 0);
+  f.requests[3].finish(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(f.engine.startupSnapshot().releaseBasis, 'capacity');
+  assert.equal(f.requests.length, 4, 'no fifth request');
+});
+
+// Late joiner: the target (3.885 s) is already past the original response (0 to 2 s), which holds a slot but is not
+// part of the coverage. fillStartupWindow verifies SN1 and SN2 (2 to 6 s); the planner then requests SN3 into the
+// fourth slot. Three futures would cover 2 to 8 s: 4.1 s of headroom against a 6100 ms requirement.
+const lateJoinerFixture = async (t, options = {}) => {
+  const tick = startupLogicalClock(t), run = startupSteps(t, tick);
+  const f = startupFixture(t, options);
+  const first = f.load(0, 12000); await fillStartupWindow(f);
+  f.state.recovery = 6100;
+  await run(100);
+  assert.deepEqual(f.requests.map(row => row.context.frag.sn), [0, 1, 2, 3]);
+  assert.equal(first.calls.success, 0);
+  return { tick, run, f, first };
+};
+
+test('startup reservoir releases a late joiner at capacity as soon as the third future verifies', async t => {
+  const { f, first } = await lateJoinerFixture(t);
+  f.requests[3].finish(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
+  const ready = f.engine.startupSnapshot();
+  assert.equal(ready.releaseBasis, 'capacity'); assert.equal(ready.verifiedStart, 2); assert.equal(ready.verifiedEnd, 8);
+  assert((ready.verifiedEnd - f.state.target) * 1000 < 6100, 'below the requirement');
+  assert.equal(f.requests.length, 4, 'no fifth request');
+});
+
+test('startup reservoir does not release a late joiner at capacity while the third future is in flight', async t => {
+  const { run, f, first } = await lateJoinerFixture(t);
+  await run(500);
+  assert.equal(f.engine.snapshot().active, 1, 'a request holds the last slot');
+  assert.equal(first.calls.success, 0); assert.equal(f.engine.startupSnapshot().releases.capacity, 0);
+});
+
+test('startup reservoir does not release a late joiner at capacity while an obsolete future is held', async t => {
+  const { run, f, first } = await lateJoinerFixture(t);
+  f.state.target = 4.3; // SN1 (2 to 4 s) is now behind the target but still held
+  f.requests[3].finish(); await flushStartup();
+  assert.equal(first.calls.success, 0, 'a held row outside the coverage means a slot can still change');
+  await run(500);
+  assert.equal(first.calls.success, 0); assert.equal(f.engine.startupSnapshot().releases.capacity, 0);
+});
+
+test('startup reservoir does not release at capacity when the verified coverage excludes the fresh target', async t => {
+  const tick = startupLogicalClock(t), run = startupSteps(t, tick);
+  const f = startupFixture(t); f.state.target = 0; f.state.recovery = 8073.75;
+  const first = f.load(0, 12000); await verifyThreeFragments(f);
+  await run(100); assert.equal(f.requests.length, 4);
+  f.state.target = 8.5; f.requests[3].finish(); await flushStartup();
+  assert.equal(first.calls.success, 0, 'four held bodies that end before the target are not coverage of it');
+  assert.equal(f.engine.startupSnapshot().releases.capacity, 0);
+});
+
+test('startup reservoir releases in the late window at the first poll within three seconds of the deadline', async t => {
+  const tick = startupLogicalClock(t), run = startupSteps(t, tick);
+  const f = startupFixture(t); f.state.target = 0; f.state.recovery = 6100;
+  const first = f.load(0, 12000); await verifyThreeFragments(f);
+  await run(8900);
+  assert.equal(first.calls.success, 0, 'no release at 8.9 s: 6000 ms of headroom is short of 6100 ms');
+  assert.equal(f.engine.startupSnapshot().state, 'buffering');
+  await run(100);
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
+  const ready = f.engine.startupSnapshot();
+  assert.equal(ready.releaseBasis, 'late-window'); assert.deepEqual(ready.releases, { headroom: 0, capacity: 0, lateWindow: 1 });
+  assert.equal(ready.requiredHeadroomMs, 6100); assert.equal(ready.verifiedEnd, 6); assert.equal(ready.reason, null);
+  assert(f.requests.length <= 4, 'no fifth request');
+});
+
+test('startup reservoir late window never releases coverage that ends behind the target', async t => {
+  const tick = startupLogicalClock(t), run = startupSteps(t, tick);
+  const f = startupFixture(t); f.state.target = 0; f.state.recovery = 6100;
+  const first = f.load(0, 12000); await verifyThreeFragments(f);
+  f.state.target = 7; // the room clock is now past the verified 0 to 6 s run
+  await run(11900);
+  assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 0);
+  assert.equal(f.engine.startupSnapshot().releaseBasis, null);
+  await run(100);
+  assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1);
+  assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+  const failed = f.engine.startupSnapshot();
+  assert.equal(failed.state, 'failed'); assert.equal(failed.reason, 'deadline');
+  assert.equal(failed.releaseBasis, null); assert.deepEqual(failed.releases, { headroom: 0, capacity: 0, lateWindow: 0 });
+  assert.equal(f.engine.snapshot().cacheBytes, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+});
+
+test('startup reservoir late-window release with a commit hook that never resolves fails at the deadline', async t => {
+  const tick = startupLogicalClock(t), run = startupSteps(t, tick);
+  let resolve, signal, calls = 0;
+  const f = startupFixture(t, { commit: value => { calls++; signal = value.signal; return new Promise(yes => { resolve = yes; }); } });
+  f.state.target = 0; f.state.recovery = 6100;
+  const first = f.load(0, 12000); await verifyThreeFragments(f);
+  await run(8900); assert.equal(calls, 0);
+  await run(100);
+  assert.equal(calls, 1, 'the late window starts the hook once'); assert.equal(first.calls.success, 0);
+  assert.equal(f.engine.startupSnapshot().commitStarted, true);
+  await run(2900);
+  assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 0); assert.equal(signal.aborted, false);
+  await run(100);
+  assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+  assert.equal(signal.aborted, true); assert.equal(f.engine.startupSnapshot().reason, 'deadline');
+  assert.deepEqual(f.engine.startupSnapshot().releases, { headroom: 0, capacity: 0, lateWindow: 0 });
+  assert.equal(f.engine.snapshot().cacheObjects, 0); assert.equal(f.engine.snapshot().cacheBytes, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  resolve(); await flushStartup(); await run(1000);
+  assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1); assert.equal(calls, 1);
+});
+
+test('startup reservoir late-window hook waits until its headroom outlasts the hold, then survives a slow acknowledgement', async t => {
+  const tick = startupLogicalClock(t), run = startupSteps(t, tick);
+  let calls = 0, acknowledge;
+  const f = startupFixture(t, { commit: () => { calls++; return new Promise(resolve => { acknowledge = resolve; }); } });
+  f.state.target = 0; f.state.recovery = 6100; // 2 s of coverage: the original response alone (0 to 2 s)
+  const first = f.load(0, 12000); await requireOriginalVerified(f);
+  await run(9000);
+  assert.equal(calls, 0, 'late window is open at 9.0 s, but 2000 ms does not exceed the 3000 ms left');
+  await run(1000);
+  assert.equal(calls, 0, 'at 10.0 s, 2000 ms is not strictly more than the 2000 ms left');
+  await run(100);
+  assert.equal(calls, 1, 'the first poll after 10.0 s starts the one-shot hook'); assert.equal(first.calls.success, 0);
+  // Acknowledgement takes 1.5 s; the room clock advances from zero meanwhile and ends at 1.5 s, still inside 0 to 2 s.
+  for (let step = 1; step <= 15; step++) { f.state.target = step / 10; await run(100); }
+  assert.equal(first.calls.success, 0); acknowledge(); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(calls, 1);
+  const ready = f.engine.startupSnapshot();
+  assert.equal(ready.releaseBasis, 'late-window'); assert.equal(ready.verifiedEnd, 2); assert.equal(ready.requiredHeadroomMs, 6100);
+  assert.equal(ready.commitStarted, true); assert.equal(ready.commitCompleted, true);
+});
+
+test('startup reservoir late window never starts the hook for headroom that cannot outlast the hold', async t => {
+  const tick = startupLogicalClock(t), run = startupSteps(t, tick);
+  let calls = 0;
+  const f = startupFixture(t, { commit: () => { calls++; } });
+  f.state.target = 1.995; f.state.recovery = 6100; // coverage ends 5 ms past the target
+  const first = f.load(0, 12000); await requireOriginalVerified(f);
+  await run(11900);
+  assert.equal(calls, 0, 'no room is published'); assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 0);
+  await run(100);
+  assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+  assert.equal(calls, 0); assert.equal(f.engine.startupSnapshot().commitStarted, false);
+  assert.equal(f.engine.startupSnapshot().reason, 'deadline');
+  assert.deepEqual(f.engine.startupSnapshot().releases, { headroom: 0, capacity: 0, lateWindow: 0 });
+});
+
+test('startup reservoir late window opens at half of a short parent window, not at a negative time', async t => {
+  const tick = startupLogicalClock(t);
+  const f = startupFixture(t); f.state.target = 0; f.state.recovery = 6100;
+  const first = f.load(0, 250); await verifyThreeFragments(f);
+  assert.equal(f.engine.startupSnapshot().limits.releaseLeadMs, 3000, 'the reported lead is the unclamped constant');
+  assert.equal(first.calls.success, 0, 'an unclamped 3000 ms lead would already be open here');
+  tick(100); await flushStartup();
+  assert.equal(first.calls.success, 0, 'at 100 ms the clamped window (opens at 125 ms) is still closed');
+  tick(100); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
+  assert.equal(f.engine.startupSnapshot().releaseBasis, 'late-window');
+});
+
+test('startup reservoir late window fails with authority-changed when authority is revoked before the final verdict', async t => {
+  const tick = startupLogicalClock(t), run = startupSteps(t, tick);
+  const f = startupFixture(t); f.state.target = 0; f.state.recovery = 6100;
+  const first = f.load(0, 12000); await verifyThreeFragments(f);
+  await run(8800);
+  f.state.holdRecheck = true; f.state.holdCheckSn = 2;
+  await run(200);
+  assert.equal(typeof f.state.releaseRecheck, 'function', 'the late-window candidate reached authority revalidation');
+  assert.equal(first.calls.success, 0);
+  f.state.revoked.add(2); f.state.releaseRecheck(); await flushStartup();
+  assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1);
+  assert.equal(first.calls.args[0].startupBufferReason, 'authority-changed');
+  assert.equal(f.engine.startupSnapshot().reason, 'authority-changed'); assert.equal(f.engine.startupSnapshot().releaseBasis, null);
+  await run(5000);
+  assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1);
 });
 
 test('startup buffer deadline fails once and cannot renew through a retry loader', async t => {
@@ -4003,7 +4260,7 @@ test('rolling startup can retain a third future after the held first interval is
   assert.equal(f.requests.length, completedRequests, 'the original deadline cannot restart released startup work');
 });
 
-test('startup extra-future byte refusal preserves useful coverage after the original interval expires', async t => {
+test('startup extra-future byte refusal preserves useful coverage until the late window releases it', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let clock = 1000; t.mock.method(performance, 'now', () => clock);
   const cap = 24 * 1024 * 1024;
@@ -4021,14 +4278,16 @@ test('startup extra-future byte refusal preserves useful coverage after the orig
     'byte refusal cannot evict the still-needed verified prefix');
   assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 0);
   assert(f.state.reservations.every(size => size <= cap));
-  clock += 7899; t.mock.timers.tick(7899); await flushStartup();
+  clock += 4899; t.mock.timers.tick(4899); await flushStartup();
   assert.equal(first.calls.error, 0, 'no early terminal or renewed deadline');
-  clock++; t.mock.timers.tick(1); await flushStartup();
-  assert.equal(first.calls.error, 1); assert.equal(first.calls.abort, 0); assert.equal(first.calls.success, 0);
-  assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
-  assert.equal(f.requests.length, 3); assert.equal(f.engine.snapshot().cacheBytes, 0);
-  assert.equal(f.engine.snapshot().reservationBytes, 0);
-  t.mock.timers.tick(1000); await flushStartup(); assert.equal(first.calls.error, 1);
+  assert.equal(first.calls.success, 0, 'the late window (9000 ms deadline, 3000 ms lead) opens at 6000 ms, not before');
+  // Late window: verified SN1 and SN2 cover the fresh target (3.885 s) so the held prefix releases, short of its
+  // 2762.5 ms requirement, instead of being discarded at the deadline.
+  clock += 101; t.mock.timers.tick(101); await flushStartup();
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(first.calls.abort, 0);
+  assert.equal(f.engine.startupSnapshot().releaseBasis, 'late-window');
+  assert.equal(f.requests.length, 3); assert.equal(f.engine.snapshot().reservationBytes, 0);
+  clock += 4000; t.mock.timers.tick(4000); await flushStartup(); assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
 });
 
 
@@ -4077,8 +4336,12 @@ test('startup load budget: controlled fourth body at8.7s releases within12s, wit
   assert.equal(f.requests.length, count); assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
 });
 
-for (const parent of [20000, 9000]) test(`startup load budget: absolute ${Math.min(parent, 12000)} ms limit cannot renew through retry or late body`, async t => {
-  const { f, first, to } = await startupBudgetCadence(t, parent), limit = Math.min(parent, 12000);
+test('startup load budget: absolute 12000 ms limit cannot renew through retry or late body', async t => {
+  const parent = 20000, limit = 12000;
+  const { f, first, to } = await startupBudgetCadence(t, parent);
+  // Without verified coverage of the fresh target (6.5 s; verified media ends at 6 s) neither relaxed rule applies,
+  // so this stays the deadline control. Moved after the cadence, which needs the original target for admission.
+  f.state.target = 6.5; await to(7100 + 100);
   await to(limit - 1); assert.equal(first.calls.error, 0, 'no early failure or per-step deadline renewal');
   assert.equal(f.engine.startupSnapshot().limits.deadlineMs, 12000);
   assert.equal(f.engine.snapshot().limits.deadlineMs, 12000);
@@ -4090,6 +4353,24 @@ for (const parent of [20000, 9000]) test(`startup load budget: absolute ${Math.m
   await to(20000); assert.equal(first.calls.success, 0); assert.equal(first.calls.error, 1);
   assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().cacheBytes, 0);
   assert.equal(f.engine.snapshot().limits.deadlineMs, 8000);
+});
+
+test('startup load budget: a 9000 ms parent opens the late window at 6000 ms and cannot renew afterwards', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let elapsed = 0; t.mock.method(performance, 'now', () => 1000 + elapsed);
+  const f = startupFixture(t, { timedStats: true });
+  f.state.target = 0; f.state.recovery = 7718.75;
+  const first = f.load(0, 9000);
+  const to = async end => { while (elapsed < end) { const step = Math.min(100, end - elapsed); elapsed += step; t.mock.timers.tick(step); await flushStartup(); } };
+  await requireOriginalVerified(f);
+  await to(5900); f.requests[1].finish(); await flushStartup();
+  assert.equal(first.calls.success, 0, 'verified coverage of the target at 5.9 s is before the late window (9000 - 3000 ms)');
+  await to(6000);
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0);
+  assert.equal(f.engine.startupSnapshot().releaseBasis, 'late-window');
+  assert.equal(f.engine.startupSnapshot().verifiedEnd, 4); assert.equal(f.engine.startupSnapshot().requiredHeadroomMs, 7718.75);
+  const count = f.requests.length; await to(20000);
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(f.requests.length, count);
 });
 
 test('a canceled warm verifier retains its default slot and body reservation until actual settlement', async t => {

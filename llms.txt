@@ -120,7 +120,11 @@ never changes the player, rate or room clock; failure is explicit. Source
 and fixture checks do not prove decoded playback or device acceptance.
 While the first callback waits, a bounded 100 ms poll plans currently parsed
 future data around measured recovery headroom and a verified future-load timing
-observation when available; this adds no release headroom waiver or rate estimate.
+observation when available; this adds no rate estimate. Before the deadline, a reservoir
+whose held futures all cover the fresh target with every slot taken and none in flight
+releases, as does one covering the target in the last three seconds (half of a parent
+window shorter than six seconds); before an unstarted commit hook either needs headroom
+exceeding the time left, and the deadline itself is unchanged.
 Admission retains the fourth-slot successor extending two verified futures
 covering the actual target, rather than horizon-skipping it and creating a hole.
 An ahead-only verified contiguous window may also use that fourth slot when

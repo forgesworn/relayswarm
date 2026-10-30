@@ -10,6 +10,53 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased startup reservoir release at capacity and in the late window (30 October 2026)
+
+A smoke run on a deployed public page, with two viewers prepared and only the
+first viewer started, failed to start. A transient 5.4 second first read of a
+6.47 MB fragment raised the measured recovery requirement to 8073.75 ms (p90 of
+the origin samples, with the usual 25 % and 100 ms margin). The reservoir then
+held four verified two-second objects covering eight seconds of media from the
+room target, the four-object limit, so it could neither admit a fifth object
+nor reach 8.07 seconds of headroom. At the twelve-second deadline the manager
+discarded all of it and reported a loader error, every retry received the same
+error, and the host stopped playback with a source error. A start with eight
+seconds of verified media in hand therefore failed outright.
+
+Two additional rules in the release check now apply before the deadline. The
+headroom rule is unchanged and still evaluated first. **Capacity:** when every
+held future contributes to the contiguous verified coverage of the fresh target,
+all four residency slots are taken and no request is in flight, no slot can
+change until the target passes a row and waiting cannot add headroom, so the
+reservoir releases. This covers a reservoir of the original response plus three
+covering futures, and a late joiner whose target is already past the original
+response (three covering futures, the original holding a slot outside the
+coverage). **Late window:** when the hold is within its last three seconds (or
+half of a parent window shorter than six seconds) and verified coverage
+includes the fresh target, the reservoir releases with whatever headroom it has.
+**Hook guard:** before an unstarted commit hook, either rule also needs coverage
+headroom strictly greater than the time left to the deadline, so that a target
+advancing from acknowledgement until the deadline stays inside coverage; without
+a hook the release is simply withheld until a later poll. Both rules run the same
+validation, optional commit hook, revalidation and delivery sequence as before,
+inside the original deadline. Both call sites of the check apply the same rules
+and the hook guard keeps the target inside coverage through the acknowledgement.
+`metrics().startupBuffer` additively reports `releaseBasis` (`headroom`,
+`capacity` or `late-window`, `null` before a release), `releases` (a count per
+basis) and `limits.releaseLeadMs`; `reason` stays `null` on a release.
+
+Unchanged: the four-object limit, the twelve-second or parent deadline, the
+recovery formula and `startupRecovery`, the byte allowances, and every
+authority, context and coverage check. Nothing is released after the deadline.
+A reservoir whose verified coverage does not include the fresh target at the
+deadline still fails with `deadline`, and a host acknowledgement that has not
+settled by the deadline still fails there. A release by either new rule carries
+less headroom than the measured requirement by design, so a player that then
+needs more media than the reservoir holds may rebuffer; whether that trade is
+acceptable on real devices is not measured. Evidence is the fixture suite
+(logical clock, four-byte bodies) only. This change is not field-qualified: no
+deployed build or real-media run has exercised it.
+
 ## Private LAN two-viewer field result for the size-aware build (30 October 2026)
 
 One authorised private attempt ran the exact b102ff4 SDK and worker on the
