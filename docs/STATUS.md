@@ -53,9 +53,23 @@ deadline still fails with `deadline`, and a host acknowledgement that has not
 settled by the deadline still fails there. A release by either new rule carries
 less headroom than the measured requirement by design, so a player that then
 needs more media than the reservoir holds may rebuffer; whether that trade is
-acceptable on real devices is not measured. Evidence is the fixture suite
-(logical clock, four-byte bodies) only. This change is not field-qualified: no
-deployed build or real-media run has exercised it.
+acceptable on real devices is not measured beyond the one reading below.
+
+Measured privately on 30 October 2026 after a paired site adopted this merge
+(`9a7437d`): two headless viewers on one Mac played the public 4K page with
+host candidates and controlled signalling, no TURN, with a synthetic 6 s hold
+on the first viewer's first segment (about 7 s as the browser saw it). The
+first viewer's requirement rose to 8832.5 ms (8918.75 ms in the 30 s smoke),
+above the four-slot reservoir, and the reservoir released by the late-window
+rule with two verified fragments (three in the smoke); its first 4K frame came
+10.9 s after the click, and the 340 s observation had zero stalls, player
+errors, dropped frames or waits. The unthrottled second viewer released by
+headroom and showed its first frame 2.8 s after its click. Accepted peer media
+was 1.44 % and 5.64 %, 3.54 % for the room. Before this change the same kind
+of slow first read (5.4 s) on the previous deployed build gave no first frame
+within 25 s and a stopped player. This is a private LAN reading with a
+synthetic delay, not public-network, NAT, TURN or physical-device
+qualification, and it does not measure the rebuffer trade above.
 
 ## Private LAN two-viewer field result for the size-aware build (30 October 2026)
 
