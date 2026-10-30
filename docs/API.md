@@ -231,7 +231,8 @@ This bounds the encoded reservoir, not total browser memory. The original first 
 is not retained as an extra shared-cache seed; its reservation is released.
 Release requires a contiguous verified interval covering the
 fresh target plus at least the origin reserve or measured p90 whole-origin
-recovery with its 25% and 100 ms margin, whichever is greater. Startup is
+recovery with its 25% and 100 ms margin, whichever is greater, unless the
+capacity or late-window rule (described under `startupBufferCommit` below) applies. Startup is
 bounded to twelve seconds from the original first-fragment load entry, or the shorter parent load deadline. Ordinary speculative requests
 retain their separate eight-second expiry. Invalid ownership,
 insufficient capacity or expiration fails the loader explicitly; it does not
@@ -275,7 +276,8 @@ Startup contains at most four objects within its chosen byte allowance. The firs
 genuine response verifies before future requests begin, so this reservoir's
 speculative downloads do not compete with its first source-service measurement.
 Future requests remain serial,
-and insufficient capacity cannot release unsafe media or extend the deadline.
+and insufficient capacity cannot release unsafe media or extend the deadline; the
+capacity and late-window rules release only verified coverage of the fresh target.
 In-flight work and authority pins keep their reservations.
 The rolling plan stores metadata only, without retaining discarded payloads.
 Polling stops on release, failure or cancellation and pauses its target reads
@@ -318,18 +320,40 @@ publish its start after verified media is ready, and await acknowledgement.
 An existing room must retain its advancing clock.
 
 Before calling an external commit hook, verified coverage must strictly exceed
-the measured recovery requirement: exact equality leaves no room for the clock
+the measured recovery requirement (unless the capacity or late-window rule
+below applies): exact equality leaves no room for the clock
 advance during acknowledgement. This surplus is rechecked after awaited
 authority checks. Without a hook, exact equality remains sufficient. After
 acknowledgement, the fresh coverage check still requires at least the measured
-recovery headroom; the original deadline remains unchanged.
+recovery headroom, or one of the two rules below; the original deadline remains unchanged.
+
+Two further rules release the reservoir before that deadline when headroom
+alone cannot be reached. Capacity: every held future contributes to the
+contiguous verified coverage of the fresh target, all four residency slots are
+taken and no request is in flight, so no slot can change until the target
+passes a row and waiting cannot add headroom. A late joiner whose target is
+already past the original response reaches this with three futures; the
+original response holds a slot without being part of the coverage. Late window:
+within the last three seconds of the hold (half of a parent window shorter than
+six seconds), verified coverage includes the fresh target. Either releases below
+the measured requirement, runs the same hook and checks, and leaves the deadline
+unchanged; coverage that does not include the fresh target still fails with
+`deadline`. Hook guard: before an unstarted commit hook, either rule also needs
+coverage headroom strictly greater than the time left to the deadline. The hook
+runs once and the room clock advances from acknowledgement, so this keeps the
+fresh target inside coverage even if the acknowledgement lasts until the
+deadline, rather than publishing a room and then failing. Without a hook the
+release is simply withheld until a later poll.
+`metrics().startupBuffer.releaseBasis` (`headroom`, `capacity`, `late-window` or
+`null`), `releases` and `limits.releaseLeadMs` report them.
 
 The original twelve-second/parent startup deadline and held reservations
 remain in force while the host acknowledges. Cancellation retires the operation; late resolution
 or rejection cannot release media. A current hook failure reports
 `commit-refused`. After success, the loader repeats fresh target, authority,
 context, parsed-fragment and resident-coverage checks. Insufficient headroom
-does not recall the hook or extend the deadline. The hook establishes encoded
+(when neither the capacity nor the late-window rule applies) does not recall
+the hook or extend the deadline. The hook establishes encoded
 reservoir readiness, not decoded frames or accepted playback. The SDK itself
 does not publish, start, pause or reanchor any room.
 The signal also ends after successful HLS handoff. A host must detach its

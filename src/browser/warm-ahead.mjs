@@ -3,7 +3,7 @@
 // no media clock, playback command, background holder or alternate rendition
 // is created here. The supplied loader remains the SDK's loader.
 export const WARM_AHEAD = Symbol('relayswarm-warm-ahead');
-const MAX_BYTES = 24 * 1024 * 1024, MAX_OBJECTS = 3, MAX_STARTUP_OBJECTS = 4, DEADLINE_MS = 8_000, STARTUP_DEADLINE_MS = 12_000, STARTUP_POLL_MS = 100;
+const MAX_BYTES = 24 * 1024 * 1024, MAX_OBJECTS = 3, MAX_STARTUP_OBJECTS = 4, DEADLINE_MS = 8_000, STARTUP_DEADLINE_MS = 12_000, STARTUP_POLL_MS = 100, STARTUP_RELEASE_LEAD_MS = 3_000;
 const validInterval = item => {
   const { start, duration } = item?.context?.frag ?? {};
   return Number.isFinite(start) && start >= 0 && Number.isFinite(duration) && duration > 0 && Number.isFinite(start + duration);
@@ -72,7 +72,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     owner: null, terminal: null, own: null, permit: null, response: null, verified: false, reserved: 0,
     controller: null, timer: null, poll: null, plan: [], cursor: null, frozenStart: null, hopAvailable: true, checking: false, targetTime: null, verifiedStart: null, verifiedEnd: null,
     requiredHeadroomMs: null, planningServiceMs: null, sourceProfile: null, firstProfile: null, admissionWaiting: false,
-    released: 0, failures: 0, cancellations: 0, commitStarted: false, commitCompleted: false };
+    released: 0, releaseBasis: null, releases: { headroom: 0, capacity: 0, lateWindow: 0 },
+    failures: 0, cancellations: 0, commitStarted: false, commitCompleted: false };
   // A measured source profile projects only same-origin candidates.
   const sourceProfileFor = (context, profile = startup.sourceProfile) => {
     try { return profile !== null && new URL(context.url).origin === profile.origin; }
@@ -657,11 +658,32 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     return { start, end, rows: used };
   };
   const startupHeadroomSufficient = (covered, target, recovery) => {
-    if (covered.end === null) return false;
+    if (covered.end === null) return null;
     const headroomMs = (covered.end - target) * 1000;
     // Publishing starts an advancing room clock. Exact equality cannot survive
     // a positive ACK delay; keep it valid for no-hook and post-ACK handoffs.
-    return !startup.commitStarted && typeof startupCommit === 'function' ? headroomMs > recovery : headroomMs >= recovery;
+    if (!startup.commitStarted && typeof startupCommit === 'function' ? headroomMs > recovery : headroomMs >= recovery) return 'headroom';
+    // The two relaxations below never extend or bypass the deadline: release
+    // still runs the full validate, hook and deliver sequence inside it.
+    // The hook is one-shot and the room clock advances from acknowledgement, so
+    // an unstarted hook needs headroom beyond all the time left: if the
+    // acknowledgement lasts until the deadline, the target still sits inside
+    // this coverage at the post-acknowledgement verdict. Without a hook the
+    // verdict simply withholds and the next poll retries.
+    if (!startup.commitStarted && typeof startupCommit === 'function' &&
+        !(headroomMs > startup.deadline - performance.now())) return null;
+    // Capacity: every held future contributes to the contiguous coverage of the
+    // fresh target, every residency slot is taken and no request is in flight, so
+    // no slot can change until the target passes a row and waiting cannot add
+    // headroom. A late joiner reaches this with three futures; the original
+    // response then holds a slot without being part of the coverage.
+    if (tracked() >= MAX_STARTUP_OBJECTS && jobs.size === 0 && [...cache.values()].every(row => covered.rows.includes(row))) return 'capacity';
+    // Late window: coverage includes the fresh target and the hold is within
+    // its final lead of the deadline. The lead is clamped for parent windows
+    // shorter than six seconds.
+    const lead = Math.min(STARTUP_RELEASE_LEAD_MS, (startup.deadline - startup.entryAt) / 2);
+    if (performance.now() >= startup.deadline - lead) return 'late-window';
+    return null;
   };
   const startupCandidate = (target = undefined) => {
     if (!startupCurrent()) return null;
@@ -673,8 +695,9 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     if (!Number.isFinite(recovery) || recovery < 0) return endStartup('failed', 'invalid-recovery');
     startup.requiredHeadroomMs = recovery;
     const covered = coverage(target);
-    if (!startupHeadroomSufficient(covered, target, recovery)) return;
-    return { covered, recovery };
+    const basis = startupHeadroomSufficient(covered, target, recovery);
+    if (!basis) return;
+    return { covered, recovery, basis };
   };
   const waitStartupCommit = signal => new Promise((resolve, reject) => {
     let settled = false;
@@ -747,13 +770,12 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         if (performance.now() >= startup.deadline) return endStartup('failed', 'deadline');
         if (!residentCurrent()) return;
         const final = coverage(fresh, covered.rows);
-        if (!startupHeadroomSufficient(final, fresh, recovery)) return;
-        return true;
+        return startupHeadroomSufficient(final, fresh, recovery) || undefined;
       };
     };
     try {
-      let current = await validate(candidate);
-      if (!current()) return;
+      let current = await validate(candidate), basis = current();
+      if (!basis) return;
       if (typeof startupCommit === 'function' && !startup.commitStarted) {
         startup.commitStarted = true;
         try { await waitStartupCommit(startup.controller.signal); }
@@ -767,8 +789,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         // any player callback or consumed credit. Never invoke the hook again.
         const afterCommit = startupCandidate();
         if (!afterCommit) return;
-        current = await validate(afterCommit);
-        if (!current()) return;
+        current = await validate(afterCommit); basis = current();
+        if (!basis) return;
       }
       // Same pending play and same response/context/stats. Only now can the
       // first verified peer object become accepted-player contribution.
@@ -783,6 +805,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       if (!startupCurrent()) return;
       if (mark?.peerBytes > 0) counters.consumedPeerBytes += mark.peerBytes;
       startup.state = 'ready'; startup.reason = null; startup.released++;
+      startup.releaseBasis = basis; startup.releases[basis === 'late-window' ? 'lateWindow' : basis]++;
       startup.planningServiceMs = null; clearSourceProfile();
       clearTimeout(startup.timer); startup.timer = null; clearTimeout(startup.poll); startup.poll = null; startup.reserved = 0;
       const completedController = startup.controller;
@@ -1061,9 +1084,10 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
       requiredHeadroomMs: startup.requiredHeadroomMs, planningServiceMs: startup.planningServiceMs,
       sourceProfile: startup.sourceProfile === null ? null
         : { size: startup.sourceProfile.size, ttfbMs: startup.sourceProfile.ttfbMs, bodyMs: startup.sourceProfile.bodyMs },
-      released: startup.released, failures: startup.failures,
+      released: startup.released, releaseBasis: startup.releaseBasis, releases: { ...startup.releases }, failures: startup.failures,
       cancellations: startup.cancellations, commitStarted: startup.commitStarted, commitCompleted: startup.commitCompleted,
-      limits: { objects: MAX_STARTUP_OBJECTS, bytes: startupMaxBytes, futureBytes: MAX_BYTES, deadlineMs: STARTUP_DEADLINE_MS } }),
+      limits: { objects: MAX_STARTUP_OBJECTS, bytes: startupMaxBytes, futureBytes: MAX_BYTES, deadlineMs: STARTUP_DEADLINE_MS,
+        releaseLeadMs: STARTUP_RELEASE_LEAD_MS } }),
     contains(time) {
       if (closed || !allowed() || !Number.isFinite(time)) return false;
       const currentJobs = [...jobs].filter(([, row]) => live(row));

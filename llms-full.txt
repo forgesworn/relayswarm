@@ -374,9 +374,9 @@ decision is not cached as permission for later upload requests.
 | `originReserveMs` | `2000` | Minimum buffered playback reserved for origin recovery; measured p90 HTTP time can increase it. Multi-holder origin tails retain that same per-load reserve and its absolute recovery deadline. An empty buffer goes directly to origin. |
 | `sustainablePeerWait` | `false` | Opt-in: also cap the initial peer wait and every extension by the fragment/part duration minus measured p90 whole-object origin time with a 25% and 100 ms recovery margin. Substantial origin ranges update this estimate after scaling by their actual byte count. Unknown origin timing or duration leaves no serial peer wait. This limits repeated failed waits from consuming more playback than each segment adds. Independent cached/late-HAVE races keep their window beside immediate HTTP. |
 | `warmAhead` | `false` | Experimental peer-first option, requiring `serve: true`: use the same player's next two parsed, unencrypted, whole main-media fragments for bounded speculative loading. With `bufferedMixedRanges` and an explicitly parsed main live or VOD playlist, current connected contributors rank each future by object key and public key, skipping optional duplicate whole-source work when a peer owns the lower rank. Unknown playlist state retains ordinary source loading. Exact holders remain eligible for mixed loading; startup and genuine demand retain their existing loading and rendezvous rules. A warmed object promoted to genuine demand before its original eight-second expiry frees the sole speculative slot; a delayed timer cannot let a later demand revive expired work. Existing demand/range limits are unchanged. Verified future objects share the held cache; at most three distinct cached/in-flight objects and 24 MiB of warm data plus all reservations fit within `maxHeldBytes`. Fresh cache permission may wait only within actual buffer headroom, up to 25 ms, before ordinary source recovery proceeds independently. |
-| `startupBufferTarget` | `null` | Experimental one-shot startup buffer for peer-first serving: a synchronous function returns the current player's fresh raw HLS target time in seconds, or `null` when its ownership/epoch is invalid. Hold the first main-fragment callback until verified contiguous upcoming media covers that target and measured origin-recovery headroom. While pending, a 100 ms poll advances a bounded parsed future window toward that horizon, skipping unrequested near-tip work and reclaiming completed unowned coverage only when needed. A window ahead of the actual target waits for it; in-flight work and authority pins retain their reservations. When both verified futures contribute to contiguous coverage of the current target but still lack recovery headroom, preserve that useful prefix and admit one additional parsed successor, even if the held original first interval is obsolete. Startup permits at most four objects within `startupBufferMaxBytes` (24 MiB by default); steady warm-ahead remains at three. Future requests remain serial. For an ahead-only window, forecast skipping preserves the last parsed future reachable within the original remaining lifetime at normal room-clock speed. Two verified contiguous ahead futures may use the fourth slot if their start remains reachable and their span is shorter than recovery. These estimates affect admission only; release still requires fresh actual-target coverage and authority. Skipped metadata cannot freeze a window. Once reserved and admitted, the window stays fixed until the target reaches its start. The startup deadline is twelve seconds from the original first-fragment load entry, or the shorter parent load deadline; retries do not renew it. Ordinary speculative requests retain their separate eight-second expiry. Works with `warmAhead: false` to stop speculative fetching after startup. It never pauses, plays, seeks or changes the room clock; bounded failure reports a loader error instead of releasing unsafe media. |
+| `startupBufferTarget` | `null` | Experimental one-shot startup buffer for peer-first serving: a synchronous function returns the current player's fresh raw HLS target time in seconds, or `null` when its ownership/epoch is invalid. Hold the first main-fragment callback until verified contiguous upcoming media covers that target and measured origin-recovery headroom. While pending, a 100 ms poll advances a bounded parsed future window toward that horizon, skipping unrequested near-tip work and reclaiming completed unowned coverage only when needed. A window ahead of the actual target waits for it; in-flight work and authority pins retain their reservations. When both verified futures contribute to contiguous coverage of the current target but still lack recovery headroom, preserve that useful prefix and admit one additional parsed successor, even if the held original first interval is obsolete. Startup permits at most four objects within `startupBufferMaxBytes` (24 MiB by default); steady warm-ahead remains at three. Future requests remain serial. For an ahead-only window, forecast skipping preserves the last parsed future reachable within the original remaining lifetime at normal room-clock speed. Two verified contiguous ahead futures may use the fourth slot if their start remains reachable and their span is shorter than recovery. These estimates affect admission only; release still requires fresh actual-target coverage and authority. Skipped metadata cannot freeze a window. Once reserved and admitted, the window stays fixed until the target reaches its start. The startup deadline is twelve seconds from the original first-fragment load entry, or the shorter parent load deadline; retries do not renew it. Ordinary speculative requests retain their separate eight-second expiry. Works with `warmAhead: false` to stop speculative fetching after startup. It never pauses, plays, seeks or changes the room clock; bounded failure reports a loader error instead of releasing unsafe media. Before that deadline the hold also releases when every held future contributes to the verified coverage of the fresh target with all four slots taken and nothing in flight, or in its last three seconds (half of a parent window shorter than six seconds) when coverage includes the target, even below the recovery headroom; neither rule extends the deadline, and before an unstarted commit hook either needs headroom greater than the time left. |
 | `startupBufferMaxBytes` | `25165824` | Encoded startup aggregate including the retained original response. Safe integer from 24 MiB through 32 MiB; a non-default value requires `startupBufferTarget`. Reserve the full chosen allowance against the shared held budget before HTTP. Cached/in-flight future bytes separately remain within 24 MiB, as do existing per-object checks. Object limits, recovery and deadlines are unchanged; this is not total browser memory. |
-| `startupBufferCommit` | `null` | Optional async host hook, requiring `startupBufferTarget`, called once with frozen `{ signal }` after verified reservoir readiness and before releasing HLS callbacks. Before publication, coverage must strictly exceed measured recovery headroom, including after awaited authority checks; exact equality remains sufficient without a hook and for fresh post-acknowledgement validation. The host may acknowledge a new room start here. The original startup deadline and resource limits continue; cancellation ignores late settlement. Fresh target, authority, context and resident coverage are checked again afterwards. The SDK never creates or reanchors the room clock. |
+| `startupBufferCommit` | `null` | Optional async host hook, requiring `startupBufferTarget`, called once with frozen `{ signal }` after verified reservoir readiness and before releasing HLS callbacks. Before publication, coverage must strictly exceed measured recovery headroom, including after awaited authority checks (unless the capacity or late-window rule in `startupBufferTarget` applies); exact equality remains sufficient without a hook and for fresh post-acknowledgement validation. The host may acknowledge a new room start here. The original startup deadline and resource limits continue; cancellation ignores late settlement. Fresh target, authority, context and resident coverage are checked again afterwards. The SDK never creates or reanchors the room clock. |
 | `uploadPacing` | `false` | Experimental canonical-piece upload refill deferral: one FIFO waiter per link, at most `min(maxUploadPeers, maxPeers)` waiters, and a fixed 250 ms queue deadline. The existing per-second rate, twice-rate burst, session allowance and wire remain unchanged. Whole-object deficits still refuse immediately. Queue rows contain identity and numeric geometry; held bytes and current host permission are checked after waiting. |
 | `latePeerRace` | `false` | Experimental peer-first option requiring `zeroBudgetPeerRace`: permit the first peer arm of still-running whole-main-fragment HTTP with no prior peer plan to use a newly accepted, current exact-HAVE holder. Warm work needs a genuine consumer or an owned pending startup-buffer dependency. Genuine demand keeps its earliest demand window; startup dependencies keep the original HTTP-entry window and first startup deadline. Both retain `min(lateWindowMs, 4000)`, arming plus `min(maxPeerWaitMs, 2500)`, and the known original HTTP load deadline. Same HTTP request/timers, fresh authority and current immutable identity; no retries or extra GET. Dormant watchers share `maxConcurrentRaces`; lifecycle changes retire them. Numeric `latePeerRace` metrics do not create delivery credit. |
 | `lateWindowMs` | `6000` | How long a race keeps asking peers before it counts as missed. |
@@ -2339,7 +2339,8 @@ This bounds the encoded reservoir, not total browser memory. The original first 
 is not retained as an extra shared-cache seed; its reservation is released.
 Release requires a contiguous verified interval covering the
 fresh target plus at least the origin reserve or measured p90 whole-origin
-recovery with its 25% and 100 ms margin, whichever is greater. Startup is
+recovery with its 25% and 100 ms margin, whichever is greater, unless the
+capacity or late-window rule (described under `startupBufferCommit` below) applies. Startup is
 bounded to twelve seconds from the original first-fragment load entry, or the shorter parent load deadline. Ordinary speculative requests
 retain their separate eight-second expiry. Invalid ownership,
 insufficient capacity or expiration fails the loader explicitly; it does not
@@ -2383,7 +2384,8 @@ Startup contains at most four objects within its chosen byte allowance. The firs
 genuine response verifies before future requests begin, so this reservoir's
 speculative downloads do not compete with its first source-service measurement.
 Future requests remain serial,
-and insufficient capacity cannot release unsafe media or extend the deadline.
+and insufficient capacity cannot release unsafe media or extend the deadline; the
+capacity and late-window rules release only verified coverage of the fresh target.
 In-flight work and authority pins keep their reservations.
 The rolling plan stores metadata only, without retaining discarded payloads.
 Polling stops on release, failure or cancellation and pauses its target reads
@@ -2426,18 +2428,40 @@ publish its start after verified media is ready, and await acknowledgement.
 An existing room must retain its advancing clock.
 
 Before calling an external commit hook, verified coverage must strictly exceed
-the measured recovery requirement: exact equality leaves no room for the clock
+the measured recovery requirement (unless the capacity or late-window rule
+below applies): exact equality leaves no room for the clock
 advance during acknowledgement. This surplus is rechecked after awaited
 authority checks. Without a hook, exact equality remains sufficient. After
 acknowledgement, the fresh coverage check still requires at least the measured
-recovery headroom; the original deadline remains unchanged.
+recovery headroom, or one of the two rules below; the original deadline remains unchanged.
+
+Two further rules release the reservoir before that deadline when headroom
+alone cannot be reached. Capacity: every held future contributes to the
+contiguous verified coverage of the fresh target, all four residency slots are
+taken and no request is in flight, so no slot can change until the target
+passes a row and waiting cannot add headroom. A late joiner whose target is
+already past the original response reaches this with three futures; the
+original response holds a slot without being part of the coverage. Late window:
+within the last three seconds of the hold (half of a parent window shorter than
+six seconds), verified coverage includes the fresh target. Either releases below
+the measured requirement, runs the same hook and checks, and leaves the deadline
+unchanged; coverage that does not include the fresh target still fails with
+`deadline`. Hook guard: before an unstarted commit hook, either rule also needs
+coverage headroom strictly greater than the time left to the deadline. The hook
+runs once and the room clock advances from acknowledgement, so this keeps the
+fresh target inside coverage even if the acknowledgement lasts until the
+deadline, rather than publishing a room and then failing. Without a hook the
+release is simply withheld until a later poll.
+`metrics().startupBuffer.releaseBasis` (`headroom`, `capacity`, `late-window` or
+`null`), `releases` and `limits.releaseLeadMs` report them.
 
 The original twelve-second/parent startup deadline and held reservations
 remain in force while the host acknowledges. Cancellation retires the operation; late resolution
 or rejection cannot release media. A current hook failure reports
 `commit-refused`. After success, the loader repeats fresh target, authority,
 context, parsed-fragment and resident-coverage checks. Insufficient headroom
-does not recall the hook or extend the deadline. The hook establishes encoded
+(when neither the capacity nor the late-window rule applies) does not recall
+the hook or extend the deadline. The hook establishes encoded
 reservoir readiness, not decoded frames or accepted playback. The SDK itself
 does not publish, start, pause or reanchor any room.
 The signal also ends after successful HLS handoff. A host must detach its
@@ -3278,6 +3302,53 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased startup reservoir release at capacity and in the late window (30 October 2026)
+
+A smoke run on a deployed public page, with two viewers prepared and only the
+first viewer started, failed to start. A transient 5.4 second first read of a
+6.47 MB fragment raised the measured recovery requirement to 8073.75 ms (p90 of
+the origin samples, with the usual 25 % and 100 ms margin). The reservoir then
+held four verified two-second objects covering eight seconds of media from the
+room target, the four-object limit, so it could neither admit a fifth object
+nor reach 8.07 seconds of headroom. At the twelve-second deadline the manager
+discarded all of it and reported a loader error, every retry received the same
+error, and the host stopped playback with a source error. A start with eight
+seconds of verified media in hand therefore failed outright.
+
+Two additional rules in the release check now apply before the deadline. The
+headroom rule is unchanged and still evaluated first. **Capacity:** when every
+held future contributes to the contiguous verified coverage of the fresh target,
+all four residency slots are taken and no request is in flight, no slot can
+change until the target passes a row and waiting cannot add headroom, so the
+reservoir releases. This covers a reservoir of the original response plus three
+covering futures, and a late joiner whose target is already past the original
+response (three covering futures, the original holding a slot outside the
+coverage). **Late window:** when the hold is within its last three seconds (or
+half of a parent window shorter than six seconds) and verified coverage
+includes the fresh target, the reservoir releases with whatever headroom it has.
+**Hook guard:** before an unstarted commit hook, either rule also needs coverage
+headroom strictly greater than the time left to the deadline, so that a target
+advancing from acknowledgement until the deadline stays inside coverage; without
+a hook the release is simply withheld until a later poll. Both rules run the same
+validation, optional commit hook, revalidation and delivery sequence as before,
+inside the original deadline. Both call sites of the check apply the same rules
+and the hook guard keeps the target inside coverage through the acknowledgement.
+`metrics().startupBuffer` additively reports `releaseBasis` (`headroom`,
+`capacity` or `late-window`, `null` before a release), `releases` (a count per
+basis) and `limits.releaseLeadMs`; `reason` stays `null` on a release.
+
+Unchanged: the four-object limit, the twelve-second or parent deadline, the
+recovery formula and `startupRecovery`, the byte allowances, and every
+authority, context and coverage check. Nothing is released after the deadline.
+A reservoir whose verified coverage does not include the fresh target at the
+deadline still fails with `deadline`, and a host acknowledgement that has not
+settled by the deadline still fails there. A release by either new rule carries
+less headroom than the measured requirement by design, so a player that then
+needs more media than the reservoir holds may rebuffer; whether that trade is
+acceptable on real devices is not measured. Evidence is the fixture suite
+(logical clock, four-byte bodies) only. This change is not field-qualified: no
+deployed build or real-media run has exercised it.
 
 ## Private LAN two-viewer field result for the size-aware build (30 October 2026)
 
