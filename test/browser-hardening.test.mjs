@@ -23,7 +23,7 @@ import { NeighbourDiscovery } from "../src/browser/neighbour-discovery.mjs";
 import { CoreNeighbourDiscovery } from "../src/browser/core-discovery.mjs";
 import { PeerSelection } from "../src/browser/peer-selection.mjs";
 import { VerifiedPieceFlow } from "../src/browser/verified-piece-flow.mjs";
-import { FutureFrontier, FRONTIER_TTL_MS, POSITION_LIMIT, POSITION_TTL_MS } from "../src/browser/future-frontier.mjs";
+import { FutureFrontier, POSITION_LIMIT, POSITION_TTL_MS } from "../src/browser/future-frontier.mjs";
 import { createOperatorControls } from "../demo/operator.mjs";
 
 const initialPeerFlow = () => ({ partialUsefulnessPreserved: 0, verifiedShortBatches: 0, verifiedShortBytes: 0, lastVerifiedShortBatch: null,
@@ -6032,7 +6032,8 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
 // The lead demand maps the first two futures (sn first + 1, first + 2) through
 // their permits and the evaluator yields both. A later demand on the first or
 // second future moves the window, and a HAVE injected in the same synchronous
-// step reaches the evaluator before any permit of the new window resolves.
+// step reaches the evaluator before any permit of the new window resolves. The
+// peer's frontier is derived from its advertised keys at election time.
 async function frontierFixture(t, evaluator, { first = 10, second = false } = {}) {
   const pair = await framingPairFixture(t, { pairedState: true }), actors = [], source = [], loaders = new Set(), objects = new Map(), peer = 1 - evaluator;
   const size = 1024 * 1024, secret = generateSecretKey();
@@ -6092,6 +6093,7 @@ async function frontierFixture(t, evaluator, { first = 10, second = false } = {}
         };
         this.row = row;
         if (ctx.frag.sn === first || row.range) this.timer = setTimeout(this.complete, ctx.frag.sn === first ? 1600 : 20);
+        else if (ctx.url.endsWith('/media/b/b0.ts')) this.timer = setTimeout(this.complete, 1600);
       }
       abort() { clearTimeout(this.timer); if (this.row && !this.row.complete) this.row.aborted = true; }
       destroy() { this.abort(); loaders.delete(this); }
@@ -6142,6 +6144,7 @@ async function frontierFixture(t, evaluator, { first = 10, second = false } = {}
       throw error;
     }
   };
+  const startedAt = performance.now();
   const lead = actors.map((_, actor) => invoke(actor, details[actor].fragments[0]));
   await clock.settle(Promise.all(lead));
   for (const f of actors) f.hls.media.buffered = { length: 1, start: () => 0, end: () => 10 };
@@ -6155,38 +6158,31 @@ async function frontierFixture(t, evaluator, { first = 10, second = false } = {}
   assert.deepEqual([warm(evaluator).sourceYielded, rows(evaluator).length, warm(evaluator).peersBehindProceeds], [2, 0, 0]);
   return { first, evaluator, peer, actors, source, paths, details, wait, channels: pair.channels, advance: clock.advance, warm, rows,
     key: index => keyFor(paths[index]),
+    // Logical time this test advanced after the actors connected, for the CI budget.
+    report: () => t.diagnostic(`frontier election logical ms: ${Math.round(performance.now() - startedAt)}`),
     // Demand fragment `index` on the evaluator; a HAVE sent now arrives before
     // any permit of the new window resolves.
     demand: index => invoke(evaluator, details[evaluator].fragments[index]),
     demandOther: index => invoke(evaluator, otherDetails[evaluator].fragments[index]),
     otherKey: index => keyFor(otherPaths[index]),
-    // Let time pass while the peer keeps playing the rendition, so that its
-    // contribution stays fresh and it remains an election candidate.
-    keepServing: async ms => {
-      for (let done = 0; done < ms; done += 10_000) {
-        invoke(peer, details[peer].fragments[0]);
-        await clock.advance(Math.min(10_000, ms - done));
-      }
-    },
     // A HAVE message from the peer, as the evaluator's link receives it.
     have: (keys, field = 'add') => channelOf(evaluator).receive(JSON.stringify({ t: 'have', [field]: keys })) };
 }
 
 // The second demand is on the first future: its window is first + 2 and
-// first + 3. The peer announces first + 1, so its frontier is first + 1:
+// first + 3. The peer advertises first + 1, so its frontier is first + 1:
 // first + 2 is adjacent (the XOR loser still yields) and first + 3 is two ahead.
 for (const evaluator of [0, 1]) test(`frontier election: a peer two objects behind takes no part, an adjacent one does (evaluator actor ${evaluator})`, { timeout: 30000 }, async t => {
   const f = await frontierFixture(t, evaluator);
   f.demand(1);
   f.have([f.key(1)]);
   await f.wait(() => f.warm(evaluator).sourceYielded >= 3 && f.rows(evaluator).length >= 1);
-  await f.advance(300);
+  await f.advance(100);
   const warm = f.warm(evaluator);
   assert.deepEqual(f.rows(evaluator).map(row => row.sn), [f.first + 3], JSON.stringify(f.source));
   assert.equal(warm.sourceYielded, 3, 'the adjacent future still follows the XOR outcome');
   assert.equal(warm.declinedSourceObjects, 1, 'its descriptor is retained for exact-HAVE reconsideration');
   assert.equal(warm.peersBehindProceeds, 1, 'only the future the peer is behind on counts');
-  assert.equal(f.warm(f.peer).peersBehindProceeds, 0, 'the peer has no mapped HAVE from the evaluator, so its frontier is unknown');
   // No wire change: HAVE frames still carry only keys, adds and deletes.
   for (const frame of f.channels.flatMap(channel => channel.sent).filter(row => row?.t === 'have'))
     assert(Object.keys(frame).every(name => ['t', 'keys', 'add', 'del'].includes(name)), JSON.stringify(frame));
@@ -6195,162 +6191,132 @@ for (const evaluator of [0, 1]) test(`frontier election: a peer two objects behi
   await f.wait(() => f.warm(evaluator).haveReconsidered === 1);
   assert.equal(f.warm(evaluator).declinedSourceObjects, 0);
   assert.equal(f.warm(evaluator).sourceYielded, 3);
+  f.report();
 });
 
 for (const evaluator of [0, 1]) test(`frontier election: an unknown frontier keeps the XOR yield (evaluator actor ${evaluator})`, { timeout: 30000 }, async t => {
   const f = await frontierFixture(t, evaluator);
   f.demand(1);
   await f.wait(() => f.warm(evaluator).sourceYielded >= 4);
-  await f.advance(300);
+  await f.advance(100);
   const warm = f.warm(evaluator);
   assert.deepEqual(f.rows(evaluator), []);
   assert.equal(warm.sourceYielded, 4);
   assert.equal(warm.declinedSourceObjects, 2);
   assert.equal(warm.peersBehindProceeds, 0);
+  f.report();
 });
 
 for (const evaluator of [0, 1]) test(`frontier election: an exact HAVE for the candidate returns before any frontier logic (evaluator actor ${evaluator})`, { timeout: 30000 }, async t => {
   const f = await frontierFixture(t, evaluator);
   f.demand(1);
   // The frontier is first + 1, as above, so first + 3 is excluded. The peer also
-  // announces first + 3 by its exact key, which is not yet a mapped position:
+  // advertises first + 3 by its exact key, which is not yet a mapped position:
   // the exact holder is found first and the frontier rule is never reached.
   f.have([f.key(1)]);
   f.have([f.key(3)]);
   await f.wait(() => f.warm(evaluator).sourceYielded >= 3 && f.rows(evaluator).some(row => row.sn === f.first + 3));
-  await f.advance(300);
+  await f.advance(100);
   assert.equal(f.warm(evaluator).sourceYielded, 3);
   assert.equal(f.warm(evaluator).peersBehindProceeds, 0, 'an exact-HAVE proceed is not a frontier proceed');
+  f.report();
 });
 
-// A third demand on the second future moves the window to first + 3 and
-// first + 4, after the clock has moved on; the peer announces first + 1.
-// A frontier of first + 1 is two behind first + 3, so a live frontier proceeds
-// on first + 3 and an expired or unmapped one yields it.
-for (const [label, ageMs, proceeds] of [['inside 30 s', 20_000, true], ['past 30 s', 31_000, false]])
-  test(`frontier election: a frontier ${label} ${proceeds ? 'still excludes the peer' : 'is unknown again'}`, { timeout: 60000 }, async t => {
-    const f = await frontierFixture(t, 1);
-    await f.advance(9000); // the lead's skipped descriptors lapse
-    f.have([f.key(1)]);
-    await f.keepServing(ageMs);
-    const before = f.warm(1).sourceYielded;
-    f.demand(2);
-    await f.wait(() => f.rows(1).some(row => row.sn === f.first + 3) || f.warm(1).sourceYielded >= before + 2);
-    await f.advance(300);
-    assert.equal(f.rows(1).some(row => row.sn === f.first + 3), proceeds, JSON.stringify(f.source));
-    assert.equal(f.warm(1).peersBehindProceeds > 0, proceeds);
-  });
-
-for (const [label, ageMs, proceeds] of [['inside 60 s', 20_000, true], ['past 60 s', 70_000, false]])
-  test(`frontier election: a permit position ${label} ${proceeds ? 'still maps a HAVE' : 'is ignored'}`, { timeout: 90000 }, async t => {
-    const f = await frontierFixture(t, 1);
-    // first + 1 was resolved by the lead's window (a deadline re-evaluation can
-    // refresh it within eight seconds) and is not resolved again after that.
-    await f.keepServing(ageMs);
-    f.have([f.key(1)]);
-    const before = f.warm(1).sourceYielded;
-    f.demand(2);
-    await f.wait(() => f.rows(1).some(row => row.sn === f.first + 3) || f.warm(1).sourceYielded >= before + 2);
-    await f.advance(300);
-    assert.equal(f.rows(1).some(row => row.sn === f.first + 3), proceeds, JSON.stringify(f.source));
-    assert.equal(f.warm(1).peersBehindProceeds > 0, proceeds);
-  });
-
 // The evaluator has resolved permits in another rendition whose sequence numbers
-// are far lower. A HAVE naming those objects must not move this rendition's
-// frontier: had it, the peer would count as behind and the evaluator would proceed.
-test('frontier election: a HAVE that maps to another rendition does not update this rendition\'s frontier', { timeout: 60000 }, async t => {
+// are far lower. Objects advertised from that rendition must not give this
+// rendition a frontier: had they, the peer would count as behind and the
+// evaluator would proceed. The positive control is that those positions were
+// learned.
+test('frontier election: objects that map to another rendition give this rendition no frontier', { timeout: 30000 }, async t => {
   const f = await frontierFixture(t, 1, { second: true });
-  await f.advance(9000);
+  const known = f.warm(1).knownPositions;
   f.demandOther(0);
-  await f.advance(2000); // its window's permits resolve and map under the other rendition
+  await f.wait(() => f.warm(1).knownPositions >= known + 2);
   const before = f.warm(1).sourceYielded;
   f.demand(2);
   f.have([f.otherKey(1), f.otherKey(2)]);
   await f.wait(() => f.warm(1).sourceYielded >= before + 2);
-  await f.advance(300);
+  await f.advance(100);
   assert.deepEqual(f.rows(1), [], JSON.stringify(f.source));
   assert.equal(f.warm(1).peersBehindProceeds, 0);
+  f.report();
 });
 
-// With the window at first + 3 and first + 4: a frontier of first + 2 is
-// adjacent to first + 3 (kept in) and two behind first + 4; a later message
-// that maps back to first + 1 puts first + 3 behind it too.
-for (const [label, messages, proceeds] of [
-  ['an advancing frontier keeps the peer in for the adjacent future', [[2, 'add']], false],
-  ['a later full list that maps to a smaller number moves it back', [[2, 'add'], [1, 'keys']], true]])
-  test(`frontier election: latest message wins, ${label}`, { timeout: 60000 }, async t => {
-    const f = await frontierFixture(t, 1);
-    await f.advance(9000);
-    f.demand(2);
-    for (const [index, field] of messages) f.have([f.key(index)], field);
-    await f.wait(() => f.rows(1).some(row => row.sn === f.first + 4));
-    await f.advance(300);
-    assert.equal(f.rows(1).some(row => row.sn === f.first + 3), proceeds, JSON.stringify(f.source));
-    assert(f.rows(1).some(row => row.sn === f.first + 4), 'two behind in both cases');
-  });
+// An older, higher sequence number that the peer still advertises keeps it a
+// candidate: its frontier is the largest advertised, here first + 2, which is
+// adjacent to first + 3 (the XOR loser yields) and two behind first + 4.
+test('frontier election: an older high-sequence key still advertised keeps the peer a candidate', { timeout: 30000 }, async t => {
+  const f = await frontierFixture(t, 1);
+  f.demand(2);
+  f.have([f.key(2)]);
+  f.have([f.key(1)]);
+  await f.wait(() => f.rows(1).some(row => row.sn === f.first + 4));
+  await f.advance(100);
+  assert.equal(f.rows(1).some(row => row.sn === f.first + 3), false, JSON.stringify(f.source));
+  assert.equal(f.warm(1).peersBehindProceeds, 1);
+  f.report();
+});
 
-// The position map and the per-link frontiers, directly: bounds, windows and
-// the keys that must change nothing.
-test('frontier election: positions and frontiers are bounded, expire and ignore unmapped or malformed keys', () => {
-  const hex = n => n.toString(16).padStart(64, '0'), link = {}, other = {};
+// The review scenario. The peer's HAVE for first + 3 reaches the evaluator
+// before the evaluator has authorised that object, so it maps to nothing when it
+// arrives. The evaluator then authorises first + 3, and the peer is adjacent to
+// first + 4 and keeps the XOR yield. A frontier stored at arrival would hold only
+// first + 1 and wrongly exclude the peer for first + 4.
+test('frontier election: a HAVE that arrived before the local authorisation counts once the object is authorised', { timeout: 30000 }, async t => {
+  const f = await frontierFixture(t, 1);
+  const before = f.warm(1).sourceYielded;
+  f.demand(2);
+  f.have([f.key(1)]);
+  f.have([f.key(3)]);
+  await f.wait(() => f.warm(1).sourceYielded >= before + 1 && f.rows(1).some(row => row.sn === f.first + 3));
+  await f.advance(100);
+  assert.equal(f.rows(1).some(row => row.sn === f.first + 4), false, JSON.stringify(f.source));
+  assert.equal(f.warm(1).sourceYielded, before + 1);
+  assert.equal(f.warm(1).peersBehindProceeds, 0);
+  f.report();
+});
+
+// The position map and the frontier derived from it, directly: bounds, the
+// window, and the keys that must change nothing.
+test('frontier election: positions are bounded, expire, and a frontier is derived from the advertised keys', () => {
+  const hex = n => n.toString(16).padStart(64, '0'), rendition = 'main:/a.m3u8';
   const store = new FutureFrontier();
   // 600 permits: first in, first out at 512.
-  for (let n = 0; n < 600; n++) store.note(hex(n), 'main:/a.m3u8', n, 1_000);
-  assert.deepEqual(store.size, { positions: POSITION_LIMIT, links: 0 });
-  store.observe(link, [hex(0), hex(87)], 1_000);
-  assert.deepEqual(store.size.links, 0, 'evicted keys map to nothing');
-  store.observe(link, [hex(88)], 1_000);
-  assert.equal(store.behind(link, 'main:/a.m3u8', 90, 1_000), true, 'the oldest survivor maps: 88 < 90 - 1');
-  assert.equal(store.behind(link, 'main:/a.m3u8', 89, 1_000), false, 'one behind is adjacent, not behind');
-  // The largest mapped number in one message wins; unmapped and malformed keys change nothing.
-  store.observe(link, [hex(300), hex(599), 'zz', 12, null, {}, 'A'.repeat(64), hex(9_999)], 1_000);
-  assert.equal(store.behind(link, 'main:/a.m3u8', 600, 1_000), false);
-  assert.equal(store.behind(link, 'main:/a.m3u8', 601, 1_000), true);
-  store.observe(link, [hex(9_999), 'zz', 12, null], 1_000);
-  store.observe(link, 'not a list', 1_000);
-  store.observe(link, undefined, 1_000);
-  assert.equal(store.behind(link, 'main:/a.m3u8', 600, 1_000), false, 'nothing mapped, so the frontier stands');
-  assert.equal(store.behind(link, 'main:/a.m3u8', 601, 1_000), true);
-  // Latest wins outright: a smaller number moves the frontier back.
-  store.observe(link, [hex(100)], 1_000);
-  assert.equal(store.behind(link, 'main:/a.m3u8', 602, 1_000), true);
-  assert.equal(store.behind(link, 'main:/a.m3u8', 101, 1_000), false);
-  assert.equal(store.behind(link, 'main:/a.m3u8', 102, 1_000), true);
-  // A rendition the key does not belong to never moves this one.
-  store.note(hex(7_000), 'main:/b.m3u8', 1, 1_000);
-  store.observe(other, [hex(7_000)], 1_000);
-  assert.equal(store.behind(other, 'main:/a.m3u8', 50, 1_000), false);
-  assert.equal(store.behind(other, 'main:/b.m3u8', 50, 1_000), true);
-  // Frontier window: 30 s, inclusive at 30 s, unknown after. Unknown is never behind.
-  assert.equal(store.behind(link, 'main:/a.m3u8', 602, 1_000 + FRONTIER_TTL_MS), true);
-  assert.equal(store.behind(link, 'main:/a.m3u8', 602, 1_001 + FRONTIER_TTL_MS), false);
-  assert.equal(store.behind(link, 'main:/c.m3u8', 602, 1_000), false);
-  assert.equal(store.behind({}, 'main:/a.m3u8', 602, 1_000), false);
-  // Position window: 60 s from the permit, never from a later message.
-  const aged = new FutureFrontier(), third = {};
-  aged.note(hex(1), 'main:/a.m3u8', 5, 0);
-  aged.observe(third, [hex(1)], POSITION_TTL_MS);
-  assert.equal(aged.behind(third, 'main:/a.m3u8', 50, POSITION_TTL_MS), true);
-  aged.observe(link, [hex(1)], POSITION_TTL_MS + 1);
-  assert.equal(aged.behind(link, 'main:/a.m3u8', 50, POSITION_TTL_MS + 1), false, 'an entry older than 60 s is ignored');
+  for (let n = 0; n < 600; n++) store.note(hex(n), rendition, n, 1_000);
+  assert.equal(store.size, POSITION_LIMIT);
+  assert.equal(store.frontier([hex(0), hex(87)], rendition, 1_000), null, 'evicted keys map to nothing');
+  assert.equal(store.frontier([hex(88)], rendition, 1_000), 88);
+  assert.equal(store.behind([hex(88)], rendition, 90, 1_000), true, '88 < 90 - 1');
+  assert.equal(store.behind([hex(88)], rendition, 89, 1_000), false, 'one behind is adjacent');
+  // The largest mapped number wins; unmapped and malformed keys change nothing.
+  const advertised = new Set([hex(300), hex(599), 'zz', 12, null, {}, 'A'.repeat(64), hex(9_999)]);
+  assert.equal(store.frontier(advertised, rendition, 1_000), 599);
+  assert.equal(store.frontier(['zz', 12, null], rendition, 1_000), null);
+  assert.equal(store.frontier(undefined, rendition, 1_000), null);
+  assert.equal(store.frontier(7, rendition, 1_000), null);
+  assert.equal(store.behind([hex(9_999)], rendition, 700, 1_000), false, 'unknown is never behind');
+  // Derived, not stored: a position learned after the key was advertised counts,
+  // and a key withdrawn from the advertised set no longer does.
+  store.note(hex(7_000), rendition, 900, 1_000);
+  assert.equal(store.frontier(new Set([hex(100), hex(7_000)]), rendition, 1_000), 900);
+  assert.equal(store.frontier(new Set([hex(100)]), rendition, 1_000), 100);
+  // A key of another rendition never gives this one a frontier.
+  store.note(hex(7_001), 'main:/b.m3u8', 5, 1_000);
+  assert.equal(store.frontier([hex(7_001)], rendition, 1_000), null);
+  assert.equal(store.frontier([hex(7_001)], 'main:/b.m3u8', 1_000), 5);
+  // Position window: 60 s from the permit, inclusive at 60 s.
+  const aged = new FutureFrontier();
+  aged.note(hex(1), rendition, 5, 0);
+  assert.equal(aged.frontier([hex(1)], rendition, POSITION_TTL_MS), 5);
+  assert.equal(aged.frontier([hex(1)], rendition, POSITION_TTL_MS + 1), null, 'an entry older than 60 s is ignored');
   // Expired entries make room before live ones are evicted.
   const room = new FutureFrontier();
-  for (let n = 0; n < POSITION_LIMIT; n++) room.note(hex(n), 'main:/a.m3u8', n, n < 2 ? 0 : 50_000);
-  room.note(hex(900), 'main:/a.m3u8', 900, 70_000);
-  assert.equal(room.size.positions, POSITION_LIMIT - 1);
-  room.observe(link, [hex(2)], 70_000);
-  assert.equal(room.behind(link, 'main:/a.m3u8', 50, 70_000), true, 'live entries survive');
-  // Per-link rendition cap, forget and clear.
-  const many = new FutureFrontier(), one = {};
-  for (let n = 0; n < 12; n++) { many.note(hex(n), `main:/r${n}.m3u8`, 1, 0); many.observe(one, [hex(n)], 0); }
-  assert.equal(many.behind(one, 'main:/r0.m3u8', 50, 0), false, 'the oldest rendition frontier was evicted at 8');
-  assert.equal(many.behind(one, 'main:/r11.m3u8', 50, 0), true);
-  many.forget(one);
-  assert.equal(many.behind(one, 'main:/r11.m3u8', 50, 0), false);
-  many.observe(one, [hex(11)], 0);
-  many.clear();
-  assert.deepEqual(many.size, { positions: 0, links: 0 });
+  for (let n = 0; n < POSITION_LIMIT; n++) room.note(hex(n), rendition, n, n < 2 ? 0 : 50_000);
+  room.note(hex(900), rendition, 900, 70_000);
+  assert.equal(room.size, POSITION_LIMIT - 1);
+  assert.equal(room.frontier([hex(2)], rendition, 70_000), 2, 'live entries survive');
+  room.clear();
+  assert.equal(room.size, 0);
 });
 
 test('verified piece flow waits for real worker verification and rejects invalidated replies', async t => {

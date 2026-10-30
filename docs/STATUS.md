@@ -45,29 +45,41 @@ ignored which viewer was ahead: when the leader lost the object-key XOR it
 yielded to a peer that, being behind, could not fetch the object before the
 leader's own deadline, so the leader fetched it from the origin anyway.
 
-The election now drops any peer whose latest mapped HAVE is more than one object
-behind the candidate. The manager maps HAVE keys to positions only through
+The election now drops any peer whose advertised objects end more than one object
+behind the candidate. The manager maps object keys to positions only through
 signed permits it resolved itself (at most 512, entries older than 60 s
-ignored); a link's frontier per rendition is the largest mapped sequence number
-in its latest HAVE message, replaced outright by each later message and unknown
-after 30 s. A peer with an unknown frontier stays in the election, and when every
-peer is behind the viewer proceeds; `warmAhead.peersBehindProceeds` counts those
-proceeds where the rank rule alone would have skipped. No wire message, core
-or WASM file changed.
+ignored). A peer's frontier is derived when the election runs, as the largest
+sequence number among the keys it currently advertises that map to a known
+position; nothing is stored per link, so a HAVE that arrived before the local
+authorisation of that object counts once the object is authorised. A peer with
+no mapped key stays in the election, as does one still advertising an old high
+sequence number after a wrap. When every peer is behind the viewer proceeds.
+`warmAhead.peersBehindProceeds` counts election decisions the exclusion turned
+into a proceed where the rank rule over all candidates would have skipped; the
+hook can decide again for one object and warm-ahead can still decline it, so the
+count may exceed the objects fetched. No wire message, core or WASM file
+changed. A first version stored a frontier per link at HAVE arrival; independent
+review showed it kept a stale view when the HAVE came before the local
+authorisation, so the late joiner could exclude the leader wrongly and fetch
+from the origin, and it was replaced by the derivation above.
 
-Proved: the controlled two-actor fixture on the real core, in both lead orders,
-shows the behind peer excluded, the adjacent peer still deciding by rank with its
-descriptor retained and exact-HAVE reconsideration unchanged, an unknown
-frontier keeping today's yield, the 30 s and 60 s windows, latest-message
-replacement, and the 512-entry bound. Not proved: any field effect. The
-expected effect in a two-viewer shared-position room is that the leader's
-`sourceYielded` falls while the late joiner is behind, its promotions fall, and
-its lead is kept, so the late joiner's accepted peer share should rise. The
-leader's own accepted peer share does not rise and may fall; the 5 % per-viewer
-gate for the leader is a gate-wording decision, not something this change
-targets. Yields fall but need not reach zero, since level viewers still decide
-by rank. Nothing here changes a remote forced-relay topology where every peer
-byte crosses one link twice. A new private field run is required.
+Proved: the controlled two-actor fixture on the real core shows the behind peer
+excluded, the adjacent peer still deciding by rank with its descriptor retained
+and exact-HAVE reconsideration unchanged, an unknown frontier keeping today's
+yield, an exact HAVE reached before the frontier, an older high key keeping the
+peer a candidate, the early-HAVE case above, and that another rendition's
+objects give no frontier. The behind/adjacent, unknown-frontier and exact-HAVE
+cases run with either actor as the evaluator; the rest run with one. The
+512-entry bound and the 60 s window are proved by a direct unit test. Not
+proved: any field effect. The expected effect in a two-viewer shared-position
+room is that the leader's `sourceYielded` falls while the late joiner is behind,
+its promotions fall, and its lead is kept, so the late joiner's accepted peer
+share should rise. The leader's own accepted peer share does not rise and may
+fall; the 5 % per-viewer gate for the leader is a gate-wording decision, not
+something this change targets. Yields fall but need not reach zero, since level
+viewers still decide by rank. Nothing here changes a remote forced-relay
+topology where every peer byte crosses one link twice. A new private field run
+is required.
 
 ## Unreleased size-aware startup admission (30 October 2026)
 

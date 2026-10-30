@@ -503,8 +503,8 @@ class HlsSwarm {
     this.rendition = null;
     this.renditions = new Map();
     // Position knowledge for the optional future source election: object key to
-    // { rendition, sn, at } for permits this manager resolved, and each link's
-    // latest mapped HAVE frontier per rendition. Both are bounded and local.
+    // { rendition, sn, at } for permits this manager resolved. Bounded and local;
+    // a peer's frontier is derived from its advertised keys at election time.
     this.frontier = new FutureFrontier();
     this.peersBehindProceeds = 0;
     this.originFetches = new Map();
@@ -984,7 +984,7 @@ class HlsSwarm {
       mode: this.disabledReason ? "off" : this.options.mode,
       disabledReason: this.disabledReason || null,
       stopped: this.stopped,
-      warmAhead: this.warmAhead ? { ...this.warmAhead.snapshot(), peersBehindProceeds: this.peersBehindProceeds } : null,
+      warmAhead: this.warmAhead ? { ...this.warmAhead.snapshot(), peersBehindProceeds: this.peersBehindProceeds, knownPositions: this.frontier.size } : null,
       startupBuffer: this.warmAhead?.startupSnapshot() ?? null,
       peerAdmission: { ...this.peerAdmission, claimedLinks: this.peerLeases.size, waiting: this.peerLeaseWaiters.size },
       uploadPacing: this.uploadPacer?.snapshot() ?? null,
@@ -2204,13 +2204,18 @@ class HlsSwarm {
     if (!candidates.length) return true;
     const target = BigInt('0x' + key), local = target ^ BigInt('0x' + this.session.pubkey);
     const wins = peers => peers.every(peer => (target ^ BigInt('0x' + peer.pubkey)) >= local);
-    // A peer whose latest mapped HAVE is more than one object behind this
-    // candidate cannot own it before our deadline, so it takes no part. An
-    // unknown frontier keeps the peer in the election.
-    const ahead = Number.isSafeInteger(frag.sn) ? candidates.filter(peer => !this.frontier.behind(peer, rendition, frag.sn, Date.now())) : candidates;
-    if (ahead.length) return wins(ahead);
-    if (!wins(candidates)) this.peersBehindProceeds += 1;
-    return true;
+    // A peer whose advertised objects, mapped through permits we resolved
+    // ourselves, end more than one object behind this candidate cannot own it
+    // before our deadline, so it takes no part. The frontier is derived here, not
+    // stored, from at most 256 advertised keys per candidate peer (256 map
+    // lookups). A peer with no mapped key stays in the election.
+    const now = Date.now();
+    const ahead = Number.isSafeInteger(frag.sn) ? candidates.filter(peer => !this.frontier.behind(peer.have, rendition, frag.sn, now)) : candidates;
+    const decision = ahead.length ? wins(ahead) : true;
+    // Counts election decisions the exclusion turned into a proceed. The hook can
+    // decide again for one object, and warm-ahead may still decline to fetch it.
+    if (decision && ahead.length < candidates.length && !wins(candidates)) this.peersBehindProceeds += 1;
+    return decision;
   }
 
   // Record where a signed permit this manager resolved sits in its playlist.
@@ -4810,10 +4815,7 @@ class HlsSwarm {
       maxSegmentBytes: this.options.maxSegmentBytes,
       onRequest: (from, key, range) => this.#serveRequest(from, key, range),
       onHaveChange: (_link, added) => {
-        if (!this.stopped && !_link.closed && this.links.get(_link.pubkey) === _link) {
-          this.frontier.observe(_link, added, Date.now());
-          this.warmAhead?.reconsiderHave(added);
-        }
+        if (!this.stopped && !_link.closed && this.links.get(_link.pubkey) === _link) this.warmAhead?.reconsiderHave(added);
         for (const waiter of [...this.haveWaiters]) waiter(added);
         this.#checkLatePeers();
       },
@@ -4833,7 +4835,6 @@ class HlsSwarm {
       onClose: (closed) => {
         this.uploadPacer?.cancel(closed);
         this.peerLeases.delete(closed);
-        this.frontier.forget(closed);
         for (const waiter of [...this.peerLeaseWaiters]) waiter();
         dial.pc.removeEventListener("datachannel", rejectExtraChannel);
         this.#endTransport(dial.pc, "link-close", closed.closeReason);

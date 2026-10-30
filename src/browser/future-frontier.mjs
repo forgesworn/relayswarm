@@ -1,20 +1,19 @@
-// Position and frontier knowledge for the optional future source election in
-// hls-swarm.mjs. Nothing here touches the wire: positions are learned only from
-// signed permits the manager itself resolved, and a link's frontier is derived
-// from the keys its HAVE messages carry, so a peer can neither create nor move
-// an object's position, only report which of our own known objects it holds.
+// Position knowledge for the optional future source election in hls-swarm.mjs.
+// Nothing here touches the wire. Positions are learned only from signed permits
+// the manager itself resolved, so a peer can neither create nor move an
+// object's position; it can only advertise which of our known objects it holds.
 //
-// Both stores are bounded and local. `now` is passed in, so callers keep their
-// own clock.
+// A peer's frontier is derived when an election runs, from the keys it currently
+// advertises, so a HAVE that arrived before the local side authorised an object
+// counts as soon as the authorisation lands. Nothing is stored per link.
+//
+// The map is bounded and local. `now` is passed in, so callers keep their clock.
 
 export const POSITION_LIMIT = 512;
 export const POSITION_TTL_MS = 60_000;
-export const FRONTIER_TTL_MS = 30_000;
-export const FRONTIER_RENDITIONS = 8;
 
 export class FutureFrontier {
   #positions = new Map();
-  #frontiers = new Map();
 
   /** Record that `key` is sequence number `sn` of `rendition`. First in, first out. */
   note(key, rendition, sn, now) {
@@ -28,41 +27,28 @@ export class FutureFrontier {
   }
 
   /**
-   * One HAVE message from `link`. For each rendition the message maps into, the
-   * largest mapped sequence number becomes that link's frontier. The latest
-   * message wins outright, so a smaller number moves the frontier back. Keys
-   * that do not map change nothing.
+   * The largest sequence number of `rendition` among the advertised keys that
+   * map to a live position, or null when none does. Unmapped and malformed keys
+   * are ignored. A link holds at most 256 keys, so this is at most 256 lookups.
    */
-  observe(link, added, now) {
-    if (!Array.isArray(added) || !this.#positions.size) return;
-    const best = new Map();
-    for (const key of added) {
+  frontier(advertised, rendition, now) {
+    if (!this.#positions.size || typeof advertised?.[Symbol.iterator] !== "function") return null;
+    let best = null;
+    for (const key of advertised) {
       const position = typeof key === "string" ? this.#positions.get(key) : undefined;
-      if (!position || position.at < now - POSITION_TTL_MS) continue;
-      if (!(best.get(position.rendition) >= position.sn)) best.set(position.rendition, position.sn);
+      if (!position || position.rendition !== rendition || position.at < now - POSITION_TTL_MS) continue;
+      if (best === null || position.sn > best) best = position.sn;
     }
-    if (!best.size) return;
-    let frontiers = this.#frontiers.get(link);
-    if (!frontiers) this.#frontiers.set(link, frontiers = new Map());
-    for (const [rendition, sn] of best) {
-      frontiers.delete(rendition);
-      for (const [held, frontier] of frontiers) {
-        if (frontier.at >= now - FRONTIER_TTL_MS && frontiers.size < FRONTIER_RENDITIONS) break;
-        frontiers.delete(held);
-      }
-      frontiers.set(rendition, { sn, at: now });
-    }
+    return best;
   }
 
-  /** True only for a known, unexpired frontier more than one object behind `sn`. */
-  behind(link, rendition, sn, now) {
-    const frontier = this.#frontiers.get(link)?.get(rendition);
-    return frontier !== undefined && frontier.at >= now - FRONTIER_TTL_MS && frontier.sn < sn - 1;
+  /** True only for a known frontier more than one object behind `sn`. */
+  behind(advertised, rendition, sn, now) {
+    const frontier = this.frontier(advertised, rendition, now);
+    return frontier !== null && frontier < sn - 1;
   }
 
-  forget(link) { this.#frontiers.delete(link); }
+  clear() { this.#positions.clear(); }
 
-  clear() { this.#positions.clear(); this.#frontiers.clear(); }
-
-  get size() { return { positions: this.#positions.size, links: this.#frontiers.size }; }
+  get size() { return this.#positions.size; }
 }
