@@ -4897,6 +4897,9 @@ test("a caller abort during the wait is not a miss", async t => {
 const multiCoreBytes = await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url));
 const multiCore = await WebAssembly.compile(multiCoreBytes);
 
+// Probes for actual native work (worker-thread replies) that a functional clock
+// must wait for in real time rather than race past in logical time.
+const nativeWorkProbes = new Set();
 function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false, holdNew = false, holdBan = false, holdDelivered = false, onFree, onRpc } = {}) {
   const workers = [];
   class WorkerImpl extends EventTarget {
@@ -4948,15 +4951,20 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
       this.thread.postMessage(data, transfer);
     }
     releaseStart() { this.dispatchEvent(new MessageEvent('message', { data: this.startReplies.shift() })); }
-    releaseInit() { this.thread.postMessage(this.init); }
+    releaseInit() { this.inFlight.add(this.init.id); this.thread.postMessage(this.init); }
     releaseNew() { const { data } = this.newRequests.shift(); this.dispatchEvent(new MessageEvent('message', { data })); }
     releaseFinal() { this.dispatchEvent(new MessageEvent("message", { data: this.finalReply })); }
     releaseBan() { this.dispatchEvent(new MessageEvent("message", { data: this.banReply })); }
     releaseDelivered() { this.dispatchEvent(new MessageEvent('message', { data: this.deliveredReplies.shift() })); }
     terminate() { this.terminated = true; this.inFlight.clear(); return this.thread.terminate(); }
   }
-  t.after(async () => { await Promise.all(workers.map(worker => worker.terminate())); await Promise.all(workers.map(worker => worker.exit)); });
-  return { WorkerImpl, workers, nativePending: () => workers.some(worker => worker.inFlight.size > 0) };
+  const nativePending = () => workers.some(worker => worker.inFlight.size > 0);
+  nativeWorkProbes.add(nativePending);
+  t.after(async () => {
+    nativeWorkProbes.delete(nativePending);
+    await Promise.all(workers.map(worker => worker.terminate())); await Promise.all(workers.map(worker => worker.exit));
+  });
+  return { WorkerImpl, workers, nativePending };
 }
 const multiContext = { url: "https://origin.example/media/seg.ts",
   frag: { sn: 1, level: 0, cc: 0, type: "main", baseurl: "https://origin.example/media/index.m3u8" } };
@@ -7127,8 +7135,7 @@ test('known whole-unfit demand refresh measures faster actual flow after the exi
 });
 
 async function wholeFitRefreshControlFixture(t, { worker = false, beforeCommitment = null } = {}) {
-  // Actual worker-thread replies are native work: hold logical time for them.
-  const clock = warmFunctionalClock(t, () => bridge?.nativePending() === true);
+  const clock = warmFunctionalClock(t, () => false);
   const bridge = worker ? transferWorkerFixture(t) : null;
   let f;
   try {
@@ -9939,7 +9946,10 @@ for (const [knownFlow, worker, forceSetupExpiry = false, forceScopeExpiry = fals
 // step yields to the event loop with a captured setImmediate, which does not
 // depend on native timer granularity (mock timers here cover only setTimeout
 // and Date). A real timer wait remains only while the caller reports that
-// actual setup work is pending. During the explicitly admitted warm setup
+// actual setup work is pending, or while actual native work is in flight: a
+// worker-thread reply (nativeWorkProbes) or a Web Crypto digest observed here.
+// Both hold logical time, so work on other threads never costs logical
+// milliseconds, and neither is a throughput or latency claim. During the explicitly admitted warm setup
 // phase only, leave policy time fixed while real metadata and Worker messages
 // complete; source/peer pacing then uses the same clocks and original
 // deadlines. No model, HAVE, source body or Core result is seeded.
@@ -9948,7 +9958,19 @@ function warmFunctionalClock(t, awaitingSetup, observeTimers = false) {
   const waits = { timer: 0, immediate: 0 };
   const nativeTimerWait = () => new Promise(resolve => { waits.timer++; nativeTimer(resolve, 1); });
   const nativeYield = () => new Promise(resolve => { waits.immediate++; nativeImmediate(resolve); });
-  let at = Math.ceil(nativeNow()), heldSince = null, setupReleasedAt = null;
+  let at = Math.ceil(nativeNow()), heldSince = null, nativeHeldSince = null, setupReleasedAt = null;
+  // Count every pending Web Crypto digest. Installed by assignment so that a
+  // fixture wrapper installed before or after this one restores independently.
+  const subtle = crypto.subtle, outerDigest = subtle.digest;
+  let pendingDigests = 0, digestsObserved = true;
+  const countedDigest = function (...args) {
+    if (!digestsObserved) return Reflect.apply(outerDigest, this, args);
+    let result; pendingDigests++;
+    try { result = Reflect.apply(outerDigest, this, args); } catch (error) { pendingDigests--; throw error; }
+    return Promise.resolve(result).finally(() => { pendingDigests--; });
+  };
+  subtle.digest = countedDigest;
+  const nativeBusy = () => pendingDigests > 0 || [...nativeWorkProbes].some(probe => probe());
   const performanceMock = t.mock.method(performance, 'now', () => at);
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
   // For the forced-RPC functional control, observe the unchanged timer API
@@ -9962,6 +9984,13 @@ function warmFunctionalClock(t, awaitingSetup, observeTimers = false) {
       await nativeTimerWait();
       return;
     }
+    if (nativeBusy()) {
+      nativeHeldSince ??= nativeNow();
+      assert(nativeNow() - nativeHeldSince < 2000, 'functional clock native work must finish');
+      await nativeTimerWait();
+      return;
+    }
+    nativeHeldSince = null;
     if (observeTimers && heldSince !== null) setupReleasedAt = at;
     heldSince = null;
     // Hit the unchanged setup boundary exactly, then resume ordinary batches.
@@ -9984,9 +10013,13 @@ function warmFunctionalClock(t, awaitingSetup, observeTimers = false) {
     return result.value;
   };
   let restored = false;
-  const restore = () => { if (!restored) { restored = true; timerObserver?.restore(); t.mock.timers.reset(); performanceMock.mock.restore(); } };
+  const restore = () => {
+    if (!restored) {
+      restored = true; digestsObserved = false; if (subtle.digest === countedDigest) subtle.digest = outerDigest;
+      timerObserver?.restore(); t.mock.timers.reset(); performanceMock.mock.restore(); } };
   t.after(restore);
   return { settle, advanceUntil, timerSnapshot: timerObserver?.snapshot, nativeWaits: () => ({ ...waits }),
+    pendingDigests: () => pendingDigests, nativeBusy,
     advance: async ms => { for (let done = 0; done < ms; done += 10) await step(Math.min(10, ms - done)); }, restore };
 }
 
@@ -9999,7 +10032,7 @@ test('functional clock: an idle ten-second logical advance does not depend on na
     await clock.advance(10000);
     const wall = realNow() - begin, waits = clock.nativeWaits();
     assert.equal(Date.now() - logicalBegin, 10000, 'the logical clock moved exactly ten seconds');
-    assert(waits.timer <= 4, 'an idle advance performs at most a bounded number of native timer waits: ' + JSON.stringify(waits));
+    assert.equal(waits.timer, 0, 'an idle advance performs no native timer wait: ' + JSON.stringify(waits));
     assert.equal(waits.immediate, 1000, 'one captured native yield per ten-ms logical step');
     assert(wall < 1000, 'ten logical seconds take well under one second of wall time: ' + wall);
     // A real timer wait is kept only while setup is explicitly awaited.
@@ -10008,6 +10041,17 @@ test('functional clock: an idle ten-second logical advance does not depend on na
     assert.equal(clock.nativeWaits().timer - waits.timer, 3, 'a step that awaits setup keeps its real timer wait');
     assert.equal(Date.now(), held, 'logical time is held while setup work is awaited');
     awaiting = false;
+    // Actual native work in flight also holds logical time: a worker-thread
+    // probe (two busy steps) and a Web Crypto digest observed by the clock.
+    let busy = 2; const probe = () => busy-- > 0, timersBefore = clock.nativeWaits().timer, mark = Date.now();
+    nativeWorkProbes.add(probe);
+    try { await clock.advance(30); } finally { nativeWorkProbes.delete(probe); }
+    assert.equal(clock.nativeWaits().timer - timersBefore, 2, 'busy steps keep one real timer wait each');
+    assert.equal(Date.now() - mark, 10, 'only the step after the work finished moved logical time');
+    const digest = crypto.subtle.digest('SHA-256', new Uint8Array(8));
+    assert.equal(clock.pendingDigests(), 1); assert.equal(clock.nativeBusy(), true);
+    await digest; await null;
+    assert.equal(clock.pendingDigests(), 0); assert.equal(clock.nativeBusy(), false);
   } finally { clock.restore(); }
 });
 
