@@ -183,13 +183,15 @@ genuine consumer accepts the complete object, and repeated reuse cannot
 credit that object twice. This draft path still needs lifecycle/failure and
 field qualification; it does not establish a performance improvement.
 
-For an explicitly parsed main VOD playlist, the combined options also select
+For an explicitly parsed main live or VOD playlist (boolean `details.live`),
+the combined options also select
 steady future source owners by object-key/public-key XOR rank among current
 connected, admitted, serving range peers in the same rendition. An exact
 advertised holder can still feed the normal mixed path. Otherwise a lower-ranked
 peer causes only that optional future to be skipped, leaving the next parsed
-future eligible. Startup coverage and genuine or already-promoted demand keep
-their existing immediate loading path. No peer claim creates a wait, source
+future eligible. Unknown playlist state retains ordinary source loading.
+Startup coverage and genuine or already-promoted demand keep their existing
+source and rendezvous rules. No peer claim creates a wait, source
 request, new deadline or accepted credit by itself. Membership differences can
 still cause duplicate or absent speculation; genuine demand does not depend
 on agreement about an owner.

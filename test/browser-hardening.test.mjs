@@ -5773,7 +5773,8 @@ test('verified piece flow never pools separate transfers, connections or time to
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
-test('owned warm reciprocal future owners supply real mixed consumption without duplicate whole source', { timeout: 15000 }, async t => {
+for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have']) test('owned warm reciprocal future owners supply real mixed consumption without duplicate whole source' +
+  (playlistState === 'vod' ? '' : ` (${playlistState} playlist)`), { timeout: 15000 }, async t => {
   // Functional-controller policy proof: simulated source/native RTC, real sessions,
   // commitments, Core, ordered protocol bytes, verification and consumption.
   // No source server, preloaded cache/HAVE or claimed WAN rate. Native key-hash
@@ -5908,9 +5909,11 @@ test('owned warm reciprocal future owners supply real mixed consumption without 
     objects.set('/media/lead.ts', new Uint8Array(32768).fill(9));
     paths.forEach((path, index) => objects.set(path, Uint8Array.from({ length: size }, (_, i) => (i * 131 + index * 17) % 251)));
     const playlist = '#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nlead.ts\n' +
-      paths.map(path => `#EXTINF:2,\n${path.split('/').at(-1)}\n`).join('') + '#EXT-X-ENDLIST\n';
+      paths.map(path => `#EXTINF:2,\n${path.split('/').at(-1)}\n`).join('') + (playlistState === 'vod' ? '#EXT-X-ENDLIST\n' : '');
     const details = actors.map(f => {
       const parsed = M3U8Parser.parseLevelPlaylist(playlist, 'https://origin.example/media/index.m3u8', 0, 'main', 0, null);
+      assert.equal(parsed.live, playlistState !== 'vod', 'use actual parser live state, rather than a claimed playback label');
+      if (playlistState === 'unknown') delete parsed.live;
       f.hls.levels = [{ details: parsed }]; return parsed;
     });
     for (const f of actors) assert.deepEqual([f.swarm.metrics().core.verifier, f.swarm.metrics().core.selection, f.swarm.metrics().core.discovery], ['wasm', 'wasm', 'wasm']);
@@ -5923,6 +5926,19 @@ test('owned warm reciprocal future owners supply real mixed consumption without 
     const advertised = pair.channels.flatMap(channel => channel.sent.filter(row => row?.t === 'have').flatMap(row => row.keys ?? row.add ?? []));
     assert(paths.every(path => !advertised.includes(keyFor(path))), 'neither held future body has been seeded or advertised');
     assert(actors.every(f => f.swarm.metrics().bytes.peerFirst === 0 && f.swarm.metrics().warmAhead.verifiedPeerBytes === 0));
+    if (playlistState === 'unknown') {
+      assert.deepEqual(initial.map(({ actor, sn }) => ({ actor, sn })).sort((a, b) => a.actor - b.actor),
+        [{ actor: 0, sn: 1 }, { actor: 1, sn: 1 }], 'unknown playlist keeps both ordinary source paths without optional election');
+      for (const f of actors) assert.equal(f.swarm.metrics().warmAhead.sourceYielded, 0);
+      for (const loader of loaders) if (loader.row?.sn === 1) loader.complete();
+      await wait(() => actors.every(f => f.swarm.metrics().warmAhead.verified >= 1));
+      const demands = actors.map((_, actor) => invoke(actor, details[actor].fragments[1]));
+      await settle(Promise.all(demands.map(async demand => {
+        sameBytes(await demand.response, objects.get(paths[0]));
+        assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+      })));
+      diagnosticPhase = 'done'; return;
+    }
     console.log(JSON.stringify({ fixture: 'reciprocal-warm-source-policy', controllerClock: 'logical-functional', simulatedSourceAndRtc: true,
       excludedNativeKeyDigestScheduling: true,
       coreReady: actors.map(f => f.swarm.metrics().core.state), expectedOwners: [{ actor: 0, sn: 1 }, { actor: 1, sn: 2 }],
@@ -5931,10 +5947,36 @@ test('owned warm reciprocal future owners supply real mixed consumption without 
     assert.deepEqual(initial.map(({ actor, sn }) => ({ actor, sn })).sort((a, b) => a.actor - b.actor),
       [{ actor: 0, sn: 1 }, { actor: 1, sn: 2 }], 'one deterministic source owner per future; current simultaneous whole duplication is the regression');
     assert(initial.every(row => row.warm && !row.range));
+    assert(actors[1].swarm.metrics().warmAhead.sourceYielded > 0, 'actor 1 skipped the unadvertised first future before fetching its own second future');
+    if (playlistState === 'live-demand-before-have') {
+      const enteredAt = performance.now(), demand = invoke(1, details[1].fragments[1]);
+      await wait(() => source.some(row => row.actor === 1 && row.sn === 1));
+      const fallback = source.find(row => row.actor === 1 && row.sn === 1);
+      assert.equal(fallback.warm, false, 'genuine rank-loser owns an independent source path');
+      assert.equal(fallback.range, null);
+      assert(fallback.invokedAtMs - enteredAt <= 25, 'the existing mixed setup bound still starts source without waiting for a future HAVE');
+      assert(fallback.timeoutMs > 0 && fallback.timeoutMs <= 10000 - (fallback.invokedAtMs - enteredAt));
+      assert(!pair.channels.some(channel => channel.sent.some(row => row?.t === 'have' && (row.keys ?? row.add ?? []).includes(keyFor(paths[0])))),
+        'no peer has supplied or advertised this object before recovery');
+      for (const loader of loaders) if (loader.row === fallback) loader.complete();
+      sameBytes(await settle(demand.response), objects.get(paths[0]));
+      assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+      assert.equal(actors[1].swarm.metrics().bytes.peerFirst, 0);
+      diagnosticPhase = 'done'; return;
+    }
+    if (playlistState === 'live') for (const [actor, f] of actors.entries()) {
+      // A real live reload replaces Fragment objects. Routing must use the
+      // current parsed window without keeping a previous parser object alive.
+      const refreshed = M3U8Parser.parseLevelPlaylist(playlist, 'https://origin.example/media/index.m3u8', 0, 'main', 0, null);
+      assert.equal(refreshed.live, true);
+      assert.notEqual(refreshed.fragments[1], details[actor].fragments[1]);
+      f.hls.levels[0].details = details[actor] = refreshed;
+    }
     diagnosticPhase = 'owner-body-completion';
     for (const loader of loaders) if (loader.row?.sn > 0) loader.complete();
     await wait(() => actors.every(f => f.swarm.metrics().warmAhead.verified >= 1));
     await wait(() => paths.every(path => pair.channels.some(channel => channel.sent.some(row => row?.t === 'have' && (row.keys ?? row.add ?? []).includes(keyFor(path))))));
+    await wait(() => actors[1].swarm.metrics().warmAhead.haveReconsidered > 0);
     for (const sn of [1, 2]) {
       diagnosticPhase = 'genuine-sn' + sn;
       const demands = actors.map((_, actor) => invoke(actor, details[actor].fragments[sn]));

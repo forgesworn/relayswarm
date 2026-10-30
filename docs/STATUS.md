@@ -10,6 +10,41 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased live future ownership (30 October 2026)
+
+The previous optional source election required a parsed VOD playlist. The demo's
+recorded-live playlist generator emits rolling windows without ENDLIST. A new
+two-SDK regression using the actual Hls parser first reproduced both viewers
+starting the same future whole-source request for `live: true`, while its VOD
+control elected distinct owners. Optional election now accepts explicitly
+parsed boolean live state, retaining ordinary loading when that state is unknown.
+Genuine live rendezvous, startup, source deadlines, resource bounds and credit
+rules are unchanged. The focused control verifies opposite future owners,
+actual HAVE reconsideration and mixed Core consumption after a live parser
+refresh. Its source/RTC are simulated and its controller clock is logical;
+this is functional evidence, not a field throughput or physical-phone result.
+
+The latest actual private M4 field used preceding source `bdf0e80`, whose 21
+required main CI jobs and both realtime jobs passed. Both trusted 4K first frames
+arrived in 4.798s / 3.918s, but the field is **RED**: accepted peer media was
+4,038,216 / 98,304 bytes (0.392668% / 0.008865%), below the original 5% and eight-MiB
+requirements. Viewer 0 also recorded five stalls (12.5663s), six player errors,
+36 dropped frames and only 326.677077s media advance; viewer 1 advanced
+339.306767s with zero health events. Actual observation was 340000.164ms
+monotonic / 340035ms wall, with natural wrap plus 79.305s. Both observed HTTP
+captures are complete. Succeeded selected relay/TLS pairs existed at both
+boundaries, but connections changed; full-window route retention is unproved.
+Temporary resources and credentials were removed and the paired private relay
+and firewall were unchanged. The failed capture is retained without rescoring.
+
+Retained diagnostics show one mixed load finishing about 34ms beyond its fixed
+mixed-completion deadline; that reserve remains intact. No source yields or
+HAVE reconsiderations were observed in that field. These facts motivate the
+live-playlist correction but do not establish a unique stall cause or prove
+the correction improves field playback. Fresh current-source CI and private
+field qualification, independent public TURN operation and physical iPhone
+acceptance remain open. No new candidate has been deployed.
+
 ## Unreleased reachable startup window (29 October 2026)
 
 Startup forecast skipping now preserves the last parsed future reachable within

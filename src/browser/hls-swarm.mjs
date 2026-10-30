@@ -2179,7 +2179,7 @@ class HlsSwarm {
     const frag = context?.frag;
     if (!this.options.bufferedMixedRanges || !this.#rangesEnabled() ||
         this.options.transferWorkerUrl !== undefined && this.transferWorkerState !== 'ready' || frag?.type !== 'main' ||
-        !Number.isInteger(frag.level) || frag.level < 0 || this.hls?.levels?.[frag.level]?.details?.live !== false ||
+        !Number.isInteger(frag.level) || frag.level < 0 || typeof this.hls?.levels?.[frag.level]?.details?.live !== 'boolean' ||
         !/^[0-9a-f]{64}$/.test(key) || !/^[0-9a-f]{64}$/.test(this.session?.pubkey)) return !requireExact;
     const rendition = this.#renditionContext(context), discovery = this.discovery.contexts.get('main');
     const candidates = [...this.links.values()].filter(peer => !peer.closed && /^[0-9a-f]{64}$/.test(peer.pubkey) && !this.banned.has(peer.pubkey) &&
@@ -2188,8 +2188,9 @@ class HlsSwarm {
       (!this.options.admit || validTicket(this.admitted.get(peer.pubkey)?.ticket)) &&
       !(discovery?.rendition === rendition && this.discovery.stale(discovery, peer.pubkey)));
     // A held exact object can already feed the ordinary mixed path. Otherwise
-    // avoid duplicating a future whole GET with a current contributor. This
-    // decides optional work only; it never delays a genuine player request.
+    // avoid duplicating a future whole GET with a current contributor. Both
+    // parsed live and VOD windows can supply optional futures. Unknown playlist
+    // state keeps ordinary source loading; genuine rendezvous is unchanged.
     if (candidates.some(peer => peer.have.has(key))) return true;
     if (requireExact) return false;
     if (!candidates.length) return true;
