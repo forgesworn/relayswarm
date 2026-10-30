@@ -5773,6 +5773,31 @@ test('verified piece flow never pools separate transfers, connections or time to
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
+// Functional policy time excludes only actual native segment-key digest work.
+// Native fixtures never install this observer; payload hashes remain native.
+function logicalSegmentKeyDigests(t, swarmId, delayForKey = () => 0) {
+  const prefix = new TextEncoder().encode(`${swarmId}\n`), originalDigest = crypto.subtle.digest, nativeTimer = setTimeout;
+  let pending = 0, operations = 0, maxPending = 0, delayedOperations = 0;
+  const mock = t.mock.method(crypto.subtle, 'digest', function (algorithm, data, ...args) {
+    const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      : data instanceof ArrayBuffer ? new Uint8Array(data) : null;
+    const matched = algorithm === 'SHA-256' && bytes && bytes.byteLength > prefix.byteLength &&
+      bytes.byteLength <= 4096 && prefix.every((value, index) => bytes[index] === value);
+    if (!matched) return originalDigest.call(this, algorithm, data, ...args);
+    const delayMs = delayForKey(); assert(Number.isInteger(delayMs) && delayMs >= 0 && delayMs <= 100);
+    pending++; operations++; maxPending = Math.max(maxPending, pending);
+    try {
+      return Promise.resolve(originalDigest.call(this, algorithm, data, ...args)).then(value => {
+        if (!delayMs) { pending--; return value; }
+        delayedOperations++;
+        return new Promise(resolve => nativeTimer(() => { pending--; resolve(value); }, delayMs));
+      }, error => { pending--; throw error; });
+    } catch (error) { pending--; throw error; }
+  });
+  return { get pending() { return pending; }, get operations() { return operations; },
+    get maxPending() { return maxPending; }, get delayedOperations() { return delayedOperations; }, restore: () => mock.mock.restore() };
+}
+
 for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have']) test('owned warm reciprocal future owners supply real mixed consumption without duplicate whole source' +
   (playlistState === 'vod' ? '' : ` (${playlistState} playlist)`), { timeout: 15000 }, async t => {
   // Functional-controller policy proof: simulated source/native RTC, real sessions,
@@ -5785,12 +5810,13 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
   const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds,
     tags: [['d', 'reciprocal-futures'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
   const keyFor = path => createHash('sha256').update(`${base.swarmId}\n${path}`).digest('hex');
-  let diagnosticPhase = 'setup', clock, pendingKeyDigests = 0, keyDigestOperations = 0, maxPendingKeyDigests = 0;
+  let diagnosticPhase = 'setup', clock;
+  const keyWork = logicalSegmentKeyDigests(t, base.swarmId);
   const settle = promise => clock ? clock.settle(promise) : promise;
   const wait = predicate => clock ? clock.advanceUntil(predicate) : until(predicate);
   const diagnostic = (reason, actor = null, sn = null) => console.log(JSON.stringify({ fixture: 'reciprocal-timeout-diagnostic',
     reason, actor, sn, controllerClock: clock ? 'logical-functional' : 'native', phase: diagnosticPhase, atMs: performance.now(),
-    excludedNativeKeyDigestScheduling: true, pendingKeyDigests, keyDigestOperations, maxPendingKeyDigests,
+    excludedNativeKeyDigestScheduling: true, pendingKeyDigests: keyWork.pending, keyDigestOperations: keyWork.operations, maxPendingKeyDigests: keyWork.maxPending,
     source: source.slice(-16), sourceOmitted: Math.max(0, source.length - 16),
     actors: actors.map((f, actor) => { const m = f.swarm.metrics(); return { actor, warm: m.warmAhead,
       acceptedPeerBytes: m.bytes.peerFirst, core: { state: m.core.state, transfers: m.core.multiHolder.transfers,
@@ -5831,28 +5857,11 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
     }));
     response.catch(() => {}); return { response, calls };
   };
-  // Keep the real digest, result and rejection. Only this fixed metadata phase
-  // is outside synthetic policy time, independently of source/Core outcomes.
-  const keyPrefix = new TextEncoder().encode(`${base.swarmId}\n`), originalDigest = crypto.subtle.digest;
-  const keyDigestMock = t.mock.method(crypto.subtle, 'digest', function (algorithm, data, ...args) {
-    const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-      : data instanceof ArrayBuffer ? new Uint8Array(data) : null;
-    const keyDigest = algorithm === 'SHA-256' && bytes && bytes.byteLength > keyPrefix.byteLength &&
-      bytes.byteLength <= 4096 && keyPrefix.every((value, index) => bytes[index] === value);
-    if (!keyDigest) return originalDigest.call(this, algorithm, data, ...args);
-    pendingKeyDigests++; keyDigestOperations++;
-    maxPendingKeyDigests = Math.max(maxPendingKeyDigests, pendingKeyDigests);
-    try {
-      return Promise.resolve(originalDigest.call(this, algorithm, data, ...args)).then(value => {
-        pendingKeyDigests--; return value;
-      }, error => { pendingKeyDigests--; throw error; });
-    } catch (error) { pendingKeyDigests--; throw error; }
-  });
   // Install before SDK creation so reentrant stop can clear every fixture timer.
     // Optional native setup admission is separately tested. Here the mandatory
     // owner/protocol proof holds only its async setup phase until ANY original
     // source invocation, whole or range; no favourable result gates time.
-    clock = warmFunctionalClock(t, () => pendingKeyDigests > 0 || actors.some((f, actor) => {
+    clock = warmFunctionalClock(t, () => keyWork.pending > 0 || actors.some((f, actor) => {
       const rows = f.swarm.trace().rows;
       return [1, 2].some(sn => {
         const load = rows.findLast(row => row.k === 'load' && row.sn === sn && row.budgetGeometry?.source === 'warm-ahead');
@@ -6005,12 +6014,12 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
       assert.equal(f.swarm.metrics().bytes.peerFirst, credit, 'reusing the same future cannot credit it twice');
       assert.equal(source.length, before);
     }
-    assert(keyDigestOperations > 0, 'the fixed metadata digest phase actually ran');
-    assert.equal(pendingKeyDigests, 0, 'all observed native key digests settled');
+    assert(keyWork.operations > 0, 'the fixed metadata digest phase actually ran');
+    assert.equal(keyWork.pending, 0, 'all observed native key digests settled');
     diagnosticPhase = 'done';
   } finally {
     if (diagnosticPhase !== 'done') diagnostic('finally');
-    keyDigestMock.mock.restore(); clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy();
+    keyWork.restore(); clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy();
   }
 });
 
@@ -10155,7 +10164,9 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
     let f, received, declined = false, declineProof = null, declineObservation = null, heldAllocationObserved = false;
     const timers = realAdmission && !logical ? realTimerInvocationContext() : null;
     if (timers) t.after(() => timers.restore());
+    const keyWork = logical ? logicalSegmentKeyDigests(t, base.swarmId) : null;
     const clock = logical ? warmFunctionalClock(t, () => {
+      if (keyWork.pending > 0) return true;
       const rows = f?.swarm.trace().rows ?? [];
       const warm = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
       // The forced-decline control fixes one explicit async setup phase:
@@ -10184,12 +10195,27 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
         return result;
       }
     }
-    const getCommitment = ctx => finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds,
-      tags: [['x', base.swarmId], ['e', streamEvent.id]], content: commitmentContent({ v: 3,
-        streamEventId: streamEvent.id, swarmId: base.swarmId,
-        key: createHash('sha256').update(`${base.swarmId}\n${new URL(ctx.url).pathname}`).digest('hex'),
-        rendition: '/media/index.m3u8', playlist: '/media/index.m3u8', mediaType: 'main', encryption: null,
-        sequence: ctx.frag.sn, discontinuity: ctx.frag.cc, part: null, sha256, size, pieceSize, pieces, expiresAt: seconds + 60 }) }, secret);
+    // This fixture supplies prepared publisher metadata. Keep publisher signing
+    // outside client admission, while native key hashing, SDK verification and
+    // Core work retain the original clocks. The public demo currently signs
+    // locally per request; this fixture is not its signing-workload benchmark.
+    const commitments = new Map(['/media/lead.ts', '/media/seg.ts'].map((path, sequence) =>
+      [`${path}:${sequence}:0`, finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds,
+        tags: [['x', base.swarmId], ['e', streamEvent.id]], content: commitmentContent({ v: 3,
+          streamEventId: streamEvent.id, swarmId: base.swarmId,
+          key: createHash('sha256').update(`${base.swarmId}\n${path}`).digest('hex'),
+          rendition: '/media/index.m3u8', playlist: '/media/index.m3u8', mediaType: 'main', encryption: null,
+          sequence, discontinuity: 0, part: null, sha256, size, pieceSize, pieces, expiresAt: seconds + 60 }) }, secret)]));
+    const commitmentOrigin = new URL(url).origin;
+    let commitmentProviderCalls = 0;
+    const getCommitment = ctx => {
+      commitmentProviderCalls++;
+      const target = new URL(ctx.url);
+      if (target.origin !== commitmentOrigin || ctx.frag.type !== 'main' || ctx.frag.level !== 0 ||
+          !Number.isSafeInteger(ctx.frag.sn) || ctx.frag.cc !== 0 || ctx.part != null ||
+          ctx.rangeStart !== undefined && ctx.rangeStart !== 0 || ctx.rangeEnd !== undefined && ctx.rangeEnd !== 0) return null;
+      return commitments.get(`${target.pathname}:${ctx.frag.sn}:${ctx.frag.cc}`) ?? null;
+    };
     f = await settle(multiFixture(t, { size, OriginLoader: AccountedHTTP, holders: [{ Channel: ContrastPeer }], traceRequests: 4096,
       swarmOptions: { streamEvent, getCommitment, serve: true, warmAhead: warming, bufferedMixedRanges: ownedWarm || !warming,
         ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}),
@@ -10292,6 +10318,64 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
         if (declined) assert.equal(f.swarm.metrics().warmAhead.verifiedPeerBytes, before.warmAhead.verifiedPeerBytes);
         else assert(f.swarm.metrics().warmAhead.verifiedPeerBytes > before.warmAhead.verifiedPeerBytes);
         assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst, 'verified warm assembly defers accepted credit before genuine consumption');
+        if (declineObservation) {
+          if (holdNewUntilBody) {
+            const body = received.slice(beforeReceived).find(row => row.path === '/media/seg.ts');
+            assert.equal(body.complete, true); assert.equal(body.bytes, size);
+            const pending = bridge.workers[0].rpcSent;
+            const allocation = [...pending.values()].find(row => row.op === 'new' && row.sentAtMs >= declineObservation.expected.enteredAtMs);
+            assert(allocation, 'actual NEW acknowledgement remains held through source-body verification');
+            assert(!rpc.some(row => row.id === allocation.id));
+            assert.equal(warmSetupDeclineProof(declineObservation), null);
+            bridge.workers[0].holdNew = false; bridge.workers[0].releaseNew();
+            await wait(() => rpc.some(row => row.id === allocation.id));
+          }
+          // Close the original warm operation after its existing verified-body
+          // observation, before a later genuine request can start independent
+          // recovery. Native cases gain no wait or loader call. Keep the full
+          // current ledger/I/O visible; incomplete evidence still fails.
+          const current = f.swarm.metrics(), pending = bridge?.workers.flatMap(value => [...(value.rpcSent?.values() ?? [])]) ?? [];
+          const proofInput = { trace: f.swarm.trace(), timer: declineObservation.timer, rpc: structuredClone(rpc),
+            expected: { ...declineObservation.expected,
+              originRangeAttempts: current.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+              physicalRangeGets: requests.slice(beforeRequests).filter(row => row.path === '/media/seg.ts' && row.range).length,
+              clientRangeLoads: received.slice(beforeReceived).filter(row => row.path === '/media/seg.ts' && row.range).length,
+              peerRequests: f.channels.reduce((sum, channel) => sum + channel.wants.length, 0) - beforePeerRequests,
+              acceptedPeerBytes: current.bytes.peerFirst - before.bytes.peerFirst,
+              verifiedWarmPeerBytes: current.warmAhead.verifiedPeerBytes - before.warmAhead.verifiedPeerBytes,
+              coreTransfersDelta: current.core.multiHolder.transfers - before.core.multiHolder.transfers,
+              rpcDropped: bridge?.workers.reduce((sum, value) => sum + (value.rpcDropped ?? 0), 0) ?? 0,
+              rpcOmitted: Math.max(0, rpcObserved - rpc.length) } };
+          declineProof = warmSetupDeclineProof(proofInput);
+          assert(declineProof && pending.length === 0, JSON.stringify({
+            message: 'real warm fallback requires complete same-load setup proof after verified warm body', proofInput,
+            pendingRpc: pending.slice(0, 32), pendingRpcOmitted: Math.max(0, pending.length - 32),
+            worker: current.core.transferWorker }));
+          if (holdNewAllocation) {
+            assert.equal(declineProof.stage, 'warm-pending-new-cleanup-after-origin');
+            assert.equal(proofInput.expected.coreTransfersDelta, 0);
+            assert(!rpc.some(row => row.op === 'start' && row.sentAtMs >= proofInput.expected.enteredAtMs));
+            console.log(JSON.stringify({ fixture: 'actual-warm-held-new-cleanup-proof',
+              controllerClock: 'logical-functional', timerClockDomain: 'logical-performance', proofInput, proof: declineProof }));
+          }
+          if (holdNewUntilBody) {
+            assert.equal(warmSetupDeclineProof(declineObservation), null,
+              'the later reply cannot backfill the immutable rejected early capture');
+            console.log(JSON.stringify({ fixture: 'actual-warm-late-new-observation', controllerClock: 'logical-functional',
+              earlyCapture: declineObservation, earlyProof: null, finalCapture: proofInput, finalProof: declineProof,
+              sourceBodyBytes: received.slice(beforeReceived).find(row => row.path === '/media/seg.ts').bytes,
+              sourceCompleteBeforeAcknowledgement: true, consumersFollowAcknowledgement: true }));
+          }
+          if (holdSetup) {
+            assert.equal(declineProof.stage, 'warm-observed-pending-rpc-timer');
+            assert.equal(proofInput.timer.firedAtMs, proofInput.expected.enteredAtMs + 25,
+              'functional control expires the original setup timer at exactly25ms');
+            warmDeclineMutationControls(proofInput);
+            console.log(JSON.stringify({ fixture: 'actual-warm-held-rpc-proof',
+              controllerClock: 'logical-functional', timerClockDomain: 'logical-performance',
+              proofInput, proof: declineProof }));
+          }
+        }
       }
       const demand = invoke(target); demand.response.catch(() => {});
       if (warming && !ownedWarm) {
@@ -10373,63 +10457,7 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
         assert.equal(after.core.transferWorker.state, worker ? 'ready' : 'off');
         const again = invoke(target); sameBytes(await settle(again.response), bytes);
         assert.equal(again.calls.success, 1); assert.equal(f.swarm.metrics().bytes.peerFirst, after.bytes.peerFirst, 'repeated consumption cannot double-credit the same warm object');
-        if (declineObservation) {
-          if (holdNewUntilBody) {
-            assert.equal(client[0].complete, true); assert.equal(client[0].bytes, size);
-            assert.deepEqual(again.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
-            const pending = bridge.workers[0].rpcSent;
-            const allocation = [...pending.values()].find(row => row.op === 'new' && row.sentAtMs >= declineObservation.expected.enteredAtMs);
-            assert(allocation, 'actual NEW acknowledgement remains held through source, genuine and repeat completion');
-            assert(!rpc.some(row => row.id === allocation.id));
-            assert.equal(warmSetupDeclineProof(declineObservation), null);
-            bridge.workers[0].holdNew = false; bridge.workers[0].releaseNew();
-            await wait(() => rpc.some(row => row.id === allocation.id));
-          }
-          // Ordinary native cases gain no wait: classify only after their
-          // existing body/consumer/reuse outcomes. Keep all later I/O visible
-          // against the original pre-warm baseline; missing evidence fails.
-          const current = f.swarm.metrics(), pending = bridge?.workers.flatMap(value => [...(value.rpcSent?.values() ?? [])]) ?? [];
-          const proofInput = { trace: f.swarm.trace(), timer: declineObservation.timer, rpc: structuredClone(rpc),
-            expected: { ...declineObservation.expected,
-              originRangeAttempts: current.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
-              physicalRangeGets: requests.slice(beforeRequests).filter(row => row.path === '/media/seg.ts' && row.range).length,
-              clientRangeLoads: received.slice(beforeReceived).filter(row => row.path === '/media/seg.ts' && row.range).length,
-              peerRequests: f.channels.reduce((sum, channel) => sum + channel.wants.length, 0) - beforePeerRequests,
-              acceptedPeerBytes: current.bytes.peerFirst - before.bytes.peerFirst,
-              verifiedWarmPeerBytes: current.warmAhead.verifiedPeerBytes - before.warmAhead.verifiedPeerBytes,
-              coreTransfersDelta: current.core.multiHolder.transfers - before.core.multiHolder.transfers,
-              rpcDropped: bridge?.workers.reduce((sum, value) => sum + (value.rpcDropped ?? 0), 0) ?? 0,
-              rpcOmitted: Math.max(0, rpcObserved - rpc.length) } };
-          declineProof = warmSetupDeclineProof(proofInput);
-          assert(declineProof && pending.length === 0, JSON.stringify({
-            message: 'real warm fallback requires complete same-load setup proof after existing media outcomes', proofInput,
-            pendingRpc: pending.slice(0, 32), pendingRpcOmitted: Math.max(0, pending.length - 32),
-            worker: current.core.transferWorker }));
-          if (holdNewAllocation) {
-            assert.equal(declineProof.stage, 'warm-pending-new-cleanup-after-origin');
-            assert.equal(proofInput.expected.coreTransfersDelta, 0);
-            assert(!rpc.some(row => row.op === 'start' && row.sentAtMs >= proofInput.expected.enteredAtMs));
-            console.log(JSON.stringify({ fixture: 'actual-warm-held-new-cleanup-proof',
-              controllerClock: 'logical-functional', timerClockDomain: 'logical-performance', proofInput, proof: declineProof }));
-          }
-          if (holdNewUntilBody) {
-            assert.equal(warmSetupDeclineProof(declineObservation), null,
-              'the later reply cannot backfill the immutable rejected early capture');
-            console.log(JSON.stringify({ fixture: 'actual-warm-late-new-observation', controllerClock: 'logical-functional',
-              earlyCapture: declineObservation, earlyProof: null, finalCapture: proofInput, finalProof: declineProof,
-              sourceBodyBytes: client[0].bytes, sourceCompleteBeforeAcknowledgement: client[0].complete,
-              genuineCallbacks: demand.calls, repeatCallbacks: again.calls }));
-          }
-          if (holdSetup) {
-            assert.equal(declineProof.stage, 'warm-observed-pending-rpc-timer');
-            assert.equal(proofInput.timer.firedAtMs, proofInput.expected.enteredAtMs + 25,
-              'functional control expires the original setup timer at exactly25ms');
-            warmDeclineMutationControls(proofInput);
-            console.log(JSON.stringify({ fixture: 'actual-warm-held-rpc-proof',
-              controllerClock: 'logical-functional', timerClockDomain: 'logical-performance',
-              proofInput, proof: declineProof }));
-          }
-        }
+
       }
       if (holdNewAllocation) {
         await wait(() => { const snapshot = f.swarm.metrics().core.transferWorker;
@@ -10440,13 +10468,14 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
           transfers: snapshot.transfers, activeBytes: snapshot.activeBytes, pending: snapshot.pending, pendingBytes: snapshot.pendingBytes }));
       }
       observations.push({ warming, ownedWarm, worker, optionalAdmissionDeclined: declined, setupProof: declineProof?.stage ?? null, controllerClock: logical ? 'logical-functional' : 'real', objectBytes: size, acceptedPeerBytes: peer,
+        commitmentSupplier: 'prepared-signed-fixture-metadata', publisherEventsPrepared: commitments.size, commitmentProviderCalls,
         actualTargetHttpBytes: client.reduce((sum, row) => sum + row.bytes, 0), targetWholeGets: server.filter(row => !row.range).length,
         target206Gets: server.filter(row => row.range).length, targetClientBodies: client.map(({ bytes, status, complete, range, warm }) => ({ bytes, status, complete, range, warm })),
         excludedLeadBodyBytes: received.slice(beforeReceived).filter(row => row.path === '/media/lead.ts').reduce((sum, row) => sum + row.bytes, 0),
         calibrationBodyBytes: received.slice(0, beforeReceived).reduce((sum, row) => sum + row.bytes, 0),
         coreReady: after.core.state, coalesced: after.warmAhead?.coalesced ?? null,
         configuredPeerBytesPerSecond: .3 * 1024 * 1024, configuredSourceBytesPerSecondPerRequest: 3 * 1024 * 1024 });
-    } finally { try { await settle(f.close()); } finally { clock?.restore(); timers?.restore(); } }
+    } finally { try { await settle(f.close()); } finally { keyWork?.restore(); clock?.restore(); timers?.restore(); } }
   }
   console.log(JSON.stringify({ fixture: 'real-core-warm-vs-genuine-mixed', policyContrastOnly: true, observations }));
 }
@@ -11420,11 +11449,16 @@ test('buffered mixed origin recovery cannot outlive its original absolute parent
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
-async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConstructor = false, declineMode = null) {
+async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConstructor = false, declineMode = null, delayGenuineKeyMs = 0) {
   // Deterministic policy proof: simulated source/native RTC, real sessions,
   // commitments, Core, ordered protocol bytes, verification and consumption.
   // No source server, preloaded cache/HAVE, timing model or claimed WAN rate.
   const pair = await framingPairFixture(t, { pairedState: true }), actors = [], source = [], loaders = new Set(), objects = new Map(), events = new Map();
+  let delayNextGenuineKey = false;
+  const keyWork = logicalSegmentKeyDigests(t, base.swarmId, () => {
+    if (!delayNextGenuineKey) return 0;
+    delayNextGenuineKey = false; return delayGenuineKeyMs;
+  });
   let clock, revokeOnConstructor = null, metadataHeld = false, metadataHeldAt = null, releaseMetadata, reenterAbort = null, stopAtContribution = false, contributionStopped = false;
   const settle = promise => clock ? clock.settle(promise) : promise;
   const wait = predicate => clock ? clock.advanceUntil(predicate) : until(predicate);
@@ -11471,7 +11505,7 @@ async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConst
   // Own SDK/session timers too, including a stop reentered during a callback.
     // Functional controller only: hold actual async setup until either source
     // lane is invoked, without selecting a favourable result or seeding a model.
-    clock = warmFunctionalClock(t, () => !metadataHeld && actors.some((f, actor) => {
+    clock = warmFunctionalClock(t, () => keyWork.pending > 0 || !metadataHeld && actors.some((f, actor) => {
       const rows = f.swarm.trace().rows;
       const load = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
       return load && rows.some(row => row.k === 'mixedScope' && row.load === load.load && row.reason === 'entry') &&
@@ -11640,6 +11674,7 @@ async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConst
     if (!paused && !withdrawAtConstructor) {
       // After recording the idle result, prove that exact same current target
       // is genuinely eligible for the existing mixed engine when Hls wakes it.
+      delayNextGenuineKey = delayGenuineKeyMs > 0;
       const demand = invoke(1, details[1].fragments[1]);
       sameBytes(await settle(demand.response), objects.get(paths[0]));
       assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
@@ -11650,17 +11685,21 @@ async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConst
       assert.equal(controlSources.reduce((sum, row) => sum + row.bytes, 0) + after.bytes.peerFirst, size);
       console.log(JSON.stringify({ fixture: 'post-idle-genuine-mixed-control',
         acceptedPeerBytes: after.bytes.peerFirst, completeOriginRangeBytes: controlSources.reduce((sum, row) => sum + row.bytes, 0),
-        targetBytes: size, coreReady: after.core.state, idleTargetSourceStarts: targetStarts.length }));
+        targetBytes: size, coreReady: after.core.state, idleTargetSourceStarts: targetStarts.length,
+        excludedNativeKeyDigests: keyWork.operations, deliberatelyDelayedKeyDigests: keyWork.delayedOperations }));
+      if (delayGenuineKeyMs) assert.equal(keyWork.delayedOperations, 1);
     }
     if (withdrawAtConstructor) assert.equal(supplyWithdrawn, true, 'the final constructor callback actually withdrew the current exact HAVE');
     if (paused || withdrawAtConstructor) assert.equal(targetStarts.length, 0, 'pause or withdrawn exact supply before entry cannot start whole or ranged I/O');
     else assert(targetStarts.some(row => row.warm && row.range),
       'exact verified HAVE reconsiders the still-current skipped future without a new genuine request');
-  } finally { releaseMetadata?.(); clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy(); }
+  } finally { releaseMetadata?.(); keyWork.restore(); clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy(); }
 }
 
 test('owned warm exact HAVE wakes an idle skipped future through real Core mixed assembly', { timeout: 15000 },
   t => cooperativeHaveReconsideration(t));
+test('owned warm exact HAVE native key delivery cannot spend logical cache authority time', { timeout: 15000 },
+  t => cooperativeHaveReconsideration(t, false, false, null, 40));
 test('owned warm exact HAVE cannot restart skipped work after pause', { timeout: 15000 },
   t => cooperativeHaveReconsideration(t, true));
 test('owned warm exact HAVE withdrawal during final constructor cannot fall through to whole HTTP', { timeout: 15000 },

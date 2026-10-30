@@ -10,31 +10,49 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
-## Unreleased Worker observation after media completion (30 October 2026)
+## Unreleased fixture operation and metadata boundaries (30 October 2026)
 
-At `974079e`, 18 required main CI jobs and both realtime jobs passed. macOS
-passed 958/959 checks: an existing native Worker fallback check rejected an
-incomplete reply capture. Its dependent aggregate failed and the required
-live-relay check skipped. All four live-playlist controls below passed. That
-failed run remains RED; later source-body/hash assertions were not reached.
-The captured RPC array contains completed replies only, so a missing target
-allocation record cannot establish whether that allocation was still pending.
+At `24bb6a7`, 15 required main jobs and both realtime jobs passed; five main
+jobs failed, including two dependent aggregates, and the required live-relay
+job skipped. The new late-NEW control conflated an original warm allocation
+with a later genuine cache-recovery allocation. A separate ordinary native
+positive safely declined at 26ms and completed six MiB from HTTP200, failing
+its strict206 assertion. Windows also failed complete-client-body and later
+cooperative source-path assertions. Its exact extra source row was not
+recorded, so the route and cause remain unknown. This run and all earlier
+failures remain RED; nothing is rescored.
 
-The test now freezes the original load, timer, geometry and source-budget
-values, then collects actual trace, RPC and I/O observations after its existing
-body, genuine-consumer and repeat-consumer steps. Ordinary native cases gain
-no wait or loader call. All final counters retain the original pre-warm
-baseline; unresolved NEW/START records still fail with bounded diagnostics.
-The strict setup-decline validator is byte-identical, and product code,
-deadlines, peer-credit rules and resource limits are unchanged.
+The setup proof now closes at the existing verified warm-body boundary before
+another genuine request begins. It retains the original timer, load, geometry
+and source-budget values, full current trace/RPC/I/O and original baseline.
+Ordinary native cases gain no wait or loader call. The strict validator stays
+byte-identical, and unresolved records still fail. The controlled NEW reply
+remains held through complete body verification, then is released before the
+subsequent genuine and repeat consumers. All later body/hash, deadline,
+callback, source-byte and accepted-once credit assertions remain mandatory.
+This is an operation-scoped setup proof, not a claim that the entire later
+session has no independent recovery work.
 
-A separate functional control holds the actual NEW acknowledgement through
-complete six-MiB source delivery and both consumer callbacks. It first failed
-at the earlier observation point. With the observation repair, the frozen
-incomplete input still rejects after the actual later reply satisfies the same
-validator. This uses a logical controller and controlled source/RTC; it does
-not identify the original CI allocation state or establish native performance.
-Fresh current-source CI and all field/public/physical acceptance remain open.
+The native comparison fixture now prepares real publisher signatures for its
+exact fixed context identities before loading/calibration. It preserves event
+content, identifiers and original expiry, calls the provider on each request,
+and retains native client key hashing, verification and Core work. It seeds no
+media, HAVE, timing model or SDK authorisation verdict. The actual public demo still
+signs commitments locally per request; this prepared supplier is a functional
+fixture, not a reproduction of that signing workload or a native performance
+benchmark. Publisher signing was measured separately on a local M1, not at the
+CI failure; it is not an established unique cause of the 26ms decline.
+
+Logical policy controls share the existing bounded segment-key digest observer:
+only exact-namespace SHA-256 inputs of at most 4096 bytes hold logical time while
+the real digest completes. Real inputs, results and rejections are retained;
+payload hashes and ordinary native clocks are unchanged. The original two-second
+native-work bound and forced 25ms decline/cancellation controls remain. A fixed
+40ms native key-delivery control first produced excess source-plus-peer bytes
+under the old logical clock, then passed with that metadata phase observed.
+This is a controlled scheduling contrast, not reconstruction of Windows' missing
+source row. Fresh current-source CI, private field, public-operation and physical
+iPhone acceptance are still required. No candidate has been deployed.
 
 ## Unreleased live future ownership (30 October 2026)
 
