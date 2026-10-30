@@ -2939,12 +2939,26 @@ class HlsSwarm {
     // across the measured holders must fit the same absolute peer deadline.
     // Unknown/refresh paths retain their existing bounded calibration attempt;
     // origin-backed transfers may still use a small useful peer fraction.
+    let wholeFitRefresh = null;
     if (plan.peerOnly && [...models.values()].every(model => Number.isFinite(model.rate) && model.rate > 0
         && Number.isFinite(model.firstByteMs) && model.firstByteMs >= 0)) {
       const availableMs = Math.max(0, plan.limit - now());
       const capacity = [...models.values()].map(model => Math.max(0, availableMs - model.firstByteMs) * model.rate)
         .sort((a, b) => b - a).slice(0, this.options.maxHoldersPerObject).reduce((sum, bytes) => sum + bytes, 0);
-      if (capacity < commitment.size) { this.counters.peerNoFit += 1; traceFinish('whole-peer-capacity'); return null; }
+      if (capacity < commitment.size) {
+        // A rate that fits one piece can otherwise suppress every whole-object
+        // attempt until its TTL. Only a genuine demand may use the existing
+        // demand-bound refresh, on one captured holder after the same cooldown.
+        // Keep the stored measurement; this explicit probe is not a whole-fit
+        // claim and never postpones its already-running HTTP source.
+        const refresh = !context?.[WARM_AHEAD] && [...models].find(([, model]) => now() - model.state.probeAt >= LINK_REFRESH_MS);
+        if (!refresh) { this.counters.peerNoFit += 1; traceFinish('whole-peer-capacity'); return null; }
+        const [link, model] = refresh;
+        wholeFitRefresh = { firstByteMs: model.firstByteMs, rateBytesPerSecond: model.rate * 1000, capacityBytes: capacity };
+        models.clear(); models.set(link, { ...model, firstByteMs: null, rate: null, refresh: true });
+        // The existing REQUEST handler consumes probeAt only when Core actually
+        // emits the calibration request; failed admission consumes no refresh.
+      }
     }
     const holders = [...models.keys()];
     const lease = {}, partialSlot = plan[OWNED_HTTP_WINNER];
@@ -3305,7 +3319,7 @@ class HlsSwarm {
       // The input is for the trace only.
       submit("start", this.options.traceRequests ? { size: commitment.size, pieces: commitment.pieces.length, pieceSize, deadline: deadline - base,
         maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...(plan.peerOnly ? { peerOnly: true } : {}),
-        ...(plan.bufferedMixed ? { exclusiveOrigin: true } : {}), ...structuredClone(estimates),
+        ...(plan.bufferedMixed ? { exclusiveOrigin: true } : {}), ...(wholeFitRefresh ? { wholeFitRefresh: { ...wholeFitRefresh } } : {}), ...structuredClone(estimates),
         holders: [...ids].map(([id, link]) => [id, this.#holderLabel(link.pubkey)]) } : null, (at) => transfer.start(at, estimates), started => {
       if (started?.late) this.multiHolder.late += 1;
       if (plan.bufferedMixed) {

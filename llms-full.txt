@@ -3256,6 +3256,62 @@ the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased refresh after whole-object capacity rejection (30 October 2026)
+
+A measured peer rate can fit one signed piece while remaining too slow for a
+whole object. That case previously kept rejecting peer-only work until the
+measurement expired, even after the existing refresh cooldown had elapsed.
+Genuine demand can now use that existing refresh opportunity on one captured
+holder. Stored measurements remain intact; the per-transfer trace explicitly
+identifies the calibration. Warm speculation is excluded, source HTTP still
+starts immediately, and the original cooldown, absolute peer deadline, resource
+limits, integrity checks and deferred credit remain unchanged.
+
+A controlled regression first failed on the previous source. With actual signed
+pieces and the committed Core, a simulated paced channel establishes a slow
+measurement, becomes faster, then refreshes after the original ten-second
+cooldown. Only the fully verified six-MiB winner earns accepted credit, and the
+following request uses its newly measured flow. This uses a logical controller
+clock and simulated channel pacing; it is not native-network throughput, a
+field contribution result, or a fix for the startup failure below. Fresh CI
+and field acceptance remain required for this source change.
+
+## Current private 4K startup failure (30 October 2026)
+
+At `f2ca77f`, all 21 required main CI jobs and both realtime jobs passed,
+including browser transport against live relays. A fresh two-viewer private M4
+field run on that exact SDK remains **RED**. Viewer 0 reached a trusted
+3840×2160 frame in 5.593 seconds. Viewer 1 never reached its first frame: its
+original twelve-second startup-manager deadline expired, followed by
+`fragLoadError`. The sustained observation and contribution tests never began.
+
+Viewer 1 verified 20,414,494 bytes, but these bodies did not form enough
+contiguous video ahead of the advancing room target. At two retained checkpoints,
+forward coverage was 717ms and 1089ms; both fall below even the original
+two-second minimum, as well as the measured 5496.25ms recovery requirement.
+Reducing that estimate would not justify release. The live future-ownership path
+did execute (`sourceYielded: 3`), but field performance benefit is unproved.
+The measured peer model also rejected whole-object transfers that did not fit;
+no faster peer capacity is established by this capture. A bounded manager replay
+reproduces the observed request order and deadline failure. Seeding the forecast
+with the first body's service duration conditionally helps, but another explicit
+rate scenario makes that candidate regress. Unobserved fragment service costs
+remain unknown, so that heuristic has not been adopted as a product fix.
+
+Both automatic private credential requests returned successful, valid leases.
+This does not qualify public visitors: the deployed public page has no issuer or
+TURN route configured, and its older SDK does not include the candidate's local
+candidate retry API. An independent authorised operator and actual public TLS
+connectivity, lease renewal and recovery checks remain necessary. The owner's
+paired Archy relay stays private; the temporary listener did not change it.
+
+All 32 sealed files were independently rehashed (1,805,381 bytes total; 622,958
+largest). Owned browser profiles, host and browser stages, rendered credentials
+and the archive were removed, with the paired relay and firewall unchanged.
+The new rejection is retained alongside all 22 earlier failed or incomplete
+receipts. Older physical iPhone evidence does not qualify this revision. No
+candidate has been deployed, and the full goal remains incomplete.
+
 ## Unreleased fixture operation and metadata boundaries (30 October 2026)
 
 At `24bb6a7`, 15 required main jobs and both realtime jobs passed; five main
@@ -3297,8 +3353,8 @@ native-work bound and forced 25ms decline/cancellation controls remain. A fixed
 40ms native key-delivery control first produced excess source-plus-peer bytes
 under the old logical clock, then passed with that metadata phase observed.
 This is a controlled scheduling contrast, not reconstruction of Windows' missing
-source row. Fresh current-source CI, private field, public-operation and physical
-iPhone acceptance are still required. No candidate has been deployed.
+source row. Current `f2ca77f` CI passed; private field, public-operation and physical
+iPhone acceptance remain required. No candidate has been deployed.
 
 ## Unreleased live future ownership (30 October 2026)
 
@@ -3314,7 +3370,7 @@ actual HAVE reconsideration and mixed Core consumption after a live parser
 refresh. Its source/RTC are simulated and its controller clock is logical;
 this is functional evidence, not a field throughput or physical-phone result.
 
-The latest actual private M4 field used preceding source `bdf0e80`, whose 21
+An earlier actual private M4 field used preceding source `bdf0e80`, whose 21
 required main CI jobs and both realtime jobs passed. Both trusted 4K first frames
 arrived in 4.798s / 3.918s, but the field is **RED**: accepted peer media was
 4,038,216 / 98,304 bytes (0.392668% / 0.008865%), below the original 5% and eight-MiB

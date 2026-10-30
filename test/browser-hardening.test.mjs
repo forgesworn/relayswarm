@@ -7059,6 +7059,181 @@ test("known whole-unfit cached peer-only work leaves immediate HTTP alone", asyn
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
+test('known whole-unfit demand refresh measures faster actual flow after the existing cooldown', { timeout: 15000 }, async t => {
+  // Functional policy timing and simulated paced channel, real signed six-MiB
+  // commitment/Core/framing/hash path. Neither model rates nor HAVE are seeded.
+  const clock = warmFunctionalClock(t, () => false); let f;
+  try {
+    f = await clock.settle(multiFixture(t, { size: 6 * 1024 * 1024,
+      holders: [{ Channel: FixedRateChannel, firstByteMs: 450, rate: 327680 }], originFallbackMs: 1000,
+      originDelayMs: 50, holdWholeOrigin: true, traceRequests: 4096,
+      swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 2500 } }));
+    sameBytes(await clock.settle(f.load()), f.bytes);
+    const training = f.swarm.metrics().peerRequestDiagnostics.records.find(row =>
+      row.outcome === 'payload' && row.receivedBytes >= 32768 && row.elapsedMs - row.firstByteMs >= 300);
+    assert(training, 'the old rate must come from actual qualifying signed-piece payload');
+    f.hls.media = { currentTime: 10, paused: false, ended: false, seeking: false, readyState: 4,
+      playbackRate: 1, buffered: { length: 0 } };
+    const wants = f.channels[0].wants.length, sources = f.wholeLoads.length;
+    const initial = beginCountedMultiLoad(f);
+    assert.equal(f.wholeLoads.length, sources + 1, 'ordinary HTTP starts synchronously');
+    await clock.advance(100);
+    const old = f.swarm.metrics().core.multiHolder.peerFlow.lastModel;
+    assert(old.firstByteMs + f.pieceSize / old.rateBytesPerSecond * 1000 < 2500);
+    assert(old.firstByteMs + f.bytes.length / old.rateBytesPerSecond * 1000 > 2500);
+    assert.equal(f.channels[0].wants.length, wants, 'the existing cooldown keeps the known whole-fit rejection');
+    const source = f.wholeLoads.at(-1);
+    source.callbacks.onSuccess({ data: f.bytes.slice().buffer }, source.loader.stats, multiContext, null);
+    sameBytes(await clock.settle(initial.response), f.bytes);
+    await clock.advance(10001); // Original ten-second refresh cooldown; still inside 30s model TTL.
+    f.channels[0].rate = 4 * 1024 * 1024; f.channels[0].firstByteMs = 20;
+    const before = f.swarm.metrics(), from = f.swarm.trace().rows.length, sourceCount = f.wholeLoads.length;
+    const at = performance.now(), refreshed = beginCountedMultiLoad(f);
+    assert.equal(f.wholeLoads.length, sourceCount + 1, 'refresh never postpones or duplicates whole HTTP');
+    await clock.advance(100);
+    assert(f.channels[0].wants.length > wants, 'a whole-fit miss may issue one explicit bounded refresh after cooldown');
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst, 'partial calibration cannot claim accepted media');
+    const start = f.swarm.trace().rows.slice(from).find(row => row.k === 'xfer' && row.op === 'start');
+    assert(start?.peerOnly && start.wholeFitRefresh);
+    assert.equal(start.peers.length, 1); assert.deepEqual(start.probePeers, [start.peers[0][0]]);
+    assert.deepEqual(start.peers[0].slice(1), [null, null], 'the explicit probe is not a fabricated faster model');
+    assert(start.wholeFitRefresh.rateBytesPerSecond > 0 && start.wholeFitRefresh.capacityBytes < f.bytes.length);
+    assert(start.deadline - at <= 2500, 'the refresh retains the original absolute peer cap');
+    sameBytes(await clock.settle(refreshed.response), f.bytes);
+    assert.deepEqual([refreshed.calls.success.length, refreshed.calls.abort.length, refreshed.calls.error.length], [1, 0, 0]);
+    const after = f.swarm.metrics();
+    assert.equal(after.bytes.peerFirst - before.bytes.peerFirst, f.bytes.length, 'only the complete verified winner earns credit');
+    assert.equal(f.wholeLoads.at(-1).loader.aborted, true);
+    assert(after.core.multiHolder.peerFlow.verifiedShortBatches > before.core.multiHolder.peerFlow.verifiedShortBatches,
+      'actual verified refills establish a qualifying same-transfer flow');
+    const lastFrom = f.swarm.trace().rows.length;
+    sameBytes(await clock.settle(beginCountedMultiLoad(f).response), f.bytes);
+    const learned = f.swarm.metrics().core.multiHolder.peerFlow.lastModel;
+    const next = f.swarm.trace().rows.slice(lastFrom).find(row => row.k === 'xfer' && row.op === 'start');
+    assert(learned.rateBytesPerSecond > old.rateBytesPerSecond * 2);
+    assert(next && !next.wholeFitRefresh && next.probePeers.length === 0, 'later whole-fit work uses the new measured rate');
+    assert.deepEqual(f.ranges.slice(1), [], 'the peer-only probe never adds origin ranges');
+    console.log(JSON.stringify({ fixture: 'whole-fit-refresh-real-core', controllerClock: 'logical-functional',
+      objectBytes: f.bytes.length, oldModel: old, measuredNewModel: learned,
+      refreshElapsedMs: performance.now() - at, creditedCompleteObjectBytes: after.bytes.peerFirst - before.bytes.peerFirst }));
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+async function wholeFitRefreshControlFixture(t, { worker = false, beforeCommitment = null } = {}) {
+  const clock = warmFunctionalClock(t, () => false);
+  const bridge = worker ? transferWorkerFixture(t) : null;
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { size: 6 * 1024 * 1024,
+      holders: [{ Channel: FixedRateChannel, firstByteMs: 450, rate: 327680 }], originFallbackMs: 1000,
+      originDelayMs: 50, holdWholeOrigin: true, traceRequests: 4096, beforeCommitment,
+      swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 2500,
+        ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } }));
+    if (worker) await clock.advanceUntil(() => f.swarm.metrics().core.transferWorker.state === 'ready');
+    sameBytes(await clock.settle(f.load()), f.bytes);
+    assert(f.swarm.metrics().peerRequestDiagnostics.records.some(row =>
+      row.outcome === 'payload' && row.receivedBytes >= 32768 && row.elapsedMs - row.firstByteMs >= 300));
+    f.hls.media = { currentTime: 10, paused: false, ended: false, seeking: false, readyState: 4,
+      playbackRate: 1, buffered: { length: 0 } };
+    await clock.advance(10001);
+    const close = async () => { try { await clock.settle(f.close()); } finally { clock.restore(); } };
+    return { f, clock, bridge, close };
+  } catch (error) { try { if (f) await clock.settle(f.close()); } finally { clock.restore(); } throw error; }
+}
+
+for (const ending of ['deadline', 'abort', 'HTTP-winner']) test(`whole-fit refresh ${ending} cannot credit incomplete calibration or renew the cooldown`, { timeout: 15000 }, async t => {
+  const q = await wholeFitRefreshControlFixture(t), { f, clock } = q;
+  try {
+    const before = f.swarm.metrics(), wants = f.channels[0].wants.length, from = f.swarm.trace().rows.length;
+    const entry = performance.now(), pending = beginCountedMultiLoad(f);
+    assert(f.wholeLoads.length > 0, 'ordinary source is already active');
+    await clock.advanceUntil(() => f.channels[0].wants.length > wants, 100);
+    const start = f.swarm.trace().rows.slice(from).find(row => row.k === 'xfer' && row.op === 'start');
+    assert(start.wholeFitRefresh); assert(start.deadline - entry <= 2500);
+    assert.equal(f.channels[0].wants[wants][1] - f.channels[0].wants[wants][0], 1, 'refresh starts with exactly one signed piece');
+    const source = f.wholeLoads.at(-1);
+    if (ending === 'abort') pending.loader.abort();
+    if (ending === 'HTTP-winner') {
+      source.callbacks.onSuccess({ data: f.bytes.slice().buffer }, source.loader.stats, multiContext, null);
+      sameBytes(await clock.settle(pending.response), f.bytes);
+    }
+    await clock.advance(2600);
+    if (ending === 'deadline') {
+      assert.equal(pending.calls.success.length, 0, 'the original peer deadline cannot deliver a partial object');
+      source.callbacks.onSuccess({ data: f.bytes.slice().buffer }, source.loader.stats, multiContext, null);
+      sameBytes(await clock.settle(pending.response), f.bytes);
+    }
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+    assert.equal(f.swarm.metrics().core.multiHolder.delivered, before.core.multiHolder.delivered);
+    assert.equal(pending.calls.success.length, ending === 'abort' ? 0 : 1);
+    assert.equal(pending.calls.abort.length, ending === 'abort' ? 1 : 0);
+    const ends = f.swarm.trace().rows.slice(from).filter(row => row.k === 'xferFinish');
+    assert.equal(ends.length, 1); assert.equal(ends[0].delivered, false);
+    assert.equal(ends[0].reason, 'signal-abort');
+    const afterWants = f.channels[0].wants.length, afterTransfers = f.swarm.metrics().core.multiHolder.transfers;
+    const second = beginCountedMultiLoad(f); const secondSource = f.wholeLoads.at(-1);
+    await clock.advance(100);
+    assert.equal(f.channels[0].wants.length, afterWants, 'an emitted probe consumes the original cooldown even when it fails');
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, afterTransfers);
+    secondSource.callbacks.onSuccess({ data: f.bytes.slice().buffer }, secondSource.loader.stats, multiContext, null);
+    sameBytes(await clock.settle(second.response), f.bytes);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+  } finally { await q.close(); }
+});
+
+for (const ending of ['metadata-refusal', 'captured-holder-withdrawal', 'warm-marker']) test(`whole-fit refresh ${ending} performs no optional probe and preserves later genuine eligibility`, { timeout: 15000 }, async t => {
+  let deny = false, withdraw = false, current;
+  const q = await wholeFitRefreshControlFixture(t, { beforeCommitment: () => {
+    if (deny) throw new Error('fixture commitment refused');
+    if (withdraw) { withdraw = false; current.channels[0].receive(JSON.stringify({ t: 'have', keys: [] })); }
+  } }), { f, clock } = q; current = f;
+  try {
+    const wants = f.channels[0].wants.length, before = f.swarm.metrics();
+    deny = ending === 'metadata-refusal'; withdraw = ending === 'captured-holder-withdrawal';
+    const context = ending === 'warm-marker' ? { ...multiContext, frag: { ...multiContext.frag }, [WARM_AHEAD]: { peerBytes: 0 } } : multiContext;
+    const pending = beginCountedMultiLoad(f, context); const source = f.wholeLoads.at(-1);
+    await clock.advance(100);
+    assert.equal(f.channels[0].wants.length, wants);
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, before.core.multiHolder.transfers);
+    source.callbacks.onSuccess({ data: f.bytes.slice().buffer }, source.loader.stats, context, null);
+    sameBytes(await clock.settle(pending.response), f.bytes);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+    deny = false;
+    f.channels[0].receive(JSON.stringify({ t: 'have', add: [f.key] }));
+    const retry = beginCountedMultiLoad(f); const retrySource = f.wholeLoads.at(-1);
+    await clock.advanceUntil(() => f.channels[0].wants.length > wants, 100);
+    assert(f.swarm.trace().rows.some(row => row.k === 'xfer' && row.wholeFitRefresh),
+      'refusal before any REQUEST did not consume the ten-second refresh');
+    retrySource.callbacks.onSuccess({ data: f.bytes.slice().buffer }, retrySource.loader.stats, multiContext, null);
+    sameBytes(await clock.settle(retry.response), f.bytes);
+    await clock.advance(100);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+  } finally { await q.close(); }
+});
+
+test('whole-fit refresh cancelled during actual Worker allocation before REQUEST preserves cooldown eligibility', { timeout: 15000 }, async t => {
+  const q = await wholeFitRefreshControlFixture(t, { worker: true }), { f, clock, bridge } = q;
+  try {
+    const wants = f.channels[0].wants.length, before = f.swarm.metrics();
+    bridge.workers[0].holdNew = true;
+    const pending = beginCountedMultiLoad(f);
+    await clock.advanceUntil(() => bridge.workers[0].newRequests?.length === 1, 500);
+    assert.equal(f.channels[0].wants.length, wants, 'the allocated probe has not emitted its first REQUEST');
+    pending.loader.abort();
+    bridge.workers[0].holdNew = false; bridge.workers[0].releaseNew();
+    await clock.advanceUntil(() => f.swarm.metrics().core.transferWorker.transfers === 0, 500);
+    const retry = beginCountedMultiLoad(f), source = f.wholeLoads.at(-1);
+    await clock.advanceUntil(() => f.channels[0].wants.length > wants, 500);
+    assert(f.swarm.trace().rows.some(row => row.k === 'xfer' && row.wholeFitRefresh));
+    source.callbacks.onSuccess({ data: f.bytes.slice().buffer }, source.loader.stats, multiContext, null);
+    sameBytes(await clock.settle(retry.response), f.bytes);
+    await clock.advance(100);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+    assert.deepEqual([pending.calls.success.length, pending.calls.abort.length], [0, 1]);
+    assert.deepEqual([retry.calls.success.length, retry.calls.abort.length], [1, 0]);
+  } finally { await q.close(); }
+});
+
 test("known whole-fit cached peer-only work combines admissible holders", async t => {
   for (const count of [1, 2]) await t.test(`${count} measured holder${count === 1 ? '' : 's'}`, async t => {
     const clock = virtualClock(t); let f;
