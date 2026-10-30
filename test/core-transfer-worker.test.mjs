@@ -7,6 +7,8 @@ import { createCoreTransferWorker } from "../src/browser/core-transfer-worker.mj
 import { loadCore } from "../src/browser/core-wasm.mjs";
 import { commitmentPieceSize } from "../src/browser/segment-commitment.mjs";
 import { CORE_FUNCTIONS, stubCore } from "./core-stub.mjs";
+import { loadOriginRange } from "../src/browser/origin-range.mjs";
+import { mixedHttpOrigin } from "./support/mixed-http-origin.mjs";
 
 const module = await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url)));
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -95,6 +97,62 @@ test("a real worker preserves every Rust frame and six-MiB hash through mixed/co
   assert.equal(client.snapshot().transfers, 0);
 });
 
+test("exclusive origin assembles six MiB with an untrained real worker and actual disjoint206 bodies", { timeout: 20000 }, async t => {
+  const { client } = await real(t), core = await loadCore(module), bytes = object(6 * 1024 * 1024);
+  const options = config(bytes, { exclusiveOrigin: true, deadline: 3500, originReserveMs: 0 });
+  const direct = core.transfer(options), remote = await client.transfer(options), pieceSize = commitmentPieceSize(bytes.length);
+  t.after(async () => { direct.free(); await remote.free(); core.retire(); });
+  const http = await mixedHttpOrigin(t, bytes), pending = new Set(), ranges = [], peerBodies = [];
+  // These are native API operation inputs, not elapsed HTTP/worker metrics.
+  // The Hls real-clock tests separately enforce its unchanged25ms admission.
+  let at = 1000, current;
+  const same = async (op, args) => {
+    const expected = direct[op](...args), actual = await remote[op](...args);
+    assert.deepEqual(actual, expected, 'the real worker preserves every Rust frame and verified byte');
+    return actual;
+  };
+  const issue = state => {
+    for (const command of state.commands) {
+      if (!['request', 'origin'].includes(command.t)) continue;
+      const source = command.peer ?? 'origin', { start, end } = command.range;
+      ranges.push({ source, start, end });
+      if (source !== 'origin') assert(end - start <= 4 && (end - start) * pieceSize <= 512 * 1024);
+      const task = { source, range: command.range };
+      const body = source === 'origin'
+        ? loadOriginRange({ Loader: http.HttpLoader, loaderConfig: {} }, { url: http.url }, start * pieceSize, Math.min(end * pieceSize, bytes.length))
+        : Promise.resolve(bytes.slice(start * pieceSize, Math.min(end * pieceSize, bytes.length)));
+      task.promise = body.then(value => ({ task, body: value })); pending.add(task);
+      if (source !== 'origin') peerBodies.push(Math.min(end * pieceSize, bytes.length) - start * pieceSize);
+    }
+  };
+  current = await same('start', [at, { peers: [[1, null, null]], origin: [0, null],
+    sharedFirstByteMs: null, sharedRate: null, probePeers: [1] }]);
+  assert.equal(current.commands.find(command => command.t === 'request').range.end, 1, 'unknown begins with exactly one piece');
+  issue(current); await http.firstRequest;
+  assert.equal(http.requests[0].complete, false, 'the real source prefix is already in flight before probe acceptance');
+  let turns = 0;
+  while (!current.finished && pending.size && turns++ < 128) {
+    const { task, body } = await Promise.race([...pending].map(value => value.promise)); pending.delete(task);
+    assert.ok(body?.byteLength);
+    if (task.source !== 'origin') {
+      const progress = await same('progress', [at += 5, task.source, 1]); issue(progress);
+    }
+    current = await same('delivered', [at += 10, task.source, task.range, body]); issue(current);
+  }
+  await Promise.all([...pending].map(value => value.promise));
+  assert.ok(current.finished && current.commands.some(command => command.t === 'deliver'));
+  assert.deepEqual(current.bytes, bytes); assert.equal(digest(current.bytes), options.sha256);
+  assert(peerBodies.length > 1, 'a verified unknown probe must actually refill, never decline this functional test');
+  assert(http.requests.length && http.requests.every(row => row.range && row.status === 206 && row.complete), 'no whole GET or incomplete source body');
+  const sourceBytes = http.received.reduce((sum, row) => sum + row.bytes, 0), peerBytes = peerBodies.reduce((sum, size) => sum + size, 0);
+  console.log(JSON.stringify({ fixture: 'exclusive-core-worker-206', coreClock: 'logical-operation-inputs-not-elapsed-metrics',
+    exclusiveOrigin: options.exclusiveOrigin, sourceBytes, peerBytes, objectBytes: bytes.length, peerRequests: peerBodies.length }));
+  assert.equal(sourceBytes + peerBytes, bytes.length, 'actual206 and peer bodies have disjoint ownership');
+  const owners = new Array(options.pieces.length).fill(0);
+  for (const range of ranges) for (let index = range.start; index < range.end; index++) owners[index]++;
+  assert(owners.every(count => count === 1), 'every physical piece was requested exactly once');
+});
+
 test("freeing one real Rust handle preserves a second active transfer and its bytes", async t => {
   const { client, workers } = await real(t), bytes = object(200_000), options = config(bytes);
   const first = await client.transfer(options), second = await client.transfer(options);
@@ -139,7 +197,7 @@ test("peer-only worker frames preserve exact Rust range verification with no ori
   } finally { await remote.free(); direct.free(); core.retire(); }
 });
 
-test("unsupported peer-only mode preserves a real worker and its ordinary mixed handles", async t => {
+for (const mode of ["peerOnly", "exclusiveOrigin"]) test("unsupported " + (mode === "peerOnly" ? "peer-only" : "exclusive origin") + " mode preserves a real worker and its ordinary mixed handles", async t => {
   const additions = {
     rs_xfer_new: [[0x7c, 0x7c, 0x7c, 0x7c, 0x7f, 0x7f], [0x7f]],
     rs_xfer_call: [[0x7f, 0x7f, 0x7c, 0x7c, 0x7c, 0x7c, 0x7f, 0x7f], [0x7f]],
@@ -153,13 +211,27 @@ test("unsupported peer-only mode preserves a real worker and its ordinary mixed 
   } finally { for (const [key, value] of previous) { if (value === undefined) delete CORE_FUNCTIONS[key]; else CORE_FUNCTIONS[key] = value; } }
   const failures = [], { client, workers } = await real(t, { module: legacy, onFailure: error => failures.push(error) });
   const options = config(object(1_024));
-  await assert.rejects(client.transfer({ ...options, peerOnly: true }), { code: "invalid-transfer" });
+  await assert.rejects(client.transfer({ ...options, [mode]: true }), { code: "invalid-transfer" });
   assert.equal(client.snapshot().state, "ready");
   assert.equal(client.snapshot().transfers, 0);
   const mixed = await client.transfer(options);
   assert.equal(await mixed.free(), true, "the pre-existing mixed constructor/free ABI remains usable");
   assert.equal(workers[0].terminated, undefined);
   assert.deepEqual(failures, []);
+});
+
+test("exclusive origin worker config preserves only valid explicit opt-ins before posting", async t => {
+  const { client, worker } = await held(t), options = config(object(1_024));
+  for (const exclusiveOrigin of [null, 1, "true", {}, []])
+    await assert.rejects(client.transfer({ ...options, exclusiveOrigin }), { code: "invalid-transfer" });
+  await assert.rejects(client.transfer({ ...options, exclusiveOrigin: true, peerOnly: true }), { code: "invalid-transfer" });
+  assert.equal(worker.requests.filter(row => row.op === "new").length, 0);
+  const exclusive = await client.transfer({ ...options, exclusiveOrigin: true });
+  assert.equal(worker.requests.find(row => row.op === "new").input.exclusiveOrigin, true);
+  await exclusive.free();
+  const ordinary = await client.transfer(options);
+  assert.equal(Object.hasOwn(worker.requests.filter(row => row.op === "new").at(-1).input, "exclusiveOrigin"), false);
+  await ordinary.free();
 });
 
 test("transfers and cumulative active bytes have independent finite limits", async t => {

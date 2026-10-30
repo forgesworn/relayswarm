@@ -1,0 +1,1174 @@
+{
+  "schema": 1,
+  "scope": "Immutable captured Mac CI admission evidence only; original run failed. No source/body/performance or internal-delay conclusion.",
+  "provenance": {
+    "sourceCommit": "cc6df86ebfa14dbe8825bf33c3d4769d4c6e3f4b",
+    "jobId": "123785133830",
+    "rawLogSha256": "c7be5c3b26612050085fe9137e60ca4146d677b98d7256ba853ad8ddffe81813",
+    "assertionPayloadSha256": "6b7f05bdb0c1e658d8818b0d949b54eaee27a656fa60eb301b137b928f1467c2",
+    "proofInputSha256": "f8abb83c8707acb96ee0b3eea65193196021912ea2e8eab78e6c507702a8657a"
+  },
+  "proofInput": {
+    "trace": {
+      "v": 1,
+      "capacity": 4096,
+      "dropped": 0,
+      "rows": [
+        {
+          "k": "load",
+          "load": 1,
+          "at": 51,
+          "sn": 1,
+          "level": 0,
+          "cc": 0,
+          "budgetMs": 0,
+          "limitMs": 2500,
+          "budgetGeometry": {
+            "source": "no-buffer",
+            "positionSource": null,
+            "currentTime": null,
+            "bufferedEnd": null,
+            "playableEnd": null,
+            "fragmentStart": null,
+            "originReserveMs": null,
+            "uncappedMs": null,
+            "durationMs": 2000,
+            "originRecoveryMs": null,
+            "sustainableMs": 0
+          }
+        },
+        {
+          "k": "eligibility",
+          "load": 1,
+          "at": 51,
+          "atMs": 51,
+          "cc": 0,
+          "level": 0,
+          "budgetMs": 0,
+          "reason": "no-budget",
+          "matchingHave": null,
+          "budgetGeometry": {
+            "source": "no-buffer",
+            "positionSource": null,
+            "currentTime": null,
+            "bufferedEnd": null,
+            "playableEnd": null,
+            "fragmentStart": null,
+            "originReserveMs": null,
+            "uncappedMs": null,
+            "durationMs": 2000,
+            "originRecoveryMs": null,
+            "sustainableMs": 0
+          }
+        },
+        {
+          "k": "originStart",
+          "load": 1,
+          "leg": "cached",
+          "at": 51,
+          "ms": 0,
+          "ranged": false
+        },
+        {
+          "k": "eligibility",
+          "load": 1,
+          "at": 52,
+          "atMs": 52,
+          "cc": 0,
+          "level": 0,
+          "budgetMs": 0,
+          "reason": "have-at-entry",
+          "matchingHave": true,
+          "budgetGeometry": {
+            "source": "no-buffer",
+            "positionSource": null,
+            "currentTime": null,
+            "bufferedEnd": null,
+            "playableEnd": null,
+            "fragmentStart": null,
+            "originReserveMs": null,
+            "uncappedMs": null,
+            "durationMs": 2000,
+            "originRecoveryMs": null,
+            "sustainableMs": 0
+          },
+          "holders": [],
+          "haveHolders": [
+            1
+          ],
+          "staleHolders": [],
+          "heldMissHolders": []
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "start",
+          "at": 60,
+          "size": 6291456,
+          "pieces": 64,
+          "pieceSize": 98304,
+          "deadline": 2551,
+          "maxHolders": 3,
+          "originReserveMs": 0,
+          "peerOnly": true,
+          "peers": [
+            [
+              1,
+              null,
+              null
+            ]
+          ],
+          "origin": null,
+          "sharedFirstByteMs": null,
+          "sharedRate": null,
+          "probePeers": [
+            1
+          ],
+          "holders": [
+            [
+              1,
+              1
+            ]
+          ],
+          "out": {
+            "c": [
+              {
+                "t": "request",
+                "peer": 1,
+                "p": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 78,
+          "source": 1,
+          "received": 16384,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 133,
+          "source": 1,
+          "received": 32768,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 202,
+          "source": 1,
+          "received": 49152,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 259,
+          "source": 1,
+          "received": 65536,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 323,
+          "source": 1,
+          "received": 81920,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "request",
+          "load": 1,
+          "at": 383,
+          "range": [
+            0,
+            1
+          ],
+          "atMs": 384,
+          "id": 1,
+          "holder": 1,
+          "cc": 0,
+          "level": 0,
+          "remainingMs": 2490.1755419999827,
+          "outcome": "payload",
+          "elapsedMs": 322.9987919999985,
+          "timeoutMs": 2490.1755419999827,
+          "expectedBytes": 98304,
+          "receivedBytes": 98304,
+          "firstByteMs": 17.256167000043206,
+          "metadataReceived": true,
+          "draining": false,
+          "closeReason": null
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 383,
+          "source": 1,
+          "received": 98304,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "delivered",
+          "at": 384,
+          "source": 1,
+          "p": [
+            0,
+            1
+          ],
+          "bytes": 98304,
+          "out": {
+            "c": [
+              {
+                "t": "request",
+                "peer": 1,
+                "p": [
+                  1,
+                  5
+                ]
+              }
+            ],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 397,
+          "source": 1,
+          "received": 16384,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 453,
+          "source": 1,
+          "received": 32768,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 507,
+          "source": 1,
+          "received": 49152,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 563,
+          "source": 1,
+          "received": 65536,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 614,
+          "source": 1,
+          "received": 81920,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 670,
+          "source": 1,
+          "received": 98304,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 724,
+          "source": 1,
+          "received": 114688,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 782,
+          "source": 1,
+          "received": 131072,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 834,
+          "source": 1,
+          "received": 147456,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 889,
+          "source": 1,
+          "received": 163840,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 945,
+          "source": 1,
+          "received": 180224,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 998,
+          "source": 1,
+          "received": 196608,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1052,
+          "source": 1,
+          "received": 212992,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1108,
+          "source": 1,
+          "received": 229376,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1163,
+          "source": 1,
+          "received": 245760,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1216,
+          "source": 1,
+          "received": 262144,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1266,
+          "source": 1,
+          "received": 278528,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1321,
+          "source": 1,
+          "received": 294912,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1377,
+          "source": 1,
+          "received": 311296,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1431,
+          "source": 1,
+          "received": 327680,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1488,
+          "source": 1,
+          "received": 344064,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1538,
+          "source": 1,
+          "received": 360448,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1597,
+          "source": 1,
+          "received": 376832,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "request",
+          "load": 1,
+          "at": 1651,
+          "range": [
+            1,
+            5
+          ],
+          "atMs": 1651,
+          "id": 1,
+          "holder": 1,
+          "cc": 0,
+          "level": 0,
+          "remainingMs": 2165.3998339999816,
+          "outcome": "payload",
+          "elapsedMs": 1265.9608330000192,
+          "timeoutMs": 2165.3998339999816,
+          "expectedBytes": 393216,
+          "receivedBytes": 393216,
+          "firstByteMs": 12.29183300002478,
+          "metadataReceived": true,
+          "draining": false,
+          "closeReason": null
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1650,
+          "source": 1,
+          "received": 393216,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "delivered",
+          "at": 1651,
+          "source": 1,
+          "p": [
+            1,
+            5
+          ],
+          "bytes": 393216,
+          "out": {
+            "c": [
+              {
+                "t": "request",
+                "peer": 1,
+                "p": [
+                  5,
+                  9
+                ]
+              }
+            ],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1672,
+          "source": 1,
+          "received": 16384,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1726,
+          "source": 1,
+          "received": 32768,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1782,
+          "source": 1,
+          "received": 49152,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1840,
+          "source": 1,
+          "received": 65536,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1941,
+          "source": 1,
+          "received": 98304,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 1995,
+          "source": 1,
+          "received": 114688,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 2049,
+          "source": 1,
+          "received": 131072,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 2103,
+          "source": 1,
+          "received": 147456,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 2159,
+          "source": 1,
+          "received": 163840,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 2212,
+          "source": 1,
+          "received": 180224,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 2265,
+          "source": 1,
+          "received": 196608,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xfer",
+          "load": 1,
+          "op": "progress",
+          "at": 2319,
+          "source": 1,
+          "received": 212992,
+          "out": {
+            "c": [],
+            "next": 2551,
+            "late": true,
+            "finished": false
+          }
+        },
+        {
+          "k": "xferFinish",
+          "load": 1,
+          "at": 2379,
+          "ms": 2324,
+          "reason": "signal-abort",
+          "delivered": false,
+          "peerRemainingMs": 172,
+          "recoveryRemainingMs": 172,
+          "bufferedMixed": false,
+          "peerOnly": true,
+          "verifiedBytes": 491520,
+          "originBytes": 0
+        },
+        {
+          "k": "request",
+          "load": 1,
+          "at": 2379,
+          "range": [
+            5,
+            9
+          ],
+          "atMs": 2380,
+          "id": 1,
+          "holder": 1,
+          "cc": 0,
+          "level": 0,
+          "remainingMs": 894.242499999993,
+          "outcome": "abort",
+          "elapsedMs": 723.1189160000067,
+          "timeoutMs": 894.242499999993,
+          "expectedBytes": 393216,
+          "receivedBytes": 229376,
+          "firstByteMs": 15.223416000022553,
+          "metadataReceived": true,
+          "draining": true,
+          "closeReason": null
+        },
+        {
+          "k": "origin",
+          "load": 1,
+          "leg": "cached",
+          "at": 51,
+          "ms": 2329,
+          "ranged": false,
+          "outcome": "payload",
+          "bytes": 6291456,
+          "stale": false,
+          "loaderLoadedBytes": 6291456,
+          "loaderTotalBytes": null
+        },
+        {
+          "k": "load",
+          "load": 2,
+          "at": 2386,
+          "sn": 0,
+          "level": 0,
+          "cc": 0,
+          "budgetMs": 3000,
+          "limitMs": 3000,
+          "budgetGeometry": {
+            "source": "buffer",
+            "positionSource": "fragment",
+            "currentTime": 10,
+            "bufferedEnd": 20,
+            "playableEnd": 20,
+            "fragmentStart": 0,
+            "originReserveMs": 3011.25,
+            "uncappedMs": 6988.75,
+            "durationMs": 10000,
+            "originRecoveryMs": 3011.25,
+            "sustainableMs": 6988.75
+          }
+        },
+        {
+          "k": "eligibility",
+          "load": 2,
+          "at": 2387,
+          "atMs": 2387,
+          "cc": 0,
+          "level": 0,
+          "budgetMs": 3000,
+          "reason": "no-have-no-wait",
+          "matchingHave": false,
+          "budgetGeometry": {
+            "source": "buffer",
+            "positionSource": "fragment",
+            "currentTime": 10,
+            "bufferedEnd": 20,
+            "playableEnd": 20,
+            "fragmentStart": 0,
+            "originReserveMs": 3011.25,
+            "uncappedMs": 6988.75,
+            "durationMs": 10000,
+            "originRecoveryMs": 3011.25,
+            "sustainableMs": 6988.75
+          },
+          "holders": [],
+          "haveHolders": [],
+          "staleHolders": [],
+          "heldMissHolders": []
+        },
+        {
+          "k": "originStart",
+          "load": 2,
+          "leg": "fallback",
+          "at": 2387,
+          "ms": 0,
+          "ranged": false
+        },
+        {
+          "k": "load",
+          "load": 3,
+          "at": 2395,
+          "sn": 1,
+          "level": 0,
+          "cc": 0,
+          "budgetMs": 0,
+          "limitMs": 2500,
+          "budgetGeometry": {
+            "source": "warm-ahead",
+            "positionSource": "fragment",
+            "currentTime": 10,
+            "bufferedEnd": 20,
+            "playableEnd": 20,
+            "fragmentStart": 10,
+            "originReserveMs": 3011.25,
+            "uncappedMs": 6988.75,
+            "durationMs": 2000,
+            "originRecoveryMs": 3011.25,
+            "sustainableMs": 0
+          }
+        },
+        {
+          "k": "mixedScope",
+          "load": 3,
+          "at": 2396,
+          "phase": "mixed",
+          "reason": "entry",
+          "ms": 1,
+          "setupRemainingMs": 24,
+          "peerRemainingMs": 2499,
+          "recoveryRemainingMs": 9999,
+          "mixedRemainingMs": 6988,
+          "nextOriginReserveMs": 3011.25,
+          "firstByteRemainingMs": 9999,
+          "originInvoked": false,
+          "capturedGeometry": {
+            "currentTime": 10,
+            "playableEnd": 20,
+            "fragmentStart": 10,
+            "originReserveMs": 3011.25,
+            "originRecoveryMs": 3011.25,
+            "uncappedMs": 6988.75,
+            "sustainableMs": 0,
+            "durationMs": 2000,
+            "fragmentDurationSeconds": 2
+          },
+          "currentGeometry": null,
+          "scope": null
+        },
+        {
+          "k": "eligibility",
+          "load": 3,
+          "at": 2403,
+          "atMs": 2403,
+          "cc": 0,
+          "level": 0,
+          "budgetMs": 0,
+          "reason": "have-at-entry",
+          "matchingHave": true,
+          "budgetGeometry": {
+            "source": "warm-ahead",
+            "positionSource": "fragment",
+            "currentTime": 10,
+            "bufferedEnd": 20,
+            "playableEnd": 20,
+            "fragmentStart": 10,
+            "originReserveMs": 3011.25,
+            "uncappedMs": 6988.75,
+            "durationMs": 2000,
+            "originRecoveryMs": 3011.25,
+            "sustainableMs": 0
+          },
+          "holders": [],
+          "haveHolders": [
+            1
+          ],
+          "staleHolders": [],
+          "heldMissHolders": []
+        },
+        {
+          "k": "mixedScope",
+          "load": 3,
+          "at": 2424,
+          "phase": "mixed",
+          "reason": "setup-timer",
+          "ms": 29,
+          "setupRemainingMs": -4,
+          "peerRemainingMs": 2471,
+          "recoveryRemainingMs": 9971,
+          "mixedRemainingMs": 6960,
+          "nextOriginReserveMs": 3011.25,
+          "firstByteRemainingMs": 9971,
+          "originInvoked": false,
+          "capturedGeometry": {
+            "currentTime": 10,
+            "playableEnd": 20,
+            "fragmentStart": 10,
+            "originReserveMs": 3011.25,
+            "originRecoveryMs": 3011.25,
+            "uncappedMs": 6988.75,
+            "sustainableMs": 0,
+            "durationMs": 2000,
+            "fragmentDurationSeconds": 2
+          },
+          "currentGeometry": {
+            "playbackRate": 1,
+            "readyState": 4,
+            "fragmentStart": 10,
+            "fragmentDurationSeconds": 2
+          },
+          "scope": {
+            "notStopped": true,
+            "warmOwner": true,
+            "hls": true,
+            "media": true,
+            "generation": true,
+            "stream": true,
+            "unpaused": true,
+            "unended": true,
+            "unseeking": true,
+            "unitRate": true,
+            "ready": true,
+            "fragment": true,
+            "start": true,
+            "duration": true,
+            "identity": true,
+            "owns": true,
+            "mixed": true,
+            "signal": true,
+            "currentNotStopped": true,
+            "recovery": true,
+            "setup": true
+          }
+        },
+        {
+          "k": "xferFinish",
+          "load": 3,
+          "at": 2424,
+          "ms": 15,
+          "reason": "signal-abort",
+          "delivered": false,
+          "peerRemainingMs": 2471,
+          "recoveryRemainingMs": 6960,
+          "bufferedMixed": true,
+          "peerOnly": false,
+          "verifiedBytes": 0,
+          "originBytes": 0
+        },
+        {
+          "k": "originStart",
+          "load": 3,
+          "leg": "fallback",
+          "at": 2424,
+          "ms": 0,
+          "ranged": false
+        }
+      ]
+    },
+    "timer": {
+      "scheduledAtMs": 326321.067833,
+      "requestedDelayMs": 24.089499999943655,
+      "firedAtMs": 326349.042
+    },
+    "rpc": [
+      {
+        "id": 2,
+        "op": "new",
+        "handle": 1,
+        "configSize": 6291456,
+        "configDeadline": 326476,
+        "exclusiveOrigin": false,
+        "peerOnly": true,
+        "sentAtMs": 323980.720291,
+        "replyAtMs": 323984.856458,
+        "success": true
+      },
+      {
+        "id": 3,
+        "op": "start",
+        "handle": 1,
+        "sentAtMs": 323985.107958,
+        "replyAtMs": 323985.78875,
+        "success": true
+      },
+      {
+        "id": 50,
+        "op": "new",
+        "handle": 2,
+        "configSize": 6291456,
+        "configDeadline": 328820,
+        "exclusiveOrigin": true,
+        "peerOnly": false,
+        "sentAtMs": 326335.933958,
+        "replyAtMs": 326340.926416,
+        "success": true
+      }
+    ],
+    "expected": {
+      "load": 3,
+      "sn": 1,
+      "cc": 0,
+      "level": 0,
+      "size": 6291456,
+      "fragmentStart": 10,
+      "fragmentDurationSeconds": 2,
+      "enteredAtMs": 326320.154083,
+      "invokedAtMs": 326349.507208,
+      "parentMs": 10000,
+      "ttfbMs": 10000,
+      "remainingLoadMs": 9970.654249999963,
+      "remainingTtfbMs": 9970.654249999963,
+      "originRangeAttempts": 0,
+      "physicalRangeGets": 0,
+      "clientRangeLoads": 0,
+      "peerRequests": 0,
+      "acceptedPeerBytes": 0,
+      "verifiedWarmPeerBytes": 0,
+      "coreTransfersDelta": 1,
+      "rpcDropped": 0,
+      "rpcOmitted": 0,
+      "rowsOmitted": 0
+    }
+  }
+}

@@ -1,0 +1,192 @@
+{
+  "message": "eligible owned warm work starts origin206 before any whole GET",
+  "worker": true,
+  "load": 3,
+  "traceDropped": 0,
+  "rows": [
+    {
+      "k": "load",
+      "load": 3,
+      "at": 2481,
+      "sn": 1,
+      "level": 0,
+      "cc": 0,
+      "budgetMs": 0,
+      "limitMs": 2500,
+      "budgetGeometry": {
+        "source": "warm-ahead",
+        "positionSource": "fragment",
+        "currentTime": 10,
+        "bufferedEnd": 20,
+        "playableEnd": 20,
+        "fragmentStart": 10,
+        "originReserveMs": 3120,
+        "uncappedMs": 6880,
+        "durationMs": 2000,
+        "originRecoveryMs": 3120,
+        "sustainableMs": 0
+      }
+    },
+    {
+      "k": "mixedScope",
+      "load": 3,
+      "at": 2481,
+      "phase": "mixed",
+      "reason": "entry",
+      "ms": 1,
+      "setupRemainingMs": 24,
+      "peerRemainingMs": 2499,
+      "recoveryRemainingMs": 9999,
+      "mixedRemainingMs": 6879,
+      "nextOriginReserveMs": 3120,
+      "firstByteRemainingMs": 9999,
+      "originInvoked": false,
+      "capturedGeometry": {
+        "currentTime": 10,
+        "playableEnd": 20,
+        "fragmentStart": 10,
+        "originReserveMs": 3120,
+        "originRecoveryMs": 3120,
+        "uncappedMs": 6880,
+        "sustainableMs": 0,
+        "durationMs": 2000,
+        "fragmentDurationSeconds": 2
+      },
+      "currentGeometry": null,
+      "scope": null
+    },
+    {
+      "k": "mixedScope",
+      "load": 3,
+      "at": 2504,
+      "phase": "mixed",
+      "reason": "setup-timer",
+      "ms": 24,
+      "setupRemainingMs": 1,
+      "peerRemainingMs": 2476,
+      "recoveryRemainingMs": 9976,
+      "mixedRemainingMs": 6856,
+      "nextOriginReserveMs": 3120,
+      "firstByteRemainingMs": 9976,
+      "originInvoked": false,
+      "capturedGeometry": {
+        "currentTime": 10,
+        "playableEnd": 20,
+        "fragmentStart": 10,
+        "originReserveMs": 3120,
+        "originRecoveryMs": 3120,
+        "uncappedMs": 6880,
+        "sustainableMs": 0,
+        "durationMs": 2000,
+        "fragmentDurationSeconds": 2
+      },
+      "currentGeometry": {
+        "playbackRate": 1,
+        "readyState": 4,
+        "fragmentStart": 10,
+        "fragmentDurationSeconds": 2
+      },
+      "scope": {
+        "notStopped": true,
+        "warmOwner": true,
+        "hls": true,
+        "media": true,
+        "generation": true,
+        "stream": true,
+        "unpaused": true,
+        "unended": true,
+        "unseeking": true,
+        "unitRate": true,
+        "ready": true,
+        "fragment": true,
+        "start": true,
+        "duration": true,
+        "identity": true,
+        "owns": true,
+        "mixed": true,
+        "signal": true,
+        "currentNotStopped": true,
+        "recovery": true,
+        "setup": true
+      }
+    },
+    {
+      "k": "xferFinish",
+      "load": 3,
+      "at": 2504,
+      "ms": 7,
+      "reason": "signal-abort",
+      "delivered": false,
+      "peerRemainingMs": 2476,
+      "recoveryRemainingMs": 6856,
+      "bufferedMixed": true,
+      "peerOnly": false,
+      "verifiedBytes": 0,
+      "originBytes": 0
+    },
+    {
+      "k": "originStart",
+      "load": 3,
+      "leg": "fallback",
+      "at": 2504,
+      "ms": 0,
+      "ranged": false
+    }
+  ],
+  "rowsOmitted": 0,
+  "rpc": [
+    {
+      "id": 2,
+      "op": "new",
+      "sentAtMs": 287551.7275,
+      "replyAtMs": 287553.098959,
+      "success": true
+    },
+    {
+      "id": 3,
+      "op": "start",
+      "sentAtMs": 287553.278875,
+      "replyAtMs": 287553.804792,
+      "success": true
+    },
+    {
+      "id": 48,
+      "op": "new",
+      "sentAtMs": 290003.812584,
+      "replyAtMs": 290008.542917,
+      "success": true
+    },
+    {
+      "id": 49,
+      "op": "start",
+      "sentAtMs": 290009.194375,
+      "replyAtMs": 290013.168625,
+      "success": true
+    }
+  ],
+  "rpcOmitted": 0,
+  "pendingRpc": [],
+  "pendingRpcOmitted": 0,
+  "rpcDropped": 0,
+  "targetHttp": [
+    {
+      "range": null,
+      "status": 200,
+      "bytes": 65536,
+      "complete": false,
+      "aborted": false,
+      "invokedAtMs": 290009.944834,
+      "sdkEnteredAtMs": 289985.415375
+    }
+  ],
+  "states": {
+    "core": "ready",
+    "worker": "ready"
+  },
+  "deltas": {
+    "transfers": 1,
+    "originRanges": 0,
+    "peerAccepted": 0,
+    "warmStarted": 1
+  }
+}

@@ -404,6 +404,8 @@ impl Lane {
 pub struct Transfer {
     config: TransferConfig,
     peer_only: bool,
+    exclusive_origin: bool,
+    origin_started: bool,
     started: bool,
     size: u64,
     piece_size: u64,
@@ -447,6 +449,8 @@ impl Transfer {
         Some(Transfer {
             config,
             peer_only: false,
+            exclusive_origin: false,
+            origin_started: false,
             started: false,
             size,
             piece_size: commitment_piece_size(size as i64) as u64,
@@ -480,6 +484,17 @@ impl Transfer {
 
     pub fn peer_only(&self) -> bool {
         self.peer_only
+    }
+
+    /// Opt in before starting: transfer only queued, unissued origin work to
+    /// peers. Recovery may repeat bytes from a failed or cancelled request.
+    /// Independent peer-only arms have no origin ownership to partition.
+    pub fn with_exclusive_origin(mut self) -> Option<Self> {
+        if self.peer_only || self.started || self.finished {
+            return None;
+        }
+        self.exclusive_origin = true;
+        Some(self)
     }
 
     pub fn drain_commands(&mut self) -> Vec<Command> {
@@ -730,7 +745,7 @@ impl Transfer {
     /// Unverified pieces the endgame may still duplicate.
     fn endgame_pieces(&self) -> Vec<u32> {
         let left: Vec<u32> = (0..self.verified.len() as u32).filter(|&i| !self.verified[i as usize]).collect();
-        if self.floor_reached || left.len() > ENDGAME_PIECES {
+        if self.exclusive_origin || self.floor_reached || left.len() > ENDGAME_PIECES {
             return Vec::new();
         }
         left.into_iter().filter(|index| !self.duplicated.contains(index)).collect()
@@ -762,6 +777,18 @@ impl Transfer {
             return;
         }
         if needed.is_empty() || self.finished {
+            return;
+        }
+        // A one-piece object cannot have both a disjoint source prefix and
+        // a peer probe. Keep its ordinary source instead of duplicating it.
+        if self.exclusive_origin && !self.origin_started && needed.len() == 1 {
+            self.queue_origin(
+                now,
+                PieceRange {
+                    start: needed[0],
+                    end: needed[0] + 1,
+                },
+            );
             return;
         }
         // A busy source starts on new work only after what it already has.
@@ -997,14 +1024,40 @@ impl Transfer {
         let peer_piece_cap = (MAX_PEER_REQUEST_BYTES / self.piece_size)
             .max(1)
             .min(u64::from(MAX_PEER_REQUEST_PIECES)) as u32;
+        let origin_tail_cap = (MAX_PEER_REQUEST_BYTES / self.piece_size).min(u64::from(MAX_PEER_REQUEST_PIECES)) as u32;
+        let hold_tail = self.exclusive_origin
+            && source == Source::Origin
+            && !self.origin_started
+            && !self.floor_reached
+            && self.probe_peers.iter().any(|source| {
+                self.lanes
+                    .get(source)
+                    .is_some_and(|lane| !lane.retired && !lane.in_flight.is_empty())
+            });
         let Some(lane) = self.lanes.get_mut(&source) else { return };
+        if self.exclusive_origin && source == Source::Origin && !lane.in_flight.is_empty() {
+            return;
+        }
+        let queued: u32 = lane.queue.iter().map(|range| range.end - range.start).sum();
+        let mut source_prefix = if hold_tail {
+            queued - origin_tail_cap.min(queued.saturating_sub(1))
+        } else {
+            queued
+        };
+        if source == Source::Origin && queued > 0 {
+            self.origin_started = true;
+        }
         while let Some(mut range) = lane.queue.front().copied() {
             if matches!(source, Source::Peer(_)) && !lane.in_flight.is_empty() {
                 return;
             }
+            if self.exclusive_origin && source == Source::Origin && source_prefix == 0 {
+                return;
+            }
             lane.queue.pop_front();
-            if matches!(source, Source::Peer(_)) {
-                let end = range.start.saturating_add(peer_piece_cap).min(range.end);
+            if matches!(source, Source::Peer(_)) || self.exclusive_origin {
+                let cap = if source == Source::Origin { source_prefix } else { peer_piece_cap };
+                let end = range.start.saturating_add(cap).min(range.end);
                 if end < range.end {
                     lane.queue.push_front(PieceRange {
                         start: end,
@@ -1012,6 +1065,9 @@ impl Transfer {
                     });
                     range.end = end;
                 }
+            }
+            if source == Source::Origin {
+                source_prefix -= range.end - range.start;
             }
             lane.in_flight.push((range, now));
             lane.first_byte_at = None;
@@ -1135,11 +1191,20 @@ impl Transfer {
             return;
         }
         let Some(origin) = self.lanes.get(&Source::Origin) else { return };
-        let mut owed: Vec<u32> = origin
-            .in_flight
-            .iter()
-            .map(|(range, _)| *range)
-            .chain(origin.queue.iter().copied())
+        // Exclusive mode moves only work whose HTTP request has not begun.
+        // The initial source prefix continues without a second physical copy.
+        let origin_ranges: Vec<PieceRange> = if self.exclusive_origin {
+            origin.queue.iter().copied().collect()
+        } else {
+            origin
+                .in_flight
+                .iter()
+                .map(|(range, _)| *range)
+                .chain(origin.queue.iter().copied())
+                .collect()
+        };
+        let mut owed: Vec<u32> = origin_ranges
+            .into_iter()
             .flat_map(|range| range.start..range.end)
             .filter(|&index| !self.verified[index as usize])
             .collect();
@@ -1204,6 +1269,21 @@ impl Transfer {
         }
         let needed = &pending[pending.len() - take..];
         let planned = split(&PlanInput { needed, ..input.clone() }, &peers);
+        if self.exclusive_origin {
+            let claimed: BTreeSet<u32> = planned
+                .assignments
+                .iter()
+                .flat_map(|assignment| assignment.ranges.iter().flat_map(|range| range.start..range.end))
+                .collect();
+            let origin = self.lanes.get_mut(&Source::Origin).unwrap();
+            let remaining: Vec<u32> = origin
+                .queue
+                .iter()
+                .flat_map(|range| range.start..range.end)
+                .filter(|index| !claimed.contains(index))
+                .collect();
+            origin.queue = runs(&remaining).into();
+        }
         for assignment in planned.assignments {
             let Some(lane) = self.lanes.get_mut(&assignment.source) else {
                 continue;

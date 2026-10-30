@@ -150,3 +150,28 @@ test("ranged loader outcomes distinguish HTTP, timeout, cancellation and wrong-s
     assert.equal(value?.byteLength ?? null, outcome === "payload" ? 4 : null);
   });
 });
+
+test('range admission runs immediately before the original loader invocation and may refuse it', async () => {
+  const { Loader, seen } = playerLoader(), order = [];
+  class Observed extends Loader { load(...args) { order.push('invoke'); return super.load(...args); } }
+  const origin = { Loader: Observed };
+  assert.equal(await loadOriginRange(origin, { url: 'https://origin.example/x' }, 0, 65536,
+    { beforeLoad: () => { order.push('guard'); return false; } }), null);
+  assert.deepEqual(order, ['guard']); assert.equal(seen.length, 0);
+  const bytes = await loadOriginRange(origin, { url: 'https://origin.example/x' }, 0, 65536,
+    { beforeLoad: () => { order.push('guard'); return true; } });
+  assert.deepEqual(bytes, file.subarray(0, 65536)); assert.deepEqual(order, ['guard', 'guard', 'invoke']);
+});
+
+test('range admission cancellation or throwing cannot invoke the original loader or settle twice', async () => {
+  for (const action of ['abort', 'throw']) {
+    const { Loader, seen } = playerLoader(), controller = new AbortController(), results = [];
+    assert.equal(await loadOriginRange({ Loader }, { url: 'https://origin.example/x' }, 0, 65536,
+      { signal: controller.signal, onResult: row => results.push(row), beforeLoad: () => {
+        if (action === 'throw') throw Error('fixture refusal');
+        controller.abort(); return true;
+      } }), null);
+    assert.equal(seen.length, 0); assert.equal(results.length, 1);
+    assert.equal(results[0].outcome, action === 'abort' ? 'abort' : 'exception');
+  }
+});

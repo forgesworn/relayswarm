@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Reconsider a skipped warm future once on an exact HAVE, within its original
+  deadline and existing admission limits. Keep at most two metadata-only
+  descriptors. If mixed admission declines while the retry is still purely
+  speculative, retire it before abort callbacks instead of downloading the
+  owner's completed object again. Genuine and promoted demand keep normal
+  source recovery; defaults, timers and playback credit are unchanged.
+
 - Decline peer-only whole-object races when the accepted holders' known
   same-link first-byte and payload-rate estimates cannot jointly carry the
   signed object within the existing deadline. Whole HTTP still starts

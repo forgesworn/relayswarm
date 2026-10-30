@@ -141,7 +141,8 @@ export function replay(core, calls) {
   if (start.pieces !== Math.ceil(start.size / start.pieceSize)) return "piece count does not match the size";
   const { object, pieces, sha256 } = objectFor(start);
   const transfer = core.transfer({ size: start.size, sha256, pieces, deadline: start.deadline, maxHolders: start.maxHolders, originReserveMs: start.originReserveMs,
-    ...(start.peerOnly ? { peerOnly: true } : {}) });
+    ...(start.peerOnly ? { peerOnly: true } : {}),
+    ...(start.exclusiveOrigin === undefined ? {} : { exclusiveOrigin: start.exclusiveOrigin }) });
   if (!transfer) return "the module refused the transfer";
   try {
     for (const row of calls) {
@@ -260,7 +261,8 @@ export function simulate(core, calls, model, maxHolders) {
   const [start] = calls;
   const { object, pieces, sha256 } = objectFor(start);
   const transfer = core.transfer({ size: start.size, sha256, pieces, deadline: start.deadline, maxHolders, originReserveMs: start.originReserveMs,
-    ...(start.peerOnly ? { peerOnly: true } : {}) });
+    ...(start.peerOnly ? { peerOnly: true } : {}),
+    ...(start.exclusiveOrigin === undefined ? {} : { exclusiveOrigin: start.exclusiveOrigin }) });
   const events = [];
   let clock = start.at, done = null, originBytes = 0, peerBytes = 0, guard = 0;
   const schedule = (at, run, peer = null) => events.push({ at, run, peer });

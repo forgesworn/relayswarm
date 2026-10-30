@@ -150,7 +150,7 @@ test("pieces that do not fit the size are refused", async () => {
   assert.equal(core.transfer({ size: 200_000, sha256: "a".repeat(64), pieces: ["a".repeat(64)], deadline: 1, maxHolders: 3, originReserveMs: 0 }), null);
 });
 
-async function probeCore({ legacy = false, withoutPeerOnly = false } = {}) {
+async function probeCore({ legacy = false, withoutPeerOnly = false, withoutExclusiveOrigin = false } = {}) {
   const instantiate = WebAssembly.instantiate, failures = [];
   let supported = false, allocations = 0;
   WebAssembly.instantiate = async (...args) => {
@@ -162,6 +162,7 @@ async function probeCore({ legacy = false, withoutPeerOnly = false } = {}) {
     exports.rs_xfer_new = (...args) => { allocations++; return originalNew(...args); };
     if (legacy) delete exports.rs_xfer_capabilities;
     else if (withoutPeerOnly) exports.rs_xfer_capabilities = () => (instance.exports.rs_xfer_capabilities?.() ?? 0) & ~2;
+    else if (withoutExclusiveOrigin) exports.rs_xfer_capabilities = () => (instance.exports.rs_xfer_capabilities?.() ?? 0) & ~4;
     return { exports };
   };
   try {
@@ -208,6 +209,36 @@ test("unsupported peer-only mode declines before allocation and preserves the or
       assert.deepEqual(result.bytes, bytes);
       assert.deepEqual(tracked.failures, []);
     } finally { mixed.free(); }
+  } finally { tracked.core.retire(); }
+});
+
+test("exclusive origin requires its explicit capability before allocation and preserves legacy mixed transfers", async () => {
+  const tracked = await probeCore({ withoutExclusiveOrigin: true }), bytes = object(200_000), c = commitment(bytes);
+  const options = { size: c.size, sha256: c.sha256, pieces: c.pieces, deadline: 11_000, maxHolders: 3, originReserveMs: 0 };
+  try {
+    assert.equal(tracked.core.transfer({ ...options, exclusiveOrigin: true }), null);
+    assert.equal(tracked.allocations, 0, "an older module cannot silently duplicate an exclusive origin range");
+    assert.equal(tracked.core.retired, false);
+    const mixed = tracked.core.transfer({ ...options, exclusiveOrigin: false });
+    try {
+      const initial = mixed.start(1_000, { peers: [], origin: [0, 1_000] });
+      const request = initial.commands.find(command => command.t === "origin");
+      const result = mixed.delivered(1_010, "origin", request.range, bytes);
+      assert.ok(result.finished); assert.deepEqual(result.bytes, bytes);
+    } finally { mixed.free(); }
+    assert.deepEqual(tracked.failures, []);
+  } finally { tracked.core.retire(); }
+});
+
+test("exclusive origin rejects nonboolean or peer-only combinations before allocation", async () => {
+  const tracked = await probeCore(), bytes = object(1_024), c = commitment(bytes);
+  const options = { size: c.size, sha256: c.sha256, pieces: c.pieces, deadline: 11_000, maxHolders: 3, originReserveMs: 0 };
+  try {
+    for (const exclusiveOrigin of [null, 1, "true", {}, []])
+      assert.equal(tracked.core.transfer({ ...options, exclusiveOrigin }), null);
+    assert.equal(tracked.core.transfer({ ...options, exclusiveOrigin: true, peerOnly: true }), null);
+    assert.equal(tracked.allocations, 0);
+    assert.equal(tracked.core.retired, false);
   } finally { tracked.core.retire(); }
 });
 

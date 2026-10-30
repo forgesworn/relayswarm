@@ -731,7 +731,8 @@ pub unsafe extern "C" fn rs_disc_call(op: u32, now: f64, pointer: *const u8, len
 // --- multi-holder transfer ---------------------------------------------------
 //
 // `rs_xfer_new(size, deadline, max_holders, origin_reserve_ms, pointer, len)`
-// takes `{"sha256": hex, "pieces": [hex], "peerOnly"?: bool}` and returns a handle, or 0 when
+// takes `{"sha256": hex, "pieces": [hex], "peerOnly"?: bool,
+// "exclusiveOrigin"?: bool}` and returns a handle, or 0 when
 // the pieces do not fit the size. `rs_xfer_call(handle, op, now, source, a,
 // b, pointer, len)` returns the length at `rs_result_ptr` of a u32 JSON
 // length, the JSON `{"c": commands, "next": ms|null, "late", "finished"}` and
@@ -755,9 +756,10 @@ pub const XFER_PROGRESS: u32 = 5;
 
 /// Bit 0: an explicit probePeers start input reserves one piece per source.
 /// Bit 1: peerOnly creation supports a transfer with no origin source.
+/// Bit 2: exclusiveOrigin creation partitions queued origin ownership.
 #[no_mangle]
 pub extern "C" fn rs_xfer_capabilities() -> u32 {
-    3
+    7
 }
 
 fn number(value: Option<&Value>) -> Option<f64> {
@@ -852,10 +854,22 @@ pub unsafe extern "C" fn rs_xfer_new(
             Some(value) => value.as_bool()?,
             None => false,
         };
+        let exclusive_origin = match args.get("exclusiveOrigin") {
+            Some(value) => value.as_bool()?,
+            None => false,
+        };
+        if peer_only && exclusive_origin {
+            return None;
+        }
         if peer_only {
             Transfer::new_peer_only(config, ms(size), sha256, &pieces, ms(deadline))
         } else {
-            Transfer::new(config, ms(size), sha256, &pieces, ms(deadline))
+            let transfer = Transfer::new(config, ms(size), sha256, &pieces, ms(deadline))?;
+            if exclusive_origin {
+                transfer.with_exclusive_origin()
+            } else {
+                Some(transfer)
+            }
         }
     });
     let Some(transfer) = made else { return 0 };
@@ -927,4 +941,48 @@ pub unsafe extern "C" fn rs_xfer_call(handle: u32, op: u32, now: f64, source: f6
         Some(transfer_frame(transfer))
     });
     set_result(out)
+}
+
+#[cfg(test)]
+mod exclusive_origin_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn make(input: &Value) -> u32 {
+        let bytes = serde_json::to_vec(input).unwrap();
+        let pointer = rs_alloc(bytes.len());
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), pointer, bytes.len());
+            let handle = rs_xfer_new(1.0, 10_000.0, 1.0, 0.0, pointer, bytes.len());
+            rs_free(pointer, bytes.len());
+            handle
+        }
+    }
+
+    #[test]
+    fn exclusive_origin_capability_and_creation_are_explicit() {
+        assert_eq!(rs_xfer_capabilities(), 7);
+        for enabled in [None, Some(false), Some(true)] {
+            let mut input = json!({"sha256": "a".repeat(64), "pieces": ["a".repeat(64)]});
+            if let Some(enabled) = enabled {
+                input["exclusiveOrigin"] = json!(enabled);
+            }
+            let handle = make(&input);
+            assert_ne!(handle, 0);
+            rs_xfer_free(handle);
+        }
+    }
+
+    #[test]
+    fn exclusive_origin_rejects_peer_only_and_untyped_creation_values() {
+        for value in [json!(true), json!("true"), json!(1), Value::Null] {
+            let input = json!({"sha256": "a".repeat(64), "pieces": ["a".repeat(64)],
+                "exclusiveOrigin": value, "peerOnly": true});
+            assert_eq!(make(&input), 0);
+        }
+        for value in [json!("true"), json!(1), Value::Null] {
+            let input = json!({"sha256": "a".repeat(64), "pieces": ["a".repeat(64)], "exclusiveOrigin": value});
+            assert_eq!(make(&input), 0);
+        }
+    }
 }

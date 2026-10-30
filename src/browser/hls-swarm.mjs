@@ -127,6 +127,7 @@ const DEFAULTS = Object.freeze({
   // Opt-in: when no safe wait remains, race a known cached schema 3 object
   // against immediately started HTTP, without any extra origin request.
   zeroBudgetPeerRace: false,
+  bufferedMixedRanges: false,
   // Opt-in with zeroBudgetPeerRace: a load-entry connection may advertise
   // the exact cached object later, within the same original peer window.
   lateHaveRace: false,
@@ -154,6 +155,16 @@ const SAMPLE_LIMIT = 500;
 const CORE_WAIT_MS = 2_000;
 
 const now = () => performance.now();
+// Only the new mixed path clips each nested loader to its captured parent /
+// playback deadline. Existing modes retain their original config identity.
+const remainingOriginConfig = (config, deadline, firstDeadline = deadline) => {
+  const at = now(), remaining = deadline - at, firstRemaining = firstDeadline - at;
+  if (!(remaining > 0 && firstRemaining > 0)) return null;
+  return { ...config, timeout: remaining, maxRetry: 0,
+    loadPolicy: { ...config?.loadPolicy, maxLoadTimeMs: remaining,
+      maxTimeToFirstByteMs: Math.min(firstRemaining, remaining),
+      errorRetry: null, timeoutRetry: null } };
+};
 // Wall-clock time of the response's first byte, which is when the origin
 // stamped Date. Using completion time would read low by the download time.
 const firstByteWallMs = (stats) => {
@@ -226,6 +237,7 @@ const increment = (value) => Math.min(Number.MAX_SAFE_INTEGER, value + 1);
 const PEER_ELIGIBILITY_REASONS = Object.freeze([
   "no-budget", "aborted-before-eligibility", "no-have-no-wait", "no-have-wait",
   "wait-no-longer-eligible", "wait-aborted", "wait-expired", "have-at-entry", "have-after-wait", "projected-late",
+  "cached-no-matching-have", "cached-ranges-unavailable",
 ]);
 const PEER_REQUEST_OUTCOMES = Object.freeze(["payload", "none", "timeout", "abort", "abandoned", "closed", "busy", "send-error"]);
 // A projection from evidence this old may be stale; one attempt within the
@@ -243,13 +255,20 @@ const UPLOAD_REFUSAL_REASONS = Object.freeze([
 
 function gathered(pc, capMs = 1_200, signal, observed) {
   return new Promise((resolve) => {
+    let knownEmpty = false;
     const hasCandidate = () => {
-      try { const sdp = pc.localDescription?.sdp; return typeof sdp === "string" && /^a=candidate:/m.test(sdp); }
-      catch { return false; }
+      knownEmpty = false;
+      try {
+        const sdp = pc.localDescription?.sdp;
+        if (typeof sdp !== "string") return false;
+        const present = /^a=candidate:/m.test(sdp);
+        knownEmpty = !present;
+        return present;
+      } catch { return false; }
     };
     const done = (outcome) => {
       const ready = outcome !== "aborted" && hasCandidate();
-      try { observed?.(outcome); } catch {} resolve(ready);
+      try { observed?.(outcome, outcome === "complete" && knownEmpty); } catch {} resolve(ready);
     };
     if (pc.iceGatheringState === "complete" || signal?.aborted) return done(signal?.aborted ? "aborted" : "complete");
     let capped = false, settled = false;
@@ -260,8 +279,8 @@ function gathered(pc, capMs = 1_200, signal, observed) {
       pc.removeEventListener("icegatheringstatechange", changed);
       pc.removeEventListener("icecandidate", candidate);
       signal?.removeEventListener("abort", finish);
-      // Classification is diagnostic only. A getter failure must not prevent
-      // the original timer/abort completion from resolving its wait.
+      // A getter failure must not prevent the original timer/abort completion
+      // from resolving its wait or authorise an unknown gather as known empty.
       let outcome = "unknown";
       try { outcome = signal?.aborted ? "aborted" : pc.iceGatheringState === "complete" ? "complete" : "capped"; } catch {}
       done(outcome);
@@ -375,6 +394,7 @@ export function createHlsSwarm(options = {}) {
   return {
     attach: (hls) => swarm.attach(hls),
     updateTicket: (ticket) => swarm.updateTicket(ticket),
+    retryLocalCandidates: () => swarm.retryLocalCandidates(),
     stop: () => swarm.stop(),
     metrics: () => swarm.metrics(),
     peerConnections: () => swarm.peerConnections(),
@@ -465,6 +485,7 @@ class HlsSwarm {
     this.dials = new Map();
     this.receivedOffers = new Set();
     this.cooldowns = new Map();
+    this.localCandidateFailures = new Map();
     this.retries = new Map();
     this.openPeers = new Map();
     this.discovery = new NeighbourDiscovery();
@@ -603,6 +624,7 @@ class HlsSwarm {
     if (typeof this.options.peerSupplyHint !== "boolean" || (this.options.onPlayerHint !== null && typeof this.options.onPlayerHint !== "function")) return "invalid-player-hint-option";
     if (typeof this.options.abrIgnorePeers !== "boolean") return "invalid-abr-option";
     if (typeof this.options.zeroBudgetPeerRace !== "boolean") return "invalid-cached-race-option";
+    if (typeof this.options.bufferedMixedRanges !== "boolean") return "invalid-buffered-mixed-option";
     if (typeof this.options.lateHaveRace !== "boolean") return "invalid-late-have-race-option";
     if (typeof this.options.latePeerRace !== 'boolean' || this.options.latePeerRace && (mode !== 'peer-first' || !this.options.zeroBudgetPeerRace)) return 'invalid-late-peer-race-option';
     if (typeof this.options.sustainablePeerWait !== "boolean") return "invalid-sustainable-wait-option";
@@ -645,6 +667,7 @@ class HlsSwarm {
           startupRecovery: context => Math.max(this.options.originReserveMs,
             (percentile(this.#originSamples(context), 0.9) || 0) * 1.25 + 100),
           allowed: () => this.#servingAllowed() && hls.media?.paused !== true && !onCellular(),
+          prefetch: (context, permit, reconsidered) => this.#ownsWarmSource(context, permit.key, reconsidered),
           next: context => {
             const fragments = hls.levels?.[context.frag?.level]?.details?.fragments;
             if (!Array.isArray(fragments)) return [];
@@ -764,9 +787,30 @@ class HlsSwarm {
     return true;
   }
 
+  // A host may notify newly usable local ICE configuration. Only an actual
+  // gathered() no-candidate failure can release its own cooldown, once.
+  retryLocalCandidates() {
+    let attempted = 0;
+    this.#guard("local-candidates", () => {
+      if (this.stopped || this.disabledReason || !this.session?.pubkey) return;
+      const failures = [...this.localCandidateFailures];
+      this.localCandidateFailures.clear();
+      for (const [pubkey, until] of failures) {
+        if (this.stopped || this.cooldowns.get(pubkey) !== until || this.links.has(pubkey) || this.dials.has(pubkey) ||
+            this.dialChecks.has(pubkey) || this.banned.has(pubkey) || this.discovery.suppresses(pubkey) ||
+            !this.#hasCapacity() || !this.#hasOutgoingSlot()) continue;
+        this.cooldowns.delete(pubkey);
+        attempted++;
+        this.#guard("dial", () => this.#dial(pubkey));
+      }
+    });
+    return attempted;
+  }
+
   stop() {
     if (this.stopped) return;
     this.stopped = true;
+    this.localCandidateFailures.clear();
     this.#retireLatePeers('stop');
     this.uploadPacer?.stop();
     this.warmAhead?.stop();
@@ -844,14 +888,15 @@ class HlsSwarm {
     try { return (context && this.traceLoads.get(context)) ?? null; } catch { return null; }
   }
 
-  #traceBegin(context, budgetMs, limitMs, budgetGeometry) {
+  #traceBegin(context, budgetMs, limitMs, budgetGeometry, parentLoad) {
     if (!this.options.traceRequests) return;
     try {
       const load = this.traceLoadNext++;
       this.traceLoads.set(context, load);
       const integer = (value) => Number.isSafeInteger(value) ? value : null;
       this.#trace({ k: "load", load, at: this.#traceAt(), sn: integer(context.frag?.sn), level: integer(context.frag?.level), cc: integer(context.frag?.cc),
-        budgetMs: Math.round(budgetMs), limitMs: Math.round(limitMs), budgetGeometry: { ...budgetGeometry } });
+        budgetMs: Math.round(budgetMs), limitMs: Math.round(limitMs), budgetGeometry: { ...budgetGeometry },
+        ...(Number.isSafeInteger(parentLoad) && parentLoad > 0 ? { parentLoad } : {}) });
       return load;
     } catch {}
   }
@@ -1092,6 +1137,7 @@ class HlsSwarm {
         originReserveMs: this.options.originReserveMs,
         sustainablePeerWait: this.options.sustainablePeerWait,
         zeroBudgetPeerRace: this.options.zeroBudgetPeerRace,
+        bufferedMixedRanges: this.options.bufferedMixedRanges,
         lateHaveRace: this.options.lateHaveRace,
         lateWindowMs: this.options.lateWindowMs,
         maxPeers: this.options.maxPeers,
@@ -1172,6 +1218,7 @@ class HlsSwarm {
       get stats() { return this.peerStats || this.inner.stats; }
       get context() { return this.peerContext || this.inner.context; }
       load(context, config, callbacks) {
+        const enteredAt = swarm.options.bufferedMixedRanges ? now() : null;
         this.abort();
         this.releaseFetch = null;
         this.peerStats = null;
@@ -1180,10 +1227,77 @@ class HlsSwarm {
         if (context?.frag) swarm.peerFragments.delete(context.frag);
         const budgetGeometry = { source: "unobserved", positionSource: null, currentTime: null, bufferedEnd: null, playableEnd: null, fragmentStart: null, originReserveMs: null, uncappedMs: null };
         const budgetMs = swarm.#peerBudget(context, budgetGeometry);
+        let warmOwner = null, mixedGeometry = budgetGeometry, mixedSource = budgetGeometry.source;
+        const marker = context?.[WARM_AHEAD];
+        if (swarm.options.warmAhead && swarm.options.bufferedMixedRanges && typeof marker?.work === 'function') {
+          const work = marker.work, identity = warmContext(context);
+          let initial, abandonWarm;
+          try { initial = work(); if (initial?.reconsidered === true) abandonWarm = marker.abandon; } catch {}
+          const current = () => {
+            try {
+              const value = work(), at = now(), genuine = value?.genuine, demand = genuine && warmContext(genuine.context);
+              return Boolean(identity && initial && value && context[WARM_AHEAD] === marker && marker.work === work &&
+                value.context === context && value.signal === initial.signal && !value.signal.aborted &&
+                (value.reconsidered === true) === (initial.reconsidered === true) &&
+                (initial.reconsidered !== true || typeof abandonWarm === 'function' && marker.abandon === abandonWarm) &&
+                value.enteredAt === initial.enteredAt && value.deadline === initial.deadline &&
+                Number.isFinite(value.enteredAt) && Number.isFinite(value.deadline) && value.enteredAt <= at &&
+                value.deadline > value.enteredAt && value.deadline - value.enteredAt <= 8000 &&
+                (at < value.deadline || genuine && Number.isFinite(genuine.at) && genuine.at >= value.enteredAt && genuine.at < value.deadline && genuine.at <= at &&
+                  demand?.key === identity.key && demand.scope === identity.scope &&
+                  Math.abs(demand.context.frag.start - identity.context.frag.start) <= 1e-9 &&
+                  Math.abs(demand.context.frag.duration - identity.context.frag.duration) <= 1e-9));
+            } catch { return false; }
+          };
+          warmOwner = { current, reconsidered: initial?.reconsidered === true,
+            abandonOptional: () => {
+              try {
+                if (!abandonWarm || !current()) return false;
+                const value = work();
+                if (value?.reconsidered !== true || value.genuine !== null || !current()) return false;
+                // The engine atomically refuses abandonment if a genuine
+                // waiter joined; normal source fallback then keeps its parent.
+                return abandonWarm.call(marker) === true;
+              } catch { return false; }
+            } };
+          if (!current()) { this.inner.stats.aborted = true; return callbacks.onAbort?.(this.inner.stats, context, null); }
+          // Read the ordinary buffer formula without removing the real owner's
+          // marker: speculative credit and the original eight-second row stay intact.
+          const shadow = { ...context }; delete shadow[WARM_AHEAD];
+          const measured = { ...budgetGeometry }; swarm.#peerBudget(shadow, measured);
+          mixedSource = measured.source; mixedGeometry = { ...measured, source: 'warm-ahead' };
+          if (!current()) { this.inner.stats.aborted = true; return callbacks.onAbort?.(this.inner.stats, context, null); }
+        }
+        const abandonBeforeMixed = () => {
+          if (!warmOwner?.reconsidered) return false;
+          if (!warmOwner.abandonOptional() && warmOwner.current()) return false;
+          // No mixed callback owner exists yet; settle the future explicitly.
+          this.inner.stats.aborted = true; callbacks.onAbort?.(this.inner.stats, context, null); return true;
+        };
         swarm.#contributionContext(context);
         if (swarm.options.peerSupplyHint) swarm.#guard("player-hint", () => swarm.#reportPlayerHints(context, budgetMs));
         if (swarm.stopped || !context.frag || context.frag.sn === "initSegment" || (context.part && !swarm.options.swarmParts)
-          || (!swarm.options.serveOnCellular && onCellular())) return this.inner.load(context, config, callbacks);
+          || (!swarm.options.serveOnCellular && onCellular())) {
+          if (abandonBeforeMixed()) return;
+          return this.inner.load(context, config, callbacks);
+        }
+        if (swarm.options.bufferedMixedRanges && budgetMs === 0 && (!context[WARM_AHEAD] || warmOwner) && !this.hlsConfig.progressive && warmContext(context) &&
+            mixedSource === 'buffer' && mixedGeometry.uncappedMs > 25 &&
+            Number.isFinite(percentile(swarm.#originSamples(context), .9)) &&
+            swarm.hls?.media?.paused === false && swarm.hls.media.ended === false && swarm.hls.media.seeking === false &&
+            swarm.hls.media.readyState >= 3 && swarm.hls.media.playbackRate === 1) {
+          const limits = [config?.loadPolicy?.maxLoadTimeMs, config?.timeout].filter(value => Number.isFinite(value) && value > 0);
+          const parentMs = limits.length ? Math.min(...limits) : 0;
+          if (Number.isFinite(parentMs) && parentMs > 0) {
+            const cached = new Map([...swarm.links.values()].filter(link => swarm.#peerEntryAvailable(link, context) &&
+              link.pc?.connectionState === 'connected' && link.channel?.readyState === 'open' && link.supportsRanges &&
+              (swarm.remoteFraming.get(link.pubkey) ?? 1) >= 2 && !swarm.banned.has(link.pubkey) && link.have.size &&
+              (!swarm.options.admit || validTicket(swarm.admitted.get(link.pubkey)?.ticket)) && swarm.#bufferedRangeFlowAvailable(link))
+              .map(link => [link, { pc: link.pc, channel: link.channel, ticket: swarm.admitted.get(link.pubkey)?.ticket, have: new Set(link.have) }]));
+            if (cached.size) return this.loadBufferedMixed(context, config, callbacks, mixedGeometry, cached, enteredAt, parentMs, warmOwner);
+          }
+        }
+        if (abandonBeforeMixed()) return;
         if (budgetMs === 0 && swarm.options.zeroBudgetPeerRace && !this.hlsConfig.progressive
           && swarm.#rangesEnabled() && swarm.#peerRaceCapacity()) {
           const cached = new Map([...swarm.links.values()].filter(link => swarm.#peerEntryAvailable(link, context) && link.supportsRanges
@@ -1223,62 +1337,7 @@ class HlsSwarm {
           this.pendingCallbacks = null;
           cleanup();
           controller.abort();
-          swarm.counters.originFallbacks += 1;
-          // The unused hls.js loader requires a zero start timestamp on its
-          // first load. Its normal HTTP statistics replace the pending wait.
-          this.inner.stats.loading.start = 0;
-          // Fallback delegates errors, retries and progressive loading to the
-          // host's original loader. Only one path can call the player back.
-          const originStarted = now();
-          let completed = false, originKey = null;
-          const keyPromise = swarm.#segmentKey(context);
-          keyPromise.then((key) => {
-            if (!completed && !swarm.stopped) { originKey = key; this.releaseFetch = swarm.#claimOrigin(key); }
-          }).catch(() => {});
-          const finishOrigin = () => {
-            if (completed) return false;
-            completed = true; this.releaseFetch?.(); this.releaseFetch = null; return true;
-          };
-          const cancelPeer = this.cancel;
-          this.cancel = () => { finishOrigin(); return cancelPeer(); };
-          const originTrace = this.originTrace = swarm.#traceWholeOrigin(traceLoad, "fallback", () => this.inner.stats);
-          this.inner.load(context, config, {
-            ...callbacks,
-            onError: (...args) => { originTrace?.terminal("error", null, undefined, originTrace !== this.originTrace); finishOrigin(); callbacks.onError?.(...args); },
-            onTimeout: (...args) => { originTrace?.terminal("timeout", null, args[0], originTrace !== this.originTrace); finishOrigin(); callbacks.onTimeout?.(...args); },
-            onAbort: (...args) => { originTrace?.terminal("abort", null, args[0], originTrace !== this.originTrace); finishOrigin(); callbacks.onAbort?.(...args); },
-            onSuccess: (response, stats, ctx, details) => {
-              if (completed) return;
-              const receivedMs = firstByteWallMs(stats);
-              const { copy, size } = swarm.#originCopy(response, context);
-              if (completed) return;
-              // Publish retained source bytes before Hls synchronously disposes
-              // the loader and withdraws its already-advertised FETCH claim.
-              if (originKey && copy) swarm.#hold(originKey, new Uint8Array(copy));
-              if (!finishOrigin()) return;
-              this.pendingCallbacks = null;
-              originTrace?.terminal("payload", size || null, stats, originTrace !== this.originTrace);
-              pushSample(swarm.originLatencySamples, now() - originStarted);
-              swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - originStarted);
-              if (swarm.options.peerSupplyHint && size) {
-                const rendition = swarm.#renditionContext(context);
-                if (!swarm.hintSizes.has(rendition) && swarm.hintSizes.size >= 16) swarm.hintSizes.delete(swarm.hintSizes.keys().next().value);
-                swarm.hintSizes.set(rendition, size);
-                const elapsedMs = now() - originStarted;
-                if (elapsedMs > 0) pushSample(swarm.hintOriginRates, size / elapsedMs);
-              }
-              callbacks.onSuccess(response, stats, ctx, details);
-              swarm.#noteOriginClock(details, receivedMs);
-              if (size && !swarm.stopped) swarm.#guard("peer-first-origin", async () => {
-                swarm.counters.originLoaded += 1;
-                swarm.counters.bytesFromOrigin += size;
-                if (!originKey) {
-                  const key = await keyPromise;
-                  if (copy && !swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
-                }
-              });
-            },
-          });
+          this.loadWholeOrigin(context, config, callbacks, traceLoad);
         };
         if (budgetMs === 0) {
           traceLoad = swarm.#traceBegin(context, 0, 0, budgetGeometry);
@@ -1325,12 +1384,268 @@ class HlsSwarm {
           }
         });
       }
-      loadCachedRace(context, config, callbacks, budgetGeometry, cached) {
-        const traceLoad = swarm.#traceBegin(context, 0, swarm.options.maxPeerWaitMs, budgetGeometry);
-        const token = {}, controller = new AbortController(), t0 = now();
+      loadBufferedMixed(context, config, callbacks, geometry, captured, enteredAt, parentMs, warmOwner = null) {
+        config = { ...config, loadPolicy: { ...config?.loadPolicy } };
+        const token = {}, controller = new AbortController(), media = swarm.hls.media, hls = swarm.hls;
+        const generation = swarm.latePeerGeneration, stream = swarm.options.streamEvent?.id, identity = warmContext(context);
+        const fragment = context.frag, start = fragment.start, duration = fragment.duration;
+        const bufferDeadline = enteredAt + (geometry.playableEnd - geometry.currentTime) * 1000;
+        const recoveryDeadline = Math.min(enteredAt + parentMs, bufferDeadline);
+        const mixedEnd = Math.min(recoveryDeadline, bufferDeadline - geometry.originReserveMs);
+        const firstMs = config?.loadPolicy?.maxTimeToFirstByteMs;
+        const firstDeadline = Math.min(recoveryDeadline, enteredAt + (Number.isFinite(firstMs) && firstMs > 0 ? firstMs : parentMs));
+        const setupDeadline = Math.min(enteredAt + 25, recoveryDeadline);
+        // Mixed completion retains a source recovery for the next genuine load;
+        // its peer remainder also keeps its own measured source recovery.
+        // Whole fallback retains the original parent and first-byte budgets.
+        const limit = Math.max(enteredAt, Math.min(mixedEnd - geometry.originReserveMs,
+          enteredAt + Math.min(2500, swarm.options.maxPeerWaitMs)));
+        const traceLoad = swarm.#traceBegin(context, 0, limit - enteredAt, geometry);
+        let phase = 'mixed', originInvoked = false, setupTimer, recoveryTimer, retireSource;
+        let observedScope = null, observedGeometry = null;
+        const traceMixed = (reason, at) => {
+          if (!swarm.options.traceRequests) return;
+          try {
+            at ??= now();
+            const number = value => Number.isFinite(value) ? value : null;
+            swarm.#trace({ k: 'mixedScope', load: traceLoad, at: swarm.#traceAt(at), phase, reason,
+              ms: Math.round(at - enteredAt), setupRemainingMs: Math.round(setupDeadline - at),
+              peerRemainingMs: Math.round(limit - at), recoveryRemainingMs: Math.round(recoveryDeadline - at),
+              mixedRemainingMs: Math.round(mixedEnd - at), nextOriginReserveMs: number(geometry.originReserveMs),
+              firstByteRemainingMs: Math.round(firstDeadline - at), originInvoked,
+              capturedGeometry: Object.fromEntries(['currentTime', 'playableEnd', 'fragmentStart', 'originReserveMs',
+                'originRecoveryMs', 'uncappedMs', 'sustainableMs', 'durationMs'].map(name => [name, number(geometry[name])])
+                .concat([['fragmentDurationSeconds', number(duration)]])),
+              currentGeometry: observedGeometry && { ...observedGeometry }, scope: observedScope && { ...observedScope } });
+          } catch {}
+        };
+        this.active = token; this.pendingCallbacks = { callbacks, context };
+        Object.assign(this.inner.stats, { aborted: false, loaded: 0, total: 0, chunkCount: 0,
+          loading: { start: enteredAt, first: 0, end: 0 } });
+        const owns = () => this.active === token && phase !== 'done';
+        const cleanup = () => {
+          clearTimeout(setupTimer); clearTimeout(recoveryTimer);
+          swarm.lifecycle.signal.removeEventListener('abort', fallback);
+        };
+        const expire = (reason = 'recovery-timer') => {
+          if (!owns()) return;
+          traceMixed(reason);
+          retireSource?.();
+          if (!owns()) return;
+          this.active = null; this.pendingCallbacks = null; phase = 'done'; cleanup(); controller.abort();
+          try { this.inner.abort(); } catch {}
+          callbacks.onTimeout?.(this.inner.stats, context, null);
+        };
+        const deliver = (name, args) => {
+          if (!owns()) return false;
+          if (now() >= recoveryDeadline || warmOwner && !warmOwner.current()) { expire('terminal-after-recovery'); return false; }
+          traceMixed(name);
+          this.active = null; this.pendingCallbacks = null; phase = 'done'; cleanup(); controller.abort();
+          callbacks[name]?.(...args);
+          return true;
+        };
+        const fallback = (reason = 'setup-timer') => {
+          if (!owns() || phase === 'origin') return;
+          traceMixed(typeof reason === 'string' ? reason : 'lifecycle-abort');
+          if (warmOwner && !warmOwner.current()) return expire('warm-owner-expired');
+          if (!originInvoked && warmOwner?.abandonOptional()) { traceMixed('optional-reconsideration-abandoned'); return; }
+          if (!owns()) return;
+          phase = 'origin'; clearTimeout(setupTimer); controller.abort();
+          const remaining = remainingOriginConfig(config, recoveryDeadline, firstDeadline);
+          if (!remaining) return expire('fallback-budget-expired');
+          const wrapped = { ...callbacks, onProgress: (...args) => {
+            if (owns() && now() < recoveryDeadline && (!warmOwner || warmOwner.current())) callbacks.onProgress?.(...args);
+            else if (owns()) expire('progress-after-recovery');
+          } };
+          for (const name of ['onSuccess', 'onError', 'onTimeout', 'onAbort']) wrapped[name] = (...args) => deliver(name, args);
+          try {
+            retireSource = this.loadWholeOrigin(context, remaining, wrapped, traceLoad, () => {
+              if (owns() && (now() >= recoveryDeadline || warmOwner && !warmOwner.current())) expire('source-owner-after-recovery');
+              return owns() && phase === 'origin';
+            }, () => {
+              const ready = (!warmOwner || warmOwner.current()) && remainingOriginConfig(config, recoveryDeadline, firstDeadline);
+              if (!ready) expire('source-invocation-budget-expired');
+              return ready;
+            });
+          } catch {
+            traceMixed('source-invocation-threw');
+            const pending = owns(); this.cancel?.(); this.pendingCallbacks = null;
+            if (pending) callbacks.onError?.({ code: 0, text: 'Origin loader failed' }, context, null, this.inner.stats);
+          }
+        };
+        this.cancel = () => {
+          const pending = owns();
+          if (pending) traceMixed('cancel');
+          this.active = null; phase = 'done'; cleanup(); controller.abort();
+          try { this.inner.abort(); } catch {}
+          return pending;
+        };
+        const scopeCurrent = () => {
+          const scope = {}, currentGeometry = {}; let failed = null;
+          const seen = (name, value) => { if (swarm.options.traceRequests) scope[name] = value; if (!value) failed ??= name; return value; };
+          const measured = (name, value) => { if (swarm.options.traceRequests) currentGeometry[name] = Number.isFinite(value) ? value : null; return value; };
+          try {
+            const currentIdentity = warmContext(context);
+            const valid = seen('notStopped', !swarm.stopped) && (!warmOwner || seen('warmOwner', warmOwner.current())) && seen('hls', swarm.hls === hls) && seen('media', hls.media === media) &&
+              seen('generation', swarm.latePeerGeneration === generation) && seen('stream', swarm.options.streamEvent?.id === stream) &&
+              seen('unpaused', media.paused === false) && seen('unended', media.ended === false) && seen('unseeking', media.seeking === false) &&
+              seen('unitRate', measured('playbackRate', media.playbackRate) === 1) && seen('ready', measured('readyState', media.readyState) >= 3) &&
+              seen('fragment', context.frag === fragment) && seen('start', measured('fragmentStart', fragment.start) === start) &&
+              seen('duration', measured('fragmentDurationSeconds', fragment.duration) === duration) && seen('identity', currentIdentity?.key === identity?.key);
+            if (swarm.options.traceRequests) { observedScope = scope; observedGeometry = currentGeometry; }
+            if (!valid) traceMixed('scope-' + failed);
+            return valid;
+          } catch {
+            if (swarm.options.traceRequests) { observedScope = scope; observedGeometry = currentGeometry; }
+            traceMixed('scope-exception'); return false;
+          }
+        };
+        const current = () => {
+          const valid = scopeCurrent(), at = now();
+          let failed = null;
+          const seen = (name, value) => { if (swarm.options.traceRequests && observedScope) observedScope[name] = value; if (!value) failed ??= name; return value; };
+          const result = valid && seen('owns', owns()) && seen('mixed', phase === 'mixed') && seen('signal', !controller.signal.aborted) &&
+            seen('currentNotStopped', !swarm.stopped) && seen('recovery', at < mixedEnd) && seen('setup', originInvoked || at < setupDeadline);
+          if (valid && !result) traceMixed('current-' + failed, at);
+          return result;
+        };
+        const entryLinkCurrent = link => {
+          const entry = captured.get(link);
+          return Boolean(entry && swarm.links.get(link.pubkey) === link && link.pc === entry.pc && link.channel === entry.channel &&
+            link.pc?.connectionState === 'connected' && link.channel?.readyState === 'open' &&
+            (!swarm.options.admit || (validTicket(entry.ticket) && swarm.admitted.get(link.pubkey)?.ticket === entry.ticket)));
+        };
+        const origin = { Loader: BaseLoader, config: this.hlsConfig,
+          get loaderConfig() { return remainingOriginConfig(config, recoveryDeadline, firstDeadline); } };
+        const plan = { deadline: limit, limit, originReserveMs: Math.max(0, mixedEnd - limit), expired: false, onDeadline: null, origin,
+          cachedOnly: new Map([...captured].map(([link, entry]) => [link, entry.have])), lateHaveRace: false,
+          bufferedMixed: true, currentValid: current, peerCurrentValid: () => current() && now() < limit,
+          entryLinkCurrent, revalidateAuthority: true, extend: () => false,
+          beforeOriginLoad: () => {
+            if (!current() || now() >= firstDeadline) { fallback('before-origin-invalid'); return false; }
+            // This proves SDK invocation, not DNS/socket/wire dispatch by a
+            // custom or asynchronously configured player loader.
+            originInvoked = true; clearTimeout(setupTimer); traceMixed('origin-invoked'); return true;
+          } };
+        setupTimer = setTimeout(fallback, Math.max(0, setupDeadline - now()));
+        recoveryTimer = setTimeout(expire, Math.max(0, recoveryDeadline - now()));
+        swarm.lifecycle.signal.addEventListener('abort', fallback, { once: true });
+        traceMixed('entry');
+        if (firstDeadline - enteredAt <= 25) return fallback('entry-first-byte-budget');
+        if (limit - enteredAt <= 25) return fallback('entry-peer-budget');
+        if (!current()) return fallback('entry-current-invalid');
+        swarm.#peerFirst(context, controller.signal, plan, 0, geometry).then(result => {
+          if (!owns() || phase !== 'mixed') return;
+          if (plan.declineToCached && current() && swarm.options.zeroBudgetPeerRace) {
+            if (warmOwner?.abandonOptional()) { traceMixed('optional-reconsideration-abandoned'); return; }
+            if (!owns()) return;
+            const remaining = remainingOriginConfig(config, recoveryDeadline, firstDeadline);
+            const cached = new Map([...captured].filter(([link]) => entryLinkCurrent(link)).map(([link, entry]) => [link, entry.have]));
+            if (remaining && cached.size) {
+              traceMixed('cached-handoff');
+              this.active = null; this.pendingCallbacks = null; phase = 'done'; cleanup(); controller.abort();
+              let settled = false;
+              const handed = { ...callbacks };
+              for (const name of ['onSuccess', 'onError', 'onTimeout', 'onAbort']) handed[name] = (...args) => {
+                if (settled) return; settled = true; callbacks[name]?.(...args);
+              };
+              try { return this.loadCachedRace(context, remaining, handed, geometry, cached,
+                { enteredAt, recoveryDeadline, firstDeadline, scopeCurrent, entryLinkCurrent, ownerCurrent: warmOwner?.current, parentLoad: traceLoad }); }
+              catch {
+                traceMixed('cached-handoff-threw');
+                this.cancel?.(); this.pendingCallbacks = null;
+                if (!settled) handed.onError({ code: 0, text: 'Origin loader failed' }, context, null, this.inner.stats);
+                return;
+              }
+            }
+          }
+          if (!result) return fallback('peer-result-empty');
+          if (!current()) return fallback('peer-result-current-invalid');
+          if (!originInvoked) return fallback('peer-result-no-origin');
+          if (!plan.revalidateAuthority?.()) return fallback('peer-result-authority');
+          if (!current()) return fallback('peer-result-recheck-invalid');
+          traceMixed('peer-result-delivered');
+          this.active = null; this.pendingCallbacks = null; phase = 'done'; cleanup(); controller.abort();
+          swarm.#completePeerLoad(this, result, context, callbacks, enteredAt);
+        }).catch(error => {
+          if (owns() && phase === 'mixed') { swarm.#noteError('buffered-mixed', error); fallback('peer-promise-rejected'); }
+        });
+      }
+      loadWholeOrigin(context, config, callbacks, traceLoad, current = null, prepare = null) {
+        swarm.counters.originFallbacks += 1;
+        // The unused hls.js loader requires a zero start timestamp on its
+        // first load. Its normal HTTP statistics replace the pending wait.
+        this.inner.stats.loading.start = 0;
+        // Fallback delegates errors, retries and progressive loading to the
+        // host's original loader. Only one path can call the player back.
+        const originStarted = now();
+        let completed = false, originKey = null;
+        const keyPromise = swarm.#segmentKey(context);
+        keyPromise.then((key) => {
+          if (!completed && !swarm.stopped) { originKey = key; this.releaseFetch = swarm.#claimOrigin(key); }
+        }).catch(() => {});
+        const finishOrigin = () => {
+          if (completed) return false;
+          completed = true; this.releaseFetch?.(); this.releaseFetch = null; return true;
+        };
+        const cancelPeer = this.cancel;
+        this.cancel = () => { finishOrigin(); return cancelPeer(); };
+        const originTrace = this.originTrace = swarm.#traceWholeOrigin(traceLoad, "fallback", () => this.inner.stats);
+        const load = this.inner.load;
+        const sourceCallbacks = {
+          ...callbacks,
+          onError: (...args) => { originTrace?.terminal("error", null, undefined, originTrace !== this.originTrace); finishOrigin(); callbacks.onError?.(...args); },
+          onTimeout: (...args) => { originTrace?.terminal("timeout", null, args[0], originTrace !== this.originTrace); finishOrigin(); callbacks.onTimeout?.(...args); },
+          onAbort: (...args) => { originTrace?.terminal("abort", null, args[0], originTrace !== this.originTrace); finishOrigin(); callbacks.onAbort?.(...args); },
+          onSuccess: (response, stats, ctx, details) => {
+            if (completed) return;
+            if (current && !current()) { finishOrigin(); return; }
+            const receivedMs = firstByteWallMs(stats);
+            const { copy, size } = swarm.#originCopy(response, context);
+            if (current && !current()) { finishOrigin(); return; }
+            if (completed) return;
+            // Publish retained source bytes before Hls synchronously disposes
+            // the loader and withdraws its already-advertised FETCH claim.
+            if (originKey && copy) swarm.#hold(originKey, new Uint8Array(copy));
+            if (!finishOrigin()) return;
+            this.pendingCallbacks = null;
+            originTrace?.terminal("payload", size || null, stats, originTrace !== this.originTrace);
+            pushSample(swarm.originLatencySamples, now() - originStarted);
+            swarm.#renditionSample(swarm.renditionOriginSamples, context, now() - originStarted);
+            if (swarm.options.peerSupplyHint && size) {
+              const rendition = swarm.#renditionContext(context);
+              if (!swarm.hintSizes.has(rendition) && swarm.hintSizes.size >= 16) swarm.hintSizes.delete(swarm.hintSizes.keys().next().value);
+              swarm.hintSizes.set(rendition, size);
+              const elapsedMs = now() - originStarted;
+              if (elapsedMs > 0) pushSample(swarm.hintOriginRates, size / elapsedMs);
+            }
+            const accepted = callbacks.onSuccess(response, stats, ctx, details);
+            if (current && accepted !== true) return;
+            swarm.#noteOriginClock(details, receivedMs);
+            if (size && !swarm.stopped) swarm.#guard("peer-first-origin", async () => {
+              swarm.counters.originLoaded += 1;
+              swarm.counters.bytesFromOrigin += size;
+              if (!originKey) {
+                const key = await keyPromise;
+                if (copy && !swarm.stopped) swarm.#hold(key, new Uint8Array(copy));
+              }
+            });
+          },
+        };
+        if (current && !current()) { finishOrigin(); return finishOrigin; }
+        const invocationConfig = prepare ? prepare() : config;
+        if (!invocationConfig) { finishOrigin(); return finishOrigin; }
+        load.call(this.inner, context, invocationConfig, sourceCallbacks);
+        return finishOrigin;
+      }
+      loadCachedRace(context, config, callbacks, budgetGeometry, cached, absolute = null) {
+        const traceLoad = swarm.#traceBegin(context, 0, swarm.options.maxPeerWaitMs, budgetGeometry, absolute?.parentLoad);
+        const token = {}, controller = new AbortController(), t0 = absolute?.enteredAt ?? now();
+        const peerDeadline = Math.min(t0 + swarm.options.maxPeerWaitMs, absolute?.recoveryDeadline ?? Infinity);
         const partial = swarm.#partialHttpWinner(controller);
-        let originPending = true, originClaimed = false, originKey = null, keyPromise, timer;
+        let originPending = true, originClaimed = false, originKey = null, keyPromise, timer, originTimer, expireOrigin;
         this.active = token;
+        if (absolute) partial.winnerValid = () => originPending && this.active === token && absolute.scopeCurrent() && now() < peerDeadline;
         this.pendingCallbacks = { callbacks, context };
         Object.assign(this.inner.stats, { aborted: false, loaded: 0, total: 0, chunkCount: 0,
           loading: { start: 0, first: 0, end: 0 } });
@@ -1349,29 +1664,44 @@ class HlsSwarm {
         this.cancel = () => {
           const pending = originPending && this.active === token;
           originPending = false; this.active = null;
+          clearTimeout(originTimer);
           stopPeer();
           try { this.inner.abort(); } catch {}
           return pending;
         };
-        const finishOrigin = winner => {
+        const finishOrigin = (winner, allowExpired = false) => {
           if (!originPending || this.active !== token) return false;
+          if (absolute && !allowExpired && now() >= absolute.recoveryDeadline) { expireOrigin(); return false; }
           let proof = null;
           if (winner === true) try { proof = partial.prepare?.(); } catch {}
           if (!originPending || this.active !== token) { if (proof) proof.entries.length = 0; return false; }
+          if (absolute && !allowExpired && now() >= absolute.recoveryDeadline) {
+            if (proof) proof.entries.length = 0; expireOrigin(); return false;
+          }
           originPending = false; this.active = null; this.pendingCallbacks = null;
+          clearTimeout(originTimer);
           stopPeer(proof);
           this.releaseFetch?.(); this.releaseFetch = null;
           return true;
         };
-        timer = setTimeout(stopPeer, swarm.options.maxPeerWaitMs);
+        expireOrigin = () => {
+          if (!finishOrigin(false, true)) return;
+          try { this.inner.abort(); } catch {}
+          callbacks.onTimeout?.(this.inner.stats, context, null);
+        };
+        if (absolute) originTimer = setTimeout(expireOrigin, Math.max(0, absolute.recoveryDeadline - now()));
+        timer = setTimeout(stopPeer, absolute ? Math.max(0, peerDeadline - now()) : swarm.options.maxPeerWaitMs);
         swarm.counters.originFallbacks += 1;
         swarm.#peerEligibility(context, 0, "no-budget", null, budgetGeometry);
         // Start HTTP before hashing a key or fetching/verifying metadata.
         const originTrace = this.originTrace = swarm.#traceWholeOrigin(traceLoad, "cached", () => this.inner.stats);
+        if (absolute?.ownerCurrent && !absolute.ownerCurrent()) return expireOrigin();
         try { this.inner.load(context, config, {
           ...callbacks,
           onProgress: (...args) => {
+            if (absolute?.ownerCurrent && !absolute.ownerCurrent()) return expireOrigin();
             if (!originPending || this.active !== token) { originTrace?.progress(undefined, null, true); return; }
+            if (absolute && now() >= absolute.recoveryDeadline) return expireOrigin();
             const payload = args[2], hasPayload = payload?.byteLength > 0;
             if (hasPayload) {
               const firstClaim = !originClaimed; originClaimed = true;
@@ -1387,11 +1717,14 @@ class HlsSwarm {
           onTimeout: (...args) => { originTrace?.terminal("timeout", null, args[0], !originPending || this.active !== token); if (finishOrigin()) callbacks.onTimeout?.(...args); },
           onAbort: (...args) => { originTrace?.terminal("abort", null, args[0], !originPending || this.active !== token); if (finishOrigin()) callbacks.onAbort?.(...args); },
           onSuccess: (response, stats, ctx, details) => {
+            if (absolute?.ownerCurrent && !absolute.ownerCurrent()) return expireOrigin();
             if (!originPending || this.active !== token) originTrace?.terminal("payload", null, undefined, true);
             if (!originPending || this.active !== token) return;
+            if (absolute && now() >= absolute.recoveryDeadline) return expireOrigin();
             const receivedMs = firstByteWallMs(stats);
             const { copy, size, positiveBody } = swarm.#originCopy(response, context);
             if (!originPending || this.active !== token) return;
+            if (absolute && now() >= absolute.recoveryDeadline) return expireOrigin();
             if (originKey && copy) swarm.#hold(originKey, new Uint8Array(copy));
             if (!finishOrigin(positiveBody)) return;
             originTrace?.terminal("payload", size || null, stats);
@@ -1413,12 +1746,17 @@ class HlsSwarm {
         keyPromise.then(key => {
           if (originPending && !swarm.stopped) { originKey = key; this.releaseFetch = swarm.#claimOrigin(key); }
         }).catch(() => {});
-        const plan = { deadline: t0 + swarm.options.maxPeerWaitMs, limit: t0 + swarm.options.maxPeerWaitMs,
+        const plan = { deadline: peerDeadline, limit: peerDeadline,
           originReserveMs: 0, expired: false, onDeadline: null, cachedOnly: cached, lateHaveRace: swarm.options.lateHaveRace,
           peerOnly: true, extend: () => false, [OWNED_HTTP_WINNER]: partial };
+        if (absolute) Object.assign(plan, { revalidateAuthority: true, entryLinkCurrent: absolute.entryLinkCurrent,
+          currentValid: () => originPending && !originClaimed && this.active === token && absolute.scopeCurrent() && now() < peerDeadline });
         swarm.#peerFirst(context, controller.signal, plan, 0, budgetGeometry).then(result => {
           if (!result || !originPending || originClaimed || this.active !== token || controller.signal.aborted || swarm.stopped || now() >= plan.limit) return;
+          if (absolute && (!plan.currentValid() || typeof plan.revalidateAuthority !== 'function' ||
+              !plan.revalidateAuthority() || !plan.currentValid())) return;
           originPending = false; this.active = null; this.pendingCallbacks = null;
+          clearTimeout(originTimer);
           stopPeer();
           this.releaseFetch?.(); this.releaseFetch = null;
           // The losing HTTP arm must never surface its abort/error callback.
@@ -1837,6 +2175,29 @@ class HlsSwarm {
     if (!previous) for (const link of this.links.values()) link.sendContribution(this.#servingAllowed(), rendition);
   }
 
+  #ownsWarmSource(context, key, requireExact = false) {
+    const frag = context?.frag;
+    if (!this.options.bufferedMixedRanges || !this.#rangesEnabled() ||
+        this.options.transferWorkerUrl !== undefined && this.transferWorkerState !== 'ready' || frag?.type !== 'main' ||
+        !Number.isInteger(frag.level) || frag.level < 0 || typeof this.hls?.levels?.[frag.level]?.details?.live !== 'boolean' ||
+        !/^[0-9a-f]{64}$/.test(key) || !/^[0-9a-f]{64}$/.test(this.session?.pubkey)) return !requireExact;
+    const rendition = this.#renditionContext(context), discovery = this.discovery.contexts.get('main');
+    const candidates = [...this.links.values()].filter(peer => !peer.closed && /^[0-9a-f]{64}$/.test(peer.pubkey) && !this.banned.has(peer.pubkey) &&
+      peer.pc?.connectionState === 'connected' && peer.channel?.readyState === 'open' && peer.supportsRanges &&
+      (this.remoteFraming.get(peer.pubkey) ?? 1) >= 2 && this.#servesRendition(peer, rendition) &&
+      (!this.options.admit || validTicket(this.admitted.get(peer.pubkey)?.ticket)) &&
+      !(discovery?.rendition === rendition && this.discovery.stale(discovery, peer.pubkey)));
+    // A held exact object can already feed the ordinary mixed path. Otherwise
+    // avoid duplicating a future whole GET with a current contributor. Both
+    // parsed live and VOD windows can supply optional futures. Unknown playlist
+    // state keeps ordinary source loading; genuine rendezvous is unchanged.
+    if (candidates.some(peer => peer.have.has(key))) return true;
+    if (requireExact) return false;
+    if (!candidates.length) return true;
+    const target = BigInt('0x' + key), local = target ^ BigInt('0x' + this.session.pubkey);
+    return candidates.every(peer => (target ^ BigInt('0x' + peer.pubkey)) >= local);
+  }
+
   #shouldWaitForOrigin(key, rendition, context) {
     const at = Date.now();
     const candidates = [...this.links.values()].filter((peer) => !peer.closed && peer.contribution?.serving
@@ -1874,9 +2235,9 @@ class HlsSwarm {
   }
 
   #peerBudget(context, geometry) {
-    // Speculation never reserves a positive peer-only wait or asks a mixed
-    // transfer to create origin ranges. Cached peers can still race the one
-    // immediately started whole-object HTTP request through the usual path.
+    // Speculation never reserves a positive exclusive peer wait. Eligible
+    // owned work measures buffer geometry separately before choosing a mixed
+    // plan; the original marker still defers accepted credit until consumption.
     if (context?.[WARM_AHEAD]) { geometry.source = "warm-ahead"; return 0; }
     const media = this.hls?.media;
     let sustainableMs = Infinity;
@@ -2071,6 +2432,17 @@ class HlsSwarm {
     return state;
   }
 
+  #bufferedRangeFlowAvailable(link) {
+    const state = this.linkTimings.get(link), at = now();
+    const known = Boolean(state?.firstBytes.some(row => at - row.at <= LINK_TIMING_TTL_MS && Number.isFinite(row.value)) &&
+      state.flows.some(row => at - row.at <= LINK_TIMING_TTL_MS && row.flowMs >= MIN_LINK_FLOW_MS && row.value > 0));
+    // Unknown lanes start with one signed piece. Verified refills can use
+    // only the Core's bounded, still-unissued origin tail.
+    // Keep ordinary HTTP immediate during an unproductive probe's cooldown.
+    return known || at - (state?.probeAt ?? -Infinity) >= LINK_REFRESH_MS ||
+      at - (state?.usefulAt ?? -Infinity) <= LINK_TIMING_TTL_MS;
+  }
+
   #observeLinkTiming(link, result, preserveUseful = false) {
     if (this.stopped || link.closed) return;
     if (["abort", "timeout", "abandoned", "none", "send-error"].includes(result.outcome)) {
@@ -2205,6 +2577,10 @@ class HlsSwarm {
     // engine is unavailable. The ordinary origin wrapper still owns caching
     // and statistics; unconfigured live/VOD coordination is unchanged.
     if (this.options.transferWorkerUrl !== undefined && this.transferWorkerState !== "ready") return null;
+    if (plan.bufferedMixed && !this.#rangesEnabled()) {
+      this.#peerEligibility(context, budgetMs, "cached-ranges-unavailable", null, budgetGeometry, undefined, undefined, false, traceLoad);
+      return null;
+    }
     const discoveryContext = this.discovery.contexts.get(context.frag.type || "main");
     const key = plan.knownKey ?? await this.#segmentKey(context);
     if (signal.aborted || this.stopped || plan.currentValid && !plan.currentValid()) {
@@ -2212,9 +2588,22 @@ class HlsSwarm {
       return null;
     }
     if (plan.cachedOnly) {
-      const matching = (atEntry) => [...plan.cachedOnly].filter(([link, have]) => (!atEntry || have.has(key)) && link.have.has(key)
-        && this.links.get(link.pubkey) === link && this.#peerEntryAvailable(link, context) && !this.banned.has(link.pubkey)
-        && link.supportsRanges === true && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2).map(([link]) => link);
+      let cachedEntry;
+      const matching = (atEntry) => {
+        const entries = [...plan.cachedOnly];
+        const observed = atEntry ? { stage: "cached-entry", capturedLinks: entries.length,
+          entryChecked: 0, entryMatched: 0, currentChecked: 0, currentMatched: 0, eligibleMatched: 0 } : null;
+        const checked = (name, value) => {
+          if (observed) { observed[name + "Checked"]++; if (value) observed[name + "Matched"]++; }
+          return value;
+        };
+        const holders = entries.filter(([link, have]) => (!atEntry || checked("entry", have.has(key))) && checked("current", link.have.has(key))
+          && this.links.get(link.pubkey) === link && this.#peerEntryAvailable(link, context) && !this.banned.has(link.pubkey)
+          && link.supportsRanges === true && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 &&
+          (!plan.entryLinkCurrent || plan.entryLinkCurrent(link))).map(([link]) => link);
+        if (observed) { observed.eligibleMatched = holders.length; cachedEntry = observed; }
+        return holders;
+      };
       let holders = matching(true);
       if (!holders.length && plan.lateHaveRace) {
         // HTTP is already running. Observe actual HAVE on the accepted
@@ -2230,8 +2619,15 @@ class HlsSwarm {
       // Freeze once. Failure or corruption does not open another late-HAVE
       // trial or admit a holder that appeared after this snapshot.
       plan.cachedHolders = new Set(holders);
-      if (!plan.cachedHolders.size || !this.#rangesEnabled()) return null;
-      this.counters.zeroBudgetPeerRaces += 1;
+      if (!plan.cachedHolders.size) {
+        this.#peerEligibility(context, budgetMs, "cached-no-matching-have", false, budgetGeometry, cachedEntry, undefined, false, traceLoad);
+        return null;
+      }
+      if (!this.#rangesEnabled()) {
+        this.#peerEligibility(context, budgetMs, "cached-ranges-unavailable", true, budgetGeometry, cachedEntry, undefined, false, traceLoad);
+        return null;
+      }
+      if (!plan.bufferedMixed) this.counters.zeroBudgetPeerRaces += 1;
     }
     const rendition = this.#renditionContext(context);
     const holderContext = discoveryContext?.rendition === rendition && this.discovery.contexts.get(discoveryContext.mediaType) === discoveryContext
@@ -2498,18 +2894,29 @@ class HlsSwarm {
   // the core's Transfer (CORE-SPEC section 6). Undefined when it does not
   // apply, so the single-holder path runs; null sends the load to origin.
   async #multiHolder(context, signal, plan, key, commitment, discoveryContext, traceLoad) {
-    if (plan.currentValid && !plan.currentValid()) return null;
+    const traceStarted = this.options.traceRequests ? now() : null;
+    const traceFinish = (reason, delivered = false, verifiedBytes = 0, originBytes = 0) => {
+      if (!this.options.traceRequests) return;
+      try {
+        const at = now();
+        this.#trace({ k: 'xferFinish', load: traceLoad, at: this.#traceAt(at), ms: Math.round(at - traceStarted), reason, delivered,
+          peerRemainingMs: Math.round(plan.limit - at), recoveryRemainingMs: Math.round(plan.limit + plan.originReserveMs - at),
+          bufferedMixed: plan.bufferedMixed === true, peerOnly: plan.peerOnly === true, verifiedBytes, originBytes });
+      } catch {}
+    };
+    if (plan.currentValid && !plan.currentValid()) { traceFinish('entry-current-invalid'); return null; }
     const worker = this.options.transferWorkerUrl !== undefined;
     // An explicit worker opt-in must never quietly retry a large transfer on
     // the main thread after worker startup, policy, resource or runtime failure.
-    if (worker && (!this.#rangesEnabled() || this.transferWorkerState !== "ready")) return null;
-    if (!this.#rangesEnabled() || !Array.isArray(commitment.pieces)) return undefined;
+    if (worker && (!this.#rangesEnabled() || this.transferWorkerState !== "ready")) { traceFinish('worker-unavailable'); return null; }
+    if (!this.#rangesEnabled() || !Array.isArray(commitment.pieces)) { traceFinish('ranges-unavailable'); return undefined; }
     // An origin that once ignored a range sends whole segments, so a piece
     // from it would cost a full download and then fail the transfer.
     const originHost = urlOrigin(context.url);
-    if (!plan.peerOnly && this.originsWithoutRanges.has(originHost)) return worker ? null : undefined;
+    if (!plan.peerOnly && this.originsWithoutRanges.has(originHost)) { traceFinish('origin-without-ranges'); return worker ? null : undefined; }
     const eligible = link => this.links.get(link.pubkey) === link && !link.closed && link.supportsRanges === true && link.have.has(key)
-      && !this.banned.has(link.pubkey) && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 && (!plan.cachedHolders || plan.cachedHolders.has(link));
+      && !this.banned.has(link.pubkey) && (this.remoteFraming.get(link.pubkey) ?? 1) >= 2 && (!plan.cachedHolders || plan.cachedHolders.has(link))
+      && (!plan.entryLinkCurrent || plan.entryLinkCurrent(link));
     const captured = [...this.links.values()].filter(link => eligible(link) && this.#peerEntryAvailable(link, context));
     const available = () => captured.filter(link => eligible(link) && this.#peerFree(link));
     let candidates = available();
@@ -2518,26 +2925,40 @@ class HlsSwarm {
       candidates = available();
     }
     if (this.stopped || signal.aborted || now() >= plan.limit ||
-        typeof plan.revalidateAuthority === 'function' && !plan.revalidateAuthority()) return null;
-    if (!candidates.length) return worker ? null : undefined;
+        typeof plan.revalidateAuthority === 'function' && !plan.revalidateAuthority()) { traceFinish('entry-state-deadline-authority'); return null; }
+    if (!candidates.length) { traceFinish('no-candidates'); return worker ? null : undefined; }
     const models = new Map(candidates.map(link => [link, this.#linkTransferEstimate(link, Math.max(0, plan.limit - now()), commitment.pieceSize)])
       .filter(([, model]) => model !== null));
     if (!models.size) {
       this.peerFlow.noModelTransfers = increment(this.peerFlow.noModelTransfers);
       this.peerFlow.lastNoModel = { candidateCount: candidates.length, model: { ...this.peerFlow.lastModel } };
-      this.counters.peerNoFit += 1; return null;
+      this.counters.peerNoFit += 1; traceFinish('no-models'); return null;
     }
     // This fresh transfer has no verified pieces and no origin lane. A piece
     // fitting is not enough: even optimistically sharing the whole object
     // across the measured holders must fit the same absolute peer deadline.
     // Unknown/refresh paths retain their existing bounded calibration attempt;
     // origin-backed transfers may still use a small useful peer fraction.
+    let wholeFitRefresh = null;
     if (plan.peerOnly && [...models.values()].every(model => Number.isFinite(model.rate) && model.rate > 0
         && Number.isFinite(model.firstByteMs) && model.firstByteMs >= 0)) {
       const availableMs = Math.max(0, plan.limit - now());
       const capacity = [...models.values()].map(model => Math.max(0, availableMs - model.firstByteMs) * model.rate)
         .sort((a, b) => b - a).slice(0, this.options.maxHoldersPerObject).reduce((sum, bytes) => sum + bytes, 0);
-      if (capacity < commitment.size) { this.counters.peerNoFit += 1; return null; }
+      if (capacity < commitment.size) {
+        // A rate that fits one piece can otherwise suppress every whole-object
+        // attempt until its TTL. Only a genuine demand may use the existing
+        // demand-bound refresh, on one captured holder after the same cooldown.
+        // Keep the stored measurement; this explicit probe is not a whole-fit
+        // claim and never postpones its already-running HTTP source.
+        const refresh = !context?.[WARM_AHEAD] && [...models].find(([, model]) => now() - model.state.probeAt >= LINK_REFRESH_MS);
+        if (!refresh) { this.counters.peerNoFit += 1; traceFinish('whole-peer-capacity'); return null; }
+        const [link, model] = refresh;
+        wholeFitRefresh = { firstByteMs: model.firstByteMs, rateBytesPerSecond: model.rate * 1000, capacityBytes: capacity };
+        models.clear(); models.set(link, { ...model, firstByteMs: null, rate: null, refresh: true });
+        // The existing REQUEST handler consumes probeAt only when Core actually
+        // emits the calibration request; failed admission consumes no refresh.
+      }
     }
     const holders = [...models.keys()];
     const lease = {}, partialSlot = plan[OWNED_HTTP_WINNER];
@@ -2561,14 +2982,15 @@ class HlsSwarm {
     const deadline = Math.floor(plan.limit);
     const hardDeadline = plan.peerOnly ? plan.limit : plan.limit + plan.originReserveMs;
     const config = { size: commitment.size, sha256: commitment.sha256, pieces: commitment.pieces,
-      deadline, maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...(plan.peerOnly ? { peerOnly: true } : {}) };
+      deadline, maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...(plan.peerOnly ? { peerOnly: true } : {}),
+      ...(plan.bufferedMixed ? { exclusiveOrigin: true } : {}) };
     let transfer;
     try { transfer = worker ? await this.transferWorker.transfer(config, { signal }) : this.core.transfer(config); }
-    catch { return null; }
+    catch { traceFinish('allocation-error'); return null; }
     if (this.stopped || signal.aborted || (worker && now() >= deadline) || plan.currentValid && !plan.currentValid() ||
         typeof plan.revalidateAuthority === 'function' && !plan.revalidateAuthority() ||
-        holders.some(link => !eligible(link) || link.busy || this.peerLeases.get(link) !== lease)) { transfer?.free(); return null; }
-    if (!transfer) return worker || plan.peerOnly ? null : undefined;
+        holders.some(link => !eligible(link) || link.busy || this.peerLeases.get(link) !== lease)) { transfer?.free(); traceFinish('allocation-state-deadline-authority-holder'); return null; }
+    if (!transfer) { traceFinish('allocation-empty'); return worker || plan.peerOnly ? null : undefined; }
     this.multiHolder.transfers += 1;
     // Each scheduler call, with its time, inputs and returned commands, so
     // the trace replays it (times relative to the trace base).
@@ -2689,8 +3111,9 @@ class HlsSwarm {
       const begunAt = now();
       let slowestMs = 0, requestCount = 0;
       const clear = (timer) => { if (timer !== null) { clearTimeout(timer); this.timers.delete(timer); } return null; };
-      const finish = (result) => {
+      const finish = (result, reason) => {
         if (finished) return;
+        traceFinish(reason, Boolean(result), verified, originShare);
         finished = true; shortFlows.clear(); freshAt.clear();
         if (partialSlot?.prepare === preparePartial) partialSlot.prepare = null;
         if (partialSlot && partialSlot.revalidate === authority) partialSlot.revalidate = null;
@@ -2703,26 +3126,27 @@ class HlsSwarm {
         transfer.free();
         resolve(result);
       };
-      const onAbort = () => finish(null);
+      const onAbort = () => finish(null, 'signal-abort');
       signal.addEventListener("abort", onAbort, { once: true });
       const submit = (op, input, call, accept = apply) => {
         if (finished) return;
         const receive = state => {
           if (finished) return;
-          if (plan.currentValid && !plan.currentValid()) return finish(null);
+          if (plan.currentValid && !plan.currentValid()) return finish(null, 'reply-current-invalid');
           // A suspended/throttled page may process a worker message before
           // its already-expired timer. Fence all credit and commands using
           // the same absolute origin backstop, not timer task ordering.
-          if ((worker || plan.peerOnly) && now() >= hardDeadline) return finish(null);
-          if (!state) finish(null); else accept(state);
+          if ((worker || plan.peerOnly || plan.bufferedMixed) && now() >= hardDeadline) return finish(null, 'reply-recovery-expired');
+          if (!state) finish(null, 'reply-state-empty'); else accept(state);
         };
         try {
           const result = xfer(op, input, call);
-          if (result?.then) result.then(receive, () => finish(null)); else receive(result);
-        } catch { finish(null); }
+          if (result?.then) result.then(receive, () => finish(null, 'submit-rejected')); else receive(result);
+        } catch { finish(null, 'submit-threw'); }
       };
       const run = (command, state) => {
         if (command.t === "request") {
+          if (plan.bufferedMixed && !plan.peerCurrentValid()) { submit("tick", {}, at => transfer.tick(at)); return; }
           const link = ids.get(command.peer), controller = new AbortController();
           requests.set(command.peer, controller);
           const [from, to] = bytesOf(command.range), startedAt = now(), remainingMs = Math.max(1, deadline - startedAt);
@@ -2737,6 +3161,7 @@ class HlsSwarm {
           const onProgress = (received) => {
             const at = now();
             if (finished || requests.get(command.peer) !== controller || at - reportedAt < PROGRESS_REPORT_MS) return;
+            if (plan.bufferedMixed && !plan.peerCurrentValid()) { submit("tick", {}, floored => transfer.tick(floored)); return; }
             reportedAt = at;
             submit("progress", { source: command.peer, received }, (floored) => transfer.progress(floored, command.peer, received));
           };
@@ -2747,7 +3172,13 @@ class HlsSwarm {
                 result.outcome === 'abort' && protectedAborts.has(controller)); } }).then((bytes) => {
             if (requests.get(command.peer) === controller) requests.delete(command.peer);
             slowestMs = Math.max(slowestMs, now() - startedAt);
+            const peerCompletedAt = now();
             if (finished) return;
+            if (plan.bufferedMixed && (!eligible(link) || !plan.currentValid())) return finish(null, 'peer-physical-eligibility-current');
+            if (plan.bufferedMixed && bytes && (peerCompletedAt >= deadline || !plan.peerCurrentValid())) {
+              this.multiHolder.unusedBytes += bytes.byteLength;
+              submit("tick", {}, at => transfer.tick(at)); return;
+            }
             if (report?.firstByteMs !== null && report?.elapsedMs !== null && report?.receivedBytes) {
               if (report.elapsedMs - report.firstByteMs >= MIN_LINK_FLOW_MS && report.receivedBytes >= MIN_LINK_FLOW_BYTES) discardShortFlow(link);
               this.peerSelection.observe({ firstByteMs: report.firstByteMs, bytes: report.receivedBytes, flowMs: report.elapsedMs - report.firstByteMs });
@@ -2756,6 +3187,21 @@ class HlsSwarm {
               this.#recordSelection(link, now() - startedAt, bytes.byteLength);
               submit("delivered", { source: command.peer, p: [command.range.start, command.range.end], bytes: bytes.byteLength },
                 (at) => transfer.delivered(at, command.peer, command.range, bytes), state => {
+              // A pre-cap physical completion may finish worker verification
+              // inside the captured recovery interval, with the same owner.
+              if (plan.bufferedMixed && (peerCompletedAt >= deadline || controller.signal.aborted ||
+                  !eligible(link) || this.peerLeases.get(link) !== lease || !plan.currentValid() ||
+                  !plan.revalidateAuthority() || !plan.currentValid() || !eligible(link) ||
+                  this.peerLeases.get(link) !== lease || controller.signal.aborted ||
+                  worker && (this.transferWorker !== flowWorker || this.transferWorkerState !== 'ready'))) return finish(null, 'peer-verified-owner-authority');
+              if (plan.bufferedMixed && state.commands.some(next => next.t === 'ban' || next.t === 'fail')) {
+                this.multiHolder.unusedBytes += bytes.byteLength;
+                // Keep integrity quarantine, without applying any request or
+                // delivery command from a rejected mixed batch.
+                for (const rejected of state.commands) if (rejected.t === 'ban') run(rejected, state);
+                if (state.commands.some(next => next.t === 'fail')) this.multiHolder.failed += 1;
+                finish(null, 'peer-integrity-rejected'); return;
+              }
               const fresh = credit(state, bytes.byteLength);
               // Valid pieces may coexist with a corrupt piece in this response.
               // Fence measurement before apply handles its rejection commands.
@@ -2780,13 +3226,14 @@ class HlsSwarm {
         } else if (command.t === "origin") {
           // The explicit mode must never emit an origin command. Fail closed
           // if an incompatible module violates it; never ignore fake work.
-          if (plan.peerOnly) { this.multiHolder.failed += 1; finish(null); return; }
+          if (plan.peerOnly) { this.multiHolder.failed += 1; finish(null, 'peer-only-origin-command'); return; }
           releaseOrigin ??= this.#claimOrigin(key);
           const controller = new AbortController(), [from, to] = bytesOf(command.range), originAt = now();
           let rangeResult = null;
           const onResult = result => {
             rangeResult = result;
             this.originRangeOutcomes[result.outcome] = increment(this.originRangeOutcomes[result.outcome]);
+            if (plan.bufferedMixed && result.outcome !== 'payload') finish(null, 'origin-range-nonpayload');
           };
           originRequests.add(controller);
           this.multiHolder.originRanges += 1;
@@ -2795,7 +3242,8 @@ class HlsSwarm {
             this.originsWithoutRanges.add(originHost);
             this.multiHolder.originRangesIgnored += 1;
           };
-          (plan.origin?.Loader ? loadOriginRange(plan.origin, context, from, to, { signal: controller.signal, onIgnored, onResult })
+          (plan.origin?.Loader ? loadOriginRange(plan.origin, context, from, to, { signal: controller.signal, onIgnored, onResult,
+            ...(plan.bufferedMixed ? { beforeLoad: plan.beforeOriginLoad } : {}) })
             : fetchOriginRange(context, from, to, { signal: controller.signal, onIgnored, onResult })).then((bytes) => {
             originRequests.delete(controller);
             if (this.options.traceRequests) this.#trace({ k: "origin", load, at: this.#traceAt(originAt), ms: Math.round(now() - originAt), ranged: true,
@@ -2834,19 +3282,20 @@ class HlsSwarm {
           if (this.multiHolderTimings.length > 128) this.multiHolderTimings.shift();
           // The core hands over a buffer of exactly the object; copy only a view.
           const bytes = state.bytes.byteOffset === 0 && state.bytes.byteLength === state.bytes.buffer.byteLength ? state.bytes : state.bytes.slice();
-          finish(commitment.expiresAt <= Math.floor(Date.now() / 1000) ? null : {
+          const expired = commitment.expiresAt <= Math.floor(Date.now() / 1000);
+          finish(expired ? null : {
             key, bytes, discoveryContext, multi: true, peerBytes: Math.max(0, commitment.size - originShare),
             contributions: [...contributions].map(([connection, bytes]) => ({ connection, bytes })),
             shortRefreshes: [...shortRefreshes].map(([connection, at]) => ({ connection, at })),
-          });
+          }, expired ? 'commitment-expired' : 'delivered');
         } else if (command.t === "fail") {
           this.multiHolder.failed += 1;
-          finish(null);
+          finish(null, 'core-fail-command');
         }
       };
       const apply = (state) => {
         if (finished) return;
-        if (!state) return finish(null); // the module failed
+        if (!state) return finish(null, 'apply-state-empty'); // the module failed
         for (const command of state.commands) { run(command, state); if (finished) return; }
         tickTimer = clear(tickTimer);
         if (state.next !== null) tickTimer = this.#after(Math.max(0, state.next - now()), () => { tickTimer = null; submit("tick", {}, (at) => transfer.tick(at)); });
@@ -2858,7 +3307,7 @@ class HlsSwarm {
         submit("tick", {}, (at) => transfer.tick(at));
         // Keep the measured reserve captured by this load, without moving its
         // absolute recovery deadline if the peer-floor timer itself ran late.
-        if (!finished && backstop === null) backstop = this.#after(Math.max(0, plan.limit + plan.originReserveMs - now()), () => { backstop = null; finish(null); });
+        if (!finished && backstop === null) backstop = this.#after(Math.max(0, plan.limit + plan.originReserveMs - now()), () => { backstop = null; finish(null, 'recovery-backstop'); });
         return true;
       };
       // Refreshing an unknown/stale path must not be cancelled using another
@@ -2869,9 +3318,23 @@ class HlsSwarm {
       const estimates = { peers, origin, sharedFirstByteMs, sharedRate: this.peerSelection.rate(), probePeers };
       // The input is for the trace only.
       submit("start", this.options.traceRequests ? { size: commitment.size, pieces: commitment.pieces.length, pieceSize, deadline: deadline - base,
-        maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...(plan.peerOnly ? { peerOnly: true } : {}), ...structuredClone(estimates),
+        maxHolders: this.options.maxHoldersPerObject, originReserveMs: 0, ...(plan.peerOnly ? { peerOnly: true } : {}),
+        ...(plan.bufferedMixed ? { exclusiveOrigin: true } : {}), ...(wholeFitRefresh ? { wholeFitRefresh: { ...wholeFitRefresh } } : {}), ...structuredClone(estimates),
         holders: [...ids].map(([id, link]) => [id, this.#holderLabel(link.pubkey)]) } : null, (at) => transfer.start(at, estimates), started => {
       if (started?.late) this.multiHolder.late += 1;
+      if (plan.bufferedMixed) {
+        // Admission is transactional: a peer-only fast-path plan must not
+        // send even its first WANT before the mandatory origin arm exists.
+        if (!plan.currentValid() || !Array.isArray(started?.commands) ||
+            started.commands.some(command => !['origin', 'request'].includes(command.t) ||
+              !Number.isSafeInteger(command.range?.start) || !Number.isSafeInteger(command.range?.end) ||
+              command.range.start < 0 || command.range.end <= command.range.start || command.range.end > commitment.pieces.length ||
+              command.t === 'request' && !ids.has(command.peer))) return finish(null, 'start-current-or-commands-invalid');
+        const peer = started.commands.some(command => command.t === 'request'), origin = started.commands.some(command => command.t === 'origin');
+        if (!origin || !peer) { plan.declineToCached = peer && !origin; return finish(null, peer && !origin ? 'start-peer-only' : 'start-missing-lane'); }
+        started = { ...started, commands: [...started.commands.filter(command => command.t === 'origin'),
+          ...started.commands.filter(command => command.t !== 'origin')] };
+      }
       apply(started);
       });
     });
@@ -3776,11 +4239,13 @@ class HlsSwarm {
       this.counters.retriesScheduled += 1;
       this.#after(retryAfterMs + Math.random() * 1_000, () => {
         if (this.discovery.reserved()) {
+          this.localCandidateFailures.delete(from);
           this.cooldowns.delete(from);
           this.#seekNeighbours();
           return;
         }
         if (this.links.has(from) || this.dials.has(from) || this.banned.has(from) || !this.#hasCapacity()) return;
+        this.localCandidateFailures.delete(from);
         this.cooldowns.delete(from);
         return this.#dial(from);
       });
@@ -3803,6 +4268,11 @@ class HlsSwarm {
 
   #hasOutgoingSlot() {
     return [...this.dials.values()].filter((dial) => dial.outgoing).length + this.dialChecks.size < this.options.maxDialsInFlight;
+  }
+
+  #setCooldown(pubkey, until) {
+    this.localCandidateFailures.delete(pubkey);
+    this.cooldowns.set(pubkey, until);
   }
 
   #coolingDown(pubkey) {
@@ -3998,6 +4468,7 @@ class HlsSwarm {
   }
 
   #beginNegotiation(dial, requestId, outgoing) {
+    this.localCandidateFailures.delete(dial.pubkey);
     if (!outgoing && dial.discovery) {
       this.#endDiscovery(dial.discovery.window, false);
       dial.discovery = null;
@@ -4044,10 +4515,11 @@ class HlsSwarm {
       if (discovery) this.discovery.abandoned(discovery);
       return;
     }
+    this.localCandidateFailures.delete(pubkey);
     this.dialChecks.add(pubkey);
     try {
       if (!(await this.#admits(pubkey, discovery ? discovery.ticket : this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket, "dialStart"))) {
-        if (discovery) { this.discovery.abandoned(discovery); this.cooldowns.set(pubkey, Date.now() + 60_000); }
+        if (discovery) { this.discovery.abandoned(discovery); this.#setCooldown(pubkey, Date.now() + 60_000); }
         return;
       }
     } finally { this.dialChecks.delete(pubkey); }
@@ -4062,7 +4534,7 @@ class HlsSwarm {
       if (!victim || !this.discovery.replaced(discovery, victim.pubkey)) { this.discovery.abandoned(discovery); return; }
       this.lastEvictionAt = Date.now(); this.counters.evicted++;
       this.#noteVictimTier(this.discovery.counters, choice.tier, "victim");
-      this.cooldowns.set(victim.pubkey, discovery.window.expiresAt);
+      this.#setCooldown(victim.pubkey, discovery.window.expiresAt);
       victim.close("rotation");
     }
     const pc = this.#newPeerConnection(true);
@@ -4081,9 +4553,13 @@ class HlsSwarm {
         if (!this.#currentNegotiation(dial, negotiation)) return;
         await pc.setLocalDescription(offer);
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        const ready = await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "offer", outcome); });
+        let knownEmpty = false;
+        const ready = await gathered(pc, 1_200, negotiation.controller.signal, (outcome, empty) => {
+          knownEmpty = empty;
+          if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "offer", outcome);
+        });
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        if (!ready) { this.#failDial(dial, "failed"); return; }
+        if (!ready) { this.#failDial(dial, "failed", 0, "failed", knownEmpty); return; }
         if (!(await this.#admits(pubkey, this.admitted.get(pubkey)?.candidateTicket ?? this.admitted.get(pubkey)?.ticket, "offerBeforeSend"))) {
           if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
           return;
@@ -4106,8 +4582,9 @@ class HlsSwarm {
     }
   }
 
-  #failDial(dial, reason, cooldownMs = 0, diagnosticReason = reason) {
+  #failDial(dial, reason, cooldownMs = 0, diagnosticReason = reason, localCandidates = false) {
     if (this.dials.get(dial.pubkey) !== dial) return;
+    this.localCandidateFailures.delete(dial.pubkey);
     this.dials.delete(dial.pubkey);
     this.discovery.failed(dial);
     this.#retireNegotiation(dial);
@@ -4122,7 +4599,11 @@ class HlsSwarm {
     // A refusal that named a time is a better wait than a flat cooldown: the
     // peer knows when it could rotate somebody out.
     const fallback = reason === "rejected" ? 30_000 : 60_000;
-    this.cooldowns.set(dial.pubkey, Date.now() + (cooldownMs > 0 ? cooldownMs : fallback));
+    this.#setCooldown(dial.pubkey, Date.now() + (cooldownMs > 0 ? cooldownMs : fallback));
+    if (localCandidates) {
+      this.localCandidateFailures.set(dial.pubkey, this.cooldowns.get(dial.pubkey));
+      if (this.localCandidateFailures.size > 256) this.localCandidateFailures.delete(this.localCandidateFailures.keys().next().value);
+    }
     this.#seekNeighbours();
   }
 
@@ -4209,6 +4690,7 @@ class HlsSwarm {
         this.#sendSignal(from, "reject", payload.requestId, this.#refusalPayload(from));
         return;
       }
+      this.localCandidateFailures.delete(from);
       const pc = this.#newPeerConnection(false);
       dial = { pubkey: from, pc, startedAt: now(), offerSentAt: now() };
       this.dials.set(from, dial);
@@ -4254,9 +4736,13 @@ class HlsSwarm {
         if (!this.#currentNegotiation(dial, negotiation)) return;
         await pc.setLocalDescription(answer);
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        const ready = await gathered(pc, 1_200, negotiation.controller.signal, (outcome) => { if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "answer", outcome); });
+        let knownEmpty = false;
+        const ready = await gathered(pc, 1_200, negotiation.controller.signal, (outcome, empty) => {
+          knownEmpty = empty;
+          if (dial.negotiation === negotiation && !negotiation.superseded) this.#localDescription(pc, "answer", outcome);
+        });
         if (!this.#currentNegotiation(dial, negotiation)) return;
-        if (!ready) { this.#failDial(dial, "failed"); return; }
+        if (!ready) { this.#failDial(dial, "failed", 0, "failed", knownEmpty); return; }
         if (!(await this.#admits(from, validTicket(payload.payload.ticket) ? payload.payload.ticket : null, "answerBeforeSend"))) {
           if (this.#currentNegotiation(dial, negotiation)) this.#failDial(dial, "failed", 0, "admission");
           return;
@@ -4301,6 +4787,7 @@ class HlsSwarm {
       maxSegmentBytes: this.options.maxSegmentBytes,
       onRequest: (from, key, range) => this.#serveRequest(from, key, range),
       onHaveChange: (_link, added) => {
+        if (!this.stopped && !_link.closed && this.links.get(_link.pubkey) === _link) this.warmAhead?.reconsiderHave(added);
         for (const waiter of [...this.haveWaiters]) waiter(added);
         this.#checkLatePeers();
       },

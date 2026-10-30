@@ -55,7 +55,7 @@ presence; `close()` also unregisters the relay-open handler.
 ## Browser loader
 
 `createHlsSwarm(options)` returns
-`{ attach(hls), updateTicket(ticket), stop(), metrics(), peerConnections(), peerConnectionDetails(), trace() }`.
+`{ attach(hls), updateTicket(ticket), retryLocalCandidates(), stop(), metrics(), peerConnections(), peerConnectionDetails(), trace() }`.
 `attach` wraps `hls.config.fLoader`; call it before `loadSource`. `stop` is the
 origin-only kill switch and closes connections, cancels pending work, releases
 held bytes and restores the original loader. Create a new swarm to participate
@@ -96,6 +96,46 @@ Normal HTTP never waits for metadata; stopping the swarm cancels its peer
 arm while that pending HTTP request continues. Progressive hls.js loads skip
 the race. See the [options and lifecycle contract](../INTEGRATION.md#options).
 
+The unreleased `bufferedMixedRanges: true` option permits concurrent peer and
+source ranges for a genuine, unencrypted whole main fragment when the original
+exclusive peer-wait budget is zero. It excludes startup work, parts,
+progressive loading and underflow; eligible steady warm work is described below. Admission requires healthy buffered
+playback at normal speed, a ready range core with the exclusive-origin
+capability, an exact entry-snapshot HAVE on a connected framing 2 link, and
+measured source recovery. A holder uses fresh measured timing or its existing
+bounded initial one-piece probe, subject to the existing cooldown. Setup has
+at most 25 ms from load entry to invoke the
+host's original source loader; this is not a wire-dispatch guarantee.
+
+The source range starts before any peer request. With an active initial probe,
+the Core leaves at most one batch of unissued source work, capped by both
+512 KiB and four signed pieces. A verified probe can refill from that queued
+work; it cannot take pieces already assigned to an in-flight HTTP request.
+Known initial peer models do not hold this extra tail. This mode also excludes
+intentional endgame duplication; failed or cancelled work may still need
+source recovery. Ordinary whole-source fallback keeps the captured absolute
+parent, first-byte and playback-recovery deadlines. Mixed completion has an
+earlier deadline that retains one measured source-recovery reserve for the
+following fragment. Its concurrent peer window retains another such reserve
+for the current transfer and remains bounded by `min(maxPeerWaitMs, 2500)`.
+If at most 25 ms remain for peer work, whole-source loading begins immediately
+with its original budgets. A whole source request never runs beside an active
+mixed transfer. After the peer window closes, source ranges may finish missing
+pieces only before the mixed-completion deadline. Media handoff
+requires a complete verified object and current
+authority. Count accepted peer media separately from actual HTTP bodies,
+including partial, duplicate and ignored-range traffic. Controlled fixtures do
+not establish field continuity, throughput or savings. The option defaults to
+`false`; see the [loading contract](../INTEGRATION.md#options).
+
+The internal Core transfer creation option `exclusiveOrigin: true` selects
+that queued-origin ownership contract. It defaults to `false`, rejects a
+non-boolean or a simultaneous `peerOnly: true`, and requires mask value `4`
+from `rs_xfer_capabilities()` before allocation. Main-thread and worker bridges
+preserve the same flag. An older module declines this mode safely; the loader
+uses its ordinary source path. Trace replay and what-if construction retain
+the flag rather than reconstructing a legacy mixed transfer.
+
 The additional experimental `lateHaveRace: true` observes actual matching
 HAVE on those connections accepted at load entry when no initial cached
 snapshot matches. HTTP starts immediately. At most one later holder snapshot
@@ -114,15 +154,63 @@ window. This is an admission bound, not a smooth-playback guarantee.
 
 The unreleased experimental `warmAhead: true` option requires peer-first and
 explicit `serve: true`. It observes this player's actual parsed main-media
-fragments, loads at most the next two, and keeps one speculative whole-object
-HTTP arm in flight. Existing demanded whole/range request limits still apply;
+fragments, loads at most the next two, and keeps one speculative object
+transport in flight. By default this uses a whole-object HTTP arm. Existing demanded whole/range request limits still apply;
 this is not a two-request global HTTP limit. Demand starts immediately and
 joins already-running exact-object work instead of downloading it again.
 That work becomes genuine demand and frees the single speculative slot, so
-the following object can load concurrently. The combined cache and in-flight
+the following object can load concurrently only while the promoted demand has
+measured source-recovery headroom. Missing headroom defers the next speculative
+request, including after an awaited authority check or reservation callback;
+the promoted source keeps its ownership and original parent deadline. Deferred
+metadata retains its original eight-second expiry and recovers the current
+parsed loader context before transport starts. Completion or cancellation of
+the genuine work wakes admission without another timer.
+The combined cache and in-flight
 set remains bounded to three distinct objects and 24 MiB; all in-flight
 reservations reduce the existing held-cache budget together.
 This option alone adds no startup gate, pause, hidden player, clock offset or automatic seek.
+
+With both `warmAhead` and `bufferedMixedRanges` enabled, an eligible steady
+future request may choose disjoint source ranges and verified peer pieces
+before any whole GET starts. This requires the same measured recovery,
+healthy media, signed authority, ready Core and captured holder checks as
+genuine mixed demand. Startup work and already-running whole GETs retain
+their existing transport. Internal ownership checks retain the original
+speculative expiry, cancellation signal and parent deadlines; promotion does
+not restart those deadlines. Verified peer credit remains deferred until a
+genuine consumer accepts the complete object, and repeated reuse cannot
+credit that object twice. This draft path still needs lifecycle/failure and
+field qualification; it does not establish a performance improvement.
+
+For an explicitly parsed main live or VOD playlist (boolean `details.live`),
+the combined options also select
+steady future source owners by object-key/public-key XOR rank among current
+connected, admitted, serving range peers in the same rendition. An exact
+advertised holder can still feed the normal mixed path. Otherwise a lower-ranked
+peer causes only that optional future to be skipped, leaving the next parsed
+future eligible. Unknown playlist state retains ordinary source loading.
+Startup coverage and genuine or already-promoted demand keep their existing
+source and rendezvous rules. No peer claim creates a wait, source
+request, new deadline or accepted credit by itself. Membership differences can
+still cause duplicate or absent speculation; genuine demand does not depend
+on agreement about an owner.
+
+A skipped future can be reconsidered once when a current link adds its exact
+HAVE. At most two metadata-only descriptors retain the routing key and original
+eight-second deadline; no body, permit or reservation is retained. Existing
+parsed-context, authority, holder and resource checks run again. Supply must
+still be present before loading; paused, changed, expired or stopped work is
+refused. Deferring a reconsideration retains its deadline and one-shot marker.
+The notification adds no timer, source wait, deadline renewal or playback
+credit. Genuine loading continues independently.
+
+An unconsumed reconsideration uses mixed loading only. If admission fails,
+the optional row is retired before abort callbacks instead of starting a
+whole GET or cached whole-object race. Genuine or promoted demand retains
+normal source recovery within the captured parent deadline. A genuine load
+reentered by an abort callback cannot join the retired row and uses its own
+ordinary loading path. Other warm work and startup behaviour are unchanged.
 
 The separate unreleased `startupBufferTarget` option defaults to `null`. A host
 may supply a synchronous function returning its fresh raw HLS target time in
@@ -162,6 +250,12 @@ behind the required recovery horizon, with at most one metadata hop per poll.
 When available, the last verified future fragment's measured whole-load time
 adds a scheduling lead to that admission horizon. This is a time observation,
 not a throughput estimate or a change to the required release headroom.
+An ahead-only window with no verified coverage of the actual target must pass
+that projection before its first future request is admitted. Skipped metadata
+does not freeze a window. A reserved, admitted window remains fixed while the
+target is before its start, so later service observations cannot skip its
+contiguous successors. Verified original coverage and the fourth-slot extension
+below retain their contiguous successors.
 The fourth-slot successor extending two contiguous verified futures covering
 the current target is retained instead of being skipped by that horizon. Its
 bytes still pass the existing reservation, verification and final release checks.
@@ -175,9 +269,12 @@ response continues to occupy one of the four residency slots. Capacity is consid
 before retiring a useful completed prefix. An adequate window or a timeline gap
 does not trigger this extension. Otherwise the existing rolling policy may
 retire its completed, unpinned first future when it contains the target.
-Once a future window starts ahead of the actual target, its start stays fixed;
+Once an admitted future window starts ahead of the actual target, its start stays fixed;
 release waits for the real target and verified coverage to meet again.
-Startup contains at most four objects within its chosen byte allowance. Future requests remain serial,
+Startup contains at most four objects within its chosen byte allowance. The first
+genuine response verifies before future requests begin, so this reservoir's
+speculative downloads do not compete with its first source-service measurement.
+Future requests remain serial,
 and insufficient capacity cannot release unsafe media or extend the deadline.
 In-flight work and authority pins keep their reservations.
 The rolling plan stores metadata only, without retaining discarded payloads.
@@ -189,6 +286,29 @@ sample, or `null` when unavailable. Failed, cancelled, stale and partial loads
 do not train it; ending startup clears it. A new sample cannot move an already
 selected future window while the actual target remains before that window.
 
+When a verified same-origin source body also carries strictly ordered
+first-byte and completion times, startup keeps one frozen service profile
+(`metrics().startupBuffer.sourceProfile`: `size`, `ttfbMs`, `bodyMs`, or `null`).
+The original response supplies the first profile after its own verification;
+each later verified future replaces it, and a verified future without valid
+same-origin timing clears it. Peer-delivered bytes, cached same-instant replies,
+partial, aborted, non-200 or different-origin responses never form one. With a
+profile for a candidate's origin, the skip decision waits for that candidate's
+fresh signed size and projects `ttfbMs + bodyMs * size / profile.size` in place
+of the last scalar sample; parsed identity is still checked before authority,
+and frozen windows, verified contiguous extensions, the one-hop-per-poll
+budget, reservations, release headroom and the original deadline are unchanged.
+A candidate held because the poll's hop is spent, or because a release check or
+commit acknowledgement is in progress, returns to the queue as metadata with its
+original deadline; a hop-spent hold pauses further startup admission until the
+next poll. A verified future whose permit is no longer current also clears the
+profile. Each profiled candidate is authorised before its skip decision, so a
+skipped candidate costs one authority request (two when held) where the scalar
+rule cost none. Only same-instant cache replies are refused: a cached reply with
+positive timing is indistinguishable from a fast source and projects like one,
+as the scalar sample already did. This projection is a scheduling estimate from
+one measured transfer, not a throughput guarantee.
+
 The optional `startupBufferCommit` function defaults to `null` and requires
 `startupBufferTarget`. It runs once after the encoded reservoir passes the
 readiness checks, before held callbacks or consumed-media credit reach HLS.
@@ -196,6 +316,13 @@ Its frozen argument contains only the original startup `AbortSignal`; it may
 return a promise. For example, a host can prepare a new room locally at zero,
 publish its start after verified media is ready, and await acknowledgement.
 An existing room must retain its advancing clock.
+
+Before calling an external commit hook, verified coverage must strictly exceed
+the measured recovery requirement: exact equality leaves no room for the clock
+advance during acknowledgement. This surplus is rechecked after awaited
+authority checks. Without a hook, exact equality remains sufficient. After
+acknowledgement, the fresh coverage check still requires at least the measured
+recovery headroom; the original deadline remains unchanged.
 
 The original twelve-second/parent startup deadline and held reservations
 remain in force while the host acknowledges. Cancellation retires the operation; late resolution
@@ -296,7 +423,9 @@ entering the shared held cache. At most three warm references and 24 MiB of
 warm data/reservations fit inside the existing `maxHeldBytes` budget. The warm
 map references the held buffer; delivery to hls.js receives a transfer-safe
 copy. Normal player/decoder memory and transient demand buffers remain
-separate. Speculation expires after eight seconds. Promotion retires that
+separate. Speculation expires after eight seconds. A genuine request must
+join before that absolute expiry to promote pending work; a delayed timer
+callback cannot let a later request revive it. Valid promotion retires the
 speculation-only timer; the already-running parent's timeout still runs from
 its original start. A parent error or timeout settles the genuine demand
 through its original callback, without an implicit fresh request or reset
@@ -340,6 +469,11 @@ is recorded once; `bytes.peerFirst` and `onPeerDelivery` receive speculative
 peer credit only when real hls.js demand consumes it. Local reuse does not
 create network bytes. These source tests do not establish sustained cold-cache
 4K, a public TURN route, network savings or physical-device continuity.
+
+`sourceYielded` counts optional source decisions declined by the prefetch hook;
+`haveReconsidered` counts exact-HAVE notifications admitted to the existing
+queue, not completed transfers. `declinedSourceObjects` is the current bounded
+metadata count. None represents delivered or accepted media.
 
 Multi-holder admission reserves its candidate links synchronously before
 asynchronous worker creation. Other download selectors respect those leases.
@@ -432,6 +566,27 @@ ID, and each multi-holder scheduler call with its inputs and the commands it
 returned, so a recorded transfer replays against the module offline. Times are
 whole milliseconds from the swarm's creation; holders are session labels, not
 keys. It is kept out of `metrics()`, which receipts snapshot repeatedly.
+Cached setup records `cached-no-matching-have` when no currently eligible
+captured holder matches the exact object, and `cached-ranges-unavailable` when
+the range engine declines before transfer. `matchingHave: false` alone does not
+prove that an advertised claim was absent. Its optional `projection` with
+`stage: "cached-entry"` records aggregate `capturedLinks`, `entryChecked`,
+`entryMatched`, `currentChecked`, `currentMatched` and `eligibleMatched` counts
+from the initial pass. A zero checked count means that predicate was not read;
+late-HAVE checks do not rewrite these initial observations. These fields identify
+existing return branches without creating credit or changing source loading. A cached handoff's new
+`load` row includes an optional numeric `parentLoad` linking its earlier mixed
+load. Ring eviction can remove that parent; missing history remains unknown.
+Buffered mixed loads also retain `mixedScope` decisions and `xferFinish`
+reasons when tracing is enabled. Scope rows record the predicates and fragment
+geometry actually read by the existing checks; a skipped predicate remains
+unknown. These observations distinguish fallback and expiry branches without
+rechecking authority or changing transfer policy. They do not establish network
+throughput or explain a stall without the corresponding player observations.
+`mixedScope.recoveryRemainingMs` retains the original whole-source deadline;
+`mixedRemainingMs` identifies the earlier mixed deadline and
+`nextOriginReserveMs` its captured recovery allowance. A transfer terminal's
+`recoveryRemainingMs` describes that Core transfer's own deadline.
 Whole HTTP legs have an early numeric load alias, including synchronous cached
 HTTP winners, immediate fallback and the immutable context of a late peer arm.
 Their fixed `leg` is `fallback`, `cached` or `late`. `originStart` observes
@@ -571,6 +726,30 @@ Apply and upload consent; an absent legacy descriptor means `"all"`.
 Relay-only is an explicit operator privacy/compatibility choice, not a TLS
 selection or a proved transfer repair. It never downgrades to `"all"`; if usable
 relay connectivity is unavailable, playback retains its existing origin fallback.
+
+## Explicit local-candidate recovery
+
+`retryLocalCandidates()` synchronously returns an integer from 0 through 256:
+the number of remembered local failures handed to the normal dial path.
+Admission may still refuse an attempt or asynchronous negotiation may fail;
+the count does not promise a new or connected peer. Notification consumes the
+current remembered batch, including entries blocked by current capacity or
+policy. There is no automatic notification, periodic retry or deferred queue.
+
+Only a readable string SDP with no local candidate at completed gathering is
+remembered, using the existing SDP evaluation. A throwing description getter,
+nonstring SDP, cancelled/unknown gather or original dial timeout does not qualify. Each entry is
+one-shot, bounded to the newest 256, and forgotten on stop, a new attempt or
+negotiation, or another cooldown write. A newer unrelated cooldown invalidates
+the entry even when both writes occur in the same millisecond. Remote refusal,
+admission, generic/native-failure, timeout and ban handling are unchanged.
+
+The host calls this after making newly usable ICE configuration available to
+its future connection factory. The existing current admission, outgoing slot,
+capacity, ban and discovery checks still guard every attempt. The API does not
+mutate constructor-captured `iceServers`, call `setConfiguration()`, restart
+ICE, recreate established links, reset Hls/cache/credit or renew deadlines.
+The original 1200 ms gather soft cap and existing dial timeout remain unchanged.
 
 ## Optional demo TURN renewal
 

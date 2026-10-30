@@ -16,6 +16,7 @@ import { PeerLink } from "../src/browser/peer-link.mjs";
 import { RelayPool, RelaySwarmSession } from "../src/relay-session.mjs";
 import { commitmentContent, commitmentPieceSize, KIND_SEGMENT_COMMITMENT, verifySegmentCommitment } from "../src/browser/segment-commitment.mjs";
 import { startLocalRelay } from "./support/local-relay.mjs";
+import { mixedHttpOrigin } from "./support/mixed-http-origin.mjs";
 import { boundedOperation } from "../src/browser/bounded-operation.mjs";
 import { WARM_AHEAD } from "../src/browser/warm-ahead.mjs";
 import { NeighbourDiscovery } from "../src/browser/neighbour-discovery.mjs";
@@ -2532,7 +2533,7 @@ async function glareFixture(t, { polite = true, hold, gathering = false, emptyCa
   const secretKey = secretKeys[polite ? 1 : 0], remoteKey = secretKeys[polite ? 0 : 1];
   const connections = [], received = [], gates = new Map();
   if (hold) gates.set(hold, glareDeferred());
-  const state = { allow: true, onNative: () => {}, checks: [] };
+  const state = { allow: true, onNative: () => {}, checks: [], candidatesAvailable: !emptyCandidates, localServers: null };
   class StatefulPC extends EventTarget {
     signalingState = "stable";
     connectionState = "new";
@@ -2544,7 +2545,7 @@ async function glareFixture(t, { polite = true, hold, gathering = false, emptyCa
     closes = 0;
     busy = 0;
     listeners = new Map();
-    constructor() { super(); connections.push(this); }
+    constructor(configuration) { super(); this.configuration = state.localServers ? { ...configuration, iceServers: structuredClone(state.localServers) } : configuration; connections.push(this); }
     addEventListener(type, callback, options) {
       if (!this.listeners.has(type)) this.listeners.set(type, new Set());
       this.listeners.get(type).add(callback); super.addEventListener(type, callback, options);
@@ -2565,8 +2566,8 @@ async function glareFixture(t, { polite = true, hold, gathering = false, emptyCa
       return this.native(`local:${description.type}`, () => {
         if (description.type === "rollback") { assert.ok(rollbackSupported, "Native rollback unavailable"); assert.equal(this.signalingState, "have-local-offer"); this.signalingState = "stable"; this.localDescription = null; }
         else if (description.type === "offer") { assert.equal(this.signalingState, "stable"); this.signalingState = "have-local-offer"; this.localDescription = description; }
-        else { assert.equal(description.type, "answer"); assert.equal(this.signalingState, "have-remote-offer"); this.signalingState = "stable"; this.localDescription = description; if (!emptyCandidates) this.iceGatheringState = "complete"; }
-        if (description.type !== "rollback" && !emptyCandidates) this.localDescription = { ...description, sdp: `${description.sdp}\r\na=candidate:fixture 1 udp 1 fixture.local 9 typ host\r\n` };
+        else { assert.equal(description.type, "answer"); assert.equal(this.signalingState, "have-remote-offer"); this.signalingState = "stable"; this.localDescription = description; if (state.candidatesAvailable) this.iceGatheringState = "complete"; }
+        if (description.type !== "rollback" && state.candidatesAvailable) this.localDescription = { ...description, sdp: `${description.sdp}\r\na=candidate:fixture 1 udp 1 fixture.local 9 typ ${state.localServers ? "relay" : "host"}\r\n` };
       });
     }
     candidate() {
@@ -2659,6 +2660,88 @@ for (const type of ["offer", "answer"]) test(`completed candidate-free ${type} f
   assert.equal(f.swarm.metrics().peers.dialsTimedOut, 0);
   assert.equal(pc.listeners.get("icecandidate")?.size ?? 0, 0);
   assert.equal(pc.listeners.get("icegatheringstatechange")?.size ?? 0, 0);
+});
+
+test("explicit local candidate retry replaces only a remembered empty-candidate dial using the future factory configuration", async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 }), old = await f.start();
+  old.complete(); await glareFlush();
+  assert.equal(old.closes, 1); assert.equal(f.swarm.metrics().peers.dialsFailed, 1);
+  assert.equal(f.received.length, 0, 'the failed actual gathered() path disclosed no candidate-free offer');
+  const servers = [{ urls: 'turns:changed.example:5549?transport=tcp', username: 'local-test-lease', credential: 'fixture-only' }];
+  f.state.localServers = servers; f.state.candidatesAvailable = true;
+  assert.equal(typeof f.swarm.retryLocalCandidates, 'function', 'explicit local-candidate retry API is missing');
+  assert.equal(f.swarm.retryLocalCandidates(), 1);
+  assert.equal(f.swarm.retryLocalCandidates(), 0, 'the same local failure authorises only one attempt');
+  await glareFlush();
+  assert.equal(f.connections.length, 2, 'a new current-config PC starts without advancing the old60s cooldown');
+  const fresh = f.connections[1]; assert.deepEqual(fresh.configuration.iceServers, servers);
+  fresh.complete(); await glareFlush();
+  const sent = f.received.find(value => value.type === 'offer'); assert(sent); assert.match(sent.payload.sdp, /typ relay/);
+  f.signal('answer', sent.requestId); await glareFlush(); fresh.localChannel.open(); await glareFlush();
+  assert.deepEqual(f.swarm.peerConnections(), [fresh]);
+  assert.equal(f.swarm.retryLocalCandidates(), 0); assert.equal(f.connections.length, 2, 'a connected link is never recreated');
+});
+
+for (const invalid of ['throwing-description', 'nonstring-sdp']) test(`local candidate retry never treats ${invalid} as a known empty gather`, async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 }), old = await f.start();
+  const readable = old.localDescription; let reads = 0;
+  Object.defineProperty(old, 'localDescription', { configurable: true, get() {
+    reads++;
+    if (invalid === 'throwing-description') throw new Error('fixture unreadable native description');
+    return { ...readable, sdp: 42 };
+  } });
+  old.complete(); await glareFlush();
+  assert.equal(reads, 2, 'classification reuses the existing gather read plus the existing diagnostic read');
+  assert.equal(old.closes, 1); assert.equal(f.swarm.metrics().peers.dialsFailed, 1); assert.equal(f.received.length, 0);
+  Object.defineProperty(old, 'localDescription', { configurable: true, writable: true, value: readable });
+  f.state.candidatesAvailable = true; f.state.localServers = [{ urls: 'turns:changed.example:5549?transport=tcp' }];
+  assert.equal(typeof old.localDescription.sdp, 'string', 'the invalid getter is repaired before notification');
+  assert.equal(f.swarm.retryLocalCandidates(), 0, 'unknown/native read failure must retain its ordinary cooldown');
+  await glareFlush(); assert.equal(f.connections.length, 1);
+});
+
+test("local candidate retry also remembers an actual completed empty-answer failure", async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 });
+  f.offer(); await glareFlush(); const old = f.connections[0]; old.complete(); await glareFlush();
+  assert.equal(f.swarm.metrics().peers.dialsFailed, 1); assert.equal(f.received.length, 0);
+  f.state.candidatesAvailable = true;
+  assert.equal(f.swarm.retryLocalCandidates(), 1); await glareFlush();
+  assert.equal(f.connections.length, 2); f.connections[1].complete(); await glareFlush();
+  assert.equal(f.received.filter(value => value.type === 'offer').length, 1);
+  assert.equal(f.swarm.retryLocalCandidates(), 0);
+});
+
+test("local candidate retry cannot release a newer generic cooldown written in the same millisecond", async t => {
+  t.mock.method(Date, 'now', () => 2000000000000);
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 }), old = await f.start();
+  old.complete(); await glareFlush(); assert.equal(f.swarm.metrics().peers.dialsFailed, 1);
+  t.mock.method(Object.getPrototypeOf(old), 'createAnswer', async () => { throw new Error('fixture native failure'); });
+  f.offer('new-unrelated-native-failure'); await glareFlush();
+  assert.equal(f.connections.length, 2); assert.equal(f.swarm.metrics().peers.dialsFailed, 2);
+  assert.equal(f.swarm.retryLocalCandidates(), 0, 'the old local-candidate marker cannot unlock an equal-timestamp generic cooldown');
+  f.peer.announcePresence({ role: 'viewer', transports: [{ type: 'webrtc', publicKey: f.peer.pubkey }], ticket: 'remote-ticket' });
+  await f.tick(1500); assert.equal(f.connections.length, 2);
+});
+
+for (const ending of ['timeout', 'refusal']) test(`local candidate retry leaves ${ending} cooldown unchanged`, async t => {
+  const f = await glareFixture(t, { gathering: ending === 'timeout', emptyCandidates: ending === 'timeout', timeout: 8000 }), pc = await f.start();
+  if (ending === 'timeout') { await f.tick(7999); assert.equal(pc.closes, 0); await f.tick(1); assert.equal(f.swarm.metrics().peers.dialsTimedOut, 1); }
+  else { const sent = f.received.find(value => value.type === 'offer'); f.signal('reject', sent.requestId); await glareFlush(); assert.equal(f.swarm.metrics().peers.dialsRejected, 1); }
+  assert.equal(f.swarm.retryLocalCandidates(), 0); await glareFlush(); assert.equal(f.connections.length, 1);
+});
+
+for (const ending of ['admission-revoked', 'stop', 'stop-during-admission']) test(`local candidate retry respects ${ending}`, async t => {
+  const f = await glareFixture(t, { gathering: true, emptyCandidates: true, timeout: 8000 }), old = await f.start();
+  old.complete(); await glareFlush(); assert.equal(f.swarm.metrics().peers.dialsFailed, 1);
+  f.state.candidatesAvailable = true; let release;
+  if (ending === 'stop') { f.swarm.stop(); assert.equal(f.swarm.retryLocalCandidates(), 0); }
+  else {
+    if (ending === 'admission-revoked') f.state.allow = false;
+    else f.state.admit = () => new Promise(resolve => { release = resolve; });
+    assert.equal(f.swarm.retryLocalCandidates(), 1, 'count denotes a normal admission attempt, not an admitted PC');
+    if (ending === 'stop-during-admission') { await glareFlush(); assert(release); f.swarm.stop(); release(true); }
+  }
+  await glareFlush(); assert.equal(f.connections.length, 1); assert.equal(f.swarm.retryLocalCandidates(), 0);
 });
 
 test("stop retires candidate-free gathering before a late candidate can signal", async t => {
@@ -4811,18 +4894,28 @@ test("a caller abort during the wait is not a miss", async t => {
 
 // --- multi-holder transfer (schema 3, framing 2) -----------------------------
 
-const multiCore = await WebAssembly.compile(await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url)));
+const multiCoreBytes = await readFile(new URL("../src/browser/relayswarm-core.wasm", import.meta.url));
+const multiCore = await WebAssembly.compile(multiCoreBytes);
 
-function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false, holdNew = false, holdBan = false, holdDelivered = false, onFree } = {}) {
+function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, holdFinal = false, holdNew = false, holdBan = false, holdDelivered = false, onFree, onRpc } = {}) {
   const workers = [];
   class WorkerImpl extends EventTarget {
     constructor() {
-      super(); workers.push(this);
+      super(); workers.push(this); this.holdNew = holdNew; this.holdDelivered = holdDelivered;
+      if (onRpc) this.addEventListener('message', ({ data }) => {
+        if (!this.rpcSent?.has(data.id)) return;
+        const sent = this.rpcSent.get(data.id); this.rpcSent.delete(data.id);
+        if ((this.rpcObserved ?? 0) < 32) {
+          this.rpcObserved = (this.rpcObserved ?? 0) + 1;
+          try { onRpc({ ...sent, replyAtMs: performance.now(), success: data.ok === true }); } catch {}
+        } else this.rpcDropped = (this.rpcDropped ?? 0) + 1;
+      });
       this.thread = new WorkerThread(new URL("./support/core-transfer-worker-thread.mjs", import.meta.url));
       this.exit = new Promise(resolve => this.thread.once("exit", resolve));
       this.thread.on("message", data => {
-        if (holdDelivered && this.deliveredIds?.delete(data.id)) { (this.deliveredReplies ??= []).push(data); return; }
-        if (holdNew && this.newIds?.delete(data.id)) { (this.newRequests ??= []).push({ data }); return; }
+        if (this.holdStart && this.startIds?.delete(data.id)) { (this.startReplies ??= []).push(data); return; }
+        if (this.holdDelivered && this.deliveredIds?.delete(data.id)) { (this.deliveredReplies ??= []).push(data); return; }
+        if (this.holdNew && this.newIds?.delete(data.id)) { (this.newRequests ??= []).push({ data }); return; }
         if (holdBan && data.result?.commands?.some(command => command.t === "ban")) { this.banReply = data; return; }
         if (holdFinal && data.result?.commands?.some(command => command.t === "deliver")) { this.finalReply = data; return; }
         this.dispatchEvent(new MessageEvent("message", { data }));
@@ -4830,14 +4923,24 @@ function transferWorkerFixture(t, { pauseInit = false, failDelivery = false, hol
       this.thread.on("error", () => this.dispatchEvent(new Event("error")));
     }
     postMessage(data, transfer) {
-      if (holdDelivered && data.op === 'delivered') (this.deliveredIds ??= new Set()).add(data.id);
+      if (onRpc && ['new', 'start'].includes(data.op)) {
+        this.rpcSent ??= new Map();
+        if (this.rpcSent.size < 32) this.rpcSent.set(data.id, { id: data.id, op: data.op, handle: data.handle,
+          ...(data.op === 'new' ? { configSize: data.input.size, configDeadline: data.input.deadline,
+            exclusiveOrigin: data.input.exclusiveOrigin === true, peerOnly: data.input.peerOnly === true } : {}),
+          sentAtMs: performance.now() });
+        else this.rpcDropped = (this.rpcDropped ?? 0) + 1;
+      }
+      if (this.holdStart && data.op === 'start') { this.heldStartPosted = true; (this.startIds ??= new Set()).add(data.id); }
+      if (this.holdDelivered && data.op === 'delivered') (this.deliveredIds ??= new Set()).add(data.id);
       if (data.op === 'new') this.newCount = (this.newCount ?? 0) + 1;
       if (data.op === 'free') onFree?.();
       if (pauseInit && data.op === "init") { this.init = data; return; }
-      if (holdNew && data.op === "new") (this.newIds ??= new Set()).add(data.id);
+      if (this.holdNew && data.op === "new") (this.newIds ??= new Set()).add(data.id);
       if (failDelivery && data.op === "delivered") { queueMicrotask(() => this.dispatchEvent(new Event("error"))); return; }
       this.thread.postMessage(data, transfer);
     }
+    releaseStart() { this.dispatchEvent(new MessageEvent('message', { data: this.startReplies.shift() })); }
     releaseInit() { this.thread.postMessage(this.init); }
     releaseNew() { const { data } = this.newRequests.shift(); this.dispatchEvent(new MessageEvent('message', { data })); }
     releaseFinal() { this.dispatchEvent(new MessageEvent("message", { data: this.finalReply })); }
@@ -5668,6 +5771,256 @@ test('verified piece flow never pools separate transfers, connections or time to
     assert.equal(f.channels.filter(channel => channel.wants.length > 0).length, 2, JSON.stringify(f.channels.map(channel => channel.wants)));
     assert.deepEqual(batches, [], 'two different 50ms connection flows 350ms apart never pool');
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+// Functional policy time excludes only actual native segment-key digest work.
+// Native fixtures never install this observer; payload hashes remain native.
+function logicalSegmentKeyDigests(t, swarmId, delayForKey = () => 0) {
+  const prefix = new TextEncoder().encode(`${swarmId}\n`), originalDigest = crypto.subtle.digest, nativeTimer = setTimeout;
+  let pending = 0, operations = 0, maxPending = 0, delayedOperations = 0;
+  const mock = t.mock.method(crypto.subtle, 'digest', function (algorithm, data, ...args) {
+    const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      : data instanceof ArrayBuffer ? new Uint8Array(data) : null;
+    const matched = algorithm === 'SHA-256' && bytes && bytes.byteLength > prefix.byteLength &&
+      bytes.byteLength <= 4096 && prefix.every((value, index) => bytes[index] === value);
+    if (!matched) return originalDigest.call(this, algorithm, data, ...args);
+    const delayMs = delayForKey(); assert(Number.isInteger(delayMs) && delayMs >= 0 && delayMs <= 100);
+    pending++; operations++; maxPending = Math.max(maxPending, pending);
+    try {
+      return Promise.resolve(originalDigest.call(this, algorithm, data, ...args)).then(value => {
+        if (!delayMs) { pending--; return value; }
+        delayedOperations++;
+        return new Promise(resolve => nativeTimer(() => { pending--; resolve(value); }, delayMs));
+      }, error => { pending--; throw error; });
+    } catch (error) { pending--; throw error; }
+  });
+  return { get pending() { return pending; }, get operations() { return operations; },
+    get maxPending() { return maxPending; }, get delayedOperations() { return delayedOperations; }, restore: () => mock.mock.restore() };
+}
+
+for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have']) test('owned warm reciprocal future owners supply real mixed consumption without duplicate whole source' +
+  (playlistState === 'vod' ? '' : ` (${playlistState} playlist)`), { timeout: 15000 }, async t => {
+  // Functional-controller policy proof: simulated source/native RTC, real sessions,
+  // commitments, Core, ordered protocol bytes, verification and consumption.
+  // No source server, preloaded cache/HAVE or claimed WAN rate. Native key-hash
+  // scheduling is excluded from this controller's synthetic policy time; the
+  // separate manager control retains the original 25 ms cache recovery boundary.
+  const pair = await framingPairFixture(t, { pairedState: true }), actors = [], source = [], loaders = new Set(), objects = new Map(), events = new Map();
+  const size = 1024 * 1024, secret = generateSecretKey(), seconds = Math.floor(Date.now() / 1000);
+  const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds,
+    tags: [['d', 'reciprocal-futures'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
+  const keyFor = path => createHash('sha256').update(`${base.swarmId}\n${path}`).digest('hex');
+  let diagnosticPhase = 'setup', clock;
+  const keyWork = logicalSegmentKeyDigests(t, base.swarmId);
+  const settle = promise => clock ? clock.settle(promise) : promise;
+  const wait = predicate => clock ? clock.advanceUntil(predicate) : until(predicate);
+  const diagnostic = (reason, actor = null, sn = null) => console.log(JSON.stringify({ fixture: 'reciprocal-timeout-diagnostic',
+    reason, actor, sn, controllerClock: clock ? 'logical-functional' : 'native', phase: diagnosticPhase, atMs: performance.now(),
+    excludedNativeKeyDigestScheduling: true, pendingKeyDigests: keyWork.pending, keyDigestOperations: keyWork.operations, maxPendingKeyDigests: keyWork.maxPending,
+    source: source.slice(-16), sourceOmitted: Math.max(0, source.length - 16),
+    actors: actors.map((f, actor) => { const m = f.swarm.metrics(); return { actor, warm: m.warmAhead,
+      acceptedPeerBytes: m.bytes.peerFirst, core: { state: m.core.state, transfers: m.core.multiHolder.transfers,
+        delivered: m.core.multiHolder.delivered, failed: m.core.multiHolder.failed, peerBytes: m.core.multiHolder.peerBytes },
+      requests: m.peerRequestDiagnostics.records.slice(-8).map(r => ({ atMs:r.atMs,outcome:r.outcome,elapsedMs:r.elapsedMs,receivedBytes:r.receivedBytes })),
+      trace: f.swarm.trace().rows.filter(r => ['load','mixedScope','eligibility','xfer','xferFinish','originStart','origin'].includes(r.k)).slice(-32)
+        .map(r => ({ k:r.k,load:r.load,at:r.at,sn:r.sn,reason:r.reason,ms:r.ms,role:r.budgetGeometry?.source,
+          phase:r.phase,scope:r.scope,setupRemainingMs:r.setupRemainingMs,originInvoked:r.originInvoked,
+          op:r.op,peerOnly:r.peerOnly,exclusiveOrigin:r.exclusiveOrigin,delivered:r.delivered,
+          ranged:r.ranged,outcome:r.outcome,bytes:r.bytes,
+          commands:r.out?.c?.slice(0,8).map(c=>({t:c.t,p:c.p})) })) }; }) }));
+
+  const getCommitment = ctx => {
+    const path = new URL(ctx.url).pathname, data = objects.get(path); assert(data);
+    const id = `${path}:${ctx.frag.sn}:${ctx.frag.cc}`;
+    if (!events.has(id)) {
+      const pieceSize = commitmentPieceSize(data.length), pieces = [];
+      for (let at = 0; at < data.length; at += pieceSize) pieces.push(createHash('sha256').update(data.subarray(at, at + pieceSize)).digest('hex'));
+      events.set(id, finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds,
+        tags: [['x', base.swarmId], ['e', streamEvent.id]], content: commitmentContent({ v: 3,
+          streamEventId: streamEvent.id, swarmId: base.swarmId, key: keyFor(path), rendition: '/media/index.m3u8',
+          playlist: '/media/index.m3u8', mediaType: 'main', encryption: null, sequence: ctx.frag.sn,
+          discontinuity: ctx.frag.cc, part: null, sha256: createHash('sha256').update(data).digest('hex'),
+          size: data.length, pieceSize, pieces, expiresAt: seconds + 60 }) }, secret));
+    }
+    return events.get(id);
+  };
+  const invoke = (actor, frag) => {
+    const f = actors[actor], ctx = { url: frag.url, frag, part: null, type: LoaderContextType.MEDIA_FRAGMENT,
+      responseType: 'arraybuffer', headers: {}, rangeStart: 0, rangeEnd: 0 };
+    const loader = new f.hls.config.fLoader(f.hls.config), calls = { success: 0, error: 0, abort: 0, timeout: 0 };
+    frag.stats = loader.stats;
+    const response = new Promise((resolve, reject) => loader.load(ctx, { timeout: 10000 }, {
+      onSuccess: value => { calls.success++; resolve(new Uint8Array(value.data)); },
+      onError: () => { calls.error++; reject(new Error('reciprocal source error')); },
+      onAbort: () => { calls.abort++; reject(new Error('reciprocal source abort')); },
+      onTimeout: () => { calls.timeout++; diagnostic('timeout', actor, frag.sn); reject(new Error('reciprocal source timeout')); },
+    }));
+    response.catch(() => {}); return { response, calls };
+  };
+  // Install before SDK creation so reentrant stop can clear every fixture timer.
+    // Optional native setup admission is separately tested. Here the mandatory
+    // owner/protocol proof holds only its async setup phase until ANY original
+    // source invocation, whole or range; no favourable result gates time.
+    clock = warmFunctionalClock(t, () => keyWork.pending > 0 || actors.some((f, actor) => {
+      const rows = f.swarm.trace().rows;
+      return [1, 2].some(sn => {
+        const load = rows.findLast(row => row.k === 'load' && row.sn === sn && row.budgetGeometry?.source === 'warm-ahead');
+        return load && rows.some(row => row.k === 'mixedScope' && row.load === load.load && row.reason === 'entry') &&
+          !source.some(row => row.actor === actor && row.sn === sn);
+      });
+    }));
+  try {
+    for (const actor of [0, 1]) {
+      class Source extends Loader {
+        stats = new LoadStats();
+        load(ctx, config, callbacks) {
+          const data = objects.get(new URL(ctx.url).pathname); assert(data);
+          const from = ctx.rangeEnd ? ctx.rangeStart : 0, to = ctx.rangeEnd || data.length;
+          const row = { actor, sn: ctx.frag.sn, warm: Boolean(ctx[WARM_AHEAD]), range: ctx.rangeEnd ? [from, to] : null,
+            bytes: 0, complete: false, aborted: false, invokedAtMs: performance.now(),
+            timeoutMs: config.timeout ?? null, maxLoadTimeMs: config.loadPolicy?.maxLoadTimeMs ?? null }; source.push(row); loaders.add(this);
+          this.stats.loading.start = performance.now();
+          this.complete = () => {
+            if (row.complete || row.aborted) return;
+            row.complete = true; row.completedAtMs = performance.now(); row.bytes = to - from; this.stats.loaded = this.stats.total = row.bytes;
+            this.stats.loading.first = this.stats.loading.end = performance.now();
+            callbacks.onSuccess({ data: data.slice(from, to).buffer, code: row.range ? 206 : 200 }, this.stats, ctx, null);
+          };
+          this.row = row;
+          // Explicit functional service scalars calibrate recovery above the
+          // two-second future duration. No native elapsed/rate claim is made.
+          if (ctx.frag.sn === 0 || row.range) this.timer = setTimeout(this.complete, ctx.frag.sn === 0 ? 1600 : 20);
+          // Whole speculative futures stay pending until their owner ledger is
+          // checked, so no holder can have advertised either future yet.
+        }
+        abort() { clearTimeout(this.timer); if (this.row && !this.row.complete) { this.row.aborted = true; this.row.abortedAtMs = performance.now(); } }
+        destroy() { this.abort(); loaders.delete(this); }
+      }
+      const media = Object.assign(new EventTarget(), { currentTime: 0, paused: false, ended: false, seeking: false,
+        readyState: 4, playbackRate: 1, buffered: { length: 0 } });
+      actors.push(await settle(pair.make({ OriginLoader: Source, player: { media }, swarmOptions: {
+        streamEvent, getCommitment, warmAhead: true, bufferedMixedRanges: true, zeroBudgetPeerRace: true,
+        sustainablePeerWait: true, originReserveMs: 2000, maxPeerWaitMs: 2500, traceRequests: 4096 } })));
+    }
+    await wait(() => actors.every(f => f.swarm.metrics().peers.connected === 1));
+    const pubkeys = actors.map(f => f.swarm.metrics().pubkey), winner = path => {
+      const key = BigInt('0x' + keyFor(path));
+      return (key ^ BigInt('0x' + pubkeys[0])) < (key ^ BigInt('0x' + pubkeys[1])) ? 0 : 1;
+    };
+    const paths = [];
+    for (const owner of [0, 1]) {
+      for (let n = 0; n < 256; n++) {
+        const path = `/media/future-${owner}-${n}.ts`;
+        if (winner(path) === owner) { paths.push(path); break; }
+      }
+    }
+    assert.equal(paths.length, 2, 'actual peer identities yield opposite deterministic future owners');
+    objects.set('/media/lead.ts', new Uint8Array(32768).fill(9));
+    paths.forEach((path, index) => objects.set(path, Uint8Array.from({ length: size }, (_, i) => (i * 131 + index * 17) % 251)));
+    const playlist = '#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nlead.ts\n' +
+      paths.map(path => `#EXTINF:2,\n${path.split('/').at(-1)}\n`).join('') + (playlistState === 'vod' ? '#EXT-X-ENDLIST\n' : '');
+    const details = actors.map(f => {
+      const parsed = M3U8Parser.parseLevelPlaylist(playlist, 'https://origin.example/media/index.m3u8', 0, 'main', 0, null);
+      assert.equal(parsed.live, playlistState !== 'vod', 'use actual parser live state, rather than a claimed playback label');
+      if (playlistState === 'unknown') delete parsed.live;
+      f.hls.levels = [{ details: parsed }]; return parsed;
+    });
+    for (const f of actors) assert.deepEqual([f.swarm.metrics().core.verifier, f.swarm.metrics().core.selection, f.swarm.metrics().core.discovery], ['wasm', 'wasm', 'wasm']);
+    const lead = actors.map((_, actor) => invoke(actor, details[actor].fragments[0]));
+    await settle(Promise.all(lead.map(x => x.response)));
+    for (const f of actors) f.hls.media.buffered = { length: 1, start: () => 0, end: () => 10 };
+    await wait(() => source.filter(row => row.sn > 0).length >= 2);
+    diagnosticPhase = 'owner-ledger';
+    const initial = source.filter(row => row.sn > 0);
+    const advertised = pair.channels.flatMap(channel => channel.sent.filter(row => row?.t === 'have').flatMap(row => row.keys ?? row.add ?? []));
+    assert(paths.every(path => !advertised.includes(keyFor(path))), 'neither held future body has been seeded or advertised');
+    assert(actors.every(f => f.swarm.metrics().bytes.peerFirst === 0 && f.swarm.metrics().warmAhead.verifiedPeerBytes === 0));
+    if (playlistState === 'unknown') {
+      assert.deepEqual(initial.map(({ actor, sn }) => ({ actor, sn })).sort((a, b) => a.actor - b.actor),
+        [{ actor: 0, sn: 1 }, { actor: 1, sn: 1 }], 'unknown playlist keeps both ordinary source paths without optional election');
+      for (const f of actors) assert.equal(f.swarm.metrics().warmAhead.sourceYielded, 0);
+      for (const loader of loaders) if (loader.row?.sn === 1) loader.complete();
+      await wait(() => actors.every(f => f.swarm.metrics().warmAhead.verified >= 1));
+      const demands = actors.map((_, actor) => invoke(actor, details[actor].fragments[1]));
+      await settle(Promise.all(demands.map(async demand => {
+        sameBytes(await demand.response, objects.get(paths[0]));
+        assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+      })));
+      diagnosticPhase = 'done'; return;
+    }
+    console.log(JSON.stringify({ fixture: 'reciprocal-warm-source-policy', controllerClock: 'logical-functional', simulatedSourceAndRtc: true,
+      excludedNativeKeyDigestScheduling: true,
+      coreReady: actors.map(f => f.swarm.metrics().core.state), expectedOwners: [{ actor: 0, sn: 1 }, { actor: 1, sn: 2 }],
+      actualSourceStarts: initial.map(({ actor, sn, warm, range }) => ({ actor, sn, warm, range })),
+      futureHaveCount: paths.filter(path => advertised.includes(keyFor(path))).length }));
+    assert.deepEqual(initial.map(({ actor, sn }) => ({ actor, sn })).sort((a, b) => a.actor - b.actor),
+      [{ actor: 0, sn: 1 }, { actor: 1, sn: 2 }], 'one deterministic source owner per future; current simultaneous whole duplication is the regression');
+    assert(initial.every(row => row.warm && !row.range));
+    assert(actors[1].swarm.metrics().warmAhead.sourceYielded > 0, 'actor 1 skipped the unadvertised first future before fetching its own second future');
+    if (playlistState === 'live-demand-before-have') {
+      const enteredAt = performance.now(), demand = invoke(1, details[1].fragments[1]);
+      await wait(() => source.some(row => row.actor === 1 && row.sn === 1));
+      const fallback = source.find(row => row.actor === 1 && row.sn === 1);
+      assert.equal(fallback.warm, false, 'genuine rank-loser owns an independent source path');
+      assert.equal(fallback.range, null);
+      assert(fallback.invokedAtMs - enteredAt <= 25, 'the existing mixed setup bound still starts source without waiting for a future HAVE');
+      assert(fallback.timeoutMs > 0 && fallback.timeoutMs <= 10000 - (fallback.invokedAtMs - enteredAt));
+      assert(!pair.channels.some(channel => channel.sent.some(row => row?.t === 'have' && (row.keys ?? row.add ?? []).includes(keyFor(paths[0])))),
+        'no peer has supplied or advertised this object before recovery');
+      for (const loader of loaders) if (loader.row === fallback) loader.complete();
+      sameBytes(await settle(demand.response), objects.get(paths[0]));
+      assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+      assert.equal(actors[1].swarm.metrics().bytes.peerFirst, 0);
+      diagnosticPhase = 'done'; return;
+    }
+    if (playlistState === 'live') for (const [actor, f] of actors.entries()) {
+      // A real live reload replaces Fragment objects. Routing must use the
+      // current parsed window without keeping a previous parser object alive.
+      const refreshed = M3U8Parser.parseLevelPlaylist(playlist, 'https://origin.example/media/index.m3u8', 0, 'main', 0, null);
+      assert.equal(refreshed.live, true);
+      assert.notEqual(refreshed.fragments[1], details[actor].fragments[1]);
+      f.hls.levels[0].details = details[actor] = refreshed;
+    }
+    diagnosticPhase = 'owner-body-completion';
+    for (const loader of loaders) if (loader.row?.sn > 0) loader.complete();
+    await wait(() => actors.every(f => f.swarm.metrics().warmAhead.verified >= 1));
+    await wait(() => paths.every(path => pair.channels.some(channel => channel.sent.some(row => row?.t === 'have' && (row.keys ?? row.add ?? []).includes(keyFor(path))))));
+    await wait(() => actors[1].swarm.metrics().warmAhead.haveReconsidered > 0);
+    for (const sn of [1, 2]) {
+      diagnosticPhase = 'genuine-sn' + sn;
+      const demands = actors.map((_, actor) => invoke(actor, details[actor].fragments[sn]));
+      const data = objects.get(paths[sn - 1]);
+      await settle(Promise.all(demands.map(async demand => { sameBytes(await demand.response, data); assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 }); })));
+    }
+    diagnosticPhase = 'repeat-cache-consumption';
+    for (const actor of [0, 1]) {
+      const f = actors[actor], metrics = f.swarm.metrics(), rows = source.filter(row => row.actor === actor && row.sn > 0);
+      assert(metrics.bytes.peerFirst > 0 && metrics.bytes.peerFirst < size, JSON.stringify({ actor,
+        message: 'reciprocal consumer must exercise partial Core assembly, not an unobserved whole-peer or source fallback',
+        peerBytes: metrics.bytes.peerFirst, warm: Object.fromEntries(['started', 'verified', 'coalesced', 'promotions',
+          'localReuseBytes', 'verifiedPeerBytes', 'consumedPeerBytes'].map(key => [key, metrics.warmAhead[key]])),
+        source: rows.slice(-16), transfers: metrics.core.multiHolder.transfers, delivered: metrics.core.multiHolder.delivered,
+        trace: f.swarm.trace().rows.filter(row => ['load', 'eligibility', 'mixedScope', 'xfer', 'xferFinish'].includes(row.k)).slice(-40)
+          .map(row => ({ k: row.k, load: row.load, sn: row.sn, op: row.op, reason: row.reason, budgetMs: row.budgetMs,
+            role: row.budgetGeometry?.source, exclusiveOrigin: row.exclusiveOrigin, peerOnly: row.peerOnly,
+            commands: row.out?.c?.slice(0, 8).map(command => ({ t: command.t, p: command.p })) })) }));
+      assert.equal(rows.reduce((sum, row) => sum + row.bytes, 0) + metrics.bytes.peerFirst, 2 * size, 'actual source slices and accepted peer bytes are disjoint');
+      assert.equal(rows.filter(row => !row.range).length, 1, 'consumer adds no duplicate future whole GET');
+      assert(rows.every(row => row.complete && !row.aborted));
+      assert(f.swarm.trace().rows.some(row => row.k === 'xfer' && row.op === 'start' && row.exclusiveOrigin === true &&
+        row.out.c.some(command => command.t === 'request') && row.out.c.some(command => command.t === 'origin')), 'actual Core mixed plan consumes the other holder');
+      const credit = metrics.bytes.peerFirst, before = source.length;
+      sameBytes(await settle(invoke(actor, details[actor].fragments[2]).response), objects.get(paths[1]));
+      assert.equal(f.swarm.metrics().bytes.peerFirst, credit, 'reusing the same future cannot credit it twice');
+      assert.equal(source.length, before);
+    }
+    assert(keyWork.operations > 0, 'the fixed metadata digest phase actually ran');
+    assert.equal(keyWork.pending, 0, 'all observed native key digests settled');
+    diagnosticPhase = 'done';
+  } finally {
+    if (diagnosticPhase !== 'done') diagnostic('finally');
+    keyWork.restore(); clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy();
+  }
 });
 
 test('verified piece flow waits for real worker verification and rejects invalidated replies', async t => {
@@ -6704,6 +7057,181 @@ test("known whole-unfit cached peer-only work leaves immediate HTTP alone", asyn
     assert.equal(after.peerAdmission.claims, before.peerAdmission.claims, 'decline occurs before taking a link lease');
     assert.equal(after.core.multiHolder.transfers, before.core.multiHolder.transfers, 'decline occurs before allocating Core work');
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('known whole-unfit demand refresh measures faster actual flow after the existing cooldown', { timeout: 15000 }, async t => {
+  // Functional policy timing and simulated paced channel, real signed six-MiB
+  // commitment/Core/framing/hash path. Neither model rates nor HAVE are seeded.
+  const clock = warmFunctionalClock(t, () => false); let f;
+  try {
+    f = await clock.settle(multiFixture(t, { size: 6 * 1024 * 1024,
+      holders: [{ Channel: FixedRateChannel, firstByteMs: 450, rate: 327680 }], originFallbackMs: 1000,
+      originDelayMs: 50, holdWholeOrigin: true, traceRequests: 4096,
+      swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 2500 } }));
+    sameBytes(await clock.settle(f.load()), f.bytes);
+    const training = f.swarm.metrics().peerRequestDiagnostics.records.find(row =>
+      row.outcome === 'payload' && row.receivedBytes >= 32768 && row.elapsedMs - row.firstByteMs >= 300);
+    assert(training, 'the old rate must come from actual qualifying signed-piece payload');
+    f.hls.media = { currentTime: 10, paused: false, ended: false, seeking: false, readyState: 4,
+      playbackRate: 1, buffered: { length: 0 } };
+    const wants = f.channels[0].wants.length, sources = f.wholeLoads.length;
+    const initial = beginCountedMultiLoad(f);
+    assert.equal(f.wholeLoads.length, sources + 1, 'ordinary HTTP starts synchronously');
+    await clock.advance(100);
+    const old = f.swarm.metrics().core.multiHolder.peerFlow.lastModel;
+    assert(old.firstByteMs + f.pieceSize / old.rateBytesPerSecond * 1000 < 2500);
+    assert(old.firstByteMs + f.bytes.length / old.rateBytesPerSecond * 1000 > 2500);
+    assert.equal(f.channels[0].wants.length, wants, 'the existing cooldown keeps the known whole-fit rejection');
+    const source = f.wholeLoads.at(-1);
+    source.callbacks.onSuccess({ data: f.bytes.slice().buffer }, source.loader.stats, multiContext, null);
+    sameBytes(await clock.settle(initial.response), f.bytes);
+    await clock.advance(10001); // Original ten-second refresh cooldown; still inside 30s model TTL.
+    f.channels[0].rate = 4 * 1024 * 1024; f.channels[0].firstByteMs = 20;
+    const before = f.swarm.metrics(), from = f.swarm.trace().rows.length, sourceCount = f.wholeLoads.length;
+    const at = performance.now(), refreshed = beginCountedMultiLoad(f);
+    assert.equal(f.wholeLoads.length, sourceCount + 1, 'refresh never postpones or duplicates whole HTTP');
+    await clock.advance(100);
+    assert(f.channels[0].wants.length > wants, 'a whole-fit miss may issue one explicit bounded refresh after cooldown');
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst, 'partial calibration cannot claim accepted media');
+    const start = f.swarm.trace().rows.slice(from).find(row => row.k === 'xfer' && row.op === 'start');
+    assert(start?.peerOnly && start.wholeFitRefresh);
+    assert.equal(start.peers.length, 1); assert.deepEqual(start.probePeers, [start.peers[0][0]]);
+    assert.deepEqual(start.peers[0].slice(1), [null, null], 'the explicit probe is not a fabricated faster model');
+    assert(start.wholeFitRefresh.rateBytesPerSecond > 0 && start.wholeFitRefresh.capacityBytes < f.bytes.length);
+    assert(start.deadline - at <= 2500, 'the refresh retains the original absolute peer cap');
+    sameBytes(await clock.settle(refreshed.response), f.bytes);
+    assert.deepEqual([refreshed.calls.success.length, refreshed.calls.abort.length, refreshed.calls.error.length], [1, 0, 0]);
+    const after = f.swarm.metrics();
+    assert.equal(after.bytes.peerFirst - before.bytes.peerFirst, f.bytes.length, 'only the complete verified winner earns credit');
+    assert.equal(f.wholeLoads.at(-1).loader.aborted, true);
+    assert(after.core.multiHolder.peerFlow.verifiedShortBatches > before.core.multiHolder.peerFlow.verifiedShortBatches,
+      'actual verified refills establish a qualifying same-transfer flow');
+    const lastFrom = f.swarm.trace().rows.length;
+    sameBytes(await clock.settle(beginCountedMultiLoad(f).response), f.bytes);
+    const learned = f.swarm.metrics().core.multiHolder.peerFlow.lastModel;
+    const next = f.swarm.trace().rows.slice(lastFrom).find(row => row.k === 'xfer' && row.op === 'start');
+    assert(learned.rateBytesPerSecond > old.rateBytesPerSecond * 2);
+    assert(next && !next.wholeFitRefresh && next.probePeers.length === 0, 'later whole-fit work uses the new measured rate');
+    assert.deepEqual(f.ranges.slice(1), [], 'the peer-only probe never adds origin ranges');
+    console.log(JSON.stringify({ fixture: 'whole-fit-refresh-real-core', controllerClock: 'logical-functional',
+      objectBytes: f.bytes.length, oldModel: old, measuredNewModel: learned,
+      refreshElapsedMs: performance.now() - at, creditedCompleteObjectBytes: after.bytes.peerFirst - before.bytes.peerFirst }));
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+async function wholeFitRefreshControlFixture(t, { worker = false, beforeCommitment = null } = {}) {
+  const clock = warmFunctionalClock(t, () => false);
+  const bridge = worker ? transferWorkerFixture(t) : null;
+  let f;
+  try {
+    f = await clock.settle(multiFixture(t, { size: 6 * 1024 * 1024,
+      holders: [{ Channel: FixedRateChannel, firstByteMs: 450, rate: 327680 }], originFallbackMs: 1000,
+      originDelayMs: 50, holdWholeOrigin: true, traceRequests: 4096, beforeCommitment,
+      swarmOptions: { zeroBudgetPeerRace: true, maxPeerWaitMs: 2500,
+        ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } }));
+    if (worker) await clock.advanceUntil(() => f.swarm.metrics().core.transferWorker.state === 'ready');
+    sameBytes(await clock.settle(f.load()), f.bytes);
+    assert(f.swarm.metrics().peerRequestDiagnostics.records.some(row =>
+      row.outcome === 'payload' && row.receivedBytes >= 32768 && row.elapsedMs - row.firstByteMs >= 300));
+    f.hls.media = { currentTime: 10, paused: false, ended: false, seeking: false, readyState: 4,
+      playbackRate: 1, buffered: { length: 0 } };
+    await clock.advance(10001);
+    const close = async () => { try { await clock.settle(f.close()); } finally { clock.restore(); } };
+    return { f, clock, bridge, close };
+  } catch (error) { try { if (f) await clock.settle(f.close()); } finally { clock.restore(); } throw error; }
+}
+
+for (const ending of ['deadline', 'abort', 'HTTP-winner']) test(`whole-fit refresh ${ending} cannot credit incomplete calibration or renew the cooldown`, { timeout: 15000 }, async t => {
+  const q = await wholeFitRefreshControlFixture(t), { f, clock } = q;
+  try {
+    const before = f.swarm.metrics(), wants = f.channels[0].wants.length, from = f.swarm.trace().rows.length;
+    const entry = performance.now(), pending = beginCountedMultiLoad(f);
+    assert(f.wholeLoads.length > 0, 'ordinary source is already active');
+    await clock.advanceUntil(() => f.channels[0].wants.length > wants, 100);
+    const start = f.swarm.trace().rows.slice(from).find(row => row.k === 'xfer' && row.op === 'start');
+    assert(start.wholeFitRefresh); assert(start.deadline - entry <= 2500);
+    assert.equal(f.channels[0].wants[wants][1] - f.channels[0].wants[wants][0], 1, 'refresh starts with exactly one signed piece');
+    const source = f.wholeLoads.at(-1);
+    if (ending === 'abort') pending.loader.abort();
+    if (ending === 'HTTP-winner') {
+      source.callbacks.onSuccess({ data: f.bytes.slice().buffer }, source.loader.stats, multiContext, null);
+      sameBytes(await clock.settle(pending.response), f.bytes);
+    }
+    await clock.advance(2600);
+    if (ending === 'deadline') {
+      assert.equal(pending.calls.success.length, 0, 'the original peer deadline cannot deliver a partial object');
+      source.callbacks.onSuccess({ data: f.bytes.slice().buffer }, source.loader.stats, multiContext, null);
+      sameBytes(await clock.settle(pending.response), f.bytes);
+    }
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+    assert.equal(f.swarm.metrics().core.multiHolder.delivered, before.core.multiHolder.delivered);
+    assert.equal(pending.calls.success.length, ending === 'abort' ? 0 : 1);
+    assert.equal(pending.calls.abort.length, ending === 'abort' ? 1 : 0);
+    const ends = f.swarm.trace().rows.slice(from).filter(row => row.k === 'xferFinish');
+    assert.equal(ends.length, 1); assert.equal(ends[0].delivered, false);
+    assert.equal(ends[0].reason, 'signal-abort');
+    const afterWants = f.channels[0].wants.length, afterTransfers = f.swarm.metrics().core.multiHolder.transfers;
+    const second = beginCountedMultiLoad(f); const secondSource = f.wholeLoads.at(-1);
+    await clock.advance(100);
+    assert.equal(f.channels[0].wants.length, afterWants, 'an emitted probe consumes the original cooldown even when it fails');
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, afterTransfers);
+    secondSource.callbacks.onSuccess({ data: f.bytes.slice().buffer }, secondSource.loader.stats, multiContext, null);
+    sameBytes(await clock.settle(second.response), f.bytes);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+  } finally { await q.close(); }
+});
+
+for (const ending of ['metadata-refusal', 'captured-holder-withdrawal', 'warm-marker']) test(`whole-fit refresh ${ending} performs no optional probe and preserves later genuine eligibility`, { timeout: 15000 }, async t => {
+  let deny = false, withdraw = false, current;
+  const q = await wholeFitRefreshControlFixture(t, { beforeCommitment: () => {
+    if (deny) throw new Error('fixture commitment refused');
+    if (withdraw) { withdraw = false; current.channels[0].receive(JSON.stringify({ t: 'have', keys: [] })); }
+  } }), { f, clock } = q; current = f;
+  try {
+    const wants = f.channels[0].wants.length, before = f.swarm.metrics();
+    deny = ending === 'metadata-refusal'; withdraw = ending === 'captured-holder-withdrawal';
+    const context = ending === 'warm-marker' ? { ...multiContext, frag: { ...multiContext.frag }, [WARM_AHEAD]: { peerBytes: 0 } } : multiContext;
+    const pending = beginCountedMultiLoad(f, context); const source = f.wholeLoads.at(-1);
+    await clock.advance(100);
+    assert.equal(f.channels[0].wants.length, wants);
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, before.core.multiHolder.transfers);
+    source.callbacks.onSuccess({ data: f.bytes.slice().buffer }, source.loader.stats, context, null);
+    sameBytes(await clock.settle(pending.response), f.bytes);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+    deny = false;
+    f.channels[0].receive(JSON.stringify({ t: 'have', add: [f.key] }));
+    const retry = beginCountedMultiLoad(f); const retrySource = f.wholeLoads.at(-1);
+    await clock.advanceUntil(() => f.channels[0].wants.length > wants, 100);
+    assert(f.swarm.trace().rows.some(row => row.k === 'xfer' && row.wholeFitRefresh),
+      'refusal before any REQUEST did not consume the ten-second refresh');
+    retrySource.callbacks.onSuccess({ data: f.bytes.slice().buffer }, retrySource.loader.stats, multiContext, null);
+    sameBytes(await clock.settle(retry.response), f.bytes);
+    await clock.advance(100);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+  } finally { await q.close(); }
+});
+
+test('whole-fit refresh cancelled during actual Worker allocation before REQUEST preserves cooldown eligibility', { timeout: 15000 }, async t => {
+  const q = await wholeFitRefreshControlFixture(t, { worker: true }), { f, clock, bridge } = q;
+  try {
+    const wants = f.channels[0].wants.length, before = f.swarm.metrics();
+    bridge.workers[0].holdNew = true;
+    const pending = beginCountedMultiLoad(f);
+    await clock.advanceUntil(() => bridge.workers[0].newRequests?.length === 1, 500);
+    assert.equal(f.channels[0].wants.length, wants, 'the allocated probe has not emitted its first REQUEST');
+    pending.loader.abort();
+    bridge.workers[0].holdNew = false; bridge.workers[0].releaseNew();
+    await clock.advanceUntil(() => f.swarm.metrics().core.transferWorker.transfers === 0, 500);
+    const retry = beginCountedMultiLoad(f), source = f.wholeLoads.at(-1);
+    await clock.advanceUntil(() => f.channels[0].wants.length > wants, 500);
+    assert(f.swarm.trace().rows.some(row => row.k === 'xfer' && row.wholeFitRefresh));
+    source.callbacks.onSuccess({ data: f.bytes.slice().buffer }, source.loader.stats, multiContext, null);
+    sameBytes(await clock.settle(retry.response), f.bytes);
+    await clock.advance(100);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+    assert.deepEqual([pending.calls.success.length, pending.calls.abort.length], [0, 1]);
+    assert.deepEqual([retry.calls.success.length, retry.calls.abort.length], [1, 0]);
+  } finally { await q.close(); }
 });
 
 test("known whole-fit cached peer-only work combines admissible holders", async t => {
@@ -7790,7 +8318,8 @@ test("trace: a multi-holder transfer replays from its rows alone to the same com
   const core = await loadCore(multiCore);
   const transfer = core.transfer({ size: start.size, sha256: createHash("sha256").update(object).digest("hex"), pieces,
     deadline: start.deadline, maxHolders: start.maxHolders, originReserveMs: start.originReserveMs,
-    ...(start.peerOnly ? { peerOnly: true } : {}) });
+    ...(start.peerOnly ? { peerOnly: true } : {}),
+    ...(start.exclusiveOrigin === undefined ? {} : { exclusiveOrigin: start.exclusiveOrigin }) });
   const summary = (state) => ({ c: state.commands.map(({ t, peer, p }) => ({ t, ...(peer !== undefined ? { peer } : {}), ...(p ? { p } : {}) })),
     next: state.next, late: state.late, finished: state.finished });
   for (const row of calls) {
@@ -8541,7 +9070,7 @@ test("a holder that failed verification as a trial is banned and closed, and is 
 
 // Real signed/encrypted rendezvous and both public factories; only ordered RTC
 // delivery is bridged. No retained relay history or artificial HAVE payloads.
-async function framingPairFixture(t, {omitPresenceCapability=false, capability={}, staleAnswer=false, deniedOffer=false}={}) {
+async function framingPairFixture(t, {omitPresenceCapability=false, capability={}, staleAnswer=false, deniedOffer=false, pairedState=false}={}) {
   const pcs=new Map(),channels=[],presences=[],signals=[],swarms=[],pendingSignals=[];let next=0;
   class Ordered extends RecordedChannel {
     readyState='connecting';ordered=true;maxRetransmits=null;maxPacketLifeTime=null;
@@ -8561,9 +9090,12 @@ async function framingPairFixture(t, {omitPresenceCapability=false, capability={
       if(description.type==='offer'){
         this.channel=new Ordered();channels.push(this.channel);this.channel.other=peer.channel;peer.channel.other=this.channel;
         const event=new Event('datachannel');event.channel=this.channel;this.dispatchEvent(event);
-      }else queueMicrotask(()=>{for(const channel of [this.channel,peer.channel]){channel.readyState='open';channel.dispatchEvent(new Event('open'));}});
+      }else queueMicrotask(()=>{
+        if(pairedState)for(const pc of [this,peer]){pc.connectionState='connected';pc.dispatchEvent(new Event('connectionstatechange'));}
+        for(const channel of [this.channel,peer.channel]){channel.readyState='open';channel.dispatchEvent(new Event('open'));}
+      });
     }
-    close(){super.close();this.channel?.close();}
+    close(){super.close();if(pairedState)this.connectionState='closed';this.channel?.close();}
   }
   const Memory=memoryRelaySocket();
   class Socket extends Memory {send(text){const [type,event]=JSON.parse(text);if(type==='EVENT'&&event.kind===24170)presences.push(event);super.send(text);}}
@@ -8586,7 +9118,7 @@ async function framingPairFixture(t, {omitPresenceCapability=false, capability={
   const bytes=new Uint8Array(32).fill(9),key=createHash('sha256').update(`${base.swarmId}\n/media/seg.ts`).digest('hex');
   const hash=createHash('sha256').update(bytes).digest('hex');
   const signed=signedFixture({v:3,key,sha256:hash,rendition:'/media/index.m3u8',playlist:'/media/index.m3u8',mediaType:'main',encryption:null,pieceSize:commitmentPieceSize(bytes.length),pieces:[hash]});
-  const make=async({cold=false,delay=0,legacy=false,admit}={})=>{
+  const make=async({cold=false,delay=0,legacy=false,admit,OriginLoader=null,swarmOptions={},player={}}={})=>{
     let http=0,bodies=0,aborts=0;class Origin extends Loader {
       stats=new LoadStats();
       load(ctx,config,callbacks){http++;const complete=()=>{bodies++;this.stats.loaded=this.stats.total=bytes.length;callbacks.onSuccess({data:bytes.slice().buffer},this.stats,ctx,null);};
@@ -8597,8 +9129,8 @@ async function framingPairFixture(t, {omitPresenceCapability=false, capability={
       mode:'peer-first',coreWasm:multiCore,multiHolder:true,serve:true,maxPeers:1,getCommitment:()=>signed.event,streamEvent:signed.options.streamEvent,
       originReserveMs:100,originFallbackMs:1000,maxPeerWaitMs:1500,traceRequests:128,ticket:"granted",
       ...(legacy?{multiHolder:false}:{}),...(admit?{admit}:{}),
-      ...(cold?{sustainablePeerWait:true,zeroBudgetPeerRace:true,lateHaveRace:true,latePeerRace:true,uploadPacing:true}:{})});swarms.push(swarm);
-    const hls={config:{loader:Origin},media:{currentTime:0,buffered:{length:cold?0:1,start:()=>0,end:()=>8}}};swarm.attach(hls);
+      ...(cold?{sustainablePeerWait:true,zeroBudgetPeerRace:true,lateHaveRace:true,latePeerRace:true,uploadPacing:true}:{}),...swarmOptions});swarms.push(swarm);
+    const hls={...player,config:{...player.config,loader:OriginLoader??Origin},media:player.media??{currentTime:0,buffered:{length:cold?0:1,start:()=>0,end:()=>8}}};swarm.attach(hls);
     await until(()=>swarm.metrics().core.state==='ready'&&presences.some(event=>event.pubkey===swarm.metrics().pubkey));
     const frag=M3U8Parser.parseLevelPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n#EXTINF:2,\nseg.ts\n','https://origin.example/media/index.m3u8',0,'main',0,null).fragments[0];
     const load=()=>new Promise((resolve,reject)=>{const loader=new hls.config.fLoader({});frag.stats=loader.stats;
@@ -8709,3 +9241,2645 @@ test('SDP framing: stale answer cannot prime a current answer lacking capability
     assert.equal(b.swarm.metrics().bytes.fromPeers,32,'the admitted installed offer still authorises the opposite direction');
   }finally{clock?.restore();f.close();}
 });
+
+test('buffered mixed setup retains only25ms before ordinary source invocation when authority is pending', async t => {
+  const clock = virtualClock(t); let f, release;
+  try {
+    f = await bufferedMixedFixture(t, clock, { beforeCommitment: () => new Promise(resolve => { release = resolve; }) });
+    const baselineWhole = f.wholeLoads.length, baselineWants = f.channels[0].wants.length, begun = clock.now();
+    const load = beginCountedMultiLoad(f, f.ctx);
+    await clock.advance(24);
+    assert.equal(f.wholeLoads.length, baselineWhole, 'the opt-in owns only its declared bounded setup interval');
+    await clock.advance(1);
+    assert.equal(f.wholeLoads.length, baselineWhole + 1);
+    assert.equal(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs, 10000 - (clock.now() - begun));
+    assert.equal(f.channels[0].wants.length, baselineWants); assert.equal(f.ranges.length, 0);
+    release?.(); sameBytes(await clock.settle(load.response), f.bytes);
+    assert.equal(load.calls.success.length, 1);
+  } finally { release?.(); if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+// Observe only the currently executing real timer. The native delay, receiver,
+// callback arguments and returned handle are passed through unchanged.
+function realTimerInvocationContext() {
+  const native = globalThis.setTimeout; let current = null;
+  function observed(callback, delay, ...args) {
+    if (typeof callback !== 'function') return Reflect.apply(native, this, [callback, delay, ...args]);
+    const scheduledAtMs = performance.now();
+    return Reflect.apply(native, this, [function (...callbackArgs) {
+      const prior = current;
+      current = { scheduledAtMs, requestedDelayMs: typeof delay === 'number' && Number.isFinite(delay) ? delay : null,
+        firedAtMs: performance.now() };
+      try { return Reflect.apply(callback, this, callbackArgs); }
+      finally { current = prior; }
+    }, delay, ...args]);
+  }
+  globalThis.setTimeout = observed;
+  return { snapshot: () => current ? { ...current } : null,
+    restore: () => { globalThis.setTimeout = native; } };
+}
+
+const MIXED_SCOPE_CHECKS = ['notStopped', 'hls', 'media', 'generation', 'stream', 'unpaused', 'unended', 'unseeking',
+  'unitRate', 'ready', 'fragment', 'start', 'duration', 'identity', 'owns', 'mixed', 'signal', 'currentNotStopped', 'recovery', 'setup'];
+
+// A classifier of actual SDK observations, not an elapsed-time assumption. The
+// current() predicate establishes entry+25 as an exact conservative lower bound;
+// its rounded diagnostic ms is used only to reject inconsistent evidence.
+function mixedScopeSetupProof(trace, expected) {
+  try {
+    if (trace.dropped !== 0 || !Array.isArray(trace.rows) || !Number.isSafeInteger(expected.load) ||
+        !Number.isFinite(expected.enteredAtMs) || !Number.isFinite(expected.invokedAtMs) ||
+        ['physicalRangeGets', 'clientRangeLoads', 'peerRequests', 'acceptedPeerBytes'].some(name => expected[name] !== 0)) return null;
+    const rows = trace.rows, same = row => row?.load === expected.load;
+    const load = rows.findIndex(row => same(row) && row.k === 'load');
+    const entry = rows.findIndex(row => same(row) && row.k === 'mixedScope' && row.reason === 'entry');
+    const failure = rows.findIndex(row => same(row) && row.k === 'mixedScope' && row.reason === 'current-setup');
+    const fallback = rows.findIndex(row => same(row) && row.k === 'mixedScope' && ['peer-result-empty', 'before-origin-invalid'].includes(row.reason));
+    const origin = rows.findIndex(row => same(row) && row.k === 'originStart');
+    if (!(load >= 0 && load < entry && entry < failure && failure < fallback && fallback < origin)) return null;
+    const sequence = [load, entry, failure, fallback, origin].map(index => rows[index]);
+    if (sequence.some((row, index) => !Number.isSafeInteger(row.at) || row.at < 0 || index > 0 && row.at < sequence[index - 1].at)) return null;
+    if (rows.filter(row => same(row) && row.k === 'load').length !== 1 ||
+        ['sn', 'cc', 'level'].some(name => !Number.isSafeInteger(expected[name]) || rows[load][name] !== expected[name])) return null;
+    if (rows.some(row => same(row) && row.k === 'request')) return null;
+    if (rows.slice(entry + 1, origin).some((row, index) => same(row) && row.k === 'mixedScope' &&
+        ![failure, fallback].includes(entry + 1 + index))) return null;
+    const rejected = rows[failure], state = rejected.scope, g = rejected.capturedGeometry, current = rejected.currentGeometry;
+    if (!state || Object.keys(state).length !== MIXED_SCOPE_CHECKS.length ||
+        MIXED_SCOPE_CHECKS.some(name => state[name] !== (name !== 'setup')) ||
+        [rows[entry], rejected, rows[fallback]].some(row => row.phase !== 'mixed' || row.originInvoked !== false) ||
+        !(rows[entry].ms >= 0 && rejected.ms >= 25 && rows[fallback].ms >= rejected.ms && rejected.setupRemainingMs <= 0)) return null;
+    if (!g || !current || g.fragmentStart !== expected.fragmentStart || g.fragmentDurationSeconds !== expected.fragmentDurationSeconds ||
+        current.fragmentStart !== g.fragmentStart || current.fragmentDurationSeconds !== g.fragmentDurationSeconds ||
+        current.playbackRate !== 1 || !(current.readyState >= 3) || g.durationMs !== expected.fragmentDurationSeconds * 1000) return null;
+    if (['currentTime', 'playableEnd', 'fragmentStart', 'durationMs', 'originReserveMs'].some(name =>
+        !Number.isFinite(g[name]) || rows[load].budgetGeometry?.[name] !== g[name])) return null;
+    const recoveryMs = Math.min(expected.parentMs, (g.playableEnd - g.currentTime) * 1000), firstMs = Math.min(recoveryMs, expected.ttfbMs);
+    if (!(Number.isFinite(recoveryMs) && recoveryMs > 25 && Number.isFinite(firstMs) && firstMs > 25 &&
+        recoveryMs - g.originReserveMs > 25 && rows[load].budgetMs === 0 && rows[load].limitMs > 25)) return null;
+    const proofTime = expected.enteredAtMs + 25, elapsed = expected.invokedAtMs - expected.enteredAtMs;
+    if (!(expected.invokedAtMs >= proofTime && expected.remainingLoadMs > 0 && expected.remainingTtfbMs > 0 &&
+        expected.remainingLoadMs <= recoveryMs - 25 && expected.remainingLoadMs >= recoveryMs - elapsed &&
+        expected.remainingTtfbMs <= firstMs - 25 && expected.remainingTtfbMs >= firstMs - elapsed)) return null;
+    const xfers = rows.map((row, index) => ({ row, index })).filter(item => same(item.row) && item.row.k === 'xfer');
+    const finishes = rows.map((row, index) => ({ row, index })).filter(item => same(item.row) && item.row.k === 'xferFinish');
+    const ranges = rows.map((row, index) => ({ row, index })).filter(item => same(item.row) && item.row.k === 'origin' && item.row.ranged === true);
+    // A successful Core RPC can reach receive() before its continuation calls
+    // currentValid(). That exact guard runs before apply(state), so this earlier
+    // rejection has one allocation but no attempted origin arm or peer command.
+    if (rows[fallback].reason === 'peer-result-empty' && expected.coreTransfersDelta === 1) {
+      if (xfers.length !== 1 || finishes.length !== 1 || ranges.length || expected.originRangeAttempts !== 0 ||
+          rows.slice(entry + 1, origin).some(row => same(row) && row.k === 'origin')) return null;
+      const { row: started, index: startIndex } = xfers[0], { row: finished, index: finishIndex } = finishes[0];
+      if (![started, finished].every(row => Number.isSafeInteger(row.at)) ||
+          !(entry < startIndex && startIndex < failure && failure < finishIndex && finishIndex < fallback && fallback < origin &&
+            started.at >= rows[entry].at && started.at <= rejected.at && finished.at >= rejected.at && finished.at <= rows[fallback].at)) return null;
+      if (started.op !== 'start' || started.exclusiveOrigin !== true || started.peerOnly === true || started.size !== expected.size ||
+          !Number.isSafeInteger(started.pieces) || !Number.isSafeInteger(started.pieceSize) || started.pieceSize <= 0 ||
+          Math.ceil(started.size / started.pieceSize) !== started.pieces || !(started.deadline > started.at) ||
+          started.out?.finished !== false || typeof started.out?.late !== 'boolean' || !Array.isArray(started.out?.c)) return null;
+      const commands = started.out.c, sources = commands.filter(command => command.t === 'origin'), peers = commands.filter(command => command.t === 'request');
+      if (commands.length !== 2 || sources.length !== 1 || peers.length !== 1 || commands.some(command =>
+          !Array.isArray(command.p) || command.p.length !== 2 || !command.p.every(Number.isSafeInteger) ||
+          command.p[0] < 0 || command.p[0] >= command.p[1] || command.p[1] > started.pieces) ||
+          !started.peers?.some(([id]) => id === peers[0].peer) ||
+          !(sources[0].p[1] <= peers[0].p[0] || peers[0].p[1] <= sources[0].p[0])) return null;
+      if (finished.reason !== 'reply-current-invalid' || finished.delivered !== false || finished.bufferedMixed !== true || finished.peerOnly !== false ||
+          finished.verifiedBytes !== 0 || finished.originBytes !== 0 || !(finished.peerRemainingMs > 0 && finished.recoveryRemainingMs > 0) ||
+          rows[origin].leg !== 'fallback' || rows[origin].ranged !== false || rows[origin].ms !== 0) return null;
+      return { stage: 'after-core-reply-before-io', proofTime,
+        sequence: [load, entry, startIndex, failure, finishIndex, fallback, origin].map(index => rows[index]) };
+    }
+    if (rows[fallback].reason === 'peer-result-empty') {
+      if (xfers.length || ranges.length || expected.coreTransfersDelta !== 0 || expected.originRangeAttempts !== 0) return null;
+      if (!finishes.length) return { stage: 'before-core', proofTime, sequence };
+      // A synchronous transfer allocation can return after the setup cutoff.
+      // This guard frees it before transfers++, start(), commands or I/O.
+      if (finishes.length !== 1 || rows.slice(entry + 1, origin).some(row => same(row) && row.k === 'origin')) return null;
+      const { row: finished, index: finishIndex } = finishes[0];
+      if (!Number.isSafeInteger(finished.at) || !(failure < finishIndex && finishIndex < fallback &&
+          finished.at >= rejected.at && finished.at <= rows[fallback].at) ||
+          finished.reason !== 'allocation-state-deadline-authority-holder' || finished.delivered !== false ||
+          finished.bufferedMixed !== true || finished.peerOnly !== false || finished.verifiedBytes !== 0 || finished.originBytes !== 0 ||
+          ![finished.ms, finished.peerRemainingMs, finished.recoveryRemainingMs].every(Number.isFinite) || finished.ms < 0 ||
+          !(finished.peerRemainingMs > 0 && finished.recoveryRemainingMs > 0) ||
+          rows[origin].leg !== 'fallback' || rows[origin].ranged !== false || rows[origin].ms !== 0) return null;
+      return { stage: 'after-allocation-before-start', proofTime,
+        sequence: [load, entry, failure, finishIndex, fallback, origin].map(index => rows[index]) };
+    }
+    // A Core plan is not physical I/O: the mandatory source arm is attempted
+    // first, and its existing beforeLoad guard can retire the whole plan before
+    // either a Range loader invocation or the queued peer command is issued.
+    if (xfers.length !== 1 || finishes.length !== 1 || ranges.length !== 1 ||
+        expected.coreTransfersDelta !== 1 || expected.originRangeAttempts !== 1) return null;
+    const { row: started, index: startIndex } = xfers[0], { row: finished, index: finishIndex } = finishes[0],
+      { row: range, index: rangeIndex } = ranges[0];
+    if ([started, finished, range].some(row => !Number.isSafeInteger(row.at)) || !Number.isFinite(range.ms)) return null;
+    if (!(entry < startIndex && startIndex < failure && fallback < finishIndex && finishIndex < origin && finishIndex < rangeIndex &&
+        started.at >= rows[entry].at && started.at <= rejected.at && finished.at >= rows[fallback].at && finished.at <= rows[origin].at)) return null;
+    if (started.op !== 'start' || started.exclusiveOrigin !== true || started.peerOnly === true || started.size !== expected.size ||
+        !Number.isSafeInteger(started.pieces) || !Number.isSafeInteger(started.pieceSize) || started.pieceSize <= 0 ||
+        Math.ceil(started.size / started.pieceSize) !== started.pieces || !(started.deadline > started.at) ||
+        started.out?.finished !== false || typeof started.out?.late !== 'boolean' || !Array.isArray(started.out?.c)) return null;
+    const commands = started.out.c, sources = commands.filter(command => command.t === 'origin'), peers = commands.filter(command => command.t === 'request');
+    if (commands.length !== 2 || sources.length !== 1 || peers.length !== 1 || commands.some(command =>
+        !Array.isArray(command.p) || command.p.length !== 2 || !command.p.every(Number.isSafeInteger) ||
+        command.p[0] < 0 || command.p[0] >= command.p[1] || command.p[1] > started.pieces) ||
+        !started.peers?.some(([id]) => id === peers[0].peer) ||
+        !(sources[0].p[1] <= peers[0].p[0] || peers[0].p[1] <= sources[0].p[0])) return null;
+    if (finished.reason !== 'signal-abort' || finished.delivered !== false || finished.bufferedMixed !== true || finished.peerOnly !== false ||
+        finished.verifiedBytes !== 0 || finished.originBytes !== 0 || range.outcome !== 'abort' || range.bytes !== null || range.httpStatus !== null ||
+        !Array.isArray(range.range) || range.range.length !== 2 || range.range.some((value, index) => value !== sources[0].p[index]) ||
+        !(range.at >= started.at && range.at <= rejected.at && range.ms >= 0)) return null;
+    return { stage: 'after-core-before-io', proofTime,
+      // Ranged `at` is the operation start; ring order is emission order, so an
+      // asynchronous abort observation can appear after the whole originStart.
+      sequence: [load, entry, startIndex, failure, fallback, finishIndex, origin, rangeIndex].sort((a, b) => a - b).map(index => rows[index]) };
+  } catch { return null; }
+}
+
+test('buffered mixed setup scope proof rejects forged or incomplete decline observations', () => {
+  // Pure classifier vectors, not elapsed measurements. The real callback case
+  // independently has to establish this complete sequence with the actual SDK.
+  const geometry = { currentTime: 10, playableEnd: 20, fragmentStart: 10, durationMs: 2000,
+    fragmentDurationSeconds: 2, originReserveMs: 3000 };
+  const state = Object.fromEntries(MIXED_SCOPE_CHECKS.map(name => [name, name !== 'setup']));
+  const vector = {
+    trace: { dropped: 0, rows: [
+      { k: 'load', load: 7, at: 100, sn: 1, cc: 0, level: 0, budgetMs: 0, limitMs: 2500, budgetGeometry: geometry },
+      { k: 'mixedScope', load: 7, at: 100, phase: 'mixed', reason: 'entry', ms: 0, originInvoked: false },
+      { k: 'mixedScope', load: 7, at: 130, phase: 'mixed', reason: 'current-setup', ms: 30, setupRemainingMs: -5,
+        originInvoked: false, scope: state, capturedGeometry: geometry,
+        currentGeometry: { fragmentStart: 10, fragmentDurationSeconds: 2, playbackRate: 1, readyState: 4 } },
+      { k: 'mixedScope', load: 7, at: 130, phase: 'mixed', reason: 'peer-result-empty', ms: 30, originInvoked: false },
+      { k: 'originStart', load: 7, at: 131, ranged: false },
+    ] },
+    expected: { load: 7, sn: 1, cc: 0, level: 0, fragmentStart: 10, fragmentDurationSeconds: 2,
+      enteredAtMs: 1000, invokedAtMs: 1031, parentMs: 10000, ttfbMs: 10000,
+      remainingLoadMs: 9969, remainingTtfbMs: 9969, coreTransfersDelta: 0, originRangeAttempts: 0,
+      physicalRangeGets: 0, clientRangeLoads: 0, peerRequests: 0, acceptedPeerBytes: 0 },
+  };
+  assert.equal(mixedScopeSetupProof(vector.trace, vector.expected)?.proofTime, 1025);
+  const controls = [
+    ['wrong reason despite late time', v => { v.trace.rows[2].reason = 'scope-ready'; }],
+    ['cross load', v => { v.trace.rows[2].load = 8; }],
+    ['wrong genuine tuple', v => { v.trace.rows[0].sn = 2; }],
+    ['missing load entry', v => { v.trace.rows.splice(0, 1); }],
+    ['missing mixed entry', v => { v.trace.rows.splice(1, 1); }],
+    ['source before rejection', v => { v.trace.rows.splice(2, 0, v.trace.rows.pop()); }],
+    ['early diagnostic time', v => { v.trace.rows[2].ms = 24; }],
+    ['setup still current', v => { v.trace.rows[2].scope.setup = true; }],
+    ['not owned', v => { v.trace.rows[2].scope.owns = false; }],
+    ['missing scope check', v => { delete v.trace.rows[2].scope.identity; }],
+    ['another scope check fails', v => { v.trace.rows[2].scope.ready = false; }],
+    ['origin already invoked', v => { v.trace.rows[2].originInvoked = true; }],
+    ['earlier scope failure', v => { v.trace.rows.splice(2, 0, { k: 'mixedScope', load: 7, at: 120, reason: 'scope-ready' }); }],
+    ['preceding peer request', v => { v.trace.rows.splice(2, 0, { k: 'request', load: 7, at: 120 }); }],
+    ['Core work', v => { v.trace.rows.splice(2, 0, { k: 'xfer', load: 7, at: 120, op: 'start' }); }],
+    ['Core allocation evidence', v => { v.trace.rows.splice(2, 0, { k: 'xferFinish', load: 7, at: 120, reason: 'allocation-empty' }); }],
+    ['allocated Core counter', v => { v.expected.coreTransfersDelta = 1; }],
+    ['ranged origin work', v => { v.trace.rows.splice(2, 0, { k: 'origin', load: 7, at: 120, ranged: true }); }],
+    ['mismatched current geometry', v => { v.trace.rows[2].currentGeometry.fragmentStart = 11; }],
+    ['clipped parent', v => { v.expected.parentMs = 20; }],
+    ['clipped first byte', v => { v.expected.ttfbMs = 20; }],
+    ['renewed parent budget', v => { v.expected.remainingLoadMs = 10000; }],
+    ['renewed first byte budget', v => { v.expected.remainingTtfbMs = 10000; }],
+    ['trace missingness', v => { v.trace.dropped = 1; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const copy = structuredClone(vector); mutate(copy);
+    assert.equal(mixedScopeSetupProof(copy.trace, copy.expected), null, name);
+  }
+});
+
+test('buffered mixed after-Core setup proof requires the exact aborted transaction and zero physical I/O', () => {
+  // Pure metadata vectors; the real paused-constructor case independently
+  // proves this sequence through the actual SDK, Core and HTTP loader.
+  const geometry = { currentTime: 10, playableEnd: 20, fragmentStart: 10, durationMs: 2000,
+    fragmentDurationSeconds: 2, originReserveMs: 3000 };
+  const state = Object.fromEntries(MIXED_SCOPE_CHECKS.map(name => [name, name !== 'setup']));
+  const vector = { trace: { dropped: 0, rows: [
+    { k: 'load', load: 7, at: 100, sn: 1, cc: 0, level: 0, budgetMs: 0, limitMs: 2500, budgetGeometry: geometry },
+    { k: 'mixedScope', load: 7, at: 100, phase: 'mixed', reason: 'entry', ms: 0, originInvoked: false },
+    { k: 'xfer', load: 7, at: 110, op: 'start', size: 6291456, pieces: 64, pieceSize: 98304, deadline: 2600,
+      exclusiveOrigin: true, peers: [[1, null, null]],
+      out: { c: [{ t: 'request', peer: 1, p: [0, 1] }, { t: 'origin', p: [1, 60] }], late: true, finished: false } },
+    { k: 'mixedScope', load: 7, at: 140, phase: 'mixed', reason: 'current-setup', ms: 40, setupRemainingMs: -15,
+      originInvoked: false, scope: state, capturedGeometry: geometry,
+      currentGeometry: { fragmentStart: 10, fragmentDurationSeconds: 2, playbackRate: 1, readyState: 4 } },
+    { k: 'mixedScope', load: 7, at: 140, phase: 'mixed', reason: 'before-origin-invalid', ms: 40, originInvoked: false },
+    { k: 'xferFinish', load: 7, at: 140, reason: 'signal-abort', delivered: false, bufferedMixed: true, peerOnly: false,
+      verifiedBytes: 0, originBytes: 0 },
+    { k: 'originStart', load: 7, at: 141, ranged: false },
+    { k: 'origin', load: 7, at: 111, ms: 30, ranged: true, range: [1, 60], outcome: 'abort', httpStatus: null, bytes: null },
+  ] }, expected: { load: 7, sn: 1, cc: 0, level: 0, size: 6291456, fragmentStart: 10, fragmentDurationSeconds: 2,
+    enteredAtMs: 1000, invokedAtMs: 1041, parentMs: 10000, ttfbMs: 10000, remainingLoadMs: 9959, remainingTtfbMs: 9959,
+    coreTransfersDelta: 1, originRangeAttempts: 1, physicalRangeGets: 0, clientRangeLoads: 0, peerRequests: 0, acceptedPeerBytes: 0 } };
+  assert.equal(mixedScopeSetupProof(vector.trace, vector.expected)?.stage, 'after-core-before-io');
+  const controls = [
+    ['wrong fallback reason', v => { v.trace.rows[4].reason = 'peer-result-empty'; }],
+    ['non-setup scope', v => { v.trace.rows[3].reason = 'scope-ready'; }],
+    ['cross-load start', v => { v.trace.rows[2].load = 8; }],
+    ['wrong terminal', v => { v.trace.rows[5].reason = 'core-fail-command'; }],
+    ['delivered terminal', v => { v.trace.rows[5].delivered = true; }],
+    ['credited peer', v => { v.expected.acceptedPeerBytes = 1; }],
+    ['verified Core bytes', v => { v.trace.rows[5].verifiedBytes = 1; }],
+    ['verified source bytes', v => { v.trace.rows[5].originBytes = 1; }],
+    ['actual Range GET', v => { v.expected.physicalRangeGets = 1; }],
+    ['invoked range loader', v => { v.expected.clientRangeLoads = 1; }],
+    ['actual peer WANT', v => { v.expected.peerRequests = 1; }],
+    ['physical request trace', v => { v.trace.rows.splice(3, 0, { k: 'request', load: 7, at: 111 }); }],
+    ['extra Core call', v => { v.trace.rows.splice(3, 0, { k: 'xfer', load: 7, at: 111, op: 'tick' }); }],
+    ['wrong Core mode', v => { v.trace.rows[2].exclusiveOrigin = false; }],
+    ['unexpected command', v => { v.trace.rows[2].out.c.push({ t: 'deliver' }); }],
+    ['missing origin command', v => { v.trace.rows[2].out.c.pop(); }],
+    ['overlapping commands', v => { v.trace.rows[2].out.c[1].p = [0, 60]; }],
+    ['outside object', v => { v.trace.rows[2].out.c[1].p[1] = 65; }],
+    ['unknown peer', v => { v.trace.rows[2].out.c[0].peer = 2; }],
+    ['range already received', v => { v.trace.rows[7].bytes = 1; }],
+    ['range has HTTP response', v => { v.trace.rows[7].httpStatus = 206; }],
+    ['range outcome mismatch', v => { v.trace.rows[7].outcome = 'timeout'; }],
+    ['range identity mismatch', v => { v.trace.rows[7].range = [2, 60]; }],
+    ['hidden attempted range', v => { v.expected.originRangeAttempts = 0; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const copy = structuredClone(vector); mutate(copy);
+    assert.equal(mixedScopeSetupProof(copy.trace, copy.expected), null, name);
+  }
+});
+
+test('buffered mixed immutable actual after-Core receipt proves the aborted pre-I/O transaction', async () => {
+  const text = (await readFile(new URL('./fixtures/buffered-mixed-after-core-setup.json', import.meta.url), 'utf8')).replace(/\r\n/gu, '\n');
+  assert.equal(createHash('sha256').update(text).digest('hex'), 'cdcf0280343555f1e52f8f6519f6b37cb67c2b9e4440e6081ab39a03da49d8de');
+  const receipt = JSON.parse(text);
+  assert.equal(receipt.provenance.sourceCommit, '502dc8c860e8182973ac55e2f8dccf21a9ce34fa');
+  assert.equal(receipt.provenance.originalLogSha256, '611430a6cb010212a89de6b5d22fa991f6819ece59ad8e397b1a8051da793ad9');
+  assert.equal(receipt.provenance.originalExitCode, 1, 'the archived attempt remains RED under its original classifier');
+  const proof = mixedScopeSetupProof(receipt.trace, receipt.expected);
+  assert.equal(proof?.stage, 'after-core-before-io');
+  assert.equal(receipt.observedCounts.originRangeAttempts, 1);
+  assert.equal(receipt.observedCounts.physicalRangeGets, 0); assert.equal(receipt.observedCounts.clientRangeBodies, 0);
+  assert.equal(receipt.observedCounts.peerRequests, 0); assert.equal(receipt.observedCounts.acceptedPeerBytes, 0);
+  assert.equal(receipt.observedCounts.physicalWholeGets, 2); assert.equal(receipt.observedCounts.successfulCallbacks, 1);
+  assert.equal(proof.sequence.find(row => row.k === 'xfer').out.late, true, 'retain the actual planning prediction without treating it as physical I/O');
+});
+
+test('buffered mixed immutable actual pre-start allocation receipt proves zero attempted I/O', async () => {
+  const text = (await readFile(new URL('./fixtures/buffered-mixed-allocation-setup.json', import.meta.url), 'utf8')).replace(/\r\n/gu, '\n');
+  assert.equal(createHash('sha256').update(text).digest('hex'), '3cb6b5a67b13f8ccc2aac626a2d0950bfcd9bea26ddf51675abe35c74ba9ed2e');
+  const receipt = JSON.parse(text), { expected } = receipt;
+  assert.equal(receipt.provenance.sourceCommit, 'a007c075c2477b653b40a359531d3dbf8a2792a0');
+  assert.equal(receipt.provenance.originalLogSha256, '2eefe10e1ac781ea6d51db049e2f4ddba2cae992d84696fb6a9646684416ad82');
+  assert.equal(receipt.provenance.originalPayloadSha256, '7ecfc2d68fa1b514b579bdb9ea0622d6727a2650f9134581c9e3c899d045d038');
+  assert.equal(receipt.provenance.originalExitCode, 1, 'original hosted898/899 result remains RED');
+  const proof = mixedScopeSetupProof(receipt.trace, expected);
+  assert.equal(proof?.stage, 'after-allocation-before-start');
+  assert.equal(proof.proofTime, expected.enteredAtMs + 25);
+  assert.deepEqual(proof.sequence.map(row => row.k), ['load', 'mixedScope', 'mixedScope', 'xferFinish', 'mixedScope', 'originStart']);
+  assert.equal(receipt.trace.rows.some(row => row.k === 'xfer'), false, 'allocation abort precedes Core start or commands');
+  assert.deepEqual(receipt.observedCounts, { coreTransfers: 0, originRangeAttempts: 0, peerRequests: 0, acceptedPeerBytes: 0,
+    physicalWholeGets: 2, physicalRangeGets: 0, clientRangeBodies: 0, successfulCallbacks: 1 });
+});
+
+test('buffered mixed pre-start allocation proof rejects other transactions and hidden I/O', async () => {
+  const vector = JSON.parse(await readFile(new URL('./fixtures/buffered-mixed-allocation-setup.json', import.meta.url), 'utf8'));
+  const started = JSON.parse(await readFile(new URL('./fixtures/buffered-mixed-after-core-reply-setup.json', import.meta.url), 'utf8'))
+    .trace.rows.find(row => row.k === 'xfer' && row.op === 'start');
+  assert.equal(mixedScopeSetupProof(vector.trace, vector.expected)?.stage, 'after-allocation-before-start');
+  // Pure counterexamples to an actual immutable receipt, not new traffic or
+  // elapsed measurements. None can use the allocation-abort exception.
+  const controls = [
+    ['wrong finish reason', v => { v.trace.rows[3].reason = 'signal-abort'; }],
+    ['extra finish', v => { v.trace.rows.splice(4, 0, structuredClone(v.trace.rows[3])); }],
+    ['Core started before rejection', v => { v.trace.rows.splice(2, 0, { ...structuredClone(started), load: 2, at: 2422 }); }],
+    ['Core transfer counted', v => { v.expected.coreTransfersDelta = 1; }],
+    ['origin attempt counted', v => { v.expected.originRangeAttempts = 1; }],
+    ['physical Range GET', v => { v.expected.physicalRangeGets = 1; }],
+    ['Range loader invoked', v => { v.expected.clientRangeLoads = 1; }],
+    ['peer request sent', v => { v.expected.peerRequests = 1; }],
+    ['accepted peer credit', v => { v.expected.acceptedPeerBytes = 1; }],
+    ['hidden request command', v => { v.trace.rows.splice(4, 0, { k: 'request', load: 2, at: 2423 }); }],
+    ['hidden range callback', v => { v.trace.rows.splice(4, 0, { k: 'origin', load: 2, at: 2423, ranged: true }); }],
+    ['source arm before fallback', v => { v.trace.rows.splice(4, 0, { k: 'origin', load: 2, at: 2423, ranged: false }); }],
+    ['finish claims delivery', v => { v.trace.rows[3].delivered = true; }],
+    ['finish claims verified bytes', v => { v.trace.rows[3].verifiedBytes = 1; }],
+    ['finish claims origin bytes', v => { v.trace.rows[3].originBytes = 1; }],
+    ['peer-only finish', v => { v.trace.rows[3].peerOnly = true; }],
+    ['unrelated signal failure', v => { v.trace.rows[2].scope.signal = false; }],
+    ['unrelated authority identity failure', v => { v.trace.rows[2].scope.identity = false; }],
+    ['missing current predicate', v => { delete v.trace.rows[2].scope.owns; }],
+    ['scope before25ms', v => { v.trace.rows[2].ms = 24; }],
+    ['setup still live', v => { v.trace.rows[2].scope.setup = true; }],
+    ['positive setup remainder', v => { v.trace.rows[2].setupRemainingMs = 1; }],
+    ['other load rejected', v => { v.trace.rows[2].load = 3; }],
+    ['other expected load', v => { v.expected.load = 3; }],
+    ['finish precedes failed check', v => { v.trace.rows[3].at = 2422; }],
+    ['finish after fallback', v => { [v.trace.rows[3], v.trace.rows[4]] = [v.trace.rows[4], v.trace.rows[3]]; }],
+    ['expired peer window', v => { v.trace.rows[3].peerRemainingMs = 0; }],
+    ['unknown recovery window', v => { v.trace.rows[3].recoveryRemainingMs = null; }],
+    ['wrong fallback leg', v => { v.trace.rows[5].leg = 'cached'; }],
+    ['ranged fallback', v => { v.trace.rows[5].ranged = true; }],
+    ['renewed parent budget', v => { v.expected.remainingLoadMs = 10000; }],
+    ['renewed first-byte budget', v => { v.expected.remainingTtfbMs = 10000; }],
+    ['source before original cutoff', v => { v.expected.invokedAtMs = v.expected.enteredAtMs + 24; }],
+    ['trace evidence dropped', v => { v.trace.dropped = 1; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const copy = structuredClone(vector); mutate(copy);
+    assert.equal(mixedScopeSetupProof(copy.trace, copy.expected), null, name);
+  }
+});
+
+test('buffered mixed immutable actual Core-reply receipt proves zero attempted I/O', async () => {
+  const text = (await readFile(new URL('./fixtures/buffered-mixed-after-core-reply-setup.json', import.meta.url), 'utf8')).replace(/\r\n/gu, '\n');
+  assert.equal(createHash('sha256').update(text).digest('hex'), '243b804cc80dfcf006048a61241d6b53db433b19379cce3348824acf4d916f1d');
+  const receipt = JSON.parse(text), { expected } = receipt;
+  assert.equal(receipt.provenance.sourceCommit, '688f8607365cdbea9d44d06e3204cd55025caba9');
+  assert.equal(receipt.provenance.originalLogSha256, '332b46def0c753877dea349a92f9e92e6495158427d37d5bb0690fc6ea4c05ca');
+  assert.equal(receipt.provenance.originalExitCode, 1, 'original hosted803/804 result remains RED');
+  const proof = mixedScopeSetupProof(receipt.trace, expected);
+  assert.equal(proof?.stage, 'after-core-reply-before-io');
+  assert.equal(proof.proofTime, expected.enteredAtMs + 25);
+  const rpc = receipt.workerRpc.at(-1);
+  assert.equal(rpc.op, 'start'); assert.equal(rpc.success, true);
+  assert(rpc.replyAtMs < expected.enteredAtMs + 25, 'RPC instrumentation reply precedes cutoff; the later actual scope predicate proves expiry');
+  assert.equal(receipt.timer, null);
+  assert.deepEqual(receipt.observedCounts, { coreTransfers: 1, originRangeAttempts: 0, peerRequests: 0, acceptedPeerBytes: 0,
+    physicalWholeGets: 2, physicalRangeGets: 0, clientRangeBodies: 0, successfulCallbacks: 1 });
+});
+
+test('buffered mixed Core-reply setup proof rejects mismatched or hidden I/O evidence', async () => {
+  const vector = JSON.parse(await readFile(new URL('./fixtures/buffered-mixed-after-core-reply-setup.json', import.meta.url), 'utf8'));
+  assert.equal(mixedScopeSetupProof(vector.trace, vector.expected)?.stage, 'after-core-reply-before-io');
+  const controls = [
+    ['wrong terminal branch', v => { v.trace.rows[4].reason = 'signal-abort'; }],
+    ['later source-attempt branch', v => { v.trace.rows[5].reason = 'before-origin-invalid'; }],
+    ['attempted origin range', v => { v.expected.originRangeAttempts = 1; }],
+    ['unknown origin attempts', v => { delete v.expected.originRangeAttempts; }],
+    ['missing Core allocation', v => { v.expected.coreTransfersDelta = 0; }],
+    ['extra Core allocation', v => { v.expected.coreTransfersDelta = 2; }],
+    ['physical Range GET', v => { v.expected.physicalRangeGets = 1; }],
+    ['invoked Range loader', v => { v.expected.clientRangeLoads = 1; }],
+    ['peer WANT', v => { v.expected.peerRequests = 1; }],
+    ['accepted peer credit', v => { v.expected.acceptedPeerBytes = 1; }],
+    ['credited Core bytes', v => { v.trace.rows[4].verifiedBytes = 1; }],
+    ['credited source bytes', v => { v.trace.rows[4].originBytes = 1; }],
+    ['delivered Core reply', v => { v.trace.rows[4].delivered = true; }],
+    ['wrong physical scope reason', v => { v.trace.rows[3].reason = 'scope-ready'; }],
+    ['another failed scope', v => { v.trace.rows[3].scope.recovery = false; }],
+    ['missing scope identity', v => { delete v.trace.rows[3].scope.identity; }],
+    ['early diagnostic elapsed', v => { v.trace.rows[3].ms = 24; }],
+    ['source already invoked', v => { v.trace.rows[3].originInvoked = true; }],
+    ['cross-load start', v => { v.trace.rows[2].load++; }],
+    ['cross-load terminal', v => { v.trace.rows[4].load++; }],
+    ['wrong genuine tuple', v => { v.trace.rows[0].sn++; }],
+    ['terminal before scope failure', v => { [v.trace.rows[3], v.trace.rows[4]] = [v.trace.rows[4], v.trace.rows[3]]; }],
+    ['fallback before terminal', v => { [v.trace.rows[4], v.trace.rows[5]] = [v.trace.rows[5], v.trace.rows[4]]; }],
+    ['hidden request trace', v => { v.trace.rows.splice(3, 0, { k: 'request', load: 2, at: 2199 }); }],
+    ['hidden origin trace', v => { v.trace.rows.splice(3, 0, { k: 'origin', load: 2, at: 2199, ranged: true }); }],
+    ['extra Core command', v => { v.trace.rows.splice(3, 0, { k: 'xfer', load: 2, at: 2199, op: 'tick' }); }],
+    ['overlapping plan', v => { v.trace.rows[2].out.c[1].p[0] = 0; }],
+    ['unexpected plan command', v => { v.trace.rows[2].out.c.push({ t: 'deliver' }); }],
+    ['wrong object size', v => { v.expected.size--; }],
+    ['renewed parent budget', v => { v.expected.remainingLoadMs = 10000; }],
+    ['renewed first-byte budget', v => { v.expected.remainingTtfbMs = 10000; }],
+    ['trace lost rows', v => { v.trace.dropped = 1; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const copy = structuredClone(vector); mutate(copy);
+    assert.equal(mixedScopeSetupProof(copy.trace, copy.expected), null, name);
+  }
+});
+
+test('buffered mixed timer observer preserves native receiver arguments handle and synchronous scope', async () => {
+  const native = globalThis.setTimeout, observer = realTimerInvocationContext(), argument = {};
+  try {
+    await new Promise((resolve, reject) => {
+      const handle = setTimeout(function (first, second) {
+        try {
+          assert.equal(this, handle); assert.equal(first, argument); assert.equal(second, 7);
+          const context = observer.snapshot();
+          assert.deepEqual(Object.keys(context), ['scheduledAtMs', 'requestedDelayMs', 'firedAtMs']);
+          assert.equal(context.requestedDelayMs, 1); assert(context.firedAtMs >= context.scheduledAtMs);
+          resolve();
+        } catch (error) { reject(error); }
+      }, 1, argument, 7);
+      assert.equal(typeof handle.refresh, 'function', 'the native Timeout handle is returned unchanged');
+    });
+    assert.equal(observer.snapshot(), null, 'context does not survive the synchronous native callback');
+  } finally { observer.restore(); }
+  assert.equal(globalThis.setTimeout, native);
+});
+
+for (const [knownFlow, worker, forceSetupExpiry = false, forceScopeExpiry = false] of [[true, false, false], [true, true, false], [false, false, false], [false, true, false], [false, true, true], [false, false, false, true]]) test(`buffered mixed ${knownFlow ? '' : 'untrained '}six-MiB object retains exact206 assembly or proven bounded setup decline (${worker ? 'committed-WASM worker' : 'main-thread'}${forceSetupExpiry ? ', held allocation' : ''}${forceScopeExpiry ? ', real callback pause' : ''})`, { timeout: 20000 }, async t => {
+  const timers = realTimerInvocationContext();
+  t.after(() => timers.restore());
+  const rpc = [], bridge = worker ? transferWorkerFixture(t, { onRpc: row => rpc.push(row) }) : null;
+  const workerOptions = bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {};
+  const size = 6 * 1024 * 1024, bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
+  const { received, requests, url, HttpLoader } = await mixedHttpOrigin(t, bytes, Loader, timers.snapshot);
+  class PacedPeer extends PhasedFlowChannel {
+    send(data) {
+      const frame = typeof data === 'string' ? JSON.parse(data) : null;
+      if (frame?.t === 'want') {
+        const pieceSize = commitmentPieceSize(this.bytes.length), from = frame.p ? frame.p[0] * pieceSize : 0;
+        const to = frame.p ? Math.min(frame.p[1] * pieceSize, this.bytes.length) : this.bytes.length;
+        this.firstByteMs = 10; this.flowMs = Math.max(0, to - from) / (.3 * 1024 * 1024) * 1000;
+      }
+      return super.send(data);
+    }
+  }
+  const callbackPause = { armed: false, calls: 0, startedAtMs: null, finishedAtMs: null };
+  const observed = [], f = await multiFixture(t, { size, OriginLoader: HttpLoader, holders: [{ Channel: PacedPeer }],
+    traceRequests: 4096, onPeerDelivery: row => observed.push(row),
+    ...(forceScopeExpiry ? { beforeCommitment: () => {
+      if (!callbackPause.armed) return;
+      callbackPause.armed = false; callbackPause.calls++; callbackPause.startedAtMs = performance.now();
+      while (performance.now() - callbackPause.startedAtMs < 30) {} // Actual synchronous callback work; no clock/timer changes.
+      callbackPause.finishedAtMs = performance.now();
+    } } : {}),
+    swarmOptions: { bufferedMixedRanges: true, zeroBudgetPeerRace: true, sustainablePeerWait: true, maxPeerWaitMs: 2500, ...workerOptions } });
+  try {
+    if (worker) await until(() => f.swarm.metrics().core.transferWorker.state === 'ready');
+    const ctx = { url, responseType: 'arraybuffer', frag: { ...multiContext.frag, url,
+      baseurl: new URL('index.m3u8', url).href, start: 10, duration: 2 } };
+    f.hls.media = { currentTime: 10, paused: false, ended: false, seeking: false, readyState: 4, playbackRate: 1,
+      buffered: { length: 0 } };
+    // Measure the actual source with no holder claim; the new demand must
+    // calibrate this same admitted link without a seeded rate or prior probe.
+    if (!knownFlow) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    sameBytes(await f.load(ctx), bytes, 'actual whole-source control trains origin timing without fabricated samples');
+    assert.equal(requests.length, 1); assert.equal(requests[0].status, 200); assert.equal(requests[0].sent, size);
+    await sleep(2); // Let the old calibration request's real cancellation EOF retire.
+    for (const pc of f.connections) pc.connectionState = 'connected';
+    if (!knownFlow) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [f.key] }));
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+    const before = f.swarm.metrics(), peerBefore = before.bytes.peerFirst;
+    if (knownFlow) assert(before.peerRequestDiagnostics.records.some(row => row.outcome === 'payload' && row.elapsedMs - row.firstByteMs >= 300),
+      'established rate must come from real prior qualifying peer payload');
+    else assert.equal(before.peerRequestDiagnostics.records.length, 0, 'source calibration must not ask the untrained holder');
+    const wantsBefore = f.channels[0].wants.length, observedBefore = observed.length;
+    const authority = { media: f.hls.media, buffered: f.hls.media.buffered, frag: ctx.frag,
+      start: ctx.frag.start, duration: ctx.frag.duration, pc: f.connections[0], channel: f.channels[0] };
+    if (forceSetupExpiry) bridge.workers[0].holdNew = true;
+    if (forceScopeExpiry) callbackPause.armed = true;
+    const calls = { success: 0, error: 0, abort: 0, timeout: 0 };
+    const response = new Promise((resolve, reject) => new f.hls.config.fLoader(f.hlsConfig).load(ctx, f.loaderConfig, {
+      onSuccess: value => { calls.success++; resolve(new Uint8Array(value.data)); },
+      onError: () => { calls.error++; reject(new Error('fixture source error')); },
+      onAbort: () => { calls.abort++; reject(new Error('fixture source abort')); },
+      onTimeout: () => { calls.timeout++; reject(new Error('fixture source timeout')); },
+    }));
+    if (forceSetupExpiry) {
+      try { await until(() => bridge.workers[0].newRequests?.length > 0); }
+      catch (error) {
+        try {
+          const number = value => Number.isFinite(value) ? value : null;
+          const numbers = (value, names) => Object.fromEntries(names.map(name => [name, number(value?.[name])]));
+          const label = value => typeof value === 'string' && /^[a-z][a-z0-9-]{0,63}$/iu.test(value) && !/^[a-f0-9]{32,}$/iu.test(value) ? value : null;
+          const delta = (value, prior) => Number.isFinite(value) && Number.isFinite(prior) ? value - prior : null;
+          const trace = f.swarm.trace(), metrics = f.swarm.metrics();
+          const selectedLoad = trace.rows.filter(row => row.k === 'mixedScope' && row.reason === 'entry').at(-1)?.load ??
+            trace.rows.filter(row => row.k === 'load' && row.sn === ctx.frag.sn && row.cc === ctx.frag.cc && row.level === ctx.frag.level).at(-1)?.load;
+          const rows = trace.rows.filter(row => row.load === selectedLoad &&
+            ['load', 'mixedScope', 'xfer', 'xferFinish', 'request', 'origin', 'originStart', 'originProgress', 'originTerminal'].includes(row.k));
+          const project = row => ({ ...numbers(row, ['load', 'at', 'ms', 'sn', 'cc', 'level', 'budgetMs', 'limitMs', 'size', 'pieces', 'pieceSize',
+              'deadline', 'setupRemainingMs', 'peerRemainingMs', 'recoveryRemainingMs', 'mixedRemainingMs', 'nextOriginReserveMs', 'firstByteRemainingMs',
+              'verifiedBytes', 'originBytes', 'bytes', 'loaderLoadedBytes', 'loaderTotalBytes']),
+            ...Object.fromEntries(['k', 'op', 'phase', 'reason', 'leg', 'outcome'].map(name => [name, label(row[name])])),
+            ...Object.fromEntries(['originInvoked', 'ranged', 'delivered', 'bufferedMixed', 'peerOnly', 'exclusiveOrigin'].map(name =>
+              [name, typeof row[name] === 'boolean' ? row[name] : null])),
+            scope: row.scope ? Object.fromEntries(MIXED_SCOPE_CHECKS.map(name => [name, typeof row.scope[name] === 'boolean' ? row.scope[name] : null])) : null,
+            capturedGeometry: row.capturedGeometry ? numbers(row.capturedGeometry, ['currentTime', 'playableEnd', 'fragmentStart', 'durationMs', 'fragmentDurationSeconds', 'originReserveMs']) : null,
+            currentGeometry: row.currentGeometry ? numbers(row.currentGeometry, ['fragmentStart', 'fragmentDurationSeconds', 'playbackRate', 'readyState']) : null,
+          });
+          const summary = values => Object.fromEntries([['whole', false], ['range', true]].map(([name, ranged]) => {
+            const selected = values.filter(row => Boolean(row.range) === ranged);
+            return [name, { count: selected.length, complete: selected.filter(row => row.complete === true).length,
+              aborted: selected.filter(row => row.aborted === true).length,
+              statuses: selected.slice(-4).map(row => number(row.status)),
+              bytes: selected.reduce((sum, row) => sum + (number(row.bytes ?? row.sent) ?? 0), 0) }];
+          }));
+          const rpcRows = rpc.slice(-32).map(row => ({ ...numbers(row, ['id', 'sentAtMs', 'replyAtMs']), op: label(row.op), success: row.success === true }));
+          const pendingRpc = bridge.workers.flatMap(value => [...(value.rpcSent?.values() ?? [])]).slice(-32)
+            .map(row => ({ ...numbers(row, ['id', 'sentAtMs']), op: label(row.op) }));
+          const selectedRows = rows.length <= 32 ? rows : [...rows.slice(0, 16), ...rows.slice(-16)];
+          const diagnostic = { fixture: 'held-mixed-allocation-precondition', atMs: performance.now(), requiredPredicateObserved: false,
+            newRequests: bridge.workers.reduce((sum, value) => sum + (value.newRequests?.length ?? 0), 0),
+            totalNewPosts: bridge.workers.reduce((sum, value) => sum + (value.newCount ?? 0), 0), calls: { ...calls },
+            rpc: rpcRows, pendingRpc, rpcDropped: bridge.workers.reduce((sum, value) => sum + (value.rpcDropped ?? 0), 0),
+            requests: summary(requests), received: summary(received),
+            receivedTiming: received.slice(-4).map(row => ({ ...numbers(row, ['sdkEnteredAtMs', 'invokedAtMs', 'completedAtMs', 'maxLoadTimeMs', 'maxTimeToFirstByteMs', 'bytes', 'status']),
+              ranged: Boolean(row.range), complete: row.complete === true, aborted: row.aborted === true })),
+            metricsDeltas: { coreTransfers: delta(metrics.core.multiHolder.transfers, before.core.multiHolder.transfers),
+              originRangeAttempts: delta(metrics.core.multiHolder.originRanges, before.core.multiHolder.originRanges),
+              peerRequests: f.channels[0].wants.length - wantsBefore, acceptedPeerBytes: delta(metrics.bytes.peerFirst, peerBefore) },
+            trace: { dropped: trace.dropped, selectedLoad: number(selectedLoad), originalRows: rows.length,
+              omittedRows: rows.length - selectedRows.length, rows: selectedRows.map(project) } };
+          while (Buffer.byteLength(JSON.stringify(diagnostic)) > 16384 && diagnostic.trace.rows.length) {
+            diagnostic.trace.rows.splice(Math.floor(diagnostic.trace.rows.length / 2), 1); diagnostic.trace.omittedRows++;
+          }
+          t.diagnostic(JSON.stringify(diagnostic));
+        } catch { t.diagnostic(JSON.stringify({ fixture: 'held-mixed-allocation-precondition', diagnosticUnavailable: true })); }
+        throw error; // The required held RPC, original predicate and timeout remain mandatory.
+      }
+      await sleep(30); // Actual reply unavailability exceeds the original25ms; no clock or deadline is changed.
+      bridge.workers[0].releaseNew();
+    }
+    sameBytes(await response, bytes, 'one complete correct object reaches the genuine demand');
+    assert.deepEqual(calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+    const trace = f.swarm.trace(), start = trace.rows.filter(row => row.k === 'xfer' && row.op === 'start').at(-1);
+    const mixedLoad = trace.rows.filter(row => row.k === 'mixedScope' && row.reason === 'entry').at(-1)?.load;
+    const diagnosticRows = trace.rows.filter(row => row.load === mixedLoad &&
+      ['load', 'mixedScope', 'xfer', 'xferFinish', 'request', 'origin', 'originStart', 'originProgress', 'originTerminal'].includes(row.k));
+    if (forceScopeExpiry) { assert.equal(callbackPause.calls, 1); assert(callbackPause.finishedAtMs - callbackPause.startedAtMs >= 30); }
+    if (requests.filter(row => !row.range).length !== 1) {
+      const fallback = received.at(-1), metrics = f.swarm.metrics(), enteredAt = fallback.sdkEnteredAtMs, cutoff = enteredAt + 25;
+      const timer = fallback.invocationProbe;
+      const boundedTimer = timer && Number.isFinite(timer.scheduledAtMs) && timer.scheduledAtMs >= enteredAt &&
+        timer.scheduledAtMs <= cutoff && Number.isFinite(timer.requestedDelayMs) && timer.requestedDelayMs >= 0 && timer.requestedDelayMs <= 25 &&
+        Number.isFinite(timer.firedAtMs) && timer.firedAtMs >= timer.scheduledAtMs && timer.firedAtMs <= fallback.invokedAtMs;
+      const pendingAtTimer = boundedTimer && rpc.find(row => row.success && ['new', 'start'].includes(row.op) &&
+        row.sentAtMs >= enteredAt && row.sentAtMs <= timer.firedAtMs && timer.firedAtMs <= row.replyAtMs);
+      const lateReply = rpc.find(row => row.success && ['new', 'start'].includes(row.op) &&
+        row.sentAtMs >= enteredAt && row.sentAtMs < cutoff && row.replyAtMs >= cutoff && row.replyAtMs <= fallback.invokedAtMs);
+      const scopeProof = mixedScopeSetupProof(trace, { load: mixedLoad, sn: ctx.frag.sn, cc: ctx.frag.cc, level: ctx.frag.level,
+        fragmentStart: authority.start, fragmentDurationSeconds: authority.duration, enteredAtMs: enteredAt, invokedAtMs: fallback.invokedAtMs,
+        parentMs: f.loaderConfig.loadPolicy.maxLoadTimeMs, ttfbMs: f.loaderConfig.loadPolicy.maxTimeToFirstByteMs,
+        remainingLoadMs: fallback.maxLoadTimeMs, remainingTtfbMs: fallback.maxTimeToFirstByteMs,
+        coreTransfersDelta: metrics.core.multiHolder.transfers - before.core.multiHolder.transfers,
+        size, originRangeAttempts: metrics.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+        physicalRangeGets: requests.filter(row => row.range).length, clientRangeLoads: received.filter(row => row.range).length,
+        peerRequests: f.channels[0].wants.length - wantsBefore, acceptedPeerBytes: metrics.bytes.peerFirst - peerBefore });
+      const proofTime = pendingAtTimer ? timer.firedAtMs : lateReply?.replyAtMs ?? scopeProof?.proofTime;
+      assert(Number.isFinite(enteredAt) && enteredAt > 0 && Number.isFinite(proofTime) && (worker && (pendingAtTimer || lateReply) || scopeProof),
+        JSON.stringify({ message: 'whole fallback needs an observed pending-RPC timer, completed exact late RPC, or actual same-load setup-scope proof',
+          knownFlow, worker, rpc, timer, enteredAt, invokedAtMs: fallback.invokedAtMs,
+          remainingLoadMs: fallback.maxLoadTimeMs, remainingTtfbMs: fallback.maxTimeToFirstByteMs,
+          callbackPause: forceScopeExpiry ? callbackPause : null, mixedLoad, traceDropped: trace.dropped,
+          counters: { coreTransfers: metrics.core.multiHolder.transfers - before.core.multiHolder.transfers,
+            originRangeAttempts: metrics.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+            peerRequests: f.channels[0].wants.length - wantsBefore, acceptedPeerBytes: metrics.bytes.peerFirst - peerBefore,
+            physicalWholeGets: requests.filter(row => !row.range).length, physicalRangeGets: requests.filter(row => row.range).length,
+            clientRangeBodies: received.filter(row => row.range).length, successfulCallbacks: calls.success },
+          diagnosticRows: diagnosticRows.length <= 64 ? diagnosticRows : [...diagnosticRows.slice(0, 32), ...diagnosticRows.slice(-32)],
+          diagnosticRowsOmitted: Math.max(0, diagnosticRows.length - 64) }));
+      assert(fallback.invokedAtMs >= proofTime, 'the real source invocation follows its observed setup-decline proof');
+      if (forceSetupExpiry) assert(pendingAtTimer, 'held allocation must exercise the actual timer-context proof');
+      if (forceScopeExpiry) assert(scopeProof, 'the real callback pause must exercise the exact SDK scope predicate proof');
+      assert.equal(requests.length, 2); assert(requests.every(row => !row.range && row.status === 200 && row.complete && row.sent === size));
+      assert.equal(received.length, 2); assert(received.every(row => !row.range && row.complete && row.bytes === size));
+      assert.equal(f.channels[0].wants.length, wantsBefore, 'decline issues no demand peer request');
+      assert.equal(metrics.bytes.peerFirst, peerBefore); assert.equal(observed.length, observedBefore);
+      const attemptedOriginRanges = metrics.core.multiHolder.originRanges - before.core.multiHolder.originRanges;
+      assert.equal(attemptedOriginRanges, scopeProof?.stage === 'after-core-before-io' ? 1 : 0,
+        'a rejected pre-invocation origin attempt is counted honestly; physical Range GETs remain zero');
+      const proofElapsed = proofTime - enteredAt, invokedElapsed = fallback.invokedAtMs - enteredAt;
+      assert(fallback.maxLoadTimeMs > 0 && fallback.maxLoadTimeMs <= f.loaderConfig.loadPolicy.maxLoadTimeMs - proofElapsed);
+      assert(fallback.maxLoadTimeMs >= f.loaderConfig.loadPolicy.maxLoadTimeMs - invokedElapsed,
+        'the parent config is prepared between the observed proof and actual source invocation');
+      assert(fallback.maxTimeToFirstByteMs > 0 && fallback.maxTimeToFirstByteMs <= f.loaderConfig.loadPolicy.maxTimeToFirstByteMs - proofElapsed);
+      assert(fallback.maxTimeToFirstByteMs >= f.loaderConfig.loadPolicy.maxTimeToFirstByteMs - invokedElapsed,
+        'the original first-byte config is prepared in the same observed interval');
+      assert(fallback.completedAtMs < enteredAt + Math.min(f.loaderConfig.loadPolicy.maxLoadTimeMs, 10000));
+      assert.equal(metrics.core?.state, 'ready'); assert.equal(metrics.core?.transferWorker?.state, worker ? 'ready' : 'off');
+      if (worker) { assert.equal(metrics.core.transferWorker.transfers, 0); assert.equal(metrics.core.transferWorker.pending, 0); }
+      else assert.deepEqual(metrics.core.transferWorker, before.core.transferWorker, 'main-thread fallback preserves its disabled worker configuration');
+      assert.equal(metrics.core.fallbacks, before.core.fallbacks); assert.equal(metrics.errors.total, before.errors.total);
+      assert.equal(metrics.segments.commitmentRejected, before.segments.commitmentRejected);
+      assert.equal(metrics.segments.commitmentUnavailable, before.segments.commitmentUnavailable);
+      assert.equal(f.hls.media, authority.media); assert.equal(ctx.frag, authority.frag);
+      assert.equal(ctx.frag.start, authority.start); assert.equal(ctx.frag.duration, authority.duration);
+      assert.equal(authority.media.buffered, authority.buffered); assert.equal(authority.buffered.end(0), 20);
+      assert.equal(authority.media.currentTime, 10); assert.equal(authority.media.playbackRate, 1);
+      assert.equal(authority.media.paused || authority.media.ended || authority.media.seeking, false);
+      assert(authority.media.readyState >= 3);
+      assert.equal(f.connections[0], authority.pc); assert.equal(authority.pc.connectionState, 'connected');
+      assert.equal(f.channels[0], authority.channel); assert.equal(authority.channel.readyState, 'open');
+      if (worker) assert(bridge.workers.every(value => !value.rpcDropped));
+      assert.deepEqual(calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+      console.log(JSON.stringify({ fixture: 'buffered-mixed-206', outcome: pendingAtTimer ? 'observed-timer-yield' : lateReply ? 'proven-exact-late-rpc' : 'proven-setup-scope', knownFlow, worker,
+        setupBudgetMs: 25, enteredAtMs: enteredAt, timer, proofTimeMs: proofTime,
+        setupRpc: pendingAtTimer || lateReply || null, scopeProof, callbackPause: forceScopeExpiry ? callbackPause : null,
+        sourceInvokedAtMs: fallback.invokedAtMs,
+        remainingLoadMs: fallback.maxLoadTimeMs, remainingTtfbMs: fallback.maxTimeToFirstByteMs,
+        wholeDemandGets: 1, originRangeAttempts: attemptedOriginRanges, physicalRangeGets: 0, clientRangeLoads: 0,
+        demandPeerRequests: 0, acceptedDemandPeerBytes: 0 }));
+      return;
+    }
+    assert.equal(forceSetupExpiry, false, 'held allocation must prove the guarded-decline branch');
+    assert.equal(forceScopeExpiry, false, 'the real callback pause must prove the SDK setup-scope decline branch');
+    if (!start) {
+      const m = f.swarm.metrics();
+      assert.ok(start, JSON.stringify({ message: 'mixed transfer did not record a Core start', knownFlow, worker,
+        traceDropped: trace.dropped, trace: trace.rows.slice(-16).map(({ k, load, at, op, leg, ms, budgetMs, limitMs, reason, outcome, ranged, stale }) =>
+          ({ k, load, at, op, leg, ms, budgetMs, limitMs, reason, outcome, ranged, stale })),
+        counters: { originFallbacks: m.segments.originFallbacks, peerNoFit: m.segments.peerNoFit,
+          commitmentRequests: m.segments.commitmentRequests, commitmentRejected: m.segments.commitmentRejected,
+          commitmentUnavailable: m.segments.commitmentUnavailable, coreFallbacks: m.core?.fallbacks ?? null,
+          transfers: m.core?.multiHolder?.transfers ?? null, noModelTransfers: m.core?.multiHolder?.peerFlow?.noModelTransfers ?? null },
+        workerState: m.core?.transferWorker?.state ?? null,
+        http: { requests: requests.length, wholeGets: requests.filter(row => !row.range).length,
+          rangeGets: requests.filter(row => row.range).length, completed: received.filter(row => row.complete).length,
+          aborted: received.filter(row => row.aborted).length,
+          serverSubmittedBytes: requests.reduce((total, row) => total + row.sent, 0),
+          clientReceivedBytes: received.reduce((total, row) => total + row.bytes, 0) } }));
+    }
+    assert.equal(start.exclusiveOrigin, true, 'only the opted mixed plan requests exclusive Core origin ownership');
+    if (knownFlow) {
+      assert.deepEqual(start.probePeers, [], 'known mixed ownership uses real measured same-link holders');
+      assert(start.peers.length && start.peers.every(([, first, rate]) => Number.isFinite(first) && first >= 0 && Number.isFinite(rate) && rate > 0));
+    } else {
+      assert.deepEqual(start.probePeers, [start.peers[0][0]], 'the genuine unknown-link demand uses the existing one-piece allowance');
+      assert(start.peers.every(([, first, rate]) => first === null && rate === null), 'no rate or first-byte estimate is invented');
+      const initialPeer = start.out.c.filter(row => row.t === 'request');
+      assert.equal(initialPeer.length, 1); assert.equal(initialPeer[0].p[1] - initialPeer[0].p[0], 1);
+    }
+    assert(start.out.c.some(row => row.t === 'origin') && start.out.c.some(row => row.t === 'request'),
+      'the genuine demand must accept its peer fraction alongside disjoint origin ranges');
+    const metrics = f.swarm.metrics(), ranged = requests.filter(row => row.range);
+    assert.equal(requests.filter(row => !row.range).length, 1, JSON.stringify({ message: 'there is no whole GET beside the mixed range arm',
+      requests, transfer: f.swarm.metrics().core.multiHolder, trace: f.swarm.trace().rows.slice(-12) }));
+    assert(ranged.length > 0); assert(ranged.every(row => row.status === 206 && row.complete), JSON.stringify(requests));
+    const clientRanges = received.filter(row => row.range);
+    assert(clientRanges.length > 0 && clientRanges.every(row => row.status === 206 && row.complete && row.bytes === row.range[1] - row.range[0]));
+    const clientBodyBytes = clientRanges.reduce((total, row) => total + row.bytes, 0);
+    const peer = metrics.bytes.peerFirst - peerBefore, source = ranged.reduce((total, row) => total + row.sent, 0);
+    assert(peer > 0 && peer < size);
+    const verifiedOrigin = metrics.core.multiHolder.originBytes - before.core.multiHolder.originBytes;
+    assert.equal(verifiedOrigin + peer, size, 'only fresh verified origins and peer pieces compose accepted media');
+    assert.equal(clientBodyBytes, source, 'complete HTTP client bodies agree with server submitted bytes in this controlled fixture');
+    assert.equal(clientBodyBytes + peer, size, 'actual complete source and accepted peer bodies have disjoint ownership');
+    assert(source >= verifiedOrigin, 'actual206 bodies include any duplicated/unused range bytes');
+    const { replay } = await import('../scripts/trace-report.mjs'), replayCore = await loadCore(multiCore);
+    try {
+      const calls = f.swarm.trace().rows.filter(row => row.k === 'xfer' && row.load === start.load);
+      assert.equal(replay(replayCore, calls), null, 'exclusive ownership survives trace reconstruction');
+    } finally { replayCore.retire(); }
+    console.log(JSON.stringify({ fixture: 'buffered-mixed-206', knownFlow, worker, actualClient206BodyBytes: clientBodyBytes, serverSubmitted206Bytes: source, objectBytes: size, acceptedPeerBytes: peer,
+      freshOriginBytes: verifiedOrigin, actualComplete206BodyBytes: source,
+      actual206Bodies: ranged.map(({ sent, status, complete }) => ({ bytes: sent, status, complete })),
+      priorWholeSourceBytes: requests[0].sent, additionalWholeGets: requests.filter(row => !row.range).length - 1,
+      configuredPeerBytesPerSecond: .3 * 1024 * 1024, configuredOriginBytesPerSecond: 3 * 1024 * 1024 }));
+    assert.equal(observed.reduce((sum, row) => sum + row.bytes, 0), peer);
+    assert.equal(metrics.segments.zeroBudgetPeerRaceWins, 0, 'mixed delivery is not a peer-only whole-object race');
+  } finally { try { await f.close(); } finally { timers.restore(); } }
+});
+
+// Functional controller clock, not elapsed/throughput evidence. Ten-ms batches
+// avoid one real Windows timer per virtual millisecond. During the explicitly
+// admitted warm setup phase only, leave policy time fixed while real metadata
+// and Worker messages complete; source/peer pacing then uses the same clocks
+// and original deadlines. No model, HAVE, source body or Core result is seeded.
+function warmFunctionalClock(t, awaitingSetup, observeTimers = false) {
+  const nativeTimer = setTimeout, nativeNow = performance.now.bind(performance);
+  let at = Math.ceil(nativeNow()), heldSince = null, setupReleasedAt = null;
+  const performanceMock = t.mock.method(performance, 'now', () => at);
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
+  // For the forced-RPC functional control, observe the unchanged timer API
+  // after the logical scheduler is installed; this is not a native-time claim.
+  const timerObserver = observeTimers ? realTimerInvocationContext() : null;
+  const step = async (ms = 10) => {
+    await new Promise(resolve => nativeTimer(resolve, 1));
+    if (awaitingSetup()) {
+      heldSince ??= nativeNow();
+      assert(nativeNow() - heldSince < 2000, 'functional warm setup must finish its actual async work');
+      return;
+    }
+    if (observeTimers && heldSince !== null) setupReleasedAt = at;
+    heldSince = null;
+    // Hit the unchanged setup boundary exactly, then resume ordinary batches.
+    const elapsed = setupReleasedAt === null ? null : at - setupReleasedAt;
+    const advanceMs = observeTimers && elapsed !== null && elapsed < 25 ? Math.min(ms, 25 - elapsed) : ms;
+    at += advanceMs; t.mock.timers.tick(advanceMs);
+  };
+  const advanceUntil = async (predicate, limitMs = 10000) => {
+    const begin = at, wall = nativeNow();
+    while (!predicate()) {
+      assert(at - begin <= limitMs && nativeNow() - wall < 15000, 'functional warm phase did not settle');
+      await step();
+    }
+  };
+  const settle = async promise => {
+    let result;
+    promise.then(value => { result = { value }; }, error => { result = { error }; });
+    await advanceUntil(() => result);
+    if (result.error) throw result.error;
+    return result.value;
+  };
+  let restored = false;
+  const restore = () => { if (!restored) { restored = true; timerObserver?.restore(); t.mock.timers.reset(); performanceMock.mock.restore(); } };
+  t.after(restore);
+  return { settle, advanceUntil, timerSnapshot: timerObserver?.snapshot,
+    advance: async ms => { for (let done = 0; done < ms; done += 10) await step(Math.min(10, ms - done)); }, restore };
+}
+
+// Actual real-clock optional admission needs a complete same-load observation,
+// not an elapsed-time inference. The incomplete897 diagnostic is NOT such a
+// receipt: it omitted the timer schedule, RPC handle and source config budgets.
+function warmSetupDeclineProof({ trace, expected, timer, rpc }) {
+  try {
+    if (trace.dropped !== 0 || !Array.isArray(trace.rows) || expected.rpcDropped !== 0 ||
+        expected.rpcOmitted !== 0 || expected.rowsOmitted !== 0 || !Array.isArray(rpc) ||
+        ['originRangeAttempts', 'physicalRangeGets', 'clientRangeLoads', 'peerRequests', 'acceptedPeerBytes', 'verifiedWarmPeerBytes']
+          .some(name => expected[name] !== 0)) return null;
+    const rows = trace.rows.filter(row => row.load === expected.load), load = rows.find(row => row.k === 'load');
+    if (!load || load.budgetGeometry?.source !== 'warm-ahead' || load.sn !== expected.sn ||
+        load.cc !== expected.cc || load.level !== expected.level || !Number.isSafeInteger(expected.load)) return null;
+    if (rows.some(row => row.k === 'mixedScope' && row.scope && row.scope.warmOwner !== true)) return null;
+    const normalized = { dropped: trace.dropped, rows: trace.rows.map(row => {
+      if (!row.scope) return row;
+      const { warmOwner, ...scope } = row.scope;
+      return { ...row, scope };
+    }) };
+    const scope = mixedScopeSetupProof(normalized, expected);
+    if (scope) return { ...scope, stage: 'warm-' + scope.stage };
+    const entry = rows.findIndex(row => row.k === 'mixedScope' && row.reason === 'entry');
+    const fired = rows.findIndex(row => row.k === 'mixedScope' && row.reason === 'setup-timer');
+    const origin = rows.findIndex(row => row.k === 'originStart');
+    if (!(entry > 0 && entry < fired && fired < origin) || rows.some(row => row.k === 'request' || row.k === 'xfer') ||
+        rows.slice(0, origin).some(row => row.k === 'origin') ||
+        rows.filter(row => row.k === 'mixedScope' && row.phase === 'mixed').length !== 2) return null;
+    const state = rows[fired].scope, checks = [...MIXED_SCOPE_CHECKS, 'warmOwner'];
+    if (!state || Object.keys(state).length !== checks.length || checks.some(name => state[name] !== true) ||
+        rows[fired].originInvoked !== false || rows[fired].phase !== 'mixed' ||
+        rows[origin].leg !== 'fallback' || rows[origin].ranged !== false || rows[origin].ms !== 0) return null;
+    const at = expected.enteredAtMs, invoked = expected.invokedAtMs, cutoff = at + 25;
+    if (![at, invoked, timer?.scheduledAtMs, timer?.requestedDelayMs, timer?.firedAtMs].every(Number.isFinite) ||
+        !(at > 0 && timer.scheduledAtMs >= at && timer.scheduledAtMs <= cutoff && timer.requestedDelayMs >= 0 &&
+          timer.requestedDelayMs <= 25 && timer.firedAtMs >= timer.scheduledAtMs && invoked >= timer.firedAtMs)) return null;
+    const g = rows[fired].capturedGeometry, current = rows[fired].currentGeometry;
+    if (!g || !current || load.budgetMs !== 0 || !(load.limitMs > 25) ||
+        g.fragmentStart !== expected.fragmentStart || g.fragmentDurationSeconds !== expected.fragmentDurationSeconds ||
+        current.fragmentStart !== g.fragmentStart || current.fragmentDurationSeconds !== g.fragmentDurationSeconds ||
+        current.playbackRate !== 1 || !(current.readyState >= 3) ||
+        ['currentTime', 'playableEnd', 'fragmentStart', 'durationMs', 'originReserveMs'].some(name =>
+          !Number.isFinite(g[name]) || load.budgetGeometry[name] !== g[name])) return null;
+    const recovery = Math.min(expected.parentMs, (g.playableEnd - g.currentTime) * 1000), first = Math.min(recovery, expected.ttfbMs);
+    const proofElapsed = timer.firedAtMs - at, invokedElapsed = invoked - at;
+    if (!(recovery > 25 && first > 25 && expected.remainingLoadMs > 0 && expected.remainingTtfbMs > 0 &&
+        expected.remainingLoadMs <= recovery - proofElapsed && expected.remainingLoadMs >= recovery - invokedElapsed &&
+        expected.remainingTtfbMs <= first - proofElapsed && expected.remainingTtfbMs >= first - invokedElapsed)) return null;
+    const allocated = rpc.filter(row => row.op === 'new' && row.sentAtMs >= at && row.sentAtMs <= invoked);
+    if (allocated.length !== 1) return null;
+    const allocation = allocated[0], starts = rpc.filter(row => row.op === 'start' && row.sentAtMs >= at && row.sentAtMs <= invoked);
+    if (!Number.isSafeInteger(allocation.id) || allocation.id < 1 || allocation.success !== true ||
+        !Number.isSafeInteger(allocation.handle) || allocation.handle < 1 || allocation.configSize !== expected.size ||
+        allocation.exclusiveOrigin !== true || allocation.peerOnly !== false ||
+        allocation.configDeadline !== Math.floor(at + load.limitMs) || starts.length > 1 ||
+        starts.some(row => !Number.isSafeInteger(row.id) || row.id <= allocation.id || row.handle !== allocation.handle || row.sentAtMs < allocation.replyAtMs)) return null;
+    const pending = [allocation, ...starts].find(row => row.success === true && Number.isFinite(row.sentAtMs) &&
+      Number.isFinite(row.replyAtMs) && row.sentAtMs <= timer.firedAtMs && timer.firedAtMs <= row.replyAtMs);
+    const finishes = rows.filter(row => row.k === 'xferFinish');
+    const finishIndex = rows.findIndex(row => row.k === 'xferFinish');
+    // Aborting a pending NEW rejects its awaited allocation on a later
+    // microtask. Independent whole-source recovery may already have started;
+    // neither a Worker allocation acknowledgement nor cleanup is Core START.
+    if (expected.coreTransfersDelta === 0 && pending === allocation && starts.length === 0 &&
+        allocation.sentAtMs <= timer.firedAtMs && invoked <= allocation.replyAtMs &&
+        fired < origin && origin < finishIndex) {
+      const finished = finishes[0], recent = rpc.filter(row => row.sentAtMs >= at);
+      if (rows[0] !== load || rows.filter(row => row.k === 'load').length !== 1 || finishes.length !== 1 ||
+          rows.filter(row => row.k === 'originStart').length !== 1 || recent.length !== 1 || recent[0] !== allocation ||
+          new Set(rpc.map(row => row.id)).size !== rpc.length ||
+          rpc.some(row => !['new', 'start'].includes(row.op) || !Number.isSafeInteger(row.id) || row.id < 1 ||
+            !Number.isSafeInteger(row.handle) || row.handle < 1 || !Number.isFinite(row.sentAtMs) ||
+            !Number.isFinite(row.replyAtMs) || row.sentAtMs > row.replyAtMs || row !== allocation && row.handle === allocation.handle) ||
+          rows.some(row => row.k === 'origin' && row.ranged === true) ||
+          [rows[0], rows[entry], rows[fired], rows[origin], finished].some((row, i, sequence) =>
+            !Number.isSafeInteger(row?.at) || row.at < 0 || i > 0 && row.at < sequence[i - 1].at) ||
+          ![expected.parentMs, expected.ttfbMs].every(Number.isFinite) || g.durationMs !== expected.fragmentDurationSeconds * 1000 ||
+          finished.reason !== 'allocation-error' || finished.delivered !== false || finished.bufferedMixed !== true ||
+          finished.peerOnly !== false || finished.verifiedBytes !== 0 || finished.originBytes !== 0 ||
+          ![finished.ms, finished.peerRemainingMs, finished.recoveryRemainingMs].every(Number.isFinite) || finished.ms < 0 ||
+          !(finished.peerRemainingMs > 0 && finished.recoveryRemainingMs > 0)) return null;
+      return { stage: 'warm-pending-new-cleanup-after-origin', proofTime: timer.firedAtMs, rpc: allocation };
+    }
+    if (rows.filter(row => row.k === 'load').length !== 1 ||
+        [rows[0], rows[entry], rows[fired], rows[finishIndex], rows[origin]].some((row, i, sequence) =>
+          !Number.isSafeInteger(row?.at) || row.at < 0 || i > 0 && row.at < sequence[i - 1].at) ||
+        !(fired < finishIndex && finishIndex < origin)) return null;
+    // Captured cc6: NEW replied before the cutoff, no START was posted, and
+    // the original setup timer actually fired after entry+25. No pending RPC
+    // is needed to prove that elapsed bound; keep its older proof separate.
+    if (!pending && expected.coreTransfersDelta === 1 && starts.length === 0 &&
+        Number.isFinite(allocation.sentAtMs) && Number.isFinite(allocation.replyAtMs) &&
+        allocation.sentAtMs <= allocation.replyAtMs && allocation.replyAtMs < cutoff && timer.firedAtMs >= cutoff) {
+      const finished = finishes[0], recent = rpc.filter(row => row.sentAtMs >= at);
+      if (rows[0] !== load || finishes.length !== 1 || recent.length !== 1 || recent[0] !== allocation ||
+          rpc.some(row => !['new', 'start'].includes(row.op) || !Number.isSafeInteger(row.id) || row.id < 1 ||
+            !Number.isSafeInteger(row.handle) || row.handle < 1 || !Number.isFinite(row.sentAtMs) ||
+            !Number.isFinite(row.replyAtMs) || row.sentAtMs > row.replyAtMs || row !== allocation &&
+            (row.id === allocation.id || row.op === 'new' && row.handle === allocation.handle)) ||
+          rows.some(row => row.k === 'origin' && row.ranged === true) ||
+          !Number.isFinite(rows[fired].ms) || rows[fired].ms < 25 ||
+          !Number.isFinite(rows[fired].setupRemainingMs) || rows[fired].setupRemainingMs > 0 ||
+          ![expected.parentMs, expected.ttfbMs].every(Number.isFinite) || g.durationMs !== expected.fragmentDurationSeconds * 1000 ||
+          finished.reason !== 'signal-abort' || finished.delivered !== false || finished.bufferedMixed !== true || finished.peerOnly !== false ||
+          finished.verifiedBytes !== 0 || finished.originBytes !== 0 ||
+          ![finished.ms, finished.peerRemainingMs, finished.recoveryRemainingMs].every(Number.isFinite) || finished.ms < 0 ||
+          !(finished.peerRemainingMs > 0 && finished.recoveryRemainingMs > 0)) return null;
+      return { stage: 'warm-protected-timer-after-precutoff-allocation', proofTime: timer.firedAtMs, rpc: allocation };
+    }
+    if (!pending || finishes.length !== 1 || finishes[0].delivered !== false || finishes[0].bufferedMixed !== true ||
+        finishes[0].peerOnly !== false || finishes[0].verifiedBytes !== 0 || finishes[0].originBytes !== 0 ||
+        ![0, 1].includes(expected.coreTransfersDelta) ||
+        !(expected.coreTransfersDelta === 1 ? finishes[0].reason === 'signal-abort' && pending.op === 'start' :
+          ['allocation-error', 'allocation-state-deadline-authority-holder'].includes(finishes[0].reason) && pending.op === 'new')) return null;
+    return { stage: 'warm-observed-pending-rpc-timer', proofTime: timer.firedAtMs, rpc: pending };
+  } catch { return null; }
+}
+
+test('owned warm pending NEW cleanup follows independent source recovery in the immutable capture', async () => {
+  const raw = await readFile(new URL('./fixtures/owned-warm-pending-allocation-cleanup.json', import.meta.url));
+  assert.equal(createHash('sha256').update(raw).digest('hex'), '80a0ea59ffde2c95471f765a08ebfcc8eb0f399ff7f2edc32730bb1591c30449');
+  const receipt = JSON.parse(raw);
+  assert.equal(receipt.provenance.sourceCommit, '0ef581aa927d83d803ca7052eba8f72508ae2290');
+  assert.equal(receipt.provenance.rawLogSha256, '1025ce7cb967c768896a9a68f3cf019d77d80b04e6cb7325b92247dff78ada8b');
+  const proof = warmSetupDeclineProof(receipt.proofInput);
+  assert.equal(proof?.stage, 'warm-pending-new-cleanup-after-origin');
+  assert.equal(proof.proofTime, receipt.proofInput.timer.firedAtMs);
+});
+
+test('owned warm pending NEW cleanup rejects incomplete or contradictory evidence', async () => {
+  const { proofInput: input } = JSON.parse(await readFile(new URL('./fixtures/owned-warm-pending-allocation-cleanup.json', import.meta.url)));
+  assert.equal(warmSetupDeclineProof(input)?.stage, 'warm-pending-new-cleanup-after-origin');
+  const row = (v, kind) => v.trace.rows.find(r => r.load === v.expected.load && r.k === kind);
+  const fired = v => v.trace.rows.find(r => r.load === v.expected.load && r.reason === 'setup-timer');
+  const allocation = v => v.rpc.find(r => r.op === 'new' && r.sentAtMs >= v.expected.enteredAtMs);
+  const controls = [
+    ['missing NEW', v => { v.rpc = v.rpc.filter(r => r !== allocation(v)); }],
+    ['duplicate NEW', v => { v.rpc.push({ ...allocation(v) }); }],
+    ['wrong NEW operation', v => { allocation(v).op = 'tick'; }],
+    ['missing id', v => { delete allocation(v).id; }],
+    ['invalid id', v => { allocation(v).id = 0; }],
+    ['reused id', v => { allocation(v).id = v.rpc[0].id; }],
+    ['missing handle', v => { delete allocation(v).handle; }],
+    ['invalid handle', v => { allocation(v).handle = 0; }],
+    ['reused handle', v => { allocation(v).handle = v.rpc[0].handle; }],
+    ['historical START aliases target handle', v => { v.rpc.find(r => r.op === 'start').handle = allocation(v).handle; }],
+    ['failed NEW', v => { allocation(v).success = false; }],
+    ['wrong size', v => { allocation(v).configSize++; }],
+    ['wrong deadline', v => { allocation(v).configDeadline++; }],
+    ['nonexclusive', v => { allocation(v).exclusiveOrigin = false; }],
+    ['peer-only', v => { allocation(v).peerOnly = true; }],
+    ['not pending at timer', v => { allocation(v).replyAtMs = v.timer.firedAtMs - .1; }],
+    ['not pending at source', v => { allocation(v).replyAtMs = (v.timer.firedAtMs + v.expected.invokedAtMs) / 2; }],
+    ['NEW sent after timer', v => { allocation(v).sentAtMs = v.timer.firedAtMs + .1; }],
+    ['nonfinite RPC time', v => { allocation(v).replyAtMs = NaN; }],
+    ['unexpected START', v => { const a = allocation(v); v.rpc.push({ id: a.id + 1, op: 'start', handle: a.handle,
+      sentAtMs: a.replyAtMs, replyAtMs: a.replyAtMs + 1, success: true }); }],
+    ['Core command', v => { v.trace.rows.push({ k: 'xfer', load: v.expected.load, at: row(v, 'xferFinish').at, op: 'start' }); }],
+    ['peer request trace', v => { v.trace.rows.push({ k: 'request', load: v.expected.load, at: row(v, 'xferFinish').at }); }],
+    ['range trace', v => { v.trace.rows.push({ k: 'origin', load: v.expected.load, at: row(v, 'xferFinish').at, ranged: true }); }],
+    ...['originRangeAttempts', 'physicalRangeGets', 'clientRangeLoads', 'peerRequests', 'acceptedPeerBytes', 'verifiedWarmPeerBytes', 'coreTransfersDelta']
+      .map(name => [name, v => { v.expected[name] = 1; }]),
+    ['missing source', v => { v.trace.rows = v.trace.rows.filter(r => r !== row(v, 'originStart')); }],
+    ['duplicate source', v => { v.trace.rows.push({ ...row(v, 'originStart') }); }],
+    ['nonfallback source', v => { row(v, 'originStart').leg = 'cached'; }],
+    ['ranged source', v => { row(v, 'originStart').ranged = true; }],
+    ['source precedes timer', v => { const r = row(v, 'originStart'); v.trace.rows.splice(v.trace.rows.indexOf(r), 1);
+      v.trace.rows.splice(v.trace.rows.indexOf(fired(v)), 0, r); }],
+    ['missing finish', v => { v.trace.rows = v.trace.rows.filter(r => r !== row(v, 'xferFinish')); }],
+    ['duplicate finish', v => { v.trace.rows.push({ ...row(v, 'xferFinish') }); }],
+    ['finish precedes timer', v => { const r = row(v, 'xferFinish'); v.trace.rows.splice(v.trace.rows.indexOf(r), 1);
+      v.trace.rows.splice(v.trace.rows.indexOf(fired(v)), 0, r); }],
+    ['finish timestamp precedes source', v => { row(v, 'xferFinish').at = row(v, 'originStart').at - 1; }],
+    ['wrong finish reason', v => { row(v, 'xferFinish').reason = 'core-fail-command'; }],
+    ['delivered', v => { row(v, 'xferFinish').delivered = true; }],
+    ['verified bytes', v => { row(v, 'xferFinish').verifiedBytes = 1; }],
+    ['origin bytes', v => { row(v, 'xferFinish').originBytes = 1; }],
+    ['not mixed', v => { row(v, 'xferFinish').bufferedMixed = false; }],
+    ['peer-only finish', v => { row(v, 'xferFinish').peerOnly = true; }],
+    ['expired recovery', v => { row(v, 'xferFinish').recoveryRemainingMs = 0; }],
+    ['negative finish duration', v => { row(v, 'xferFinish').ms = -1; }],
+    ['wrong load', v => { v.expected.load++; }],
+    ['wrong fragment', v => { v.expected.sn++; }],
+    ['missing scope predicate', v => { delete fired(v).scope.generation; }],
+    ...MIXED_SCOPE_CHECKS.concat('warmOwner').map(name => [name, v => { fired(v).scope[name] = false; }]),
+    ['missing timer', v => { v.timer = null; }],
+    ['late schedule', v => { v.timer.scheduledAtMs = v.expected.enteredAtMs + 26; }],
+    ['wrong timer delay', v => { v.timer.requestedDelayMs = 26; }],
+    ['source before firing', v => { v.expected.invokedAtMs = v.timer.firedAtMs - 1; }],
+    ['nonfinite parent', v => { v.expected.parentMs = Infinity; }],
+    ['contradictory duration', v => { fired(v).capturedGeometry.durationMs++; row(v, 'load').budgetGeometry.durationMs++; }],
+    ['renewed parent', v => { v.expected.remainingLoadMs = v.expected.parentMs; }],
+    ['renewed first byte', v => { v.expected.remainingTtfbMs = v.expected.ttfbMs; }],
+    ['underclipped source', v => { v.expected.remainingLoadMs--; }],
+    ['trace dropped', v => { v.trace.dropped = 1; }],
+    ['RPC dropped', v => { v.expected.rpcDropped = 1; }],
+    ['RPC omitted', v => { v.expected.rpcOmitted = 1; }],
+    ['rows omitted', v => { v.expected.rowsOmitted = 1; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const v = structuredClone(input); mutate(v); assert.equal(warmSetupDeclineProof(v), null, name);
+  }
+  console.log(JSON.stringify({ fixture: 'pending-new-cleanup-proof-mutations', rejected: controls.length,
+    scope: 'Immutable classifier counterexamples only; not traffic, completion or CI rescore evidence' }));
+});
+
+test('owned warm captured precutoff allocation timer proves a protected setup decline', async () => {
+  const raw = await readFile(new URL('./fixtures/owned-warm-precutoff-allocation-timer.json', import.meta.url));
+  assert.equal(createHash('sha256').update(raw).digest('hex'), 'c709ac06143be329e88dc0c676e5a0b579ace2445961975106baccd7dc227c8f');
+  const receipt = JSON.parse(raw);
+  assert.equal(receipt.provenance.sourceCommit, 'cc6df86ebfa14dbe8825bf33c3d4769d4c6e3f4b');
+  assert.equal(receipt.provenance.rawLogSha256, 'c7be5c3b26612050085fe9137e60ca4146d677b98d7256ba853ad8ddffe81813');
+  const proof = warmSetupDeclineProof(receipt.proofInput);
+  assert.equal(proof?.stage, 'warm-protected-timer-after-precutoff-allocation');
+  assert.equal(proof.proofTime, receipt.proofInput.timer.firedAtMs);
+});
+
+test('owned warm captured precutoff allocation proof rejects incomplete or contradictory evidence', async () => {
+  const receipt = JSON.parse(await readFile(new URL('./fixtures/owned-warm-precutoff-allocation-timer.json', import.meta.url)));
+  const input = receipt.proofInput, at = input.expected.enteredAtMs;
+  const allocation = v => v.rpc.find(row => row.op === 'new' && row.sentAtMs >= at);
+  const row = (v, kind) => v.trace.rows.find(item => item.load === v.expected.load && item.k === kind);
+  const fired = v => v.trace.rows.find(item => item.load === v.expected.load && item.reason === 'setup-timer');
+  const controls = [
+    ['early timer', v => { v.timer.firedAtMs = at + 24; }],
+    ['missing timer', v => { v.timer = null; }],
+    ['late timer schedule', v => { v.timer.scheduledAtMs = at + 26; }],
+    ['wrong timer delay', v => { v.timer.requestedDelayMs = 26; }],
+    ['missing allocation', v => { v.rpc = v.rpc.filter(item => item !== allocation(v)); }],
+    ['duplicate allocation', v => { v.rpc.push({ ...allocation(v) }); }],
+    ['wrong RPC operation', v => { allocation(v).op = 'tick'; }],
+    ['failed allocation', v => { allocation(v).success = false; }],
+    ['late allocation reply', v => { allocation(v).replyAtMs = at + 26; }],
+    ['reversed RPC times', v => { allocation(v).replyAtMs = allocation(v).sentAtMs - 1; }],
+    ['nonfinite RPC time', v => { allocation(v).replyAtMs = NaN; }],
+    ['missing handle', v => { delete allocation(v).handle; }],
+    ['invalid handle', v => { allocation(v).handle = 0; }],
+    ['reused previous handle', v => { allocation(v).handle = v.rpc.find(item => item.op === 'new').handle; }],
+    ['reused RPC identity', v => { allocation(v).id = v.rpc[0].id; }],
+    ['changed object size', v => { allocation(v).configSize++; }],
+    ['changed peer deadline', v => { allocation(v).configDeadline++; }],
+    ['nonexclusive allocation', v => { allocation(v).exclusiveOrigin = false; }],
+    ['peer-only allocation', v => { allocation(v).peerOnly = true; }],
+    ['unexpected START', v => { const a = allocation(v); v.rpc.push({ id: a.id + 1, op: 'start', handle: a.handle,
+      sentAtMs: a.replyAtMs + 1, replyAtMs: a.replyAtMs + 2, success: true }); }],
+    ['Core command trace', v => { v.trace.rows.push({ k: 'xfer', load: v.expected.load, at: 2424, op: 'start' }); }],
+    ['range trace', v => { v.trace.rows.push({ k: 'origin', load: v.expected.load, at: 2424, ranged: true }); }],
+    ...['originRangeAttempts','physicalRangeGets','clientRangeLoads','peerRequests','acceptedPeerBytes','verifiedWarmPeerBytes']
+      .map(name => [name, v => { v.expected[name] = 1; }]),
+    ['wrong allocation delta', v => { v.expected.coreTransfersDelta = 0; }],
+    ['verified transfer bytes', v => { row(v, 'xferFinish').verifiedBytes = 1; }],
+    ['origin transfer bytes', v => { row(v, 'xferFinish').originBytes = 1; }],
+    ['delivered transfer', v => { row(v, 'xferFinish').delivered = true; }],
+    ['wrong finish reason', v => { row(v, 'xferFinish').reason = 'core-fail-command'; }],
+    ['duplicate finish', v => { v.trace.rows.push({ ...row(v, 'xferFinish') }); }],
+    ['different load', v => { v.expected.load++; }],
+    ['different fragment', v => { v.expected.sn++; }],
+    ['lost warm owner', v => { fired(v).scope.warmOwner = false; }],
+    ['other false predicate', v => { fired(v).scope.unpaused = false; }],
+    ['wrong timer reason', v => { fired(v).reason = 'scope-ready'; }],
+    ['nonexpired row', v => { fired(v).setupRemainingMs = 1; }],
+    ['nonfinite elapsed row', v => { fired(v).ms = NaN; }],
+    ['nonfinite remaining row', v => { fired(v).setupRemainingMs = NaN; }],
+    ['nonfinite parent', v => { v.expected.parentMs = Infinity; }],
+    ['contradictory duration', v => { fired(v).capturedGeometry.durationMs++;
+      row(v, 'load').budgetGeometry.durationMs++; }],
+    ['finish precedes timer', v => { const rows = v.trace.rows, index = rows.indexOf(row(v, 'xferFinish'));
+      const [finish] = rows.splice(index, 1); rows.splice(rows.indexOf(fired(v)), 0, finish); }],
+    ['source precedes timer', v => { const rows = v.trace.rows, index = rows.indexOf(row(v, 'originStart'));
+      const [source] = rows.splice(index, 1); rows.splice(rows.indexOf(fired(v)), 0, source); }],
+    ['invocation precedes timer', v => { v.expected.invokedAtMs = v.timer.firedAtMs - 1; }],
+    ['renewed parent', v => { v.expected.remainingLoadMs = v.expected.parentMs; }],
+    ['renewed first byte', v => { v.expected.remainingTtfbMs = v.expected.ttfbMs; }],
+    ['underclipped parent', v => { v.expected.remainingLoadMs--; }],
+    ['dropped trace', v => { v.trace.dropped = 1; }],
+    ['dropped RPC', v => { v.expected.rpcDropped = 1; }],
+    ['omitted RPC', v => { v.expected.rpcOmitted = 1; }],
+    ['omitted rows', v => { v.expected.rowsOmitted = 1; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const v = structuredClone(input); mutate(v);
+    assert.equal(warmSetupDeclineProof(v), null, name);
+  }
+  console.log(JSON.stringify({ fixture: 'captured-precutoff-allocation-timer-proof', rejected: controls.length,
+    scope: 'Receipt classifier counterexamples only; not new traffic or a CI rescore' }));
+});
+
+// Mutate the ACTUAL held-response observation below. These controls classify
+// evidence only; none introduces or changes controller time or source policy.
+function warmDeclineMutationControls(input) {
+  assert(warmSetupDeclineProof(input));
+  const controls = [
+    ['missing timer', v => { v.timer = null; }],
+    ['late scheduled timer', v => { v.timer.scheduledAtMs = v.expected.enteredAtMs + 26; }],
+    ['wrong requested delay', v => { v.timer.requestedDelayMs = 26; }],
+    ['source before firing', v => { v.expected.invokedAtMs = v.timer.firedAtMs - 1; }],
+    ['missing allocation handle', v => { delete v.rpc.find(r => r.op === 'new' && r.sentAtMs >= v.expected.enteredAtMs).handle; }],
+    ['different start handle', v => { v.rpc.find(r => r.op === 'start' && r.sentAtMs >= v.expected.enteredAtMs).handle++; }],
+    ['wrong object', v => { v.expected.size++; }],
+    ['wrong peer cap', v => { v.rpc.find(r => r.op === 'new' && r.sentAtMs >= v.expected.enteredAtMs).configDeadline++; }],
+    ['nonexclusive', v => { v.rpc.find(r => r.op === 'new' && r.sentAtMs >= v.expected.enteredAtMs).exclusiveOrigin = false; }],
+    ['not pending', v => { for (const r of v.rpc) r.replyAtMs = Math.min(r.replyAtMs, v.timer.firedAtMs - 1); }],
+    ['failed reply', v => { for (const r of v.rpc) r.success = false; }],
+    ['duplicate allocation', v => { v.rpc.push({...v.rpc.find(r => r.op === 'new' && r.sentAtMs >= v.expected.enteredAtMs)}); }],
+    ['wrong load', v => { v.expected.load++; }],
+    ['wrong role', v => { v.trace.rows.find(r => r.k === 'load' && r.load === v.expected.load).budgetGeometry.source = 'buffer'; }],
+    ['lost warm owner', v => { v.trace.rows.find(r => r.reason === 'setup-timer' && r.load === v.expected.load).scope.warmOwner = false; }],
+    ['range command', v => { v.expected.originRangeAttempts = 1; }],
+    ['actual range', v => { v.expected.physicalRangeGets = 1; }],
+    ['range invocation', v => { v.expected.clientRangeLoads = 1; }],
+    ['peer request', v => { v.expected.peerRequests = 1; }],
+    ['accepted peer', v => { v.expected.acceptedPeerBytes = 1; }],
+    ['verified warm bytes', v => { v.expected.verifiedWarmPeerBytes = 1; }],
+    ['renewed parent', v => { v.expected.remainingLoadMs = v.expected.parentMs; }],
+    ['renewed first byte', v => { v.expected.remainingTtfbMs = v.expected.ttfbMs; }],
+    ['delivered', v => { v.trace.rows.find(r => r.k === 'xferFinish' && r.load === v.expected.load).delivered = true; }],
+    ['wrong terminal', v => { v.trace.rows.find(r => r.k === 'xferFinish' && r.load === v.expected.load).reason = 'core-fail-command'; }],
+    ['hidden rows', v => { v.expected.rowsOmitted = 1; }],
+    ['dropped trace', v => { v.trace.dropped = 1; }],
+    ['dropped RPC', v => { v.expected.rpcDropped = 1; }],
+  ];
+  for (const [name, mutate] of controls) {
+    const v = structuredClone(input); mutate(v);
+    assert.equal(warmSetupDeclineProof(v), null, name);
+  }
+  console.log(JSON.stringify({ fixture: 'warm-setup-decline-proof-mutations', rejected: controls.length }));
+}
+
+test('warm setup proof rejects the immutable incomplete897 failure without reconstructing missing observations', async () => {
+  const raw = await readFile(new URL('./fixtures/owned-warm-897-incomplete.json', import.meta.url));
+  assert.equal(createHash('sha256').update(raw).digest('hex'), 'cb9de5a1638cd959cd568a3db0eb260a13accf365f9b99a03d5f1cce66c5f1fa');
+  const old = JSON.parse(raw), source = old.targetHttp[0];
+  assert.equal(source.range, null); assert.equal(source.complete, false);
+  assert(!Object.hasOwn(source, 'invocationProbe'));
+  assert(!Object.hasOwn(source, 'maxLoadTimeMs'));
+  assert(old.rpc.every(row => !Object.hasOwn(row, 'handle')));
+  const input = { trace: { dropped: old.traceDropped, rows: old.rows }, rpc: old.rpc,
+    timer: source.invocationProbe, expected: { load: old.load, sn: 1, cc: 0, level: 0, size: 6291456,
+      enteredAtMs: source.sdkEnteredAtMs, invokedAtMs: source.invokedAtMs,
+      remainingLoadMs: source.maxLoadTimeMs, remainingTtfbMs: source.maxTimeToFirstByteMs,
+      rpcDropped: old.rpcDropped, rpcOmitted: old.rpcOmitted, rowsOmitted: old.rowsOmitted,
+      originRangeAttempts: old.deltas.originRanges, acceptedPeerBytes: old.deltas.peerAccepted } };
+  assert.equal(warmSetupDeclineProof(input), null, 'old RED lacks independent evidence; later controls cannot rescore it');
+});
+
+async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logical = false, realAdmission = false, holdSetup = false, holdNewAllocation = false, holdNewUntilBody = false } = {}) {
+  const size = 6 * 1024 * 1024, bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
+  const secret = generateSecretKey(), seconds = Math.floor(Date.now() / 1000);
+  const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds, tags: [['d', 'contrast'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
+  const pieceSize = commitmentPieceSize(size), pieces = [];
+  for (let at = 0; at < size; at += pieceSize) pieces.push(createHash('sha256').update(bytes.subarray(at, at + pieceSize)).digest('hex'));
+  const sha256 = createHash('sha256').update(bytes).digest('hex'), observations = [];
+  // Explicit synthetic pacing, not a transport benchmark or a measured WAN rate.
+  class ContrastPeer extends PhasedFlowChannel {
+    send(data) {
+      const frame = typeof data === 'string' ? JSON.parse(data) : null;
+      if (frame?.t === 'want') {
+        const from = frame.p ? frame.p[0] * pieceSize : 0, to = frame.p ? Math.min(size, frame.p[1] * pieceSize) : size;
+        this.firstByteMs = 10; this.flowMs = (to - from) / (.3 * 1024 * 1024) * 1000;
+      }
+      return super.send(data);
+    }
+  }
+  for (const warming of ownedWarm ? [true] : [true, false]) {
+    let f, received, declined = false, declineProof = null, declineObservation = null, heldAllocationObserved = false;
+    const timers = realAdmission && !logical ? realTimerInvocationContext() : null;
+    if (timers) t.after(() => timers.restore());
+    const keyWork = logical ? logicalSegmentKeyDigests(t, base.swarmId) : null;
+    const clock = logical ? warmFunctionalClock(t, () => {
+      if (keyWork.pending > 0) return true;
+      const rows = f?.swarm.trace().rows ?? [];
+      const warm = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
+      // The forced-decline control fixes one explicit async setup phase:
+      // let actual metadata/allocation reach its REAL posted START, then let
+      // the original25ms timer advance while that actual reply is held.
+      // Neither range admission nor a favourable Core result controls time.
+      if (holdNewAllocation && bridge?.workers[0]?.newRequests?.length) heldAllocationObserved = true;
+      return Boolean(warm && (holdSetup ? !bridge?.workers[0]?.heldStartPosted :
+        holdNewAllocation ? !heldAllocationObserved : !received.some(row => row.path === '/media/seg.ts' && row.warm)));
+    }, holdSetup || holdNewAllocation) : null;
+    const settle = promise => clock ? clock.settle(promise) : promise;
+    const wait = predicate => clock ? clock.advanceUntil(predicate) : until(predicate);
+    let rpcObserved = 0;
+    const rpc = [], bridge = worker ? transferWorkerFixture(t, { onRpc: row => { rpcObserved++; if (rpc.length < 64) rpc.push(row); } }) : null;
+    const origin = await mixedHttpOrigin(t, bytes, Loader, clock?.timerSnapshot ?? timers?.snapshot), { requests, url } = origin;
+    received = origin.received;
+    class AccountedHTTP extends origin.HttpLoader {
+      load(ctx, config, callbacks) {
+        const index = received.length, result = super.load(ctx, config, { ...callbacks,
+          onSuccess: (response, stats, ...args) => {
+            // This loader records the native HTTP response callback as first.
+            received[index].firstResponseAtMs = stats.loading.first;
+            callbacks.onSuccess(response, stats, ...args);
+          } });
+        Object.assign(received[index], { path: new URL(ctx.url).pathname, sn: ctx.frag.sn, warm: Boolean(ctx[WARM_AHEAD]) });
+        return result;
+      }
+    }
+    // This fixture supplies prepared publisher metadata. Keep publisher signing
+    // outside client admission, while native key hashing, SDK verification and
+    // Core work retain the original clocks. The public demo currently signs
+    // locally per request; this fixture is not its signing-workload benchmark.
+    const commitments = new Map(['/media/lead.ts', '/media/seg.ts'].map((path, sequence) =>
+      [`${path}:${sequence}:0`, finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds,
+        tags: [['x', base.swarmId], ['e', streamEvent.id]], content: commitmentContent({ v: 3,
+          streamEventId: streamEvent.id, swarmId: base.swarmId,
+          key: createHash('sha256').update(`${base.swarmId}\n${path}`).digest('hex'),
+          rendition: '/media/index.m3u8', playlist: '/media/index.m3u8', mediaType: 'main', encryption: null,
+          sequence, discontinuity: 0, part: null, sha256, size, pieceSize, pieces, expiresAt: seconds + 60 }) }, secret)]));
+    const commitmentOrigin = new URL(url).origin;
+    let commitmentProviderCalls = 0;
+    const getCommitment = ctx => {
+      commitmentProviderCalls++;
+      const target = new URL(ctx.url);
+      if (target.origin !== commitmentOrigin || ctx.frag.type !== 'main' || ctx.frag.level !== 0 ||
+          !Number.isSafeInteger(ctx.frag.sn) || ctx.frag.cc !== 0 || ctx.part != null ||
+          ctx.rangeStart !== undefined && ctx.rangeStart !== 0 || ctx.rangeEnd !== undefined && ctx.rangeEnd !== 0) return null;
+      return commitments.get(`${target.pathname}:${ctx.frag.sn}:${ctx.frag.cc}`) ?? null;
+    };
+    f = await settle(multiFixture(t, { size, OriginLoader: AccountedHTTP, holders: [{ Channel: ContrastPeer }], traceRequests: 4096,
+      swarmOptions: { streamEvent, getCommitment, serve: true, warmAhead: warming, bufferedMixedRanges: ownedWarm || !warming,
+        ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}),
+        zeroBudgetPeerRace: true, sustainablePeerWait: true, maxPeerWaitMs: 2500 } }));
+    const invoke = ctx => {
+      const loader = new f.hls.config.fLoader(f.hlsConfig), calls = { success: 0, error: 0, abort: 0, timeout: 0 };
+      ctx.frag.stats = loader.stats;
+      const response = new Promise((resolve, reject) => loader.load(ctx, f.loaderConfig, {
+        onSuccess: value => { calls.success++; resolve(new Uint8Array(value.data)); },
+        onError: () => { calls.error++; reject(new Error('contrast source error')); },
+        onAbort: () => { calls.abort++; reject(new Error('contrast source abort')); },
+        onTimeout: () => { calls.timeout++; reject(new Error('contrast source timeout')); },
+      }));
+      return { response, calls, loader };
+    };
+    try {
+      assert.equal(f.swarm.metrics().core.state, 'ready');
+      if (worker) await wait(() => f.swarm.metrics().core.transferWorker.state === 'ready');
+      const details = M3U8Parser.parseLevelPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nlead.ts\n#EXTINF:2,\nseg.ts\n#EXT-X-ENDLIST\n',
+        new URL('index.m3u8', url).href, 0, 'main', 0, null);
+      const contextFor = frag => ({ url: frag.url, frag, responseType: 'arraybuffer', type: LoaderContextType.MEDIA_FRAGMENT, headers: {}, part: null, rangeStart: 0, rangeEnd: 0 });
+      const target = contextFor(details.fragments[1]), lead = contextFor(details.fragments[0]);
+      f.hls.media = Object.assign(new EventTarget(), { currentTime: 10, paused: false, ended: false, seeking: false,
+        readyState: 4, playbackRate: 1, buffered: { length: 0 } });
+      // Neither arm has a future map during identical genuine calibration.
+      sameBytes(await settle(invoke(target).response), bytes);
+      if (clock) await clock.advance(2); else await sleep(2);
+      assert(f.swarm.metrics().peerRequestDiagnostics.records.some(row => row.outcome === 'payload' && row.elapsedMs - row.firstByteMs >= 300),
+        'the holder model comes from actual Core-verified qualifying payload');
+      for (const pc of f.connections) pc.connectionState = 'connected';
+      f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+      f.hls.levels = [{ details }];
+      const before = f.swarm.metrics(), beforeReceived = received.length, beforeRequests = requests.length;
+      const beforePeerRequests = f.channels.reduce((sum, channel) => sum + channel.wants.length, 0);
+      if (holdSetup) { assert(worker && realAdmission); bridge.workers[0].holdStart = true; }
+      if (holdNewAllocation) { assert(worker && realAdmission && logical); bridge.workers[0].holdNew = true; }
+      const previous = invoke(lead); previous.response.catch(() => {});
+      await wait(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/lead.ts'));
+      if (warming) await wait(() => received.some((row, index) => index >= beforeReceived && row.path === '/media/seg.ts' && row.warm));
+      if (ownedWarm) {
+        const targetOrigin = received.slice(beforeReceived).find(row => row.path === '/media/seg.ts');
+        if (!targetOrigin.range) {
+          const trace = f.swarm.trace(), metrics = f.swarm.metrics();
+          const load = trace.rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead')?.load;
+          const diagnosticRows = trace.rows.filter(row => row.load === load && ['load', 'mixedScope', 'xfer', 'xferFinish', 'originStart', 'origin'].includes(row.k));
+          const pending = bridge?.workers.flatMap(value => [...(value.rpcSent?.values() ?? [])]) ?? [];
+          if (realAdmission) {
+            declined = true;
+            if (holdSetup) {
+              await wait(() => bridge.workers[0].startReplies?.length > 0);
+              bridge.workers[0].holdStart = false; bridge.workers[0].releaseStart();
+            }
+            await wait(() => f.swarm.trace().rows.some(row => row.k === 'xferFinish' && row.load === load));
+            if (holdNewAllocation) {
+              const held = bridge.workers[0].newRequests;
+              assert(heldAllocationObserved && held?.length === 1, 'the actual NEW reply remains held across original timer/source recovery');
+              const pendingNew = bridge.workers[0].rpcSent.get(held[0].data.id);
+              assert.equal(pendingNew?.op, 'new');
+              assert.equal(targetOrigin.invocationProbe.firedAtMs, targetOrigin.sdkEnteredAtMs + 25);
+              assert(pendingNew.sentAtMs <= targetOrigin.invocationProbe.firedAtMs &&
+                targetOrigin.invokedAtMs >= targetOrigin.invocationProbe.firedAtMs);
+              assert.equal(targetOrigin.complete, false, 'the live proof is observed before its whole HTTP body completes');
+              if (!holdNewUntilBody) { bridge.workers[0].holdNew = false; bridge.workers[0].releaseNew(); }
+            }
+            const fullTrace = f.swarm.trace(), now = f.swarm.metrics();
+            const wants = f.channels.flatMap(channel => channel.wants);
+            const proofInput = { trace: fullTrace, timer: targetOrigin.invocationProbe, rpc,
+              expected: { load, sn: target.frag.sn, cc: target.frag.cc, level: target.frag.level, size,
+                fragmentStart: target.frag.start, fragmentDurationSeconds: target.frag.duration,
+                enteredAtMs: targetOrigin.sdkEnteredAtMs, invokedAtMs: targetOrigin.invokedAtMs,
+                parentMs: f.loaderConfig.loadPolicy.maxLoadTimeMs, ttfbMs: f.loaderConfig.loadPolicy.maxTimeToFirstByteMs,
+                remainingLoadMs: targetOrigin.maxLoadTimeMs, remainingTtfbMs: targetOrigin.maxTimeToFirstByteMs,
+                originRangeAttempts: now.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+                physicalRangeGets: requests.slice(beforeRequests).filter(row => row.path === '/media/seg.ts' && row.range).length,
+                clientRangeLoads: received.slice(beforeReceived).filter(row => row.path === '/media/seg.ts' && row.range).length,
+                peerRequests: wants.length - beforePeerRequests,
+                acceptedPeerBytes: now.bytes.peerFirst - before.bytes.peerFirst,
+                verifiedWarmPeerBytes: now.warmAhead.verifiedPeerBytes - before.warmAhead.verifiedPeerBytes,
+                coreTransfersDelta: now.core.multiHolder.transfers - before.core.multiHolder.transfers,
+                rpcDropped: bridge?.workers.reduce((sum, value) => sum + (value.rpcDropped ?? 0), 0) ?? 0,
+                rpcOmitted: Math.max(0, rpcObserved - rpc.length), rowsOmitted: 0 } };
+            // Preserve the original load/timer/source scalars independently of
+            // the live completed-reply ledger. Cancelling NEW can finish its
+            // local promise before the actual Worker acknowledgement arrives.
+            declineObservation = structuredClone(proofInput);
+            if (holdNewUntilBody) assert.equal(warmSetupDeclineProof(declineObservation), null,
+              'an incomplete early reply capture must still reject');
+          } else assert(targetOrigin.range, JSON.stringify({ message: 'eligible owned warm work starts origin206 before any whole GET', worker,
+            load: load ?? null, traceDropped: trace.dropped, rows: diagnosticRows.slice(-64), rowsOmitted: Math.max(0, diagnosticRows.length - 64),
+            rpc, rpcOmitted: Math.max(0, rpcObserved - rpc.length), pendingRpc: pending.slice(-32), pendingRpcOmitted: Math.max(0, pending.length - 32),
+            rpcDropped: bridge?.workers.reduce((sum, value) => sum + (value.rpcDropped ?? 0), 0) ?? 0,
+            targetHttp: received.slice(beforeReceived).filter(row => row.path === '/media/seg.ts').slice(-8).map(({ range, status, bytes, complete, aborted, invokedAtMs, sdkEnteredAtMs }) =>
+              ({ range, status, bytes, complete, aborted, invokedAtMs, sdkEnteredAtMs })),
+            states: { core: metrics.core.state, worker: metrics.core.transferWorker.state },
+            deltas: { transfers: metrics.core.multiHolder.transfers - before.core.multiHolder.transfers,
+              originRanges: metrics.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+              peerAccepted: metrics.bytes.peerFirst - before.bytes.peerFirst, warmStarted: metrics.warmAhead.started - before.warmAhead.started } }));
+        }
+        await wait(() => f.swarm.metrics().warmAhead.verified > before.warmAhead.verified);
+        if (declined) assert.equal(f.swarm.metrics().warmAhead.verifiedPeerBytes, before.warmAhead.verifiedPeerBytes);
+        else assert(f.swarm.metrics().warmAhead.verifiedPeerBytes > before.warmAhead.verifiedPeerBytes);
+        assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst, 'verified warm assembly defers accepted credit before genuine consumption');
+        if (declineObservation) {
+          if (holdNewUntilBody) {
+            const body = received.slice(beforeReceived).find(row => row.path === '/media/seg.ts');
+            assert.equal(body.complete, true); assert.equal(body.bytes, size);
+            const pending = bridge.workers[0].rpcSent;
+            const allocation = [...pending.values()].find(row => row.op === 'new' && row.sentAtMs >= declineObservation.expected.enteredAtMs);
+            assert(allocation, 'actual NEW acknowledgement remains held through source-body verification');
+            assert(!rpc.some(row => row.id === allocation.id));
+            assert.equal(warmSetupDeclineProof(declineObservation), null);
+            bridge.workers[0].holdNew = false; bridge.workers[0].releaseNew();
+            await wait(() => rpc.some(row => row.id === allocation.id));
+          }
+          // Close the original warm operation after its existing verified-body
+          // observation, before a later genuine request can start independent
+          // recovery. Native cases gain no wait or loader call. Keep the full
+          // current ledger/I/O visible; incomplete evidence still fails.
+          const current = f.swarm.metrics(), pending = bridge?.workers.flatMap(value => [...(value.rpcSent?.values() ?? [])]) ?? [];
+          const proofInput = { trace: f.swarm.trace(), timer: declineObservation.timer, rpc: structuredClone(rpc),
+            expected: { ...declineObservation.expected,
+              originRangeAttempts: current.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+              physicalRangeGets: requests.slice(beforeRequests).filter(row => row.path === '/media/seg.ts' && row.range).length,
+              clientRangeLoads: received.slice(beforeReceived).filter(row => row.path === '/media/seg.ts' && row.range).length,
+              peerRequests: f.channels.reduce((sum, channel) => sum + channel.wants.length, 0) - beforePeerRequests,
+              acceptedPeerBytes: current.bytes.peerFirst - before.bytes.peerFirst,
+              verifiedWarmPeerBytes: current.warmAhead.verifiedPeerBytes - before.warmAhead.verifiedPeerBytes,
+              coreTransfersDelta: current.core.multiHolder.transfers - before.core.multiHolder.transfers,
+              rpcDropped: bridge?.workers.reduce((sum, value) => sum + (value.rpcDropped ?? 0), 0) ?? 0,
+              rpcOmitted: Math.max(0, rpcObserved - rpc.length) } };
+          declineProof = warmSetupDeclineProof(proofInput);
+          assert(declineProof && pending.length === 0, JSON.stringify({
+            message: 'real warm fallback requires complete same-load setup proof after verified warm body', proofInput,
+            pendingRpc: pending.slice(0, 32), pendingRpcOmitted: Math.max(0, pending.length - 32),
+            worker: current.core.transferWorker }));
+          if (holdNewAllocation) {
+            assert.equal(declineProof.stage, 'warm-pending-new-cleanup-after-origin');
+            assert.equal(proofInput.expected.coreTransfersDelta, 0);
+            assert(!rpc.some(row => row.op === 'start' && row.sentAtMs >= proofInput.expected.enteredAtMs));
+            console.log(JSON.stringify({ fixture: 'actual-warm-held-new-cleanup-proof',
+              controllerClock: 'logical-functional', timerClockDomain: 'logical-performance', proofInput, proof: declineProof }));
+          }
+          if (holdNewUntilBody) {
+            assert.equal(warmSetupDeclineProof(declineObservation), null,
+              'the later reply cannot backfill the immutable rejected early capture');
+            console.log(JSON.stringify({ fixture: 'actual-warm-late-new-observation', controllerClock: 'logical-functional',
+              earlyCapture: declineObservation, earlyProof: null, finalCapture: proofInput, finalProof: declineProof,
+              sourceBodyBytes: received.slice(beforeReceived).find(row => row.path === '/media/seg.ts').bytes,
+              sourceCompleteBeforeAcknowledgement: true, consumersFollowAcknowledgement: true }));
+          }
+          if (holdSetup) {
+            assert.equal(declineProof.stage, 'warm-observed-pending-rpc-timer');
+            assert.equal(proofInput.timer.firedAtMs, proofInput.expected.enteredAtMs + 25,
+              'functional control expires the original setup timer at exactly25ms');
+            warmDeclineMutationControls(proofInput);
+            console.log(JSON.stringify({ fixture: 'actual-warm-held-rpc-proof',
+              controllerClock: 'logical-functional', timerClockDomain: 'logical-performance',
+              proofInput, proof: declineProof }));
+          }
+        }
+      }
+      const demand = invoke(target); demand.response.catch(() => {});
+      if (warming && !ownedWarm) {
+        assert.equal(f.swarm.metrics().warmAhead.coalesced, before.warmAhead.coalesced + 1);
+        assert.equal(f.swarm.metrics().warmAhead.promotions, before.warmAhead.promotions + 1);
+        assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst, 'pending warm ownership cannot claim accepted peer bytes');
+      }
+      sameBytes(await settle(demand.response), bytes); sameBytes(await settle(previous.response), bytes);
+      assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+      const after = f.swarm.metrics(), rows = f.swarm.trace().rows;
+      const client = received.slice(beforeReceived).filter(row => row.path === '/media/seg.ts');
+      const server = requests.slice(beforeRequests).filter(row => row.path === '/media/seg.ts');
+      const peer = after.bytes.peerFirst - before.bytes.peerFirst;
+      assert(client.every(row => row.complete && row.bytes === (row.range ? row.range[1] - row.range[0] : size)));
+      assert.equal(client.reduce((sum, row) => sum + row.bytes, 0), server.reduce((sum, row) => sum + row.sent, 0));
+      const starts = rows.filter(row => row.k === 'xfer' && row.op === 'start' && row.at >= (rows.filter(row => row.k === 'load' && row.sn === 0).at(-1)?.at ?? 0));
+      if (declined) {
+        assert.equal(client.length, 1); assert.equal(server.length, 1);
+        assert.equal(client[0].range, null); assert.equal(client[0].status, 200); assert.equal(client[0].bytes, size);
+        assert.equal(peer, 0); assert.equal(after.warmAhead.verifiedPeerBytes, before.warmAhead.verifiedPeerBytes);
+        assert(client[0].completedAtMs < client[0].sdkEnteredAtMs + f.loaderConfig.loadPolicy.maxLoadTimeMs);
+        assert(client[0].completedAtMs <= client[0].invokedAtMs + client[0].maxLoadTimeMs,
+          'the complete fallback body stays within its original reduced source deadline');
+        assert(client[0].firstResponseAtMs >= client[0].invokedAtMs &&
+          client[0].firstResponseAtMs <= client[0].invokedAtMs + client[0].maxTimeToFirstByteMs,
+          'the native HTTP response arrives within its original reduced first-byte deadline');
+      } else if (warming && !ownedWarm) {
+        assert.equal(client.length, 1); assert.equal(client[0].range, null); assert.equal(client[0].warm, true);
+        assert.equal(server.length, 1); assert.equal(server[0].status, 200); assert.equal(peer, 0);
+        const warmLoad = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
+        assert(warmLoad);
+        assert(rows.some(row => row.k === 'xferFinish' && row.load === warmLoad.load && row.peerOnly && row.reason === 'whole-peer-capacity'));
+        assert(!rows.some(row => row.k === 'mixedScope' && row.load === warmLoad.load));
+        assert.equal(after.warmAhead.consumedPeerBytes, 0); assert.equal(after.warmAhead.reservationBytes, 0);
+      } else {
+        const strictTargetRanges = client.length > 0 && client.every(row => row.range && row.status === 206);
+        let rangeFailure;
+        if (!strictTargetRanges) {
+          // Failure-only evidence: preserve the native clock, admission policy
+          // and strict range requirement; do not infer why a whole GET won.
+          const targetLoad = rows.findLast(row => row.k === 'load' && row.sn === target.frag.sn)?.load ?? null;
+          const targetLoads = new Set();
+          let ancestor = targetLoad;
+          while (Number.isSafeInteger(ancestor) && ancestor > 0 && !targetLoads.has(ancestor) && targetLoads.size < 4) {
+            targetLoads.add(ancestor);
+            ancestor = rows.find(row => row.k === 'load' && row.load === ancestor)?.parentLoad ?? null;
+          }
+          const targetRows = rows.filter(row => targetLoads.has(row.load) &&
+            ['load', 'mixedScope', 'eligibility', 'xfer', 'xferFinish', 'originStart', 'origin'].includes(row.k));
+          const retainedRows = targetRows.length <= 48 ? targetRows : [...targetRows.slice(0, 16), ...targetRows.slice(-32)];
+          const fields = ['k', 'at', 'load', 'parentLoad', 'sn', 'phase', 'reason', 'ms', 'budgetMs', 'limitMs', 'budgetGeometry',
+            'capturedGeometry', 'currentGeometry', 'scope', 'setupRemainingMs', 'originInvoked', 'leg', 'ranged',
+            'op', 'exclusiveOrigin', 'peerOnly', 'bufferedMixed', 'delivered', 'verifiedBytes', 'originBytes'];
+          rangeFailure = JSON.stringify({ fixture: 'real-core-warm-vs-genuine-mixed-range-failure',
+            warming, ownedWarm, worker, controllerClock: logical ? 'logical-functional' : 'real',
+            targetLoad, targetLoads: [...targetLoads], unresolvedAncestor: ancestor,
+            calls: demand.calls, acceptedPeerBytes: peer, traceDropped: f.swarm.trace().dropped,
+            originRangeAttempts: after.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+            coreTransfersDelta: after.core.multiHolder.transfers - before.core.multiHolder.transfers,
+            peerRequests: f.channels.reduce((sum, channel) => sum + channel.wants.length, 0) - beforePeerRequests,
+            clientRowsOmitted: Math.max(0, client.length - 16), serverRowsOmitted: Math.max(0, server.length - 16),
+            traceRowsOmitted: Math.max(0, targetRows.length - 48),
+            client: client.slice(0, 16).map(({ range, status, bytes, complete, warm, sdkEnteredAtMs, invokedAtMs,
+              completedAtMs, firstResponseAtMs, maxLoadTimeMs, maxTimeToFirstByteMs }) =>
+              ({ range, status, bytes, complete, warm, sdkEnteredAtMs, invokedAtMs, completedAtMs,
+                firstResponseAtMs, maxLoadTimeMs, maxTimeToFirstByteMs })),
+            server: server.slice(0, 16).map(({ range, status, sent }) => ({ range, status, sent })),
+            trace: retainedRows.map(row => Object.fromEntries(fields.filter(key => Object.hasOwn(row, key))
+              .map(key => [key, row[key]]))) });
+        }
+        assert(strictTargetRanges, rangeFailure);
+        const start = starts.at(-1); assert(start && start.exclusiveOrigin === true);
+        assert.deepEqual(start.probePeers, []); assert(start.peers.every(([, first, rate]) => Number.isFinite(first) && Number.isFinite(rate) && rate > 0));
+        assert(start.out.c.some(row => row.t === 'origin') && start.out.c.some(row => row.t === 'request'));
+        assert(peer > 0 && peer < size); assert.equal(peer + client.reduce((sum, row) => sum + row.bytes, 0), size);
+      }
+      if (ownedWarm) {
+        assert.equal(after.warmAhead.consumedPeerBytes - before.warmAhead.consumedPeerBytes, peer);
+        assert.equal(after.core.transferWorker.state, worker ? 'ready' : 'off');
+        const again = invoke(target); sameBytes(await settle(again.response), bytes);
+        assert.equal(again.calls.success, 1); assert.equal(f.swarm.metrics().bytes.peerFirst, after.bytes.peerFirst, 'repeated consumption cannot double-credit the same warm object');
+
+      }
+      if (holdNewAllocation) {
+        await wait(() => { const snapshot = f.swarm.metrics().core.transferWorker;
+          return snapshot.transfers === 0 && snapshot.pending === 0; });
+        const snapshot = f.swarm.metrics().core.transferWorker;
+        for (const field of ['transfers', 'activeBytes', 'pending', 'pendingBytes']) assert.equal(snapshot[field], 0, field);
+        console.log(JSON.stringify({ fixture: 'actual-warm-held-new-worker-cleanup',
+          transfers: snapshot.transfers, activeBytes: snapshot.activeBytes, pending: snapshot.pending, pendingBytes: snapshot.pendingBytes }));
+      }
+      observations.push({ warming, ownedWarm, worker, optionalAdmissionDeclined: declined, setupProof: declineProof?.stage ?? null, controllerClock: logical ? 'logical-functional' : 'real', objectBytes: size, acceptedPeerBytes: peer,
+        commitmentSupplier: 'prepared-signed-fixture-metadata', publisherEventsPrepared: commitments.size, commitmentProviderCalls,
+        actualTargetHttpBytes: client.reduce((sum, row) => sum + row.bytes, 0), targetWholeGets: server.filter(row => !row.range).length,
+        target206Gets: server.filter(row => row.range).length, targetClientBodies: client.map(({ bytes, status, complete, range, warm }) => ({ bytes, status, complete, range, warm })),
+        excludedLeadBodyBytes: received.slice(beforeReceived).filter(row => row.path === '/media/lead.ts').reduce((sum, row) => sum + row.bytes, 0),
+        calibrationBodyBytes: received.slice(0, beforeReceived).reduce((sum, row) => sum + row.bytes, 0),
+        coreReady: after.core.state, coalesced: after.warmAhead?.coalesced ?? null,
+        configuredPeerBytesPerSecond: .3 * 1024 * 1024, configuredSourceBytesPerSecondPerRequest: 3 * 1024 * 1024 });
+    } finally { try { await settle(f.close()); } finally { keyWork?.restore(); clock?.restore(); timers?.restore(); } }
+  }
+  console.log(JSON.stringify({ fixture: 'real-core-warm-vs-genuine-mixed', policyContrastOnly: true, observations }));
+}
+
+test('real Core contrasts legacy warm whole source with otherwise eligible genuine mixed ranges', { timeout: 25000 }, t => realCoreWarmContrast(t));
+
+for (const worker of [false, true]) test(`owned steady warm work assembles disjoint206 and defers peer credit until genuine consumption (${worker ? 'worker' : 'main'}, logical controller)`, { timeout: 20000 },
+  t => realCoreWarmContrast(t, { ownedWarm: true, worker, logical: true }));
+
+for (const worker of [false, true]) test(`owned steady warm real-clock admission retains strict206 or observed setup decline (${worker ? 'worker' : 'main'})`, { timeout: 20000 },
+  t => realCoreWarmContrast(t, { ownedWarm: true, worker, realAdmission: true }));
+
+// Mandatory functional timer/RPC control; no assumption that a native25ms
+// optional setup reaches START under arbitrary hosted load. Ordinary real-clock
+// cases above still require actual strict206 or a complete observed decline.
+test('owned steady warm held Worker reply proves setup-only whole fallback (logical controller)', { timeout: 20000 },
+  t => realCoreWarmContrast(t, { ownedWarm: true, worker: true, logical: true, realAdmission: true, holdSetup: true }));
+
+
+// Functional allocation-cancellation proof: actual committed Worker NEW reply
+// is held before advancing the original setup timer. The real whole HTTP body,
+// hash/callbacks and reduced source budgets remain mandatory; no elapsed claim.
+test('owned steady warm held NEW reply proves cleanup after independent source and complete fallback (logical controller)', { timeout: 20000 },
+  t => realCoreWarmContrast(t, { ownedWarm: true, worker: true, logical: true, realAdmission: true, holdNewAllocation: true }));
+
+test('owned steady warm late NEW observation preserves source completion before strict proof (logical controller)', { timeout: 20000 },
+  t => realCoreWarmContrast(t, { ownedWarm: true, worker: true, logical: true, realAdmission: true,
+    holdNewAllocation: true, holdNewUntilBody: true }));
+
+
+async function bufferedMixedFixture(t, clock, options = {}) {
+  lateRaceKeyClock(t);
+  let training = true;
+  const f = await clock.settle(multiFixture(t, { size: 1024 * 1024, holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 350 }],
+    originDelayMs: 100, wholeOriginDelayMs: 500, traceRequests: 4096, ...options,
+    beforeCommitment: (...args) => training ? undefined : options.beforeCommitment?.(...args),
+    swarmOptions: { bufferedMixedRanges: true, zeroBudgetPeerRace: true, sustainablePeerWait: true, maxPeerWaitMs: 2500, ...options.swarmOptions } }));
+  f.ctx = { ...multiContext, frag: { ...multiContext.frag, start: 10, duration: .1 } };
+  f.hls.media = { currentTime: 10, paused: false, ended: false, seeking: false, readyState: 4, playbackRate: 1,
+    buffered: { length: 0 } };
+  if (options.swarmOptions?.transferWorkerUrl) await clock.advanceUntil(() => f.swarm.metrics().core.transferWorker.state === 'ready', 1000);
+  if (options.untrained) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+  if (!options.skipTraining) sameBytes(await clock.settle(f.load(f.ctx)), f.bytes);
+  if (!options.skipTraining) await clock.advance(2);
+  training = false;
+  for (const pc of f.connections) pc.connectionState = 'connected';
+  if (options.untrained) f.channels[0].receive(JSON.stringify({ t: 'have', keys: [f.key] }));
+  f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+  // Request diagnostics retain calibration separately; new assertions count only
+  // work begun after this actual source/peer training stage.
+  for (const channel of f.channels) channel.wants.length = 0;
+  return f;
+}
+
+// These SDK integration controls model the internal descriptor supplied by the
+// separately tested warm engine. Real Core/signatures/framing/range I/O remain.
+function ownedWarmControl(f, clock, remainingMs = 8000) {
+  const signal = new AbortController(), enteredAt = clock.now() - (8000 - remainingMs);
+  const owner = { valid: true, reads: 0, signal, enteredAt, deadline: enteredAt + 8000, genuine: null };
+  const context = { ...f.ctx };
+  context[WARM_AHEAD] = { peerBytes: 0, work: () => {
+    owner.reads++;
+    return owner.valid && !signal.signal.aborted && f.hls.media.paused === false && (clock.now() < owner.deadline || owner.genuine)
+      ? { context, enteredAt, deadline: owner.deadline, signal: signal.signal, genuine: owner.genuine } : null;
+  } };
+  const calls = { success: 0, abort: 0, error: 0, timeout: 0 }, loader = new f.hls.config.fLoader(f.hlsConfig);
+  const start = () => {
+    let finish;
+    const outcome = new Promise(resolve => { finish = resolve; });
+    loader.load(context, f.loaderConfig, Object.fromEntries(['success', 'abort', 'error', 'timeout'].map(name =>
+      ['on' + name[0].toUpperCase() + name.slice(1), (...args) => { calls[name]++; finish({ kind: name, args }); }])));
+    return outcome;
+  };
+  return { owner, context, calls, loader, start };
+}
+
+for (const worker of [false, true]) test(`owned warm mixed reports captured nonmatching HAVE before Core allocation (${worker ? 'worker' : 'main'})`, async t => {
+  const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    assert.equal(f.swarm.metrics().core.state, 'ready');
+    if (worker) assert.equal(f.swarm.metrics().core.transferWorker.state, 'ready');
+    const unrelated = 'f'.repeat(64); assert.notEqual(unrelated, f.key);
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [unrelated] }));
+    const before = f.swarm.metrics(), whole = f.wholeLoads.length, ranges = f.ranges.length;
+    const work = ownedWarmControl(f, clock), result = await clock.settle(work.start());
+    assert.equal(result.kind, 'success'); sameBytes(new Uint8Array(result.args[0].data), f.bytes);
+    assert.equal(f.wholeLoads.length, whole + 1); assert.equal(f.ranges.length, ranges);
+    assert.deepEqual(f.channels[0].wants, []); assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, before.core.multiHolder.transfers);
+    const rows = f.swarm.trace().rows, entry = rows.findLast(row => row.k === 'mixedScope' && row.reason === 'entry');
+    assert(entry, 'accepted framing2 with nonempty other-object HAVE entered owned warm setup');
+    assert.equal(rows.find(row => row.k === 'load' && row.load === entry.load).budgetGeometry.source, 'warm-ahead');
+    const eligibility = rows.find(row => row.k === 'eligibility' && row.load === entry.load && row.reason === 'cached-no-matching-have');
+    assert(eligibility, 'the actual cached exact-HAVE refusal must identify why no Core transfer was allocated');
+    assert.equal(eligibility.matchingHave, false); assert.equal(eligibility.budgetGeometry.source, 'warm-ahead');
+    assert.deepEqual(eligibility.projection, { stage: 'cached-entry', capturedLinks: 1,
+      entryChecked: 1, entryMatched: 0, currentChecked: 0, currentMatched: 0, eligibleMatched: 0 });
+    assert(!JSON.stringify(eligibility).includes(unrelated)); assert(!JSON.stringify(eligibility).includes(f.key));
+    assert.equal(work.calls.success, 1);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const worker of [false, true]) test(`owned warm mixed distinguishes exact entry HAVE withdrawn before key completion (${worker ? 'worker' : 'main'})`, async t => {
+  const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    assert.equal(f.swarm.metrics().core.state, 'ready');
+    if (worker) assert.equal(f.swarm.metrics().core.transferWorker.state, 'ready');
+    const before = f.swarm.metrics(), whole = f.wholeLoads.length, ranges = f.ranges.length;
+    const work = ownedWarmControl(f, clock), pending = work.start();
+    // load() has synchronously captured the exact entry HAVE, while #segmentKey
+    // must yield before matching it against the link's current HAVE snapshot.
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    const result = await clock.settle(pending);
+    assert.equal(result.kind, 'success'); sameBytes(new Uint8Array(result.args[0].data), f.bytes);
+    assert.equal(f.wholeLoads.length, whole + 1); assert.equal(f.ranges.length, ranges);
+    assert.deepEqual(f.channels[0].wants, []); assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, before.core.multiHolder.transfers);
+    const rows = f.swarm.trace().rows, entry = rows.findLast(row => row.k === 'mixedScope' && row.reason === 'entry');
+    assert(entry);
+    const eligibility = rows.find(row => row.k === 'eligibility' && row.load === entry.load && row.reason === 'cached-no-matching-have');
+    assert(eligibility); assert.equal(eligibility.matchingHave, false);
+    assert.equal(eligibility.budgetGeometry.source, 'warm-ahead');
+    assert.deepEqual(eligibility.projection, { stage: 'cached-entry', capturedLinks: 1,
+      entryChecked: 1, entryMatched: 1, currentChecked: 1, currentMatched: 0, eligibleMatched: 0 });
+    assert.equal(work.calls.success, 1);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('owned warm mixed reports unavailable range engine before Core allocation', async t => {
+  const clock = virtualClock(t); let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { untrained: true, swarmOptions: { warmAhead: true, serve: true, multiHolder: false } });
+    assert.equal(f.swarm.metrics().core.state, 'ready');
+    const before = f.swarm.metrics(), whole = f.wholeLoads.length;
+    const work = ownedWarmControl(f, clock), result = await clock.settle(work.start());
+    assert.equal(result.kind, 'success'); sameBytes(new Uint8Array(result.args[0].data), f.bytes);
+    assert.equal(f.wholeLoads.length, whole + 1); assert.equal(f.ranges.length, 0); assert.deepEqual(f.channels[0].wants, []);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.bytes.peerFirst);
+    assert.equal(f.swarm.metrics().core.multiHolder.transfers, before.core.multiHolder.transfers);
+    const rows = f.swarm.trace().rows, entry = rows.findLast(row => row.k === 'mixedScope' && row.reason === 'entry');
+    assert(entry);
+    const eligibility = rows.find(row => row.k === 'eligibility' && row.load === entry.load && row.reason === 'cached-ranges-unavailable');
+    assert(eligibility); assert.equal(eligibility.matchingHave, null);
+    assert.equal(eligibility.budgetGeometry.source, 'warm-ahead');
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+// Controlled descriptors isolate SDK provenance validation from the separately
+// tested warm-row clock. Advancing performance without dispatching timers models
+// a synchronous callback arriving on the original eight-second boundary.
+for (const worker of [false, true]) test(`owned warm promotion at its original deadline cannot revive source work (${worker ? 'worker' : 'main'})`, async t => {
+  const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    assert.equal(f.swarm.metrics().core.state, 'ready');
+    if (worker) assert.equal(f.swarm.metrics().core.transferWorker.state, 'ready');
+    const before = { whole: f.wholeLoads.length, ranges: f.ranges.length, wants: f.channels[0].wants.length, peer: f.swarm.metrics().bytes.peerFirst };
+    const work = ownedWarmControl(f, clock, 10), priorNow = performance.now.bind(performance);
+    work.owner.genuine = { at: work.owner.deadline, context: work.context };
+    t.mock.method(performance, 'now', () => priorNow() + 10);
+    const outcome = work.start();
+    assert.equal(work.calls.abort, 1, 'late genuine provenance must be rejected synchronously before any timer dispatch');
+    assert.equal((await clock.settle(outcome)).kind, 'abort');
+    await clock.advance(40);
+    assert.equal(f.wholeLoads.length, before.whole); assert.equal(f.ranges.length, before.ranges);
+    assert.equal(f.channels[0].wants.length, before.wants); assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer);
+    assert.equal(work.calls.success + work.calls.error + work.calls.timeout, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const worker of [false, true]) test(`owned warm valid promotion crosses row deadline without renewing its transport parent (${worker ? 'worker' : 'main'})`, async t => {
+  const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    // Healthy synthetic headroom; this is a policy control, not field timing.
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 24 };
+    const before = { whole: f.wholeLoads.length, ranges: f.ranges.length, peer: f.swarm.metrics().bytes.peerFirst };
+    const work = ownedWarmControl(f, clock, 10), started = clock.now(), outcome = work.start();
+    await clock.advance(5);
+    work.owner.genuine = { at: clock.now(), context: work.context };
+    assert(work.owner.genuine.at < work.owner.deadline);
+    const result = await clock.settle(outcome);
+    assert.equal(result.kind, 'success'); sameBytes(new Uint8Array(result.args[0].data), f.bytes);
+    assert(clock.now() > work.owner.deadline, 'completion is after the fixed original row deadline');
+    assert(clock.now() < started + 10000, 'completion remains within the original transport parent');
+    assert.equal(f.wholeLoads.length, before.whole); assert(f.ranges.length > before.ranges);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer, 'the original speculative marker still defers consumption credit');
+    assert.equal(work.calls.success, 1); assert.equal(work.calls.abort + work.calls.error + work.calls.timeout, 0);
+    const rows = f.swarm.trace().rows.filter(row => row.k === 'mixedScope' && row.load === f.swarm.trace().rows.findLast(row => row.k === 'mixedScope' && row.reason === 'entry').load);
+    const ends = rows.map(row => row.ms + row.recoveryRemainingMs);
+    assert(ends.every(end => Math.abs(end - 10000) <= 1), 'promotion never resets the original ten-second transport parent');
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const worker of [false, true]) test(`owned warm valid promotion cannot renew a shorter original parent (${worker ? 'worker' : 'main'})`, async t => {
+  const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    f.loaderConfig = { ...f.loaderConfig, timeout: 50 };
+    const before = { whole: f.wholeLoads.length, ranges: f.ranges.length, peer: f.swarm.metrics().bytes.peerFirst };
+    const work = ownedWarmControl(f, clock, 10), started = clock.now(), outcome = work.start();
+    await clock.advance(5); work.owner.genuine = { at: clock.now(), context: work.context };
+    assert(work.owner.genuine.at < work.owner.deadline);
+    assert.equal((await clock.settle(outcome, 100)).kind, 'timeout');
+    assert(clock.now() <= started + 51, 'the shorter original parent expires without renewal');
+    assert.equal(f.wholeLoads.length, before.whole + 1); assert.equal(f.ranges.length, before.ranges);
+    assert(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs <= 50);
+    await clock.advance(550);
+    assert.equal(work.calls.success, 0); assert.equal(work.calls.timeout, 1);
+    assert.equal(work.calls.abort + work.calls.error, 0);
+    assert.equal(f.wholeLoads.length, before.whole + 1); assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const worker of [false, true]) for (const ending of ['expiry', 'pause', 'abort', 'revoked']) {
+  test(`owned warm mixed ${ending} during authority wait starts no late I/O (${worker ? 'worker' : 'main'})`, async t => {
+    const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null;
+    let f, release, blocked = false;
+    try {
+      f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+        ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) },
+        beforeCommitment: () => new Promise((resolve, reject) => { blocked = true; release = ending === 'revoked' ? () => reject(new Error('revoked')) : resolve; }) });
+      assert.equal(f.swarm.metrics().core.state, 'ready');
+      if (worker) assert.equal(f.swarm.metrics().core.transferWorker.state, 'ready');
+      const before = { whole: f.wholeLoads.length, ranges: f.ranges.length, wants: f.channels[0].wants.length, peer: f.swarm.metrics().bytes.peerFirst };
+      const work = ownedWarmControl(f, clock, ending === 'expiry' ? 10 : 8000), outcome = work.start();
+      await clock.advanceUntil(() => blocked, 20);
+      const entry = f.swarm.trace().rows.findLast(row => row.k === 'mixedScope' && row.reason === 'entry');
+      assert(entry, 'the owner passed admission and entered new mixed setup before authority yielded');
+      const load = f.swarm.trace().rows.find(row => row.k === 'load' && row.load === entry.load);
+      assert.equal(load.budgetGeometry.source, 'warm-ahead'); assert(work.owner.reads > 1);
+      if (ending === 'expiry') await clock.advance(11);
+      else if (ending === 'pause') f.hls.media.paused = true;
+      else if (ending === 'abort') { work.owner.signal.abort(); work.loader.abort(); }
+      else work.owner.valid = false;
+      release(); await clock.advance(40);
+      assert.equal(f.wholeLoads.length, before.whole); assert.equal(f.ranges.length, before.ranges);
+      assert.equal(f.channels[0].wants.length, before.wants); assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer);
+      assert.equal(work.calls.success, 0);
+      const terminals = work.calls.abort + work.calls.error + work.calls.timeout;
+      assert.equal(terminals, 1, 'lost ownership settles once without accepting delayed metadata');
+      assert.notEqual((await clock.settle(outcome)).kind, 'success');
+      await clock.advance(500);
+      assert.equal(work.calls.abort + work.calls.error + work.calls.timeout, terminals);
+      assert.equal(f.wholeLoads.length, before.whole); assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer);
+    } finally { release?.(); if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+}
+
+for (const worker of [false, true]) test(`owned warm mixed loss after origin invocation rejects stale callbacks (${worker ? 'worker' : 'main'})`, async t => {
+  const clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { warmAhead: true, serve: true,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    const before = { whole: f.wholeLoads.length, ranges: f.ranges.length, peer: f.swarm.metrics().bytes.peerFirst };
+    const work = ownedWarmControl(f, clock), outcome = work.start();
+    await clock.advanceUntil(() => f.ranges.length > before.ranges, 25);
+    assert(f.swarm.trace().rows.some(row => row.k === 'mixedScope' && row.reason === 'origin-invoked'));
+    const rangesAtLoss = f.ranges.length; work.owner.valid = false;
+    await clock.advance(600);
+    assert.equal(work.calls.success, 0); assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer);
+    assert.equal(f.wholeLoads.length, before.whole, 'a stale range reply cannot create a recovery whole GET');
+    assert.equal(f.ranges.length, rangesAtLoss, 'no new range may follow lost ownership');
+    assert.equal(work.calls.abort + work.calls.error + work.calls.timeout, 1);
+    assert.notEqual((await clock.settle(outcome)).kind, 'success');
+    assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const worker of [false, true]) test(`owned warm mixed missing capability retains one ordinary source (${worker ? 'worker' : 'main'})`, async t => {
+  const bytes = Buffer.from(multiCoreBytes), offset = bytes.indexOf(Buffer.from('rs_xfer_capabilities'));
+  assert(offset >= 0); bytes[offset] = bytes[offset + 1] = 0x78;
+  const legacy = await WebAssembly.compile(bytes), clock = virtualClock(t), bridge = worker ? transferWorkerFixture(t) : null; let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { untrained: true, swarmOptions: { warmAhead: true, serve: true, coreWasm: legacy,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    const before = { whole: f.wholeLoads.length, ranges: f.ranges.length, peer: f.swarm.metrics().bytes.peerFirst };
+    const work = ownedWarmControl(f, clock), outcome = await clock.settle(work.start());
+    assert.equal(outcome.kind, 'success'); sameBytes(new Uint8Array(outcome.args[0].data), f.bytes);
+    assert.equal(f.wholeLoads.length, before.whole + 1); assert.equal(f.ranges.length, before.ranges);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, before.peer); assert.equal(work.calls.success, 1);
+    assert.equal(f.swarm.metrics().core.state, 'ready');
+    if (worker) assert.equal(f.swarm.metrics().core.transferWorker.state, 'ready');
+    assert(f.swarm.trace().rows.some(row => row.k === 'mixedScope' && row.reason === 'entry'));
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('buffered mixed scope trace reports the actual fragment rejection before transfer finish without extra getter reads', async t => {
+  for (const field of ['start', 'duration']) {
+    const counts = [];
+    for (const capacity of [0, 128]) {
+      const clock = virtualClock(t); let f, reads = 0, changed = false;
+      try {
+        f = await bufferedMixedFixture(t, clock, { traceRequests: capacity });
+        const captured = f.ctx.frag[field], next = captured + .125;
+        Object.defineProperty(f.ctx.frag, field, { configurable: true, get() { reads++; return changed ? next : captured; } });
+        const pending = beginCountedMultiLoad(f, f.ctx);
+        await clock.advance(5); assert(f.ranges.length > 0, 'the current real Core transfer has already issued its source range');
+        changed = true;
+        sameBytes(await clock.settle(pending.response), f.bytes);
+        assert.equal(pending.calls.success.length, 1); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+        const rows = f.swarm.trace().rows;
+        if (!capacity) assert.deepEqual(rows, [], 'traceRequests0 retains no observation rows');
+        else {
+          const rejection = rows.find(row => row.k === 'mixedScope' && row.reason === 'scope-' + field);
+          assert(rejection); assert.equal(rejection.scope[field], false);
+          const geometryField = field === 'start' ? 'fragmentStart' : 'fragmentDurationSeconds';
+          assert.equal(rejection.capturedGeometry[geometryField], captured);
+          assert.equal(rejection.currentGeometry[geometryField], next);
+          assert.equal(rejection.capturedGeometry.durationMs, 100, 'budget duration remains explicitly milliseconds');
+          const terminal = rows.find(row => row.k === 'xferFinish' && row.load === rejection.load);
+          assert.equal(terminal?.reason, 'reply-current-invalid'); assert.equal(terminal.delivered, false);
+          assert(rows.indexOf(rejection) < rows.indexOf(terminal), 'the evaluated scope failure precedes its terminal observation');
+          assert(rows.some(row => row.k === 'mixedScope' && row.load === rejection.load && row.reason === 'peer-result-empty'));
+          const text = JSON.stringify(rows.filter(row => ['mixedScope', 'xferFinish'].includes(row.k)));
+          assert(!text.includes(f.ctx.url) && !text.includes(f.key) && !text.includes(f.swarm.metrics().pubkey), 'new observations omit URLs, keys and public identities');
+        }
+        counts.push(reads);
+      } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+    }
+    assert.equal(counts[1], counts[0], field + ' getter is evaluated identically with tracing off and on');
+  }
+});
+
+test('buffered mixed scope trace retains the actual immediate budget branch and successful transfer terminal', async t => {
+  for (const parentMs of [100, 10000]) {
+    const clock = virtualClock(t); let f;
+    try {
+      f = await bufferedMixedFixture(t, clock, { traceRequests: 128 });
+      f.loaderConfig.timeout = parentMs;
+      const pending = beginCountedMultiLoad(f, f.ctx);
+      if (parentMs !== 100) sameBytes(await clock.settle(pending.response), f.bytes);
+      const rows = f.swarm.trace().rows, load = rows.filter(row => row.k === 'load').at(-1).load;
+      const scoped = rows.filter(row => row.k === 'mixedScope' && row.load === load);
+      assert(scoped.some(row => row.reason === 'entry'));
+      if (parentMs === 100) {
+        assert(scoped.some(row => row.reason === 'entry-peer-budget' && row.ms === 0));
+        assert.equal(rows.filter(row => row.k === 'xferFinish' && row.load === load).length, 0, 'an immediate source decline never allocates a Core transfer');
+        pending.loader.abort(); assert.equal(pending.calls.abort.length, 1);
+      } else {
+        const terminal = rows.filter(row => row.k === 'xferFinish' && row.load === load);
+        assert.equal(terminal.length, 1); assert.equal(terminal[0].reason, 'delivered'); assert.equal(terminal[0].delivered, true);
+        assert.equal(terminal[0].verifiedBytes, f.bytes.length);
+        assert(scoped.some(row => row.reason === 'origin-invoked') && scoped.some(row => row.reason === 'peer-result-delivered'));
+      }
+      assert.equal(pending.calls.success.length, parentMs === 100 ? 0 : 1);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  }
+});
+
+test('buffered mixed scope trace cannot change delivery when its observation sink throws', async t => {
+  const clock = virtualClock(t), push = Array.prototype.push; let f, rejected = 0;
+  try {
+    f = await bufferedMixedFixture(t, clock);
+    Array.prototype.push = function (...items) {
+      if (items.length === 1 && ['mixedScope', 'xferFinish'].includes(items[0]?.k)) { rejected++; throw new Error('fixture trace sink'); }
+      return Reflect.apply(push, this, items);
+    };
+    const pending = beginCountedMultiLoad(f, f.ctx);
+    sameBytes(await clock.settle(pending.response), f.bytes);
+    assert.equal(pending.calls.success.length, 1); assert(rejected > 0);
+    assert(f.swarm.metrics().bytes.peerFirst > 0, 'the same mixed transfer still accepts its verified peer contribution');
+  } finally { Array.prototype.push = push; if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const worker of [false, true]) test("buffered mixed missing ownership capability uses one whole source and preserves its engine " + (worker ? "(worker)" : "(main)"), async t => {
+  // Keep all real verifier/link exports; hide only this optional capability
+  // export to model a module that cannot promise exclusive origin ownership.
+  const bytes = Buffer.from(multiCoreBytes), name = Buffer.from('rs_xfer_capabilities'), offset = bytes.indexOf(name);
+  assert(offset >= 0 && bytes.indexOf(name, offset + 1) === -1);
+  bytes[offset] = bytes[offset + 1] = 0x78;
+  const legacy = await WebAssembly.compile(bytes);
+  const bridge = worker ? transferWorkerFixture(t) : null, clock = virtualClock(t); let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { untrained: true, swarmOptions: { coreWasm: legacy,
+      ...(bridge ? { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl: bridge.WorkerImpl } : {}) } });
+    assert.equal(f.swarm.metrics().peerRequestDiagnostics.records.length, 0, 'source calibration did not probe the holder');
+    const before = f.wholeLoads.length, load = beginCountedMultiLoad(f, f.ctx);
+    sameBytes(await clock.settle(load.response), f.bytes);
+    assert.equal(f.wholeLoads.length, before + 1); assert.equal(f.ranges.length, 0);
+    assert.deepEqual(f.channels[0].wants, []); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.equal(f.swarm.metrics().core.state, 'ready');
+    if (worker) assert.equal(f.swarm.metrics().core.transferWorker.state, 'ready', 'ordinary missing capability does not retire the worker');
+    assert.equal(load.calls.success.length, 1);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const exclusion of ['default', 'underflow', 'warm', 'part', 'no-have', 'no-recovery', 'probe-cooldown']) {
+  test(`buffered mixed admission preserves immediate ordinary source for ${exclusion}`, async t => {
+    const clock = virtualClock(t); let f;
+    try {
+      f = await bufferedMixedFixture(t, clock, { skipTraining: exclusion === 'no-recovery',
+        ...(exclusion === 'probe-cooldown' ? { wholeOriginDelayMs: 100 } : {}),
+        swarmOptions: { bufferedMixedRanges: exclusion !== 'default' } });
+      let ctx = f.ctx;
+      if (exclusion === 'underflow') f.hls.media.readyState = 2;
+      if (exclusion === 'warm') ctx = { ...ctx, [WARM_AHEAD]: { peerBytes: 0 } };
+      if (exclusion === 'part') ctx = { ...ctx, part: { index: 0, start: 10, duration: .1 } };
+      if (exclusion === 'no-have') f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+      const before = f.wholeLoads.length, load = beginCountedMultiLoad(f, ctx);
+      assert.equal(f.wholeLoads.length, before + 1, 'excluded paths do not spend the new setup interval');
+      assert.equal(f.ranges.length, 0); assert.deepEqual(f.channels[0].wants, []);
+      sameBytes(await clock.settle(load.response), f.bytes);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+}
+
+test('buffered mixed late authority, caller abort and replacement fence all delayed setup callbacks', async t => {
+  for (const ending of ['abort', 'replacement', 'disconnect', 'revoked']) {
+    const clock = virtualClock(t); let f, release;
+    try {
+      f = await bufferedMixedFixture(t, clock, { untrained: ending === 'revoked',
+        beforeCommitment: () => new Promise((resolve, reject) => {
+          release = ending === 'revoked' ? () => reject(new Error('authority revoked')) : resolve;
+        }) });
+      const before = f.wholeLoads.length, pending = beginCountedMultiLoad(f, f.ctx);
+      await clock.advance(5); assert.equal(typeof release, 'function');
+      if (ending === 'abort') pending.loader.abort();
+      if (ending === 'replacement') pending.loader.load(f.ctx, f.loaderConfig, { onSuccess() {} });
+      if (ending === 'disconnect') f.connections[0].connectionState = 'disconnected';
+      release(); await clock.advance(30);
+      assert.deepEqual(f.channels[0].wants, []); assert.equal(f.ranges.length, 0);
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+      if (ending === 'abort') { assert.equal(pending.calls.abort.length, 1); assert.equal(f.wholeLoads.length, before); }
+      else assert.equal(f.wholeLoads.length, before + 1);
+    } finally { release?.(); if (f) await clock.settle(f.close()); clock.restore(); }
+  }
+});
+
+test('buffered mixed fast Core plan returns to the existing cached winner without a renewed window', async t => {
+  const core = await loadCore(multiCore), handle = core.transfer({ size: 1, sha256: '0'.repeat(64),
+    pieces: ['0'.repeat(64)], deadline: 10000, maxHolders: 1, originReserveMs: 0 });
+  const prototype = Object.getPrototypeOf(handle); handle.free();
+  const original = prototype.start; let sawPeerOnly = false;
+  const clock = virtualClock(t); let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { untrained: true });
+    assert.equal(f.swarm.metrics().peerRequestDiagnostics.records.length, 0,
+      'source-only training does not invent a fast peer model or bypass the known whole-object fit guard');
+    f.channels[0].firstByteMs = 1; f.channels[0].flowMs = 40; // The actual LAN-style body can finish before the source.
+    t.mock.method(prototype, 'start', function (at, estimates) {
+      const state = original.call(this, at, { ...estimates, probePeers: [],
+        peers: estimates.peers.map(([id]) => [id, 0, 1_000_000]), origin: [100000, .001] });
+      sawPeerOnly ||= state.commands.some(command => command.t === 'request') && !state.commands.some(command => command.t === 'origin');
+      return state;
+    });
+    const before = f.wholeLoads.length, send = f.channels[0].send.bind(f.channels[0]);
+    t.mock.method(f.channels[0], 'send', data => {
+      if (typeof data === 'string' && JSON.parse(data).t === 'want') assert.equal(f.wholeLoads.length, before + 1, 'cached source starts before restored peer work');
+      return send(data);
+    });
+    const load = beginCountedMultiLoad(f, f.ctx);
+    sameBytes(await clock.settle(load.response), f.bytes);
+    assert(sawPeerOnly, 'the negative uses an actual Core-generated peer-only plan');
+    assert(f.channels[0].wants.length > 0); assert.equal(f.ranges.length, 0, 'the rejected mixed plan emitted no origin range or peer work');
+    assert.equal(f.wholeLoads.length, before + 1); assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length, JSON.stringify(f.swarm.trace().rows.slice(-25)));
+    const starts = f.swarm.trace().rows.filter(row => row.k === 'xfer' && row.op === 'start').slice(-2);
+    assert.equal(starts.length, 2); assert.equal(starts[0].deadline, starts[1].deadline, 'handoff keeps the exact original peer deadline');
+    const rows = f.swarm.trace().rows, originalLoad = rows.findLast(row => row.k === 'mixedScope' && row.reason === 'cached-handoff').load;
+    const cachedLoad = rows.find(row => row.k === 'load' && row.load === starts[1].load);
+    assert.notEqual(cachedLoad.load, originalLoad); assert.equal(cachedLoad.parentLoad, originalLoad,
+      'the new cached trace ID links to its original mixed owner without carrying keys or identities');
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+class BufferedCorruptPeer extends PhasedFlowChannel {
+  send(data) {
+    const frame = typeof data === 'string' ? JSON.parse(data) : null;
+    if (!this.corruptNext || frame?.t !== 'want') return super.send(data);
+    const at = (frame.p?.[0] ?? 0) * commitmentPieceSize(this.bytes.length), saved = this.bytes[at];
+    this.bytes[at] ^= 255;
+    try { return super.send(data); } finally { this.bytes[at] = saved; }
+  }
+}
+
+for (const bad of ['ignored-range', 'corrupt-peer', 'corrupt-probe']) {
+  test(`buffered mixed ${bad} cancels its partial work before bounded source fallback without accepted peer credit`, async t => {
+    const clock = virtualClock(t); let f;
+    try {
+      f = await bufferedMixedFixture(t, clock, bad === 'ignored-range' ? { ignoreRanges: true }
+        : { untrained: bad === 'corrupt-probe',
+          holders: [{ Channel: BufferedCorruptPeer, firstByteMs: 10, flowMs: 350 }], originDelayMs: 1000 });
+      if (bad !== 'ignored-range') f.channels[0].corruptNext = true;
+      const before = f.wholeLoads.length, pending = beginCountedMultiLoad(f, f.ctx);
+      sameBytes(await clock.settle(pending.response), f.bytes);
+      const metrics = f.swarm.metrics();
+      assert.equal(metrics.bytes.peerFirst, 0); assert.equal(pending.calls.success.length, 1);
+      assert.equal(f.wholeLoads.length, before + 1);
+      assert(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs < 10000, JSON.stringify({message:'fallback receives only the original remaining time',metrics,trace:f.swarm.trace().rows.slice(-20)}));
+      if (bad === 'ignored-range') assert.equal(metrics.core.multiHolder.originRangesIgnored, 1);
+      else {
+        assert.equal(metrics.core.multiHolder.delivered, 0, 'a corrupted batch cannot become a completed peer load');
+        assert.equal(metrics.core.multiHolder.bans, 1); assert.equal(metrics.segments.peerCorrupt, 1);
+        assert.equal(f.channels[0].readyState, 'closed', 'rejected data still quarantines its source');
+      }
+      await clock.advance(3000); assert.equal(metrics.bytes.peerFirst, 0); assert.equal(pending.calls.success.length, 1);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+}
+
+test('buffered mixed setup clock fence acts before its timer when an awaited authority callback runs late', async t => {
+  const clock = virtualClock(t); let f, shift = 0;
+  try {
+    t.mock.method(performance, 'now', () => clock.now() + shift);
+    f = await bufferedMixedFixture(t, clock, { beforeCommitment: () => { shift = 26; } });
+    const before = f.wholeLoads.length, pending = beginCountedMultiLoad(f, f.ctx);
+    for (let i = 0; i < 40; i++) await Promise.resolve();
+    assert.equal(f.wholeLoads.length, before + 1, 'explicit clock check refuses before the25ms timer task runs');
+    assert.equal(f.ranges.length, 0); assert.deepEqual(f.channels[0].wants, []);
+    assert.equal(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs, 9974);
+    sameBytes(await clock.settle(pending.response), f.bytes);
+  } finally { shift = 0; if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('buffered mixed rechecks the25ms guard after the original range loader constructor before any peer command', async t => {
+  const clock = virtualClock(t); let f, shift = 0, constructions = 0, arm = false;
+  const bytes = Uint8Array.from({ length: 1024 * 1024 }, (_, i) => (i * 131 + 17) % 251), whole = [], ranges = [];
+  class ConstructorRace extends Loader {
+    constructor() { super(); constructions++; if (arm) { arm = false; shift = 26; } }
+    load(ctx, config, callbacks) {
+      (ctx.rangeEnd ? ranges : whole).push({ ctx, config, invokedAtMs: performance.now() });
+      setTimeout(() => callbacks.onSuccess({ data: bytes.slice(ctx.rangeStart ?? 0, ctx.rangeEnd ?? bytes.length).buffer }, this.stats, ctx, null), ctx.rangeEnd ? 100 : 500);
+    }
+  }
+  try {
+    t.mock.method(performance, 'now', () => clock.now() + shift);
+    f = await bufferedMixedFixture(t, clock, { OriginLoader: ConstructorRace });
+    const loader = new f.hls.config.fLoader(f.hlsConfig); arm = true;
+    const before = f.swarm.metrics(), enteredAtMs = performance.now(); let successfulCallbacks = 0;
+    const response = new Promise(resolve => loader.load(f.ctx, f.loaderConfig, { onSuccess: value => { successfulCallbacks++; resolve(value); } }));
+    sameBytes(new Uint8Array((await clock.settle(response)).data), f.bytes);
+    assert.equal(arm, false, 'the guard is reached inside the origin-range constructor');
+    assert.equal(ranges.length, 0); assert.equal(whole.length, 2); assert.deepEqual(f.channels[0].wants, []);
+    assert.equal(whole.at(-1).config.loadPolicy.maxLoadTimeMs, 9974);
+    assert.equal(successfulCallbacks, 1);
+    const trace = f.swarm.trace(), metrics = f.swarm.metrics(), source = whole.at(-1);
+    const load = trace.rows.filter(row => row.k === 'mixedScope' && row.reason === 'entry').at(-1).load;
+    const proof = mixedScopeSetupProof(trace, { load, sn: f.ctx.frag.sn, cc: f.ctx.frag.cc, level: f.ctx.frag.level,
+      size: f.bytes.length, fragmentStart: f.ctx.frag.start, fragmentDurationSeconds: f.ctx.frag.duration,
+      enteredAtMs, invokedAtMs: source.invokedAtMs, parentMs: f.loaderConfig.loadPolicy.maxLoadTimeMs,
+      ttfbMs: f.loaderConfig.loadPolicy.maxTimeToFirstByteMs, remainingLoadMs: source.config.loadPolicy.maxLoadTimeMs,
+      remainingTtfbMs: source.config.loadPolicy.maxTimeToFirstByteMs,
+      coreTransfersDelta: metrics.core.multiHolder.transfers - before.core.multiHolder.transfers,
+      originRangeAttempts: metrics.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+      physicalRangeGets: 0, clientRangeLoads: ranges.length, peerRequests: f.channels[0].wants.length,
+      acceptedPeerBytes: metrics.bytes.peerFirst - before.bytes.peerFirst });
+    assert.equal(proof?.stage, 'after-core-before-io', JSON.stringify({ traceDropped: trace.dropped,
+      rows: trace.rows.filter(row => row.load === load), enteredAtMs, sourceInvokedAtMs: source.invokedAtMs }));
+    console.log(JSON.stringify({ fixture: 'after-core-setup-policy', clockScope: 'logical-policy-inputs-not-elapsed-performance',
+      stage: proof.stage, originRangeAttempts: 1, rangeLoaderInvocations: ranges.length, peerRequests: f.channels[0].wants.length,
+      acceptedPeerBytes: metrics.bytes.peerFirst - before.bytes.peerFirst, successfulCallbacks, sequence: proof.sequence }));
+  } finally { shift = 0; if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('buffered mixed ignores a late real worker allocation reply after the fixed setup cutoff', async t => {
+  const nativeSetTimeout = setTimeout;
+  let frees = 0;
+  const { WorkerImpl, workers } = transferWorkerFixture(t, { onFree: () => { frees++; }, onRpc: () => {} }), clock = virtualClock(t); let f;
+  // Real IPC has its own finite wall bound. Policy time stays stationary while
+  // the actual Rust worker posts/holds its matching allocation reply; none of
+  // these logical25ms observations is an elapsed-performance measurement.
+  const waitForIPC = async predicate => {
+    const deadline = process.hrtime.bigint() + 2_000_000_000n;
+    while (!predicate()) {
+      assert(process.hrtime.bigint() < deadline, 'actual worker IPC phase did not occur within its real2s bound');
+      await new Promise(resolve => nativeSetTimeout(resolve, 1));
+    }
+  };
+  try {
+    f = await bufferedMixedFixture(t, clock, { swarmOptions: { transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl } });
+    await clock.advanceUntil(() => f.swarm.metrics().core.transferWorker.state === 'ready', 500);
+    await waitForIPC(() => { const state = f.swarm.metrics().core.transferWorker; return state.transfers === 0 && state.pending === 0; });
+    const worker = workers[0], priorNew = worker.newCount ?? 0, priorFree = frees, before = f.wholeLoads.length,
+      originalParent = f.loaderConfig.loadPolicy.maxLoadTimeMs, originalTtfb = f.loaderConfig.loadPolicy.maxTimeToFirstByteMs;
+    const began = clock.now(), connection = f.connections[0], channel = f.channels[0];
+    worker.holdNew = true;
+    const pending = beginCountedMultiLoad(f, f.ctx);
+    await waitForIPC(() => (worker.newCount ?? 0) === priorNew + 1 && worker.newRequests?.length === 1);
+    assert.equal(clock.now(), began, 'native IPC waits must not consume or move the logical setup clock');
+    const held = worker.newRequests[0].data, posted = worker.rpcSent?.get(held.id);
+    assert.equal(held.v, 1); assert.equal(held.ok, true); assert.equal(held.result, true);
+    assert(posted); assert.equal(posted.id, held.id); assert.equal(posted.op, 'new'); assert.equal(posted.sentAtMs, began);
+    assert.equal(worker.newIds.has(held.id), false, 'the actual posted allocation received this exact held reply');
+    assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 1);
+    assert.equal(f.wholeLoads.length, before); assert.equal(pending.calls.success.length, 0);
+    await clock.advance(24); assert.equal(f.wholeLoads.length, before, 'held allocation cannot start recovery before its original cutoff');
+    await clock.advance(1);
+    assert.equal(clock.now(), began + 25); assert.equal(f.wholeLoads.length, before + 1);
+    const source = f.wholeLoads.at(-1);
+    assert.equal(source.config.loadPolicy.maxLoadTimeMs, originalParent - 25);
+    assert.equal(source.config.loadPolicy.maxTimeToFirstByteMs, originalTtfb - 25);
+    assert.equal(f.ranges.length, 0); assert.deepEqual(f.channels[0].wants, []); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    worker.releaseNew();
+    await waitForIPC(() => { const state = f.swarm.metrics().core.transferWorker; return state.transfers === 0 && state.pending === 0; });
+    assert.equal(clock.now(), began + 25, 'retirement IPC cannot move the source deadline either');
+    assert.equal(frees, priorFree + 1); assert.equal(f.swarm.metrics().core.transferWorker.activeBytes, 0);
+    assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 0, 'the held transaction releases its admitted link lease');
+    assert.equal(pending.calls.success.length, 0, 'the source still owns its incomplete whole body when the old reply is released');
+    sameBytes(await clock.settle(pending.response), f.bytes);
+    await clock.advance(100);
+    assert.equal(pending.calls.success.length, 1); assert.equal(pending.calls.error.length, 0); assert.equal(pending.calls.abort.length, 0);
+    assert.equal(f.wholeLoads.length, before + 1); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.equal(f.ranges.length, 0); assert.deepEqual(f.channels[0].wants, []);
+    assert.equal(f.swarm.metrics().core.transferWorker.transfers, 0); assert.equal(f.swarm.metrics().core.transferWorker.pending, 0);
+    assert.equal(f.swarm.metrics().peerAdmission.claimedLinks, 0);
+    assert.equal(f.connections[0], connection); assert.equal(f.channels[0], channel); assert.equal(channel.readyState, 'open');
+    console.log(JSON.stringify({ fixture: 'held-allocation-logical-policy', clockScope: 'logical-policy-inputs-not-elapsed-performance',
+      newPosts: worker.newCount - priorNew, matchingHeldReply: true, policyAtPost: began, setupCutoffOffsetMs: 25,
+      remainingParentMs: source.config.loadPolicy.maxLoadTimeMs, remainingTtfbMs: source.config.loadPolicy.maxTimeToFirstByteMs,
+      wholeFallbacks: f.wholeLoads.length - before, successfulCallbacks: pending.calls.success.length,
+      freePosts: frees - priorFree, claimedLinks: f.swarm.metrics().peerAdmission.claimedLinks,
+      rangeInvocations: f.ranges.length, peerRequests: channel.wants.length, acceptedPeerBytes: f.swarm.metrics().bytes.peerFirst }));
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('buffered mixed retains a shorter absolute parent deadline through partial origin and late callbacks', async t => {
+  const clock = virtualClock(t); let f;
+  try {
+    // Keep a positive peer interval after the existing 2s recovery reserve;
+    // the declared parent still ends before the 10s buffered playback window.
+    f = await bufferedMixedFixture(t, clock, { originDelayMs: 4000 });
+    f.channels[0].firstByteMs = 1000;
+    f.loaderConfig.loadPolicy.maxLoadTimeMs = 3000;
+    const calls = { success: 0, timeout: 0, error: 0, abort: 0 };
+    const loader = new f.hls.config.fLoader(f.hlsConfig);
+    loader.load(f.ctx, f.loaderConfig, { onSuccess: () => calls.success++, onTimeout: () => calls.timeout++,
+      onError: () => calls.error++, onAbort: () => calls.abort++ });
+    await clock.advance(2999); assert.equal(calls.timeout, 0);
+    assert(f.rangeLoaders.length > 0); assert(f.rangeLoaders.every(row => row.loaderConfig.loadPolicy.maxLoadTimeMs <= 3000));
+    await clock.advance(1); assert.equal(calls.timeout, 1); assert.equal(calls.success, 0);
+    await clock.advance(2000); assert.equal(calls.timeout, 1); assert.equal(calls.success, 0);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.equal(f.wholeLoads.length, 1, 'no fresh whole-source budget appears at an expired parent deadline');
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('buffered mixed whole fallback cannot renew an expired original TTFB after a synchronous key callback', async t => {
+  const clock = virtualClock(t); let f, release, shift = 0, keyCalls = 0;
+  try {
+    t.mock.method(performance, 'now', () => clock.now() + shift);
+    f = await bufferedMixedFixture(t, clock, { beforeCommitment: () => new Promise(resolve => { release = resolve; }),
+      swarmOptions: { segmentKey: url => { if (++keyCalls === 4) shift = 80; return new URL(url).pathname; } } });
+    // The parent can preserve recovery; the original 100ms first-byte bound
+    // still expires during the synchronous fallback-key callback.
+    f.loaderConfig.timeout = 3000; f.loaderConfig.loadPolicy.maxTimeToFirstByteMs = 100;
+    const before = f.wholeLoads.length, calls = { success: 0, timeout: 0, error: 0 };
+    new f.hls.config.fLoader(f.hlsConfig).load(f.ctx, f.loaderConfig, {
+      onSuccess: () => calls.success++, onTimeout: () => calls.timeout++, onError: () => calls.error++ });
+    await clock.advance(25);
+    assert.equal(keyCalls, 4, 'the fourth key callback is the whole fallback preparation');
+    assert.equal(f.wholeLoads.length, before, 'no original source invocation may receive a renewed first-byte budget');
+    assert.equal(calls.timeout, 1); assert.equal(calls.success, 0); assert.equal(calls.error, 0);
+    release?.(); await clock.advance(1000); assert.equal(calls.timeout, 1); assert.equal(calls.success, 0);
+  } finally { shift = 0; release?.(); if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const parentMs of [100, 3000]) for (const ending of ['expiry', 'throw']) test(`buffered mixed whole fallback ${ending} retires the exact source owner once (parent${parentMs})`, async t => {
+  const clock = virtualClock(t); let f, release, saved, reads = 0;
+  try {
+    f = await bufferedMixedFixture(t, clock, { beforeCommitment: () => new Promise(resolve => { release = resolve; }) });
+    f.loaderConfig.timeout = parentMs; f.loaderConfig.loadPolicy.maxTimeToFirstByteMs = 80;
+    const loader = new f.hls.config.fLoader(f.hlsConfig), calls = { success: 0, error: 0, timeout: 0 };
+    t.mock.method(loader.inner, 'abort', () => {}); // Uncooperative: no onAbort or cancellation acknowledgement.
+    t.mock.method(loader.inner, 'load', (ctx, config, callbacks) => {
+      saved = { ctx, config, callbacks };
+      if (ending === 'throw') throw new Error('fixture invocation failed');
+    });
+    const before = f.swarm.metrics().bytes.fromOrigin;
+    loader.load(f.ctx, f.loaderConfig, { onSuccess: () => calls.success++, onError: () => calls.error++, onTimeout: () => calls.timeout++ });
+    const setupMs = parentMs === 100 ? 0 : 25;
+    if (setupMs) { await clock.advance(24); assert.equal(saved, undefined, 'valid mixed ownership retains only its setup window'); await clock.advance(1); }
+    assert(saved, 'an insufficient-recovery100ms parent invokes source synchronously');
+    assert.equal(saved.config.loadPolicy.maxLoadTimeMs, parentMs - setupMs);
+    assert.equal(saved.config.loadPolicy.maxTimeToFirstByteMs, 80 - setupMs, 'the original80ms first-byte deadline is preserved');
+    if (ending === 'expiry') {
+      await clock.advance(parentMs - setupMs - 1); assert.equal(calls.timeout, 0);
+      await clock.advance(1); assert.equal(calls.timeout, 1, 'retirement occurs at the exact captured parent deadline');
+    }
+    else assert.equal(calls.error, 1);
+    saved.callbacks.onSuccess({ get data() { reads++; return f.bytes.slice().buffer; } }, loader.inner.stats, saved.ctx, null);
+    release?.(); await clock.advance(1000);
+    assert.equal(reads, 0, 'late source success cannot read/copy a body after owner retirement');
+    assert.equal(calls.success, 0); assert.equal(calls.error + calls.timeout, 1);
+    assert.equal(f.swarm.metrics().bytes.fromOrigin, before); assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  } finally { release?.(); if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('buffered mixed entry clock includes a synchronous previous-loader abort', async t => {
+  const clock = virtualClock(t); let f, shift = 0;
+  try {
+    t.mock.method(performance, 'now', () => clock.now() + shift);
+    f = await bufferedMixedFixture(t, clock);
+    const loader = new f.hls.config.fLoader(f.hlsConfig); let invoked;
+    t.mock.method(loader.inner, 'abort', () => { shift = 30; });
+    t.mock.method(loader.inner, 'load', (_ctx, config) => { invoked = config; });
+    loader.load(f.ctx, f.loaderConfig, {});
+    assert(invoked, 'exhausted setup invokes ordinary source immediately');
+    assert.equal(invoked.loadPolicy.maxLoadTimeMs, 9970);
+    assert.equal(f.ranges.length, 0); assert.deepEqual(f.channels[0].wants, []);
+    loader.abort();
+  } finally { shift = 0; if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const ending of ['connection', 'media', 'authority']) test(`buffered mixed cached handoff retains entry ${ending} fences`, async t => {
+  const core = await loadCore(multiCore), handle = core.transfer({ size: 1, sha256: '0'.repeat(64), pieces: ['0'.repeat(64)], deadline: 10000, maxHolders: 1, originReserveMs: 0 });
+  const prototype = Object.getPrototypeOf(handle); handle.free();
+  const original = prototype.start, clock = virtualClock(t); let f, release, calls = 0;
+  try {
+    f = await bufferedMixedFixture(t, clock, { beforeCommitment: () => {
+      if (++calls === 2) return new Promise((resolve, reject) => { release = ending === 'authority' ? () => reject(new Error('authority revoked')) : resolve; });
+    } });
+    t.mock.method(prototype, 'start', function (at, estimates) { return original.call(this, at, { ...estimates,
+      probePeers: [], peers: estimates.peers.map(([id]) => [id, 0, 1_000_000]), origin: [100000, .001] }); });
+    const pending = beginCountedMultiLoad(f, f.ctx);
+    await clock.advanceUntil(() => typeof release === 'function', 25);
+    if (ending === 'connection') f.connections[0].connectionState = 'disconnected';
+    if (ending === 'media') f.hls.media.playbackRate = 2;
+    release(); sameBytes(await clock.settle(pending.response), f.bytes);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0); assert.deepEqual(f.channels[0].wants, []);
+    assert.equal(pending.calls.success.length, 1);
+  } finally { release?.(); if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+class BufferedTailPeer extends PhasedFlowChannel {
+  send(data) {
+    const frame = typeof data === 'string' ? JSON.parse(data) : null;
+    if (this.tailOnly && frame?.t === 'want' && ++this.tailWants > 1) {
+      RecordedChannel.prototype.send.call(this, data); this.wants.push(frame.p ?? null); return;
+    }
+    return super.send(data);
+  }
+}
+
+// Calibrate recovery through a real SDK source completion, then exercise
+// silent peer retirement and verified source completion on the original clock.
+for (const boundary of ['near-buffer', 'healthy-buffer', 'short-parent']) test('buffered mixed leaves the next source recovery intact at the ' + boundary, async t => {
+  const clock = virtualClock(t); let f, demandAt = null;
+  const size = (boundary === 'healthy-buffer' ? 6 : 1) * 1024 * 1024,
+    source = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251), sourceCalls = [];
+  // Synthetic service, not an unobserved whole-GET counterfactual: calibration
+  // and the first ordinary demand take2258ms, its successor2429ms.
+  // Ranged bodies share a3329ms completion point for the first demand.
+  class CadencedSource extends Loader {
+    load(context, config, callbacks) {
+      this.aborted = false;
+      const from = context.rangeEnd ? context.rangeStart : 0, to = context.rangeEnd || size;
+      const row = { from, to, ranged: Boolean(context.rangeEnd), at: clock.now(), completed: false, config }; this.row = row; sourceCalls.push(row);
+      this.stats.loading = { start: clock.now(), first: 0, end: 0 };
+      const delay = demandAt === null ? 2258 : row.ranged ? Math.max(0, demandAt + 3329 - clock.now()) : context.frag.sn === 1 ? 2258 : 2429;
+      setTimeout(() => {
+        if (this.aborted) return;
+        row.completed = true; row.completedAt = clock.now(); this.stats.loaded = to - from;
+        this.stats.loading.first = clock.now(); this.stats.loading.end = clock.now();
+        callbacks.onSuccess({ data: source.slice(from, to).buffer, code: row.ranged ? 206 : 200 }, this.stats, context, null);
+      }, delay);
+    }
+    abort() { this.aborted = true; if (this.row) this.row.aborted = true; }
+    destroy() { this.destroyed = true; }
+  }
+  try {
+    f = await bufferedMixedFixture(t, clock, { size, untrained: true, OriginLoader: CadencedSource,
+      holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 350 }] });
+    assert.equal(f.swarm.metrics().segments.originLatencyMedianMs, 2258);
+    // A second genuine demand establishes its known same-link peer model;
+    // the first no-HAVE request above supplied the actual source clock.
+    f.hls.media.buffered = { length: 0 };
+    sameBytes(await clock.settle(f.load(f.ctx)), f.bytes);
+    assert(f.swarm.metrics().core.multiHolder.peerBytes > 0, 'genuine calibration verifies peer pieces without seeding a model');
+    for (const channel of f.channels) channel.wants.length = 0;
+    const reserve = 2258 * 1.25 + 100; assert.equal(reserve, 2922.5);
+    let position = 10, end = 10 + (boundary === 'healthy-buffer' ? 12 : 3.446), lastAt = clock.now(), minimumAhead = Infinity;
+    const playback = () => {
+      const ahead = end - position - (clock.now() - lastAt) / 1000;
+      minimumAhead = Math.min(minimumAhead, ahead); position = Math.min(end, position + (clock.now() - lastAt) / 1000); lastAt = clock.now();
+      return ahead;
+    };
+    Object.defineProperty(f.hls.media, 'currentTime', { configurable: true, get() { playback(); return position; } });
+    Object.defineProperty(f.hls.media, 'readyState', { configurable: true, get() { return playback() > 0 ? 4 : 2; } });
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => end };
+    f.ctx.frag.start = end; f.ctx.frag.duration = 2;
+    if (boundary === 'short-parent') f.loaderConfig.loadPolicy.maxLoadTimeMs = 3000;
+    const before = sourceCalls.length, transfers = f.swarm.metrics().core.multiHolder.transfers, peerBefore = f.swarm.metrics().bytes.peerFirst;
+    demandAt = clock.now(); const first = beginCountedMultiLoad(f, f.ctx);
+    sameBytes(await clock.settle(first.response), f.bytes); const firstElapsed = clock.now() - demandAt;
+    const afterFirst = playback(); end += 2;
+    const demandSources = sourceCalls.slice(before), peer = f.swarm.metrics().bytes.peerFirst - peerBefore;
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    const next = { ...f.ctx, url: 'https://origin.example/media/next.ts', frag: { ...f.ctx.frag, sn: 2, start: end, duration: 2 } };
+    const secondAt = clock.now(), second = beginCountedMultiLoad(f, next);
+    sameBytes(await clock.settle(second.response), f.bytes); playback(); end += 2;
+    console.log(JSON.stringify({ fixture: 'next-source-recovery', boundary, reserveMs: reserve, firstElapsedMs: firstElapsed,
+      nextElapsedMs: clock.now() - secondAt, minimumAheadMs: minimumAhead * 1000, peerBytes: peer,
+      sourceBodies: demandSources.map(row => ({ ranged: row.ranged, bytes: row.to - row.from, complete: row.completed })) }));
+    assert(minimumAhead >= 0, 'sequential genuine demands must not exhaust the captured playable buffer');
+    if (boundary === 'healthy-buffer') {
+      assert(demandSources.some(row => row.ranged && row.completed), 'healthy headroom actually runs source ranges');
+      assert(peer > 0, 'the real committed Core verifies a nonzero peer contribution');
+      assert.equal(demandSources.reduce((sum, row) => sum + (row.completed ? row.to - row.from : 0), 0) + peer, size,
+        'complete206 bodies and accepted peer bytes retain disjoint ownership');
+      assert(afterFirst * 1000 >= reserve, 'successful mixed completion retains the next whole-source recovery');
+    } else {
+      assert.equal(demandSources.length, 1); assert.equal(demandSources[0].ranged, false, 'near-edge admission starts ordinary whole HTTP');
+      assert.equal(f.swarm.metrics().core.multiHolder.transfers, transfers, 'decline occurs before Core allocation');
+      assert.equal(peer, 0);
+      if (boundary === 'short-parent') assert.equal(demandSources[0].config.loadPolicy.maxLoadTimeMs, 3000,
+        'mixed clipping never replaces the original shorter-parent whole budget');
+    }
+    assert.equal(first.calls.success.length, 1); assert.equal(second.calls.success.length, 1);
+    assert.equal(first.calls.abort.length + first.calls.error.length + second.calls.abort.length + second.calls.error.length, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const boundary of ['buffer', 'buffer-with-next-reserve', 'parent', 'parent-without-reserve']) test('buffered mixed preserves measured source recovery at the ' + boundary + ' boundary', async t => {
+  const clock = virtualClock(t); let f;
+  const size = 1024 * 1024, sourceMs = 1600, source = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251), sourceCalls = [];
+  class MeasuredSource extends Loader {
+    load(context, config, callbacks) {
+      this.aborted = false;
+      const from = context.rangeEnd ? context.rangeStart : 0, to = context.rangeEnd || size;
+      const row = { from, to, ranged: Boolean(context.rangeEnd), at: clock.now(), completed: false, aborted: false, config }; sourceCalls.push(row); this.row = row;
+      this.stats.loading = { start: clock.now(), first: 0, end: 0 };
+      setTimeout(() => {
+        if (this.aborted) return;
+        row.completed = true; row.completedAt = clock.now(); this.stats.loading.first = row.completedAt; this.stats.loading.end = row.completedAt;
+        callbacks.onSuccess({ data: source.slice(from, to).buffer, code: row.ranged ? 206 : 200 }, this.stats, context, null);
+      }, sourceMs * (to - from) / size);
+    }
+    abort() { this.aborted = true; if (this.row) this.row.aborted = true; }
+    destroy() { this.destroyed = true; }
+  }
+  class SilentDemandPeer extends PhasedFlowChannel {
+    send(data) {
+      const frame = typeof data === 'string' ? JSON.parse(data) : null;
+      if (this.quiet && frame?.t === 'want') {
+        RecordedChannel.prototype.send.call(this, data); this.wants.push(frame.p ?? null); return;
+      }
+      return super.send(data);
+    }
+  }
+  try {
+    f = await bufferedMixedFixture(t, clock, { untrained: true, OriginLoader: MeasuredSource,
+      holders: [{ Channel: SilentDemandPeer, firstByteMs: 10, flowMs: 350 }] });
+    const measured = f.swarm.metrics().segments.originLatencyMedianMs;
+    assert.equal(measured, sourceMs, 'recovery comes from the actual completed source calibration');
+    const reserve = measured * 1.25 + 100; assert.equal(reserve, 2100);
+    const headroomMs = boundary === 'buffer' ? 3000 : boundary === 'buffer-with-next-reserve' ? 5100 : 10000;
+    const parentMs = boundary === 'parent' ? 3000 : boundary === 'parent-without-reserve' ? 1800 : 10000;
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 10 + headroomMs / 1000 };
+    f.loaderConfig.loadPolicy.maxLoadTimeMs = parentMs;
+    f.channels[0].quiet = true;
+    const before = sourceCalls.length, start = clock.now(), pending = beginCountedMultiLoad(f, f.ctx);
+    if (boundary === 'parent-without-reserve' || boundary === 'buffer') {
+      assert.equal(sourceCalls.length, before + 1, 'insufficient current or next recovery starts ordinary source synchronously');
+      assert.equal(sourceCalls.at(-1).ranged, false); assert.deepEqual(f.channels[0].wants, []);
+      sameBytes(await clock.settle(pending.response, parentMs), f.bytes);
+      assert.equal(sourceCalls.length, before + 1); assert.equal(f.swarm.metrics().core.multiHolder.transfers, 0);
+    } else {
+      await clock.advanceUntil(() => f.channels[0].wants.length > 0, 25);
+      assert(sourceCalls.slice(before).some(row => row.ranged), 'the genuine demand starts its source before waiting for the probe');
+      const spare = Math.min(parentMs, headroomMs - reserve) - reserve;
+      await clock.advance(spare - (clock.now() - start));
+      assert(f.channels[0].cancels > 0, 'silent peer must retire before consuming the measured source recovery reserve');
+      const wants = f.channels[0].wants.length;
+      sameBytes(await clock.settle(pending.response, reserve), f.bytes);
+      assert.equal(f.channels[0].wants.length, wants, 'retired peer work cannot restart during source recovery');
+      assert(sourceCalls.slice(before).every(row => row.ranged && row.completed), 'existing source ownership completes without another whole GET');
+    }
+    assert(clock.now() - start < Math.min(parentMs, headroomMs), 'one verified object completes before the unchanged parent/buffer deadline');
+    assert.equal(pending.calls.success.length, 1); assert.equal(pending.calls.abort.length + pending.calls.error.length, 0);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0, 'a silent holder supplies no accepted peer bytes');
+    await clock.advance(50); assert.equal(pending.calls.success.length, 1);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('buffered mixed retires peer work at its fixed cap while source ranges finish within the original parent', async t => {
+  const clock = virtualClock(t); let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { originDelayMs: 3000,
+      holders: [{ Channel: BufferedTailPeer, firstByteMs: 10, flowMs: 350 }] });
+    f.channels[0].tailOnly = true; f.channels[0].tailWants = 0;
+    const before = f.wholeLoads.length, start = clock.now(), pending = beginCountedMultiLoad(f, f.ctx);
+    await clock.advance(2500);
+    assert.equal(pending.calls.success.length, 0, 'unfinished source ranges cannot fabricate a complete object');
+    assert.equal(f.wholeLoads.length, before, 'the peer cap must not discard the still-owned origin recovery lane');
+    const peerRequests = f.channels[0].wants.length;
+    sameBytes(await clock.settle(pending.response, 6000), f.bytes);
+    assert(clock.now() - start > 2500 && clock.now() - start < 10000);
+    assert.equal(f.channels[0].wants.length, peerRequests, 'no fresh peer request is issued after the original peer cap');
+    assert.equal(f.wholeLoads.length, before, 'range completion does not need another whole-object GET');
+    assert(f.swarm.metrics().bytes.peerFirst > 0, 'only the final complete object consumes the earlier verified fraction');
+    assert(f.channels[0].cancels > 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const untrained of [false, true]) test('buffered mixed verifies a pre-cap ' + (untrained ? 'untrained ' : '') + 'peer body after its cap without renewing peer network work', async t => {
+  const { WorkerImpl, workers } = transferWorkerFixture(t), clock = virtualClock(t); let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { untrained, originDelayMs: 3000,
+      swarmOptions: { maxPeerWaitMs: 600, transferWorkerUrl: 'https://worker.example/transfer.js', WorkerImpl } });
+    workers[0].holdDelivered = true;
+    const before = f.wholeLoads.length, start = clock.now(), pending = beginCountedMultiLoad(f, f.ctx);
+    await clock.advanceUntil(() => workers[0].deliveredReplies?.length > 0, 550);
+    assert(clock.now() - start < 600, 'actual peer body completes before the original cap');
+    assert(workers[0].deliveredReplies[0].result.verified > 0, 'the committed worker really verified the held peer body');
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0, 'verification is not consumed media');
+    await clock.advance(601 - (clock.now() - start));
+    const wants = f.channels[0].wants.length;
+    workers[0].holdDelivered = false; workers[0].releaseDelivered();
+    sameBytes(await clock.settle(pending.response, 6000), f.bytes);
+    assert.equal(f.channels[0].wants.length, wants, 'late worker REQUEST commands cannot renew peer work');
+    assert.equal(f.wholeLoads.length, before, 'the original source ranges retain their recovery ownership');
+    assert(f.swarm.metrics().bytes.peerFirst > 0, 'only assembled verified media consumes the pre-cap fraction');
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+for (const headroomMs of [10000, 14000]) test('buffered mixed discards physical peer completion after its cap while keeping source recovery (' + headroomMs + 'ms buffered)', async t => {
+  const clock = virtualClock(t); let f, shift = 0, late = false;
+  try {
+    t.mock.method(performance, 'now', () => clock.now() + shift);
+    f = await bufferedMixedFixture(t, clock, { originDelayMs: 3000 });
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 10 + headroomMs / 1000 };
+    const receive = f.channels[0].receive.bind(f.channels[0]);
+    t.mock.method(f.channels[0], 'receive', data => {
+      if (!late && typeof data === 'string' && JSON.parse(data).t === 'eof') { late = true; shift = 2600; }
+      return receive(data);
+    });
+    const before = f.wholeLoads.length, enteredAt = performance.now(), pending = beginCountedMultiLoad(f, f.ctx);
+    // The2600ms performance jump does not advance the mock timer clock. At
+    //10s headroom, the source recovery callback reaches modeled8600ms and
+    //must use the original1400ms whole fallback; its500ms body is observed
+    //within the same original10s parent, rather than renewing that deadline.
+    try { sameBytes(await clock.settle(pending.response, headroomMs === 10000 ? 7000 : 6000), f.bytes); }
+    catch (error) {
+      console.log(JSON.stringify({ fixture: 'late-physical-peer-cap', shift, late, now: performance.now(),
+        calls: { success: pending.calls.success.length, abort: pending.calls.abort.length, error: pending.calls.error.length },
+        wholeLoads: f.wholeLoads.length, before, ranges: f.ranges,
+        decisions: f.swarm.trace().rows.filter(row => ['load', 'mixedScope', 'xferFinish'].includes(row.k)).slice(-16) }));
+      throw error;
+    }
+    assert(late); assert(performance.now() - enteredAt < 10000, 'both outcomes retain the original absolute parent');
+    if (headroomMs === 10000) {
+      assert.equal(f.wholeLoads.length, before + 1);
+      assert.equal(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs, 1400);
+      const rejected = f.swarm.trace().rows.find(row => row.k === 'mixedScope' && row.reason === 'current-recovery');
+      assert.equal(rejected.mixedRemainingMs, -600); assert.equal(rejected.recoveryRemainingMs, 1400);
+    } else assert.equal(f.wholeLoads.length, before, 'healthy next-recovery headroom preserves the original range owner');
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0, 'post-cap physical completion supplies no accepted peer media');
+    assert(f.swarm.metrics().core.multiHolder.unusedBytes > 0, 'discarded late payload remains accounted');
+  } finally { shift = 0; if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('buffered mixed origin recovery cannot outlive its original absolute parent', async t => {
+  const clock = virtualClock(t); let f;
+  try {
+    f = await bufferedMixedFixture(t, clock, { originDelayMs: 5000, swarmOptions: { maxPeerWaitMs: 600 } });
+    f.loaderConfig.timeout = 3000;
+    const before = f.wholeLoads.length, calls = { success: 0, timeout: 0 };
+    new f.hls.config.fLoader(f.hlsConfig).load(f.ctx, f.loaderConfig, { onSuccess: () => calls.success++, onTimeout: () => calls.timeout++ });
+    await clock.advance(2999); assert.equal(calls.timeout, 0); assert.equal(calls.success, 0);
+    assert(f.rangeLoaders.length > 0);
+    await clock.advance(1); assert.equal(calls.timeout, 1);
+    await clock.advance(6000); assert.equal(calls.success, 0); assert.equal(calls.timeout, 1);
+    assert.equal(f.wholeLoads.length, before, 'expired recovery never starts another whole source request');
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+async function cooperativeHaveReconsideration(t, paused = false, withdrawAtConstructor = false, declineMode = null, delayGenuineKeyMs = 0) {
+  // Deterministic policy proof: simulated source/native RTC, real sessions,
+  // commitments, Core, ordered protocol bytes, verification and consumption.
+  // No source server, preloaded cache/HAVE, timing model or claimed WAN rate.
+  const pair = await framingPairFixture(t, { pairedState: true }), actors = [], source = [], loaders = new Set(), objects = new Map(), events = new Map();
+  let delayNextGenuineKey = false;
+  const keyWork = logicalSegmentKeyDigests(t, base.swarmId, () => {
+    if (!delayNextGenuineKey) return 0;
+    delayNextGenuineKey = false; return delayGenuineKeyMs;
+  });
+  let clock, revokeOnConstructor = null, metadataHeld = false, metadataHeldAt = null, releaseMetadata, reenterAbort = null, stopAtContribution = false, contributionStopped = false;
+  const settle = promise => clock ? clock.settle(promise) : promise;
+  const wait = predicate => clock ? clock.advanceUntil(predicate) : until(predicate);
+  const size = 1024 * 1024, secret = generateSecretKey(), seconds = Math.floor(Date.now() / 1000);
+  const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds,
+    tags: [['d', 'reciprocal-futures'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
+  const keyFor = path => createHash('sha256').update(`${base.swarmId}\n${path}`).digest('hex');
+  const getCommitment = ctx => {
+    const path = new URL(ctx.url).pathname, data = objects.get(path); assert(data);
+    const id = `${path}:${ctx.frag.sn}:${ctx.frag.cc}`;
+    if (!events.has(id)) {
+      const pieceSize = commitmentPieceSize(data.length), pieces = [];
+      for (let at = 0; at < data.length; at += pieceSize) pieces.push(createHash('sha256').update(data.subarray(at, at + pieceSize)).digest('hex'));
+      events.set(id, finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds,
+        tags: [['x', base.swarmId], ['e', streamEvent.id]], content: commitmentContent({ v: 3,
+          streamEventId: streamEvent.id, swarmId: base.swarmId, key: keyFor(path), rendition: '/media/index.m3u8',
+          playlist: '/media/index.m3u8', mediaType: 'main', encryption: null, sequence: ctx.frag.sn,
+          discontinuity: ctx.frag.cc, part: null, sha256: createHash('sha256').update(data).digest('hex'),
+          size: data.length, pieceSize, pieces, expiresAt: seconds + 60 }) }, secret));
+    }
+    return events.get(id);
+  };
+  const invoke = (actor, frag) => {
+    const f = actors[actor], ctx = { url: frag.url, frag, part: null, type: LoaderContextType.MEDIA_FRAGMENT,
+      responseType: 'arraybuffer', headers: {}, rangeStart: 0, rangeEnd: 0 };
+    const loader = new f.hls.config.fLoader(f.hls.config), calls = { success: 0, error: 0, abort: 0, timeout: 0 };
+    frag.stats = loader.stats;
+    const response = new Promise((resolve, reject) => loader.load(ctx, { timeout: 10000 }, {
+      onSuccess: value => { calls.success++; resolve(new Uint8Array(value.data)); },
+      onError: () => { calls.error++; reject(new Error('reciprocal source error')); },
+      onAbort: () => { calls.abort++; reject(new Error('reciprocal source abort')); },
+      onTimeout: () => { calls.timeout++; reject(new Error('reciprocal source timeout')); },
+    }));
+    response.catch(() => {}); return { response, calls };
+  };
+  if (declineMode === 'callback-stop') {
+    const original = CoreNeighbourDiscovery.prototype.context;
+    t.mock.method(CoreNeighbourDiscovery.prototype, 'context', function (...args) {
+      const result = original.apply(this, args);
+      if (stopAtContribution) { stopAtContribution = false; contributionStopped = true; actors[1].swarm.stop(); }
+      return result;
+    });
+  }
+  // Own SDK/session timers too, including a stop reentered during a callback.
+    // Functional controller only: hold actual async setup until either source
+    // lane is invoked, without selecting a favourable result or seeding a model.
+    clock = warmFunctionalClock(t, () => keyWork.pending > 0 || !metadataHeld && actors.some((f, actor) => {
+      const rows = f.swarm.trace().rows;
+      const load = rows.findLast(row => row.k === 'load' && row.sn === 1 && row.budgetGeometry?.source === 'warm-ahead');
+      return load && rows.some(row => row.k === 'mixedScope' && row.load === load.load && row.reason === 'entry') &&
+        !source.some(row => row.actor === actor && row.sn === 1);
+    }));
+  try {
+    for (const actor of [0, 1]) {
+      class Source extends Loader {
+        stats = new LoadStats();
+        constructor(...args) {
+          super(...args);
+          if (actor === 1 && declineMode === 'callback-stop' && source.some(row => row.actor === 0 && row.sn === 1 && row.complete)) stopAtContribution = true;
+          if (actor === 1 && revokeOnConstructor) { const revoke = revokeOnConstructor; revokeOnConstructor = null; revoke(); }
+        }
+        load(ctx, config, callbacks) {
+          const data = objects.get(new URL(ctx.url).pathname); assert(data);
+          const from = ctx.rangeEnd ? ctx.rangeStart : 0, to = ctx.rangeEnd || data.length;
+          const row = { actor, sn: ctx.frag.sn, warm: Boolean(ctx[WARM_AHEAD]), range: ctx.rangeEnd ? [from, to] : null,
+            bytes: 0, complete: false, aborted: false, invokedAtMs: performance.now(),
+            maxLoadTimeMs: config.loadPolicy?.maxLoadTimeMs ?? config.timeout }; source.push(row); loaders.add(this);
+          this.stats.loading.start = performance.now();
+          this.complete = () => {
+            if (row.complete || row.aborted) return;
+            row.complete = true; row.bytes = to - from; this.stats.loaded = this.stats.total = row.bytes;
+            this.stats.loading.first = this.stats.loading.end = performance.now();
+            callbacks.onSuccess({ data: data.slice(from, to).buffer, code: row.range ? 206 : 200 }, this.stats, ctx, null);
+          };
+          this.row = row;
+          // Explicit functional-controller service scalars calibrate recovery
+          // above two seconds; no native elapsed/performance claim or seeded
+          // peer model is made by this logical-clock control.
+          if (ctx.frag.sn === 0 || row.range) this.timer = setTimeout(this.complete, ctx.frag.sn === 0 ? 1600 : 20);
+          // Whole speculative futures stay pending until their owner ledger is
+          // checked, so no holder can have advertised either future yet.
+        }
+        abort() { clearTimeout(this.timer); if (this.row && !this.row.complete) this.row.aborted = true;
+          if (actor === 1 && reenterAbort) { const enter = reenterAbort; reenterAbort = null; enter(); } }
+        destroy() { this.abort(); loaders.delete(this); }
+      }
+      const media = Object.assign(new EventTarget(), { currentTime: 0, paused: false, ended: false, seeking: false,
+        readyState: 4, playbackRate: 1, buffered: { length: 0 } });
+      const commitment = ctx => {
+        const event = getCommitment(ctx);
+        if (declineMode && actor === 1 && ctx.frag.sn === 1 && ctx[WARM_AHEAD]?.work && !metadataHeld) {
+          metadataHeld = true; metadataHeldAt = performance.now();
+          return new Promise(resolve => { releaseMetadata = () => resolve(event); });
+        }
+        return event;
+      };
+      actors.push(await settle(pair.make({ OriginLoader: Source, player: { media }, swarmOptions: {
+        streamEvent, getCommitment: commitment, warmAhead: true, bufferedMixedRanges: true, zeroBudgetPeerRace: true,
+        sustainablePeerWait: true, originReserveMs: 2000, maxPeerWaitMs: 2500, traceRequests: 4096 } })));
+    }
+    await wait(() => actors.every(f => f.swarm.metrics().peers.connected === 1));
+    const pubkeys = actors.map(f => f.swarm.metrics().pubkey), winner = path => {
+      const key = BigInt('0x' + keyFor(path));
+      return (key ^ BigInt('0x' + pubkeys[0])) < (key ^ BigInt('0x' + pubkeys[1])) ? 0 : 1;
+    };
+    const paths = [];
+    for (const owner of [0]) {
+      for (let n = 0; n < 256; n++) {
+        const path = `/media/future-${owner}-${n}.ts`;
+        if (winner(path) === owner) { paths.push(path); break; }
+      }
+    }
+    assert.equal(paths.length, 1, 'actual peer identities elect actor0 for the single future');
+    objects.set('/media/lead.ts', new Uint8Array(32768).fill(9));
+    paths.forEach((path, index) => objects.set(path, Uint8Array.from({ length: size }, (_, i) => (i * 131 + index * 17) % 251)));
+    const playlist = '#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nlead.ts\n' +
+      paths.map(path => `#EXTINF:2,\n${path.split('/').at(-1)}\n`).join('') + '#EXT-X-ENDLIST\n';
+    const details = actors.map(f => {
+      const parsed = M3U8Parser.parseLevelPlaylist(playlist, 'https://origin.example/media/index.m3u8', 0, 'main', 0, null);
+      f.hls.levels = [{ details: parsed }]; return parsed;
+    });
+    for (const f of actors) assert.deepEqual([f.swarm.metrics().core.verifier, f.swarm.metrics().core.selection, f.swarm.metrics().core.discovery], ['wasm', 'wasm', 'wasm']);
+    const lead = actors.map((_, actor) => invoke(actor, details[actor].fragments[0]));
+    await settle(Promise.all(lead.map(x => x.response)));
+    for (const f of actors) f.hls.media.buffered = { length: 1, start: () => 0, end: () => 10 };
+    await wait(() => source.filter(row => row.sn > 0).length === 1);
+    await wait(() => actors[1].swarm.metrics().warmAhead.active === 0 && actors[1].swarm.metrics().warmAhead.queued === 0);
+    assert.equal(actors[1].swarm.metrics().warmAhead.started, 0, 'non-owner actually declined optional source before HAVE');
+    const initial = source.filter(row => row.sn > 0);
+    const advertised = pair.channels.flatMap(channel => channel.sent.filter(row => row?.t === 'have').flatMap(row => row.keys ?? row.add ?? []));
+    assert(paths.every(path => !advertised.includes(keyFor(path))), 'neither held future body has been seeded or advertised');
+    assert(actors.every(f => f.swarm.metrics().bytes.peerFirst === 0 && f.swarm.metrics().warmAhead.verifiedPeerBytes === 0));
+    console.log(JSON.stringify({ fixture: 'reciprocal-warm-source-policy', simulatedSourceAndRtc: true,
+      coreReady: actors.map(f => f.swarm.metrics().core.state), expectedOwners: [{ actor: 0, sn: 1 }],
+      actualSourceStarts: initial.map(({ actor, sn, warm, range }) => ({ actor, sn, warm, range })),
+      futureHaveCount: paths.filter(path => advertised.includes(keyFor(path))).length }));
+    assert.deepEqual(initial.map(({ actor, sn }) => ({ actor, sn })).sort((a, b) => a.actor - b.actor),
+      [{ actor: 0, sn: 1 }], 'only actual elected owner starts speculative whole source');
+    assert(initial.every(row => row.warm && !row.range));
+    let exactHaveDelivered = false;
+    const listeners = pair.channels.map(channel => {
+      const listener = event => { if (typeof event.data !== 'string') return;
+        const frame = JSON.parse(event.data);
+        if (frame.t === 'have' && (frame.keys ?? frame.add ?? []).includes(keyFor(paths[0]))) exactHaveDelivered = true;
+      };
+      channel.addEventListener('message', listener); return [channel, listener];
+    });
+    if (paused) { actors[1].hls.media.paused = true; actors[1].hls.media.dispatchEvent(new Event('pause')); }
+    let supplyWithdrawn = false;
+    if (withdrawAtConstructor) revokeOnConstructor = () => {
+      const sender = pair.channels.find(channel => channel.sent.some(frame => frame?.t === 'have' &&
+        (frame.keys ?? frame.add ?? []).includes(keyFor(paths[0]))));
+      assert(sender?.other, 'the exact verified HAVE came from the real paired holder');
+      sender.other.receive(JSON.stringify({ t: 'have', add: [], del: [keyFor(paths[0])] })); supplyWithdrawn = true;
+    };
+    for (const loader of loaders) if (loader.row?.actor === 0 && loader.row?.sn === 1) loader.complete();
+    await wait(() => actors[0].swarm.metrics().warmAhead.verified === 1 && exactHaveDelivered);
+    const atHave = performance.now();
+    if (declineMode === 'callback-stop') {
+      await wait(() => contributionStopped); await clock.advance(25);
+      assert.equal(source.filter(row => row.actor === 1 && row.sn === 1).length, 0,
+        'contribution callback stop cannot bypass optional ownership through direct inner.load');
+      assert.equal(actors[1].swarm.metrics().bytes.peerFirst, 0); return;
+    }
+    if (declineMode) {
+      await wait(() => metadataHeld);
+      assert.equal(actors[1].swarm.metrics().warmAhead.haveReconsidered, 1);
+      let demand;
+      if (declineMode === 'genuine') demand = invoke(1, details[1].fragments[1]);
+      if (declineMode === 'reentrant') reenterAbort = () => { demand = invoke(1, details[1].fragments[1]); };
+      await clock.advance(Math.max(0, metadataHeldAt + 25 - performance.now()));
+      await wait(() => actors[1].swarm.trace().rows.some(row => row.k === 'mixedScope' && row.reason === 'setup-timer'));
+      const optionalStarts = () => source.filter(row => row.actor === 1 && row.sn === 1 && row.warm);
+      console.log(JSON.stringify({ fixture: 'reconsidered-warm-setup-decline', controllerClock: 'logical-functional',
+        mode: declineMode, elapsedMs: performance.now() - metadataHeldAt,
+        optionalSources: optionalStarts().map(({ range, warm, maxLoadTimeMs }) => ({ range, warm, maxLoadTimeMs })),
+        warm: actors[1].swarm.metrics().warmAhead }));
+      if (declineMode === 'optional') {
+        assert.equal(optionalStarts().length, 0, 'pure optional reconsideration must abandon setup decline instead of duplicate whole HTTP');
+        assert.equal(actors[1].swarm.metrics().bytes.peerFirst, 0);
+      } else {
+        assert(demand, 'genuine entry was observed before or during abort cleanup');
+        await wait(() => source.some(row => row.actor === 1 && row.sn === 1));
+        for (const loader of loaders) if (loader.row?.actor === 1 && loader.row?.sn === 1) loader.complete();
+        sameBytes(await settle(demand.response), objects.get(paths[0]));
+        assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+        if (declineMode === 'genuine') {
+          assert.equal(optionalStarts().length, 1); assert.equal(optionalStarts()[0].range, null);
+          assert.equal(optionalStarts()[0].maxLoadTimeMs, 9975, 'promotion retains the original10s parent minus25ms setup');
+        } else assert.equal(optionalStarts().length, 0, 'reentrant genuine must own new source, not dying optional work');
+      }
+      releaseMetadata(); await clock.advance(50);
+      if (declineMode === 'optional') assert.equal(optionalStarts().length, 0, 'late metadata cannot revive cancelled optional work');
+      return;
+    }
+    // One short observation of an event-driven opportunity. This is not a
+    // larger setup/peer/row deadline; no genuine request is made to wake it.
+    await clock.advance(100);
+    if (!paused && !withdrawAtConstructor) await wait(() => actors[1].swarm.metrics().warmAhead.verified === 1);
+    const receiver = actors[1].swarm.metrics(), targetStarts = source.filter(row => row.actor === 1 && row.sn === 1);
+    const diagnostic = { fixture: 'exact-have-idle-warm-reconsideration', controllerClock: 'logical-functional', paused, withdrawAtConstructor, supplyWithdrawn,
+      simulatedSourceAndRtc: true, actualSignedCommitmentAndCore: true, targetBytes: size,
+      exactHaveDelivered, ownerWholeComplete: source.some(row => row.actor === 0 && row.sn === 1 && row.complete),
+      observationAfterHaveMs: performance.now() - atHave,
+      receiverWarm: receiver.warmAhead, receiverCore: receiver.core.state,
+      receiverTargetSources: targetStarts.map(({ range, warm, complete }) => ({ range, warm, complete })),
+      receiverAcceptedPeerBytes: receiver.bytes.peerFirst,
+      receiverTrace: actors[1].swarm.trace().rows.filter(row => ['load', 'eligibility', 'mixedScope', 'xferFinish'].includes(row.k))
+        .map(row => ({ k: row.k, sn: row.sn, role: row.budgetGeometry?.source, reason: row.reason })) };
+    console.log(JSON.stringify(diagnostic));
+    for (const [channel, listener] of listeners) channel.removeEventListener('message', listener);
+    assert.equal(receiver.bytes.peerFirst, 0, 'warm verification before genuine consumption cannot earn accepted credit');
+    if (!paused && !withdrawAtConstructor) {
+      // After recording the idle result, prove that exact same current target
+      // is genuinely eligible for the existing mixed engine when Hls wakes it.
+      delayNextGenuineKey = delayGenuineKeyMs > 0;
+      const demand = invoke(1, details[1].fragments[1]);
+      sameBytes(await settle(demand.response), objects.get(paths[0]));
+      assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+      const after = actors[1].swarm.metrics(), controlSources = source.filter(row => row.actor === 1 && row.sn === 1);
+      assert(after.bytes.peerFirst > 0, 'the same target actually consumes verified peer bytes after a genuine wake');
+      assert(controlSources.length > 0 && controlSources.every(row => row.range && row.complete),
+        'the same target actually uses origin ranges, never a duplicate whole GET');
+      assert.equal(controlSources.reduce((sum, row) => sum + row.bytes, 0) + after.bytes.peerFirst, size);
+      console.log(JSON.stringify({ fixture: 'post-idle-genuine-mixed-control',
+        acceptedPeerBytes: after.bytes.peerFirst, completeOriginRangeBytes: controlSources.reduce((sum, row) => sum + row.bytes, 0),
+        targetBytes: size, coreReady: after.core.state, idleTargetSourceStarts: targetStarts.length,
+        excludedNativeKeyDigests: keyWork.operations, deliberatelyDelayedKeyDigests: keyWork.delayedOperations }));
+      if (delayGenuineKeyMs) assert.equal(keyWork.delayedOperations, 1);
+    }
+    if (withdrawAtConstructor) assert.equal(supplyWithdrawn, true, 'the final constructor callback actually withdrew the current exact HAVE');
+    if (paused || withdrawAtConstructor) assert.equal(targetStarts.length, 0, 'pause or withdrawn exact supply before entry cannot start whole or ranged I/O');
+    else assert(targetStarts.some(row => row.warm && row.range),
+      'exact verified HAVE reconsiders the still-current skipped future without a new genuine request');
+  } finally { releaseMetadata?.(); keyWork.restore(); clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy(); }
+}
+
+test('owned warm exact HAVE wakes an idle skipped future through real Core mixed assembly', { timeout: 15000 },
+  t => cooperativeHaveReconsideration(t));
+test('owned warm exact HAVE native key delivery cannot spend logical cache authority time', { timeout: 15000 },
+  t => cooperativeHaveReconsideration(t, false, false, null, 40));
+test('owned warm exact HAVE cannot restart skipped work after pause', { timeout: 15000 },
+  t => cooperativeHaveReconsideration(t, true));
+test('owned warm exact HAVE withdrawal during final constructor cannot fall through to whole HTTP', { timeout: 15000 },
+  t => cooperativeHaveReconsideration(t, false, true));
+for (const mode of ['optional', 'genuine', 'reentrant']) test(`owned warm reconsidered setup decline ${mode} retains correct source ownership`, { timeout: 15000 },
+  t => cooperativeHaveReconsideration(t, false, false, mode));
+test('owned warm reconsidered contribution callback stop cannot bypass source ownership', { timeout: 15000 },
+  t => cooperativeHaveReconsideration(t, false, false, 'callback-stop'));

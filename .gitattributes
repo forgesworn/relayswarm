@@ -2,3 +2,7 @@
 docs/interop/*.patch -whitespace
 # Reviewed native patch hashes require identical bytes on every checkout.
 scripts/native-patches/*.patch text eol=lf -whitespace
+# Preserve the original CI receipt bytes used by its SHA-256 regression.
+test/fixtures/owned-warm-897-incomplete.json text eol=lf
+test/fixtures/owned-warm-precutoff-allocation-timer.json text eol=lf
+test/fixtures/owned-warm-pending-allocation-cleanup.json text eol=lf

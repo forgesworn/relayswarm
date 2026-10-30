@@ -10,6 +10,731 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Private LAN two-viewer field result for the size-aware build (30 October 2026)
+
+One authorised private attempt ran the exact b102ff4 SDK and worker on the
+unchanged public site, as two headless Chrome contexts on one M4 with native
+host candidates, controlled in-process signalling and a cold browser cache. No
+TURN, operator or public rendezvous was involved; the owner deferred the
+TURN-over-TLS route gate to a separate test and left every other gate as it was.
+Viewer 0 reached a trusted 3840x2160 frame in 3.899 s and the late joiner in
+10.613 s. Both played 340 s with zero stalls, player errors, dropped frames or
+waits, advanced 339.29 s of media each, passed a natural wrap with 83 s observed
+after it, and kept native sample gaps at or below 1.02 s. The late joiner
+accepted 13.63 % of its media from the leader (146,257,386 bytes) over a
+host-to-host link measured at 12.7 MB/s; its planner-selected startup futures
+were won by the existing cached and late peer races because the leader already
+held them. The leader accepted 1.91 % (21,021,971 bytes) from the late joiner,
+below the unchanged 5 % per-viewer gate, so the combined audit is RED on that
+one criterion and PASS on playback, observation and route evidence.
+
+An earlier labelled smoke under heavier machine and link load failed the late
+joiner's 12 s startup at 1.5 to 1.9 MB/s from the origin with zero peer bytes:
+peer-first has no wait budget during startup and the leader then held only the
+fragments the planner had to skip. That structural lead (peer-aware startup
+admission, link-aware upload pacing) is recorded with the packet; it is not
+built. This result is one Mac behind one link; it is not public, NAT, TLS
+relay route, physical phone or merge qualification.
+
+## Unreleased size-aware startup admission (30 October 2026)
+
+The private 4K failure below followed a request order of SN1, SN4, SN6 and
+SN7 under an advancing room target. The scalar planning lead treated every
+candidate as costing the last whole-load time, so the planner skipped two
+smaller reachable fragments, admitted the largest one, and its longer service
+raised the measured recovery requirement beyond what the remaining lifetime
+could cover. Startup now keeps one frozen same-origin service profile (first
+byte and body time of a verified complete source body, reported as
+`startupBuffer.sourceProfile`) and, when a candidate's origin has one, defers
+the skip decision until that candidate's own signed size is freshly authorised,
+projecting its service from the measured profile. Peer-delivered, cached
+same-instant, partial, aborted, non-200 or different-origin responses form no
+profile, and a later verified future without valid timing clears it, returning
+admission to the previous scalar rule. Parsed identity is still checked before
+authority; frozen windows, contiguous extensions, the one-hop-per-poll budget,
+reservations, release headroom and the original deadline are unchanged.
+
+An offline replay of the retained viewer-1 capture, using its catalogue sizes
+and measured SN1 timing, now requests SN1, SN5 and SN6 and releases before the
+deadline under the named conditional service rates; the scalar seed's earlier
+adverse scenario stays green, the slowest observed rate remains an honest
+failure, and the invalid-timing, peer, cache, mutation and other-origin
+controls preserve the previous policy. Unobserved fragment service costs are
+still assumptions. This is a logical scheduling change with synthetic bodies and
+always-current permits; it is not field throughput, decoded playback,
+contribution or device evidence, and fresh CI plus a new private field run
+remain required.
+
+## Unreleased refresh after whole-object capacity rejection (30 October 2026)
+
+A measured peer rate can fit one signed piece while remaining too slow for a
+whole object. That case previously kept rejecting peer-only work until the
+measurement expired, even after the existing refresh cooldown had elapsed.
+Genuine demand can now use that existing refresh opportunity on one captured
+holder. Stored measurements remain intact; the per-transfer trace explicitly
+identifies the calibration. Warm speculation is excluded, source HTTP still
+starts immediately, and the original cooldown, absolute peer deadline, resource
+limits, integrity checks and deferred credit remain unchanged.
+
+A controlled regression first failed on the previous source. With actual signed
+pieces and the committed Core, a simulated paced channel establishes a slow
+measurement, becomes faster, then refreshes after the original ten-second
+cooldown. Only the fully verified six-MiB winner earns accepted credit, and the
+following request uses its newly measured flow. This uses a logical controller
+clock and simulated channel pacing; it is not native-network throughput, a
+field contribution result, or a fix for the startup failure below. Fresh CI
+and field acceptance remain required for this source change.
+
+## Current private 4K startup failure (30 October 2026)
+
+At `f2ca77f`, all 21 required main CI jobs and both realtime jobs passed,
+including browser transport against live relays. A fresh two-viewer private M4
+field run on that exact SDK remains **RED**. Viewer 0 reached a trusted
+3840×2160 frame in 5.593 seconds. Viewer 1 never reached its first frame: its
+original twelve-second startup-manager deadline expired, followed by
+`fragLoadError`. The sustained observation and contribution tests never began.
+
+Viewer 1 verified 20,414,494 bytes, but these bodies did not form enough
+contiguous video ahead of the advancing room target. At two retained checkpoints,
+forward coverage was 717ms and 1089ms; both fall below even the original
+two-second minimum, as well as the measured 5496.25ms recovery requirement.
+Reducing that estimate would not justify release. The live future-ownership path
+did execute (`sourceYielded: 3`), but field performance benefit is unproved.
+The measured peer model also rejected whole-object transfers that did not fit;
+no faster peer capacity is established by this capture. A bounded manager replay
+reproduces the observed request order and deadline failure. Seeding the forecast
+with the first body's service duration conditionally helps, but another explicit
+rate scenario makes that candidate regress. Unobserved fragment service costs
+remain unknown, so that heuristic has not been adopted as a product fix.
+
+Both automatic private credential requests returned successful, valid leases.
+This does not qualify public visitors: the deployed public page has no issuer or
+TURN route configured, and its older SDK does not include the candidate's local
+candidate retry API. An independent authorised operator and actual public TLS
+connectivity, lease renewal and recovery checks remain necessary. The owner's
+paired Archy relay stays private; the temporary listener did not change it.
+
+All 32 sealed files were independently rehashed (1,805,381 bytes total; 622,958
+largest). Owned browser profiles, host and browser stages, rendered credentials
+and the archive were removed, with the paired relay and firewall unchanged.
+The new rejection is retained alongside all 22 earlier failed or incomplete
+receipts. Older physical iPhone evidence does not qualify this revision. No
+candidate has been deployed, and the full goal remains incomplete.
+
+## Unreleased fixture operation and metadata boundaries (30 October 2026)
+
+At `24bb6a7`, 15 required main jobs and both realtime jobs passed; five main
+jobs failed, including two dependent aggregates, and the required live-relay
+job skipped. The new late-NEW control conflated an original warm allocation
+with a later genuine cache-recovery allocation. A separate ordinary native
+positive safely declined at 26ms and completed six MiB from HTTP200, failing
+its strict206 assertion. Windows also failed complete-client-body and later
+cooperative source-path assertions. Its exact extra source row was not
+recorded, so the route and cause remain unknown. This run and all earlier
+failures remain RED; nothing is rescored.
+
+The setup proof now closes at the existing verified warm-body boundary before
+another genuine request begins. It retains the original timer, load, geometry
+and source-budget values, full current trace/RPC/I/O and original baseline.
+Ordinary native cases gain no wait or loader call. The strict validator stays
+byte-identical, and unresolved records still fail. The controlled NEW reply
+remains held through complete body verification, then is released before the
+subsequent genuine and repeat consumers. All later body/hash, deadline,
+callback, source-byte and accepted-once credit assertions remain mandatory.
+This is an operation-scoped setup proof, not a claim that the entire later
+session has no independent recovery work.
+
+The native comparison fixture now prepares real publisher signatures for its
+exact fixed context identities before loading/calibration. It preserves event
+content, identifiers and original expiry, calls the provider on each request,
+and retains native client key hashing, verification and Core work. It seeds no
+media, HAVE, timing model or SDK authorisation verdict. The actual public demo still
+signs commitments locally per request; this prepared supplier is a functional
+fixture, not a reproduction of that signing workload or a native performance
+benchmark. Publisher signing was measured separately on a local M1, not at the
+CI failure; it is not an established unique cause of the 26ms decline.
+
+Logical policy controls share the existing bounded segment-key digest observer:
+only exact-namespace SHA-256 inputs of at most 4096 bytes hold logical time while
+the real digest completes. Real inputs, results and rejections are retained;
+payload hashes and ordinary native clocks are unchanged. The original two-second
+native-work bound and forced 25ms decline/cancellation controls remain. A fixed
+40ms native key-delivery control first produced excess source-plus-peer bytes
+under the old logical clock, then passed with that metadata phase observed.
+This is a controlled scheduling contrast, not reconstruction of Windows' missing
+source row. Current `f2ca77f` CI passed; private field, public-operation and physical
+iPhone acceptance remain required. No candidate has been deployed.
+
+## Unreleased live future ownership (30 October 2026)
+
+The previous optional source election required a parsed VOD playlist. The demo's
+recorded-live playlist generator emits rolling windows without ENDLIST. A new
+two-SDK regression using the actual Hls parser first reproduced both viewers
+starting the same future whole-source request for `live: true`, while its VOD
+control elected distinct owners. Optional election now accepts explicitly
+parsed boolean live state, retaining ordinary loading when that state is unknown.
+Genuine live rendezvous, startup, source deadlines, resource bounds and credit
+rules are unchanged. The focused control verifies opposite future owners,
+actual HAVE reconsideration and mixed Core consumption after a live parser
+refresh. Its source/RTC are simulated and its controller clock is logical;
+this is functional evidence, not a field throughput or physical-phone result.
+
+An earlier actual private M4 field used preceding source `bdf0e80`, whose 21
+required main CI jobs and both realtime jobs passed. Both trusted 4K first frames
+arrived in 4.798s / 3.918s, but the field is **RED**: accepted peer media was
+4,038,216 / 98,304 bytes (0.392668% / 0.008865%), below the original 5% and eight-MiB
+requirements. Viewer 0 also recorded five stalls (12.5663s), six player errors,
+36 dropped frames and only 326.677077s media advance; viewer 1 advanced
+339.306767s with zero health events. Actual observation was 340000.164ms
+monotonic / 340035ms wall, with natural wrap plus 79.305s. Both observed HTTP
+captures are complete. Succeeded selected relay/TLS pairs existed at both
+boundaries, but connections changed; full-window route retention is unproved.
+Temporary resources and credentials were removed and the paired private relay
+and firewall were unchanged. The failed capture is retained without rescoring.
+
+Retained diagnostics show one mixed load finishing about 34ms beyond its fixed
+mixed-completion deadline; that reserve remains intact. No source yields or
+HAVE reconsiderations were observed in that field. These facts motivate the
+live-playlist correction but do not establish a unique stall cause or prove
+the correction improves field playback. Fresh current-source CI and private
+field qualification, independent public TURN operation and physical iPhone
+acceptance remain open. No new candidate has been deployed.
+
+## Unreleased reachable startup window (29 October 2026)
+
+Startup forecast skipping now preserves the last parsed future reachable within
+the original remaining lifetime at normal room-clock speed. Two already
+verified contiguous futures ahead of the target can use the existing fourth
+slot when their start remains reachable and their span is shorter than measured
+recovery. Admission estimates never substitute for fresh actual-target coverage
+and authority at release. Byte limits, serial requests and the original
+twelve-second/shorter-parent deadline remain unchanged. A host lookahead that
+changes the queued context cancels before authorisation or source loading.
+
+A logical scheduling regression first fails on the preceding source in all
+three feasible cases. It retains the later private test's observed geometry,
+SN1/4/8/9 service scalars and recovery requirement. Only the previously
+unrequested SN7 completion is hypothetical; the bodies are four-byte fixtures,
+not decoded media. Slow SN7 cases must still fail at the original deadline.
+All 216 warm/startup checks pass, including unverified/gapped/unreachable
+windows, aggregate byte and reservation refusal, and callback cancellation.
+Two earlier scheduling expectations now describe the intentional reachable
+window/fourth-slot behaviour while retaining their original parent limits
+and explicit actual-target recovery assertions.
+These controller checks do not establish throughput, useful peer contribution
+or physical-device playback. The subsequent private field observation below
+records the current runtime's measured result.
+
+## Private reachable-startup field observation (29 October 2026)
+
+Full [e2e CI](https://github.com/forgesworn/relayswarm/actions/runs/40964038776)
+and [realtime CI](https://github.com/forgesworn/relayswarm/actions/runs/40964038705)
+passed at `399ab4f`. Its runtime objects equal the compiled `a85f8134` candidate.
+The previously intermittent HTTP-renewal and browser credential-rollover checks
+passed in this run; their earlier failures remain unexplained.
+
+One fresh, restricted private Spry test on the M4 produced trusted 3840×2160
+first frames in 4.93 and 7.95 seconds. Both viewers completed 340.002 seconds
+of monotonic observation and 340.015 seconds of wall observation, advancing
+339.29 and 339.23 seconds through natural track wrap and another 79.8 seconds.
+Neither recorded post-qualification waiting, stalls, player errors or dropped
+frames. Automatic credentials and literal selected succeeded local relay/TLS
+and remote-relay pairs were observed at both original boundaries.
+
+The overall verdict remains **RED**. Accepted peer media was 294,912 and
+5,544,673 bytes: 0.02645% and 0.5054% of accepted peer plus loaded source media,
+below the original 5% and eight-MiB requirements. Viewer 1 also exceeded the
+HTTP recorder's 131,072 data-event cap; later body events were not aggregated,
+so its inclusive HTTP total remains unknown. These observations establish
+neither traffic savings nor a physical-phone, public-default or NAT result.
+The original failed receipt remains unchanged. All 32 sealed files were
+reverified; temporary relay, browser profiles, raw credential input and rendered
+secrets were removed, with the paired private relay and firewall unchanged.
+
+## Unreleased exact-HAVE reconsideration (29 October 2026)
+
+A focused two-SDK/Core fixture reproduces a missed optional opportunity:
+the elected owner verifies an object and delivers its exact HAVE, but an idle
+viewer that previously skipped that future starts no warm work. The same
+object then completes on genuine demand using 327,680 verified peer bytes and
+720,896 source-range bytes, with no duplicate whole GET. This uses simulated
+source and native RTC; it proves the source-policy opportunity, not field
+causality or throughput.
+
+Skipped futures now retain at most two metadata-only routing descriptors.
+An exact added HAVE can reconsider each once within its original deadline,
+through fresh context, authority, holder and resource checks. Deferred work
+keeps the one-shot marker. This adds no timer, source wait or playback credit;
+genuine demand remains independent. A fresh field measurement is still needed
+to establish whether this change meets the original contribution requirement.
+All 15 manager guards and the complete 231-test manager suite pass. Eight
+scoped SDK/Core controls pass, including idle mixed assembly with deferred
+credit, pause and constructor-time supply withdrawal, the earlier reciprocal
+owner case, full six-MiB main/Worker positives and capability fallbacks. These
+are functional controller/protocol checks, not native throughput measurements.
+
+The subsequent `cc6df86` e2e run remains failed: macOS passed 939 of 940
+checks, and the Windows mixed partition passed 46 of 47. A native local
+reproduction exposed a purely speculative HAVE retry falling back to a whole
+GET after its original 25 ms setup decline. The reciprocal protocol fixture
+deliberately held that unexpected whole body, so genuine demand later joined
+it and reached the unchanged parent timeout. That reproduction establishes
+the local mechanism; the original Windows log lacks that internal trace.
+
+Purely speculative reconsiderations now abandon work on mixed admission
+failure instead of duplicating the owner's completed body. Cancellation marks
+the outer row retired before abort callbacks can reenter genuine demand.
+Controlled tests first observed one unwanted whole GET, then zero with this
+change. Genuine promotion keeps normal fallback with the original reduced
+parent; callback-reentered genuine demand starts its own ordinary source path.
+Six focused cancellation controls and all 237 manager checks pass.
+
+The macOS failure records allocation replying before the setup cutoff, no
+START RPC or optional I/O, and the original timer firing afterwards. A separate
+strict captured-input proof recognises that ordering; the existing pending-RPC
+proof is unchanged. Its 54 hostile controls reject incomplete or contradictory
+inputs. An unchanged native Worker check subsequently completed exact mixed
+assembly and the original whole-body/hash/callback assertions. Neither that
+run nor the classifier rescored the earlier CI failure; its internal scheduling
+delay remains unknown.
+
+The reciprocal owner/mixed protocol fixture now uses an explicitly functional
+controller with its original payloads, deadlines and assertions. Its logical
+clock is installed before its SDK sessions so callback-driven stop can clean
+up those same timers. All six native six-MiB cases and both ordinary native
+warm callsites remain unchanged. The final 22-case selection passes, including
+those native cases, mandatory main/Worker assembly and the ownership/proof
+controls. These results still require fresh CI and field qualification.
+
+## Setup-proof and native CI scheduling correction (29 October 2026)
+
+The `a007c07` hosted run passed its reciprocal future-owner and existing
+main/Worker warm mixed positives. Its required CI verdict still failed:
+macOS rejected a protected setup decline that allocated and freed a Core
+transfer before any start or I/O; Ubuntu reached its ten-minute job limit
+although all reported test steps had passed. Those original failed/cancelled
+results remain unchanged.
+
+The test-only proof classifier now recognises that exact same-load pre-start
+allocation-abort shape. It still requires the original setup cutoff, all other
+current predicates, zero transfer starts, attempted ranges, peer requests and
+accepted credit, plus correctly reduced source deadlines. An immutable CI-input
+regression first fails with the old helper; 14 focused controls then pass,
+including 34 rejecting mutations, all six real-clock six-MiB cases and the
+mandatory actual Core/Worker mixed positive. Application code, clocks, budgets
+and the required actual range-transfer assertions are unchanged.
+
+Publisher tests now run separately on each original Ubuntu/macOS platform.
+The required per-platform checks require both the original native suite and
+publisher job to succeed, rejecting failed, cancelled, skipped or missing jobs.
+Original commands, platform coverage and job caps are retained; Windows
+partitions remain unchanged. In the `897927f` hosted run, Ubuntu and Windows
+required gates passed, along with both publisher jobs, browser playback,
+Core/package checks and realtime transport. The overall e2e verdict failed:
+one macOS warm/Worker positive required mixed admission even though its
+optional 25 ms setup timer had already selected whole-source recovery. That
+capture lacks enough timer and invocation metadata to prove a protected
+decline; it remains failed. No field result is qualified by these CI checks.
+
+The follow-up test-only correction separates mandatory mixed assembly from
+optional real-clock admission. Full six-MiB main/Worker positives still use
+the actual warm manager, commitments, Core and HTTP206, and require exact
+disjoint assembly with deferred once-only credit. Their explicitly functional
+controller clock yields to actual setup I/O before advancing policy timers;
+it is not elapsed-time or throughput evidence. Two separate real-clock cases
+require either full mixed assembly or complete same-load setup-decline proof,
+zero attempted ranges/peer requests/credit and an exact whole-source body
+within reduced original deadlines. A separate functional control holds an
+actual Worker reply and advances its logical scheduler to the original 25 ms
+boundary, checking fallback and rejecting 28 altered receipts. It makes no
+native elapsed-time claim. The incomplete original macOS input remains a
+rejecting fixture; six existing real-clock six-MiB tuples are unchanged.
+
+The `a85f8134` full hosted run failed two new test assumptions: macOS passed
+921 of 922 checks but its forced native-time control never observed the START
+reply it expected to hold; that optional setup window does not guarantee a
+START. Its exact internal branch is unknown. Windows base passed 601 of 602
+checks; checkout CRLF conversion changed the immutable JSON receipt's hash.
+The forced control now uses the explicitly functional scheduler described
+above, while ordinary real-clock checks remain unchanged. One file-specific
+Git attribute preserves the original LF receipt bytes and expected hash; an
+actual Git checkout with `core.autocrlf=true` reproduces the old mismatch and
+passes after that correction. The three affected controls, immutable negative
+and two mandatory assembly positives pass locally. The original hosted failures
+remain failed; a new full CI run is required. Product code and timing, original
+fixture timeouts and field thresholds are unchanged.
+
+The later `1206505` macOS run passed 921 of 922 checks. An older ACK controller
+fixture mixed mocked timers with real monotonic time and never observed its
+commit signal. A native delayed-timer specimen reproduces that fixture failure;
+a separate real-time guard control correctly rejects an expired 25 ms startup
+without calling the hook or renewing through late completion. Five logical
+short-deadline fixtures now advance their timer and monotonic clocks together.
+Their original parents and assertions remain; the ACK case additionally checks
+that ownership is live at 24 ms and aborted at 25 ms. All five controls and
+216 manager checks pass locally. These are controller and unit-level deadline
+proofs; the failed hosted verdict and field acceptance remain separate.
+
+At `39e28b1`, the complete macOS native gate passed. Two other hosted cases
+failed: Windows policy/session renewal was not fresh at its original issuance
+checkpoint, and the browser TURN-rollover journey observed refreshed credentials
+but no accepted peer media in its latest swarm generation. Each unchanged local
+journey subsequently passed once. Those runs do not explain or rescore either
+hosted failure, and no product correction is claimed. Bounded test diagnostics
+now retain native request/renewal timing and redacted per-generation demand,
+media-state and pending-source history. Original authority, delays, media,
+predicates and supervisor limits remain unchanged; hosted diagnosis is pending.
+
+## Unreleased cooperative VOD futures (29 October 2026)
+
+When both warm-ahead and buffered mixed ranges are enabled on explicit main
+VOD, optional future source work now chooses a per-key contributor rather than
+always starting the same whole fetch on every viewer. Only current connected,
+serving, admitted range peers participate; unavailable local Core/Worker paths
+retain the existing warming behaviour. Exact cached holders can still feed
+mixed delivery. Startup coverage and genuine or already-promoted demand do
+not wait for owner agreement, and all original budgets and credit rules remain.
+
+A two-SDK regression first records both viewers starting the same future whole
+source before either has advertised that object. With the new policy, distinct
+future owners supply reciprocal actual Core mixed transfers, with disjoint
+source slices and verified peer bytes, exact object hashes and no duplicate
+whole future source or repeated accepted credit. Source and native transport
+are simulated; sessions, commitments, protocol bytes, Core verification and
+consumption are real. Genuine zero-wait eligibility comes from actual delayed
+source callbacks and measured recovery, without seeding rates or clocks.
+The full warm-manager suite passes 199 checks; 20 focused SDK checks also pass,
+including existing framing and main/Worker mixed positives. These local checks
+are not a field-throughput or public/physical-device qualification.
+
+## Latest private playback and contribution result (29 October 2026)
+
+The later `a007c07` cooperative-futures candidate failed its fresh private
+two-browser test during startup. Viewer A reached a trusted 3840x2160 frame in
+4.51 seconds. Viewer B exhausted its original twelve-second startup barrier
+without presenting a frame; the required 340-second observation never began.
+Its source GETs completed, but verified media did not safely cover the moving
+target plus recovery headroom. The cooperative owner policy is excluded while
+startup is buffering, so this is not evidence that source ownership caused the
+failure. The immutable capture and strict audit remain failed. Temporary
+credentials, profiles and services were cleaned; the paired private relay was
+preserved. No sustained contribution, TURN-route or physical-phone acceptance
+is claimed for that run.
+
+### Earlier sustained private test
+
+The `f5c0760` runtime candidate completed a real two-browser private test with
+340.001 seconds of wall observation and 340.001 seconds of monotonic observation
+(rounded). Each player advanced 339.278 seconds. First 3840x2160 frames arrived
+in approximately 4.8 and 6.0 seconds. Both recorded zero post-qualification
+waiting, stalls, errors and dropped frames, including a natural wrap followed
+by 79.5 seconds of playback. Both initially selected local relay/TLS and literal
+remote-relay candidates with succeeded pairs.
+
+The overall result remains failed. Accepted peer media was 5,788,148 bytes
+(0.519%) and 884,736 bytes (0.0802%), below the unchanged 5% and 8 MiB per-viewer
+requirements. One final selected pair was `in-progress`, failing the required
+final succeeded-pair proof despite its connected PC/ICE/SCTP/DTLS. The driver
+therefore failed its final assertion after the observation. These results are
+private desktop-browser evidence, not public operator, physical iPhone or
+source-traffic savings qualification. Temporary test resources were removed;
+the paired private relay was preserved.
+
+Both viewers completed real range responses, so the low contribution does not
+show a global range-transfer failure. Of 109 matching first whole-source
+objects, 97 started on both viewers before either response completed. Incomplete
+retained HAVE and warm-reuse history prevents a complete causal attribution.
+The next local candidate coordinates optional future source ownership while
+preserving immediate genuine demand and the original deadlines. Its local
+policy controls do not qualify the field contribution target.
+
+## Unreleased local-candidate retry notification (29 October 2026)
+
+An explicit host notification can retry remembered local no-candidate gather
+failures after the host makes a new configuration available to its future
+connection factory. The bounded one-shot API retains ordinary current
+admission, capacity and discovery checks. It does not update existing peers or
+release unrelated cooldowns, and it adds no timer or automatic presence retry.
+
+A regression first fails for the missing API after a real SDK no-candidate
+gather failure. Twenty-four focused signalling controls then pass, including
+future-constructor configuration, incoming and outgoing failures, same-millisecond
+generic cooldown replacement, repeated notification, connected links,
+admission revocation, timeout/refusal preservation and stop across an awaited
+admission. Two additional regressions first reject the old treatment of an
+unreadable native description as a definite empty gather; after correction,
+both retain the ordinary cooldown and exact original SDP read count. Native RTC
+and relay transport boundaries are simulated; signed and
+encrypted SDK/session handling is real. This unit proves local lifecycle
+behaviour, not browser ICE, field playback, useful contribution or release
+qualification. Earlier fixture setup failures and field failures remain retained.
+
+## Unreleased cached setup diagnostics (29 October 2026)
+
+Cached mixed setup now identifies a missing exact captured HAVE and an
+unavailable range engine at their existing pre-Core return branches. Cached
+handoff load IDs link to their earlier mixed owner. The change adds bounded
+local diagnostic fields only; transport, authority, scheduling, deadlines,
+selection and accepted credit retain their existing behaviour.
+
+Regressions first fail for the missing refusal row and initial claim counts.
+Ten focused Core controls pass after the diagnostic repair, including
+main/Worker actual HTTP206 assembly, absent versus withdrawn exact-HAVE claims,
+refusal without a new transfer, unchanged cached deadlines, and existing
+getter/throwing-sink checks. A repaired private capture preserves the warm role,
+initial predicate counts and linked load history within its original byte limits;
+its 13 controls pass. These checks establish observation behaviour, not a field fix.
+
+## Current-source private field diagnostic (29 October 2026)
+
+One further full-context Core run passes 876 checks with zero failures and one
+Core-inapplicable JavaScript-selection skip. Both warm main-thread and Worker
+HTTP206 positives pass. The earlier intermittent Worker whole-source failure
+does not recur; its cause remains unexplained and its failed receipt is retained.
+
+A fresh private two-viewer trial uses the exact current build. Both browsers
+verify all four substituted module bodies and reach actual 3840x2160 frames in
+4.97 and 5.04 seconds. Both receive separate short-lived credentials and connect
+native ICE/SCTP within 0.92 seconds. The strict readiness stage nevertheless
+fails: one transport-selected remote candidate remains `prflx`, while the
+required type is `relay`. Its local relay/TLS path, DTLS and candidate pair
+succeed; this does not satisfy the unchanged remote-relay gate. SDP messages
+were sent with one candidate before gathering completed, but no retained
+candidate-membership evidence proves why the native type differs.
+
+The 340-second observation never starts. Final reports record zero accepted
+peer bytes on both viewers, and both complete HTTP captures contain no Range
+requests or HTTP206 responses. One viewer records a 47.5 ms seek-associated wait
+while 5.009 seconds remain buffered; it resumes before the nearby source body
+completes. The other records no health event. There is no reproduced eight-second
+discard/refetch episode. A retained mixed entry omits the warm-owner role and
+some refusal rows, so it cannot establish that warm-owned mixed delivery ran.
+No coordination or underflow cause is inferred from those missing observations.
+
+All 32 captured files and 17 run inputs reverify within the original limits.
+Cleanup removes the temporary relay/issuer, exact browser profiles and stages,
+rendered private material and archive, while preserving the paired relay and
+firewall. This is a failed private diagnostic, not sustained playback,
+public-operator, physical-phone or traffic-saving qualification. The next
+measurement must retain the existing warm-role/refusal fields and privately
+compare candidate membership without publishing addresses or SDP.
+
+## Draft steady warm mixed delivery (29 October 2026)
+
+The draft now lets eligible steady future work choose disjoint source ranges
+and verified peer pieces before a whole GET starts, when both existing opt-ins
+are enabled. Startup work keeps its existing transport. The internal work owner
+retains the original speculative expiry and cancellation signal; promotion
+keeps the original parent deadline. Accepted peer credit waits for genuine
+consumption of the complete verified object.
+
+All 193 warm/startup checks pass. Controlled passing main-thread and
+committed-WASM Worker warm mixed runs use 688,128 verified peer
+bytes and 5,603,328 HTTP206 body bytes per 6 MiB target, with no whole GET. Credit remains zero
+before genuine consumption and is not duplicated by repeated reuse. The legacy
+whole-source versus genuine-mixed comparison also passes. Explicit synthetic
+pacing and separately accounted calibration/lead bodies make these policy
+checks, not a sustained playback, physical-device or public-operator result.
+
+Eighteen additional SDK controls pass on the main thread and committed Worker.
+They cover lost ownership during authority waits, expiry, pause, abort,
+revocation, stale range replies, missing capability, valid promotion beyond the
+speculative deadline and shorter original parents. The internal descriptor is
+modelled in those controls; actual warm-engine and HTTP assembly proofs are
+separate. Twenty-five existing mixed fallback/deadline controls also pass.
+
+Review exposed a late-promotion bug: if JavaScript delayed the timer callback,
+a first genuine request at or after eight seconds could clear an expired
+speculative timer. Both exact-boundary and boundary-plus-one regressions fail
+before the warm-engine correction. The SDK also rejects late promotion
+provenance. Valid earlier promotion preserves the original parent timeout.
+The original Linux CI reservation assertion is retained as failed evidence;
+its fixture now holds the next future explicitly, checks its reservation and
+verifies zero reservations after pause instead of assuming global quiescence.
+
+The first broad Core swarm run records 874 passes, two scope-proof failures
+and one JavaScript-selection-only skip. Ordinary loads were emitting an extra
+warm-only trace field; the strict scope validator correctly rejected that
+shape. The SDK now emits that field only for actual warm owners. Both failing
+cases and the warm checks pass in a new 28/28 selection without changing the
+validator. The complete corrected-source rerun records 875 passes, one
+failure and that same skip: its warm Worker target unexpectedly starts whole
+HTTP instead of ranges. The failure has no branch trace, so its cause remains
+unknown. A bounded assertion payload now retains scope/transfer/HTTP and Worker
+RPC evidence without relaxing the HTTP206 requirement or deadlines. One isolated
+diagnostic run passes actual assembly; it neither explains nor rescinds the
+full-run failure. No further blind reruns were used to claim a fix. A fresh
+finite field run, physical-device acceptance and a public operator remain
+pending. No experimental SDK is deployed; this PR is not ready to merge.
+
+## Unreleased promoted-source admission (29 October 2026)
+
+A promoted genuine source no longer automatically admits a second speculative
+HTTP request. Its consumer must have measured recovery headroom. Admission
+rechecks after authority and reservation callbacks; missing context, unavailable
+headroom and lifecycle changes leave new speculation deferred. The existing
+source keeps its parent deadline. Deferred metadata retains its original
+eight-second expiry and recovers the current parsed loader fields before
+transport starts. Genuine completion or cancellation resumes admission without
+polling. Cache, object and reservation limits remain unchanged.
+
+Two low-headroom regressions fail before this correction and pass afterwards.
+A separate actual-SDK regression catches missing loader fields during deferral
+and passes after restoring them from current parsed metadata. The final focused
+selection passes 20/20; all 171 warm/startup checks pass with the committed Core
+selected where applicable. Direct engine controls remain JavaScript policy
+tests. Current main-thread and committed-WASM Worker controls both complete
+actual disjoint HTTP206 and verified peer assembly.
+
+A controlled real-Core comparison retains the legacy whole-source control:
+with mixed ranges disabled, the warm/coalesced target uses one 6 MiB whole GET
+and accepts no peer bytes;
+the otherwise eligible genuine target uses 5,603,328 HTTP206 body bytes plus
+688,128 verified peer bytes, with no target whole GET. Both arms use the same
+explicit synthetic pacing, media geometry and deadlines; calibration and lead
+traffic are accounted separately. This is policy evidence, not a field speed or
+traffic-saving qualification. Warm mixed planning must own its source ranges
+before a whole GET starts. The draft implementation described above addresses that path; it does not
+establish a sustained playback improvement. The draft remains unqualified.
+
+## Unreleased moving-room startup admission (29 October 2026)
+
+Additional composition controls exercise steady warming after startup release,
+deferred consumption credit, cached reuse and pause cancellation. A separate
+combined-options integration case explicitly asserts the committed Core is
+ready and verifies a warmed object's HAVE advertisement, upload and local reuse.
+The focused eight-control selection passes with the correct Core environment;
+direct warm-engine controls remain JavaScript policy tests. This is not a new
+full-suite run or mixed-transfer performance qualification.
+
+A further actual-Core overlap control waits for the exact future object's peer
+request before completing HTTP. On an explicitly ordered, reliable fixture
+channel it verifies one HTTP success, the matching peer cancellation and drain
+boundary, continued HAVE advertisement and local reuse without peer credit.
+The focused nine-control selection passes. A separate unknown-reliability
+fixture closes deliberately when its active request is aborted: HTTP warming
+still verifies, but that closed link cannot receive HAVE. This explains the
+controlled diagnostic's missing announcement; the original timing is not
+retained, and its failed result remains unchanged. No runtime change or field
+performance improvement is established by these controls.
+
+When the original fragment is obsolete, merely selecting metadata ahead of the
+room target no longer freezes a window before it passes the existing recovery
+and verified-service projection. Freezing follows successful reservation and
+current ownership; a cancellation during that check stops before future HTTP.
+Verified original coverage, contiguous fourth-slot extensions and already
+admitted windows retain their behaviour. Deadlines and capacity limits are
+unchanged.
+
+A controlled moving-target regression fails the original twelve-second deadline
+before the fix and releases at 9.91 seconds afterwards. Captured scalar inputs
+are identified separately from synthetic one-second services for unrequested
+fragments; this is not a field counterfactual. All 149 warm/startup tests pass.
+Four older fixture starting positions now make their claimed windows genuinely
+admissible; their recovery requirements, durations, budgets and assertions remain.
+The existing logical-policy held-allocation test also now requires a matching
+real Worker reply before advancing its policy clock, then verifies the exact
+25 ms fallback, unchanged budgets and retirement without credit or a leaked lease.
+This is policy coverage, not elapsed-performance evidence.
+
+Hosted checks on the preceding `b77f9c4` head passed the macOS and Linux native
+jobs, Rust and interoperability checks. The low-latency browser job failed,
+the Windows native job was cancelled, and dependent live-relay coverage was
+skipped. The browser capture stalls even with peers disabled and
+later records playlist HTTP500s; the first stall precedes those responses, and
+the underlying server exception was not retained. Warm/startup and mixed ranges
+were disabled in that fixture. Its failure remains unresolved.
+
+A fresh mixed-disabled control of the admission fix reached both first 4K
+frames in 7.1 and 5.6 seconds, but sustained playback failed badly: the final
+reports record 30/25 stalls totalling 167.1/95.6 seconds and no accepted peer
+media. Initial Hls underflows preceded automatic native-HLS fallback. Both
+players then used recorded VOD without a RelaySwarm adapter, so later HTTP206s
+are not evidence of SDK mixed transfers. This is a failed field result, not a
+performance qualification. Physical-device and public-operator gates remain.
+
+A subsequent private two-viewer candidate enables both steady warming and
+buffered mixed ranges against the updated website. First 4K frames arrive in
+4.7 and 8.1 seconds; cumulative native observations record zero waits, stalls,
+player errors or dropped frames, including a track wrap and at least 79 seconds
+afterwards. Both retain the Hls/MediaSource adapter. This is an unmatched
+diagnostic, so it does not isolate which option or source conditions produced
+that healthy playback.
+
+The overall candidate still fails. Accepted peer media is only 0.044% and
+0.118%, with maximum reported verified TLS-route media of 0.47 and 1.22 MiB,
+below the unchanged 5% and 8 MiB requirements. The start route capture records
+nominated, connected relay/TLS pairs still in the ICE `in-progress` state;
+the final pairs succeed, but the required start proof is missing. Monotonic
+observation is 340002 ms while wall observation is 339996 ms, below its separate
+340000 ms minimum. The failed capture remains unchanged. The temporary issuer,
+relay, browser profiles and rendered credentials were removed, and the paired
+private relay and firewall are unchanged. No experimental SDK was deployed.
+
+A separate forty-second diagnostic retains bounded channel-control and warm
+cache observations. Both start TLS proofs succeed; one ordered, reliable
+channel per viewer stays open. Three observed cancellations receive matching
+EOF within 393, 543 and 2241 ms. This does not explain the earlier closures.
+Warm reuse reaches about 110/155 MB, with no verified or consumed peer bytes
+from warming. Of 29/34 SDK loads, 22/27 are marked warm-ahead, including the
+held startup originals. Every retained transfer finish is peer-only, and the
+HTTP captures contain no ranges: no origin-backed mixed transfer ran in this
+episode, although peer piece probes and refills did run.
+
+The forty-second run still records two stalls, two player errors and fifteen
+dropped frames on one viewer; the other records zero. Both accept no peer
+media. One speculative source request reaches its eight-second cap after
+receiving 5.44 MB, then a genuine whole-object refetch overlaps a stall. That
+observed duplication warrants a controlled ownership and scheduling test; it
+does not justify increasing the cap or identify a complete field fix. The
+diagnostic stops intentionally and cannot pass the original 340-second gate.
+Its temporary resources are removed and its evidence remains separate from
+the earlier full observation.
+
+## Unreleased room-start publication boundary (29 October 2026)
+
+An optional startup commit hook now requires verified coverage strictly above
+the measured recovery requirement before publication, including after awaited
+authority checks. Exact equality cannot survive a positive acknowledgement
+delay once the room clock advances. No-hook and post-acknowledgement validation
+retain their existing minimum-headroom rule and original deadlines.
+
+A controlled regression reproduces the prior twelve-second startup failure and
+releases once at 7.91 seconds after the correction. Its first two source service
+times reproduce captured timings; subsequent one-second services and a ten-ms
+acknowledgement are explicit synthetic inputs. All 146 warm/startup checks pass.
+This is local regression evidence, not a new field or physical-device result.
+
+The latest sustained two-viewer private 4K diagnostic still fails acceptance:
+one viewer recorded four waits totalling 0.877 seconds, three player errors and
+2.16% accepted peer media; the other accepted none. A later mixed-disabled
+control failed startup and motivated this boundary correction. A fresh
+mixed-disabled control with the correction started one viewer in 6.4 seconds,
+but that viewer recorded three waits totalling 5.159 seconds and the other
+reached the unchanged startup deadline without a frame. This does not isolate
+the remaining problem to mixed transfers or establish sufficient source cadence.
+
+The test classifier now recognises the exact Core-reply setup rejection before
+any transfer command is applied. An immutable actual CI receipt and 32 hostile
+mutations cover this zero-I/O branch; the original failed run remains failed.
+The bounded integration selection remains red at 14/15: its held-allocation
+case did not observe the required RPC before its fixture timeout, and fallback
+completion was not captured. The branch remains draft; sustained playback,
+useful contribution, independently operated public credential issuing and
+physical iPhone acceptance remain open. Production and the paired private
+relay are unchanged.
+
+A subsequent diagnostic-only attempt retains that held-case failure and records
+setup expiry before allocation, zero RPCs/ranges/peer requests, and one successful
+whole-source fallback callback. It explains that attempt without satisfying the
+required held-RPC coverage or changing its original timeout.
+
+A separate source-only Chrome probe on the same test Mac fetched four complete,
+catalogue-hash-verified objects over HTTP/3 in 0.68–1.50 seconds each, totalling
+24,331,115 bytes. It used no SDK, player or video decoding. Different objects,
+request order and run time prevent a matched comparison with playback; this
+point-in-time observation does not identify the field bottleneck.
+
 ## Unreleased first-candidate SDP gathering (28 October 2026)
 
 The browser loader retains its 1.2-second gathering soft cap when local offer

@@ -1006,18 +1006,19 @@ test("OFF followed by failed session validation remains off and marks authority 
 
 // Only the policy/session transport is real here. The maintained bundled client
 // runs with fixture media/swarm, real issuance clocks and no browser process.
-async function policyHTTP(t, { inlinePolicySession = false, boundedH1 = inlinePolicySession } = {}) {
+async function policyHTTP(t, { inlinePolicySession = false, boundedH1 = inlinePolicySession, observeTiming = false } = {}) {
   const state = { phase: "bootstrap", policyDelay: 0, sessionDelay: 0, holdSession: false, sessionStatus: 200, policyAfterSessionIngress: false,
     policy: { mode: null, revision: 0, telemetry: false },
     session: { v: 1, swarmId: "old", streamEvent: { id: "old" }, relays: [], manifest: "/media/index.m3u8", commitmentEndpoint: "/commitment" } };
   if (inlinePolicySession) Object.assign(state.session, { deliveryPolicyEndpoint: "/delivery-policy.json?session=1", deliveryPolicySession: "inline-v1" });
-  const records = [], open = new Set(), timers = new Set(), gatedPolicies = new Map(); let p;
+  const records = [], clientRecords = [], open = new Set(), timers = new Set(), gatedPolicies = new Map(); let p, clientDropped = 0;
   const agent = boundedH1 ? new http.Agent({ keepAlive: true, maxSockets: 2 }) : null;
   const server = http.createServer((request, response) => {
     const route = request.url === "/delivery-policy.json" || request.url === "/delivery-policy.json?session=1" ? "policy" : request.url === "/session.json" ? "session" : null;
     if (!route) { response.writeHead(404).end(); return; }
     const record = { route, phase: state.phase, httpVersion: request.httpVersion, arrived: performance.now(), ended: null, closed: null };
     records.push(record); open.add(response); let timer;
+    if (observeTiming) { record.finished = null; response.once("finish", () => { record.finished = performance.now(); }); }
     response.once("close", () => { open.delete(response); record.closed = performance.now(); clearTimeout(timer); timers.delete(timer); gatedPolicies.delete(record); });
     if (route === "session") for (const [policy, send] of gatedPolicies) if (policy.phase === record.phase) { gatedPolicies.delete(policy); send(); }
     if (route === "session" && state.holdSession) return;
@@ -1036,10 +1037,11 @@ async function policyHTTP(t, { inlinePolicySession = false, boundedH1 = inlinePo
   t.after(async () => {
     p?.close(); agent?.destroy(); for (const timer of timers) clearTimeout(timer); for (const response of open) response.destroy(); gatedPolicies.clear();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    if (observeTiming) t.diagnostic(JSON.stringify({ kind: "policy-http-owned-cleanup", openResponses: open.size, serverListening: server.listening }));
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const fetchImpl = agent ? (url, init) => new Promise((resolve, reject) => {
+  const transport = agent ? (url, init) => new Promise((resolve, reject) => {
     const request = http.get(new URL(url, origin), { agent, signal: init.signal }, response => {
       const chunks = []; let size = 0;
       response.on("data", chunk => { size += chunk.length; if (size > 65536) response.destroy(new Error("Policy fixture response exceeded its bound.")); else chunks.push(chunk); });
@@ -1049,8 +1051,20 @@ async function policyHTTP(t, { inlinePolicySession = false, boundedH1 = inlinePo
     });
     request.on("error", reject);
   }) : (url, init) => fetch(new URL(url, origin), init);
+  const fetchImpl = !observeTiming ? transport : (url, init) => {
+    const row = clientRecords.length < 32 ? { route: url === "/session.json" ? "session" : "policy",
+      phase: state.phase === "bootstrap" || state.phase === "delayed" ? state.phase : "other",
+      issuedAtHostMs: performance.now(), issuedAtClientMs: p?.context.performance.now() ?? null,
+      settledAtHostMs: null, settledAtClientMs: null, outcome: null } : null;
+    if (row) clientRecords.push(row); else clientDropped++;
+    const settle = outcome => { if (row) { row.settledAtHostMs = performance.now(); row.settledAtClientMs = p?.context.performance.now() ?? null; row.outcome = outcome; } };
+    let pending;
+    try { pending = transport(url, init); } catch (error) { settle("throw"); throw error; }
+    pending.then(() => settle("fulfilled"), () => settle("rejected"));
+    return pending;
+  };
   p = await page(new Map(), { realClock: true, fetchImpl });
-  return { p, state, records, open };
+  return { p, state, records, open, clientRecords, clientDropped: () => clientDropped };
 }
 
 test("real HTTP inline renewal succeeds without entering a withheld separate session endpoint", { timeout: 3000 }, async t => {
@@ -1072,17 +1086,31 @@ async function waitForHTTP(predicate, ms = 1500) {
 }
 
 test("real HTTP pair completes within the existing issuance overlap", { timeout: 12000 }, async t => {
-  const f = await policyHTTP(t), { p, state, records } = f;
+  const f = await policyHTTP(t, { observeTiming: true }), { p, state, records } = f;
   p.element("mode").value = "peer-first"; p.element("upload").checked = true; await p.submit();
   const active = p.fixture.swarms.at(-1), count = p.fixture.swarms.length;
   assert(await active.options.reserveUploadBytes(1234)); active.uploaded = 1234;
   const report = p.context.window.relaySwarmDemo.report();
   const issuance = report.policyRenewal.records.filter(x => x.outcome === "accepted").at(-1).issuedAtMs;
   state.phase = "delayed"; state.policyDelay = state.sessionDelay = 2000;
-  const polls = new Set(), interval = setInterval(() => { const pending = p.poll(); polls.add(pending); pending.then(() => polls.delete(pending), () => polls.delete(pending)); }, 2000);
+  const pollTimes = [], polls = new Set(), interval = setInterval(() => {
+    const row = { issuedAtMs: p.context.performance.now(), settledAtMs: null, result: null };
+    if (pollTimes.length < 8) pollTimes.push(row);
+    const pending = p.poll(); polls.add(pending); pending.then(value => {
+      row.settledAtMs = p.context.performance.now(); row.result = value === true; polls.delete(pending);
+    }, () => { row.settledAtMs = p.context.performance.now(); row.result = false; polls.delete(pending); });
+  }, 2000);
   try {
     await delay(Math.max(0, issuance + 5300 - p.context.performance.now()));
     const current = p.context.window.relaySwarmDemo.report();
+    t.diagnostic(JSON.stringify({ kind: "policy-http-original-overlap-checkpoint", clientAtMs: p.context.performance.now(), hostAtMs: performance.now(),
+      initialIssuanceAtMs: issuance, initialExpiryAtMs: issuance + 5000, checkpointAtMs: issuance + 5300,
+      policyDelayMs: state.policyDelay, sessionDelayMs: state.sessionDelay, pollingMs: 2000,
+      pollTimes, clientRecords: f.clientRecords, clientDropped: f.clientDropped(),
+      clientSettleScope: "Native fetch promise settlement; body completion is in controlTimings. Host and page clocks have different origins.",
+      serverRecords: records.slice(0, 32).map(row => ({ route: row.route, phase: row.phase === "bootstrap" || row.phase === "delayed" ? row.phase : "other",
+        arrivedAtHostMs: row.arrived, sentAtHostMs: row.ended, finishedAtHostMs: row.finished, closedAtHostMs: row.closed })),
+      serverDropped: Math.max(0, records.length - 32), policyRenewal: current.policyRenewal, controlTimings: current.controlTimings }));
     assert.equal(current.policyRenewal.fresh, true, "Sequential policy+session latency must not exhaust the unchanged5s issuance authority");
     assert.equal(p.element("upload").checked, true); assert.equal(p.fixture.swarms.length, count); assert.equal(active.stopped, undefined);
     assert.equal(current.uploadBudget.spent, 1234);
@@ -1091,6 +1119,7 @@ test("real HTTP pair completes within the existing issuance overlap", { timeout:
     assert(firstPolicy && firstSession && firstSession.arrived < firstPolicy.ended, "Session must reach actual HTTP while its paired policy is still withheld");
   } finally {
     clearInterval(interval); p.close(); await Promise.allSettled([...polls]); await waitForHTTP(() => f.open.size === 0);
+    t.diagnostic(JSON.stringify({ kind: "policy-http-overlap-finally", pendingPolls: polls.size, openResponses: f.open.size }));
   }
 });
 
@@ -1202,10 +1231,10 @@ test("broadcast availability: captured and unresolved origin keys are emitted be
     const swarm = transform("swarm", original.replaceAll("\n", eol)).source.replaceAll("\r\n", "\n");
     const peer = transform("peer", await readFile(new URL("src/browser/peer-link.mjs", ROOT), "utf8")).source
       .replace(/^import[^\n]+\n/u, "").replace("export class PeerLink", "class PeerLink");
-    const knownStart = swarm.indexOf("              // Publish retained source bytes before Hls synchronously disposes");
-    const unknownStart = swarm.indexOf("                  const key = await keyPromise;");
-    const snippets = [swarm.slice(knownStart, swarm.indexOf("              if (!finishOrigin()) return;", knownStart)),
-      swarm.slice(unknownStart, swarm.indexOf("\n                }\n              });", unknownStart))];
+    const knownStart = swarm.indexOf("            // Publish retained source bytes before Hls synchronously disposes");
+    const unknownStart = swarm.indexOf("                const key = await keyPromise;");
+    const snippets = [swarm.slice(knownStart, swarm.indexOf("            if (!finishOrigin()) return;", knownStart)),
+      swarm.slice(unknownStart, swarm.indexOf("\n              }\n            });", unknownStart))];
     for (const known of [true, false]) for (const retain of [true, false]) {
       let tick = 0, sends = 0;
       const observation = createObservation(() => tick++, 1000), context = { frag: { sn: 1, cc: 0, level: 0 } };
