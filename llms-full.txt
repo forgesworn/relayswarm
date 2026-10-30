@@ -2394,6 +2394,22 @@ sample, or `null` when unavailable. Failed, cancelled, stale and partial loads
 do not train it; ending startup clears it. A new sample cannot move an already
 selected future window while the actual target remains before that window.
 
+When a verified same-origin source body also carries strictly ordered
+first-byte and completion times, startup keeps one frozen service profile
+(`metrics().startupBuffer.sourceProfile`: `size`, `ttfbMs`, `bodyMs`, or `null`).
+The original response supplies the first profile after its own verification;
+each later verified future replaces it, and a verified future without valid
+same-origin timing clears it. Peer-delivered bytes, cached same-instant replies,
+partial, aborted, non-200 or different-origin responses never form one. With a
+profile for a candidate's origin, the skip decision waits for that candidate's
+fresh signed size and projects `ttfbMs + bodyMs * size / profile.size` in place
+of the last scalar sample; parsed identity is still checked before authority,
+and frozen windows, verified contiguous extensions, the one-hop-per-poll
+budget, reservations, release headroom and the original deadline are unchanged.
+A candidate held because the poll's hop is spent returns to the queue as
+metadata with its original deadline. This projection is a scheduling estimate
+from one measured transfer, not a throughput guarantee.
+
 The optional `startupBufferCommit` function defaults to `null` and requires
 `startupBufferTarget`. It runs once after the encoded reservoir passes the
 readiness checks, before held callbacks or consumed-media credit reach HLS.
@@ -3255,6 +3271,35 @@ The [changelog](https://raw.githubusercontent.com/forgesworn/relayswarm/main/CHA
 the [installation guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
+
+## Unreleased size-aware startup admission (30 October 2026)
+
+The private 4K failure below followed a request order of SN1, SN4, SN6 and
+SN7 under an advancing room target. The scalar planning lead treated every
+candidate as costing the last whole-load time, so the planner skipped two
+smaller reachable fragments, admitted the largest one, and its longer service
+raised the measured recovery requirement beyond what the remaining lifetime
+could cover. Startup now keeps one frozen same-origin service profile (first
+byte and body time of a verified complete source body, reported as
+`startupBuffer.sourceProfile`) and, when a candidate's origin has one, defers
+the skip decision until that candidate's own signed size is freshly authorised,
+projecting its service from the measured profile. Peer-delivered, cached
+same-instant, partial, aborted, non-200 or different-origin responses form no
+profile, and a later verified future without valid timing clears it, returning
+admission to the previous scalar rule. Parsed identity is still checked before
+authority; frozen windows, contiguous extensions, the one-hop-per-poll budget,
+reservations, release headroom and the original deadline are unchanged.
+
+An offline replay of the retained viewer-1 capture, using its catalogue sizes
+and measured SN1 timing, now requests SN1, SN5 and SN6 and releases before the
+deadline under the named conditional service rates; the scalar seed's earlier
+adverse scenario stays green, the slowest observed rate remains an honest
+failure, and the invalid-timing, peer, cache, mutation and other-origin
+controls preserve the previous policy. Unobserved fragment service costs are
+still assumptions. This is a logical scheduling change with synthetic bodies and
+always-current permits; it is not field throughput, decoded playback,
+contribution or device evidence, and fresh CI plus a new private field run
+remain required.
 
 ## Unreleased refresh after whole-object capacity rejection (30 October 2026)
 

@@ -34,11 +34,15 @@ async function fixture(t, options = {}) {
     stats = { loaded: 0, loading: { start: 0, first: 0, end: 0 } };
     load(context, config, callbacks) {
       this.context = context;
-      const row = { context, config, callbacks, loader: this, aborted: false, completed: false, started: performance.now(), finish: (body = bytes) => {
+      // options.bodies(sn) gives each fragment its own signed body; options.firstByteMs
+      // reports a first byte that long after the start (never after the end).
+      const sourceBody = options.bodies ? options.bodies(context.frag.sn) : bytes;
+      const row = { context, config, callbacks, loader: this, aborted: false, completed: false, started: performance.now(), finish: (body = sourceBody) => {
         if (row.aborted) return;
         clearTimeout(row.parentTimer);
         row.completed = true;
-        Object.assign(this.stats, { loaded: body.length, total: body.length, loading: { start: row.started, first: row.started, end: performance.now() } });
+        const end = performance.now(), first = options.firstByteMs === undefined ? row.started : Math.min(end, row.started + options.firstByteMs);
+        Object.assign(this.stats, { loaded: body.length, total: body.length, loading: { start: row.started, first, end } });
         callbacks.onSuccess({ url: context.url, data: body.slice().buffer, code: 200 }, this.stats, context, null);
       }, fail: error => {
         if (row.aborted || row.completed) return;
@@ -72,12 +76,13 @@ async function fixture(t, options = {}) {
     const seconds = Math.floor(Date.now() / 1000), key = sha(`${swarmId}\n${new URL(context.url).pathname}`);
     const cacheKey = `${key}:${context.frag.sn}:${context.frag.cc}:${state.expired}`;
     if (events.has(cacheKey)) return events.get(cacheKey);
-    const pieceSize = commitmentPieceSize(bytes.length), pieces = [];
-    if (options.rangePeer) for (let at = 0; at < bytes.length; at += pieceSize) pieces.push(sha(bytes.subarray(at, at + pieceSize)));
+    const signed = options.bodies ? options.bodies(context.frag.sn) : bytes;
+    const pieceSize = commitmentPieceSize(signed.length), pieces = [];
+    if (options.rangePeer) for (let at = 0; at < signed.length; at += pieceSize) pieces.push(sha(signed.subarray(at, at + pieceSize)));
     const event = finalizeEvent({ kind: KIND_SEGMENT_COMMITMENT, created_at: seconds, tags: [['x', swarmId], ['e', streamEvent.id]],
       content: commitmentContent({ v: options.rangePeer ? 3 : 2, streamEventId: streamEvent.id, swarmId, key, rendition: '/media/index.m3u8',
         playlist: '/media/index.m3u8', mediaType: 'main', encryption: null, sequence: context.frag.sn, discontinuity: context.frag.cc,
-        part: null, sha256: options.badHash ? 'f'.repeat(64) : sha(bytes), size: bytes.length, expiresAt: seconds + (state.expired ? -1 : 120),
+        part: null, sha256: options.badHash ? 'f'.repeat(64) : sha(signed), size: signed.length, expiresAt: seconds + (state.expired ? -1 : 120),
         ...(options.rangePeer ? { pieceSize, pieces } : {}) }) }, sk);
     events.set(cacheKey, event); return event;
   };
@@ -900,7 +905,12 @@ function startupFixture(t, options = {}) {
           if (row.aborted && !force) return;
           row.response = { data: body.slice().buffer, url: ctx.url, code: 200 };
           this.stats.loaded = body.length;
-          if (options.timedStats) this.stats.loading.end = performance.now();
+          if (options.timedStats) {
+            const end = performance.now();
+            // hls.js sets loading.first at headers; null models a loader without it.
+            if (options.firstByteMs !== null) this.stats.loading.first = Math.min(end, this.stats.loading.start + (options.firstByteMs ?? 1));
+            this.stats.loading.end = end;
+          }
           options.beforeSuccess?.(ctx, this.stats);
           callbacks.onSuccess(row.response, this.stats, ctx, null);
         } };
@@ -1217,7 +1227,9 @@ async function startupReachableReplay(t, sn7ServiceMs, options = {}) {
   const starts = [0, 2, 4, 6, 8, 10.64, 12.64, 14.56, 16.56, 18.56, 20.56, 22.56];
   const durations = [2, 2, 2, 2, 2.64, 2, 1.92, 2, 2, 2, 2, 2];
   const services = { 1: 2917, 4: 3713, 7: sn7ServiceMs, 8: 1266, 9: 1120 };
-  const f = startupFixture(t, { timedStats: true, starts, durations, startupMaxBytes: 32 * 1024 * 1024, ...options,
+  // Legacy scalar planning only: these replays retain the measured request order
+  // from a loader without first-byte timing. Size-aware replays are separate.
+  const f = startupFixture(t, { timedStats: true, firstByteMs: null, starts, durations, startupMaxBytes: 32 * 1024 * 1024, ...options,
     onNext: ctx => options.onNext?.(ctx, f, elapsed),
     beforeVerify: ctx => options.beforeVerify?.(ctx, f, elapsed),
     reserve: size => options.reserve?.(size, f, elapsed) ?? true });
@@ -2221,7 +2233,8 @@ test('startup service lead retains a contiguous fourth-slot extension after the 
 test('startup service lead changes cannot move an already selected forward start', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let clock = 1000; t.mock.method(performance, 'now', () => clock);
-  const f = startupFixture(t, { timedStats: true, starts: [0, 2, 4, 5, 6, 9], durations: [2, 2, 1, 1, 3, 2] });
+  // Scalar service lead only; the size-aware profile path has its own replays.
+  const f = startupFixture(t, { timedStats: true, firstByteMs: null, starts: [0, 2, 4, 5, 6, 9], durations: [2, 2, 1, 1, 3, 2] });
   const first = f.load(0, 8000); await requireOriginalVerified(f); f.state.target = 2.3; f.state.recovery = 3500;
   clock += 50; f.requests[1].finish(); await flushStartup();
   clock += 100; t.mock.timers.tick(100); await flushStartup();
@@ -2231,6 +2244,542 @@ test('startup service lead changes cannot move an already selected forward start
   clock += 100; t.mock.timers.tick(100); await flushStartup();
   assert.equal(f.requests[3]?.context.frag.sn, 4, 'changed service fills contiguous[6,9] rather than selecting a later start');
   assert.equal(first.calls.success, 0);
+});
+
+// Size-aware startup admission. Field geometry is the retained 4K programme's
+// real fragment sizes and timing. Only SN1/SN4/SN6 service times were measured
+// on the viewer; every other service below is HYPOTHETICAL and named as such.
+const FIELD_STARTS = [0, 2, 4, 6, 8, 10.64, 12.64, 14.56, 16.56, 18.56, 20.56, 22.56];
+const FIELD_DURATIONS = [2, 2, 2, 2, 2.64, 2, 1.92, 2, 2, 2, 2, 2];
+const FIELD_SIZES = [6471966, 6074938, 5723873, 6060338, 8604060, 6059257, 5735496, 6231822, 6026326, 6058936, 6206410, 6145869];
+const MIB = 1024 * 1024;
+const fieldBodies = new Map();
+const fieldBody = size => {
+  if (!fieldBodies.has(size)) { const body = new Uint8Array(size); fieldBodies.set(size, { body, digest: sha(body) }); }
+  return fieldBodies.get(size);
+};
+// Math.max(2000, p90 * 1.25 + 100), p90 at floor(0.9 * n), rounded.
+const fieldRecovery = services => {
+  const sorted = [...services].sort((a, b) => a - b);
+  return Math.max(2000, Math.round(sorted[Math.floor(0.9 * sorted.length)] * 1.25 + 100));
+};
+
+// Logical-clock replay of the field geometry. `services(sn)` returns the
+// scheduled total service time in whole milliseconds for each request; the
+// loader reports `firstByteMs` as its first-byte delay (null: no first byte).
+async function sizeAwareReplay(t, { firstByteMs, services, target = 2.1, ownSn = 1, parentMs = 120000 }) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let elapsed = 0; t.mock.method(performance, 'now', () => 1000 + elapsed);
+  const authLog = [], samples = [], completions = [], recoveries = [], served = [];
+  const f = startupFixture(t, { timedStats: true, firstByteMs, starts: FIELD_STARTS, durations: FIELD_DURATIONS,
+    startupMaxBytes: 32 * MIB,
+    permit: ctx => {
+      const sn = ctx.frag.sn, size = FIELD_SIZES[sn];
+      authLog.push({ sn, elapsed });
+      return { key: ctx.url, size, sha256: fieldBody(size).digest, current: () => !f.state.revoked.has(sn) };
+    } });
+  f.state.target = target;
+  const first = f.load(ownSn, parentMs); await flushStartup();
+  let releaseAt = null;
+  while (elapsed < 12000 && !first.calls.success && !first.calls.error && !first.calls.abort) {
+    const active = f.requests.find(row => !row.response && !row.aborted);
+    const sn = active?.context.frag.sn;
+    if (active) assert(sn < FIELD_SIZES.length, `request beyond the retained programme: SN${sn}`);
+    const service = active ? services(sn) : null;
+    const due = active ? active.stats.loading.start - 1000 + service : Infinity;
+    const step = Math.min(10, 12000 - elapsed, Math.max(1, due - elapsed));
+    elapsed += step; f.state.target = target + elapsed / 1000;
+    t.mock.timers.tick(step);
+    if (active && !active.aborted && elapsed >= due) {
+      served.push(service); f.state.recovery = fieldRecovery(served); recoveries.push(f.state.recovery);
+      completions.push({ sn, elapsed, serviceMs: service });
+      releaseAt = authLog.length;
+      active.finish(false, fieldBody(FIELD_SIZES[sn]).body);
+    }
+    await flushStartup();
+    samples.push({ elapsed, target: f.state.target, startup: f.engine.startupSnapshot(), warm: f.engine.snapshot() });
+  }
+  const requests = f.requests.map(row => row.context.frag.sn);
+  const authorised = [...new Set(authLog.map(entry => entry.sn))];
+  const skipped = authorised.filter(sn => !requests.includes(sn));
+  const summary = { elapsed, requests, skipped, completions, recoveryMs: f.state.recovery,
+    calls: { success: first.calls.success, error: first.calls.error, abort: first.calls.abort },
+    authCalls: f.state.authCalls, startup: f.engine.startupSnapshot() };
+  if (!first.calls.success) releaseAt = null; // no final validation without a release
+  return { f, first, samples, completions, recoveries, authLog, releaseAt, summary, elapsed, requests, skipped };
+}
+// Gates no scenario may weaken.
+const assertStartupGates = ({ f, first, samples, recoveries, elapsed }) => {
+  assert(samples.every(({ startup, warm }) => startup.heldObjects <= 4 && startup.heldBytes <= 32 * MIB && warm.active <= 1),
+    'held objects, held bytes and active requests stay inside their startup bounds');
+  assert.equal(f.engine.startupSnapshot().limits.deadlineMs, 12000, 'the original deadline is unchanged');
+  assert(elapsed <= 12000);
+  assert(recoveries.every((value, i) => i === 0 || value >= recoveries[i - 1]), 'recovery is never reduced');
+  assert.equal(f.state.recovery, recoveries.at(-1) ?? 2000);
+  if (first.calls.success === 1) {
+    const ready = f.engine.startupSnapshot();
+    assert(elapsed < 12000, 'release precedes the original deadline');
+    assert(ready.verifiedStart <= f.state.target && f.state.target < ready.verifiedEnd, 'release covers the actual room target');
+    assert((ready.verifiedEnd - f.state.target) * 1000 >= f.state.recovery, 'release keeps the full measured recovery');
+  } else {
+    assert.equal(first.calls.success, 0);
+    assert.equal(f.engine.startupSnapshot().reason, 'deadline');
+  }
+};
+
+test('size-aware startup replays the measured viewer order under legacy scalar planning', async t => {
+  // SN7 is HYPOTHETICAL: 2514 ms is the measured partial pace, not an observed SN7 service.
+  const measured = { 1: 2585, 4: 4314, 6: 2371, 7: 2514 };
+  const r = await sizeAwareReplay(t, { firstByteMs: null, services: sn => {
+    assert(sn in measured, `unexpected request SN${sn}`); return measured[sn]; } });
+  console.log(JSON.stringify({ fixture: 'size-aware-startup-legacy-replay', hypotheticalSn7ServiceMs: 2514, ...r.summary }));
+  assert.deepEqual(r.requests, [1, 4, 6, 7]);
+  assert.equal(r.first.calls.success, 0); assert.equal(r.first.calls.error, 1);
+  assert.equal(r.elapsed, 12000);
+  assert.equal(r.f.engine.startupSnapshot().reason, 'deadline');
+  assert.equal(r.f.engine.startupSnapshot().requiredHeadroomMs, 5493,
+    'p90 of 2585/4314 is 4314 ms; 4314 * 1.25 + 100 = 5492.5 rounds to 5493');
+  assert(r.samples.every(({ startup }) => startup.sourceProfile === null), 'no first-byte timing forms no profile');
+  assertStartupGates(r);
+});
+
+// Authorisation accounting. During admission each requested future is
+// authorised once; a skipped candidate costs at most one extra re-authorisation
+// (a hold). Everything after the last completion is the final validation of the
+// held coverage.
+const assertAuthAccounting = ({ f, authLog, releaseAt, requests, skipped }) => {
+  const admission = authLog.slice(0, releaseAt ?? authLog.length), validation = authLog.slice(releaseAt ?? authLog.length);
+  for (const sn of requests) assert.equal(admission.filter(entry => entry.sn === sn).length, 1, `SN${sn} authorised once for admission`);
+  for (const sn of skipped) assert(admission.filter(entry => entry.sn === sn).length <= 2, `SN${sn} skipped with at most one hold`);
+  assert(validation.length <= 4, 'final validation authorises the original and at most three held futures');
+  assert.equal(f.state.authCalls, authLog.length);
+  return { admission: admission.length, validation: validation.length };
+};
+
+test('size-aware startup selects the smaller reachable futures from measured first-byte and body timing', async t => {
+  // SN1 is measured (2585 ms, TTFB 260 ms). SN5, SN6 and SN7 are HYPOTHETICAL at
+  // the first complete rate, 2350.149 bytes per ms; no SN5/SN6/SN7 service was observed.
+  const rate = 2350.149, hypothetical = [];
+  const services = sn => {
+    if (sn === 1) return 2585;
+    const ms = Math.round(FIELD_SIZES[sn] / rate); hypothetical.push({ sn, ms }); return ms;
+  };
+  const r = await sizeAwareReplay(t, { firstByteMs: 260, services });
+  const { f, first, samples, requests, skipped } = r, accounting = assertAuthAccounting(r);
+  console.log(JSON.stringify({ fixture: 'size-aware-startup-replay', hypotheticalServicesMs: [...new Map(hypothetical.map(h => [h.sn, h.ms]))],
+    ...r.summary, authAdmission: accounting.admission, authValidation: accounting.validation }));
+  assert.deepEqual(requests.slice(0, 3), [1, 5, 6]);
+  for (const sn of [2, 3, 4]) assert(!requests.includes(sn), `SN${sn} is never requested`);
+  assert.equal(first.calls.success, 1); assert.equal(first.calls.error, 0); assert.equal(first.calls.abort, 0);
+  assert(r.elapsed < 12000, 'release precedes the original 12000 ms deadline');
+  assert.equal(r.recoveries[0], 3331, 'recovery after the measured SN1 service is 2585 * 1.25 + 100, rounded');
+  assert(r.recoveries.every(value => value >= 3331), 'recovery is never reduced below its SN1 value');
+  assertStartupGates(r);
+  assert.equal(f.engine.startupSnapshot().requiredHeadroomMs, f.state.recovery);
+  const profiled = samples.find(({ startup }) => startup.sourceProfile !== null);
+  assert(profiled, 'a profile forms once SN1 verifies');
+  assert.deepEqual(profiled.startup.sourceProfile, { size: 6074938, ttfbMs: 260, bodyMs: 2325 });
+  assert(accounting.admission <= requests.length + skipped.length * 2);
+  assert.equal(first.calls.args[2], first.context); assert.equal(first.calls.args[0].data.byteLength, FIELD_SIZES[1]);
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().active, 0);
+});
+
+test('size-aware startup keeps the adverse fastest-body scenario green', async t => {
+  // Every service (including SN1) is HYPOTHETICAL at the optimistic flow rate,
+  // 2598.6 bytes per ms, with a near-zero first-byte delay.
+  const r = await sizeAwareReplay(t, { firstByteMs: 1, services: sn => Math.round(FIELD_SIZES[sn] / 2598.6) });
+  assertAuthAccounting(r);
+  console.log(JSON.stringify({ fixture: 'size-aware-startup-fastest-body', ...r.summary }));
+  assert.equal(r.first.calls.success, 1); assert(r.elapsed < 12000);
+  assert.equal(r.first.calls.error, 0);
+  assertStartupGates(r);
+});
+
+test('size-aware startup classifies the slowest measured rate honestly', async t => {
+  // Every service (including SN1) is HYPOTHETICAL at the slowest complete rate,
+  // 1994.4 bytes per ms. The outcome is recorded, not forced.
+  const r = await sizeAwareReplay(t, { firstByteMs: 260, services: sn => Math.round(FIELD_SIZES[sn] / 1994.4) });
+  assertAuthAccounting(r);
+  console.log(JSON.stringify({ fixture: 'size-aware-startup-slowest-rate', outcome: r.first.calls.success ? 'released' : 'failed', ...r.summary }));
+  assertStartupGates(r);
+  if (r.first.calls.success === 0) {
+    assert.equal(r.first.calls.error, 1); assert.equal(r.first.calls.args[0].startupBufferReason, 'deadline');
+    t.mock.timers.tick(20000); await flushStartup();
+    assert.equal(r.first.calls.success, 0, 'no late success after the deadline');
+  }
+  assert.equal(r.f.engine.snapshot().reservationBytes, 0);
+});
+
+// Real SDK fixture: real signed commitments, real sha256 and the real
+// authorise/verify/current path. Signed sizes differ per fragment.
+const sdkSizes = [1024, 2048, 1536, 4096];
+const sdkBody = (sn, salt = 0, length = sdkSizes[sn]) => Uint8Array.from({ length }, (_, i) => (i + sn + salt) % 251);
+
+test('size-aware startup adopts a profile only from a verified same-origin body with real signed size', async t => {
+  const f = await fixture(t, { enabled: false, startupTarget: () => 1.3, held: [0, 1, 2, 3], firstByteMs: 5, bodies: sn => sdkBody(sn) });
+  const row = sn => f.requests.find(item => item.context.frag.sn === sn), startup = () => f.swarm.metrics().startupBuffer;
+  const first = f.load(0);
+  await until(() => row(0)); assert.equal(startup().sourceProfile, null, 'no profile before any body');
+  await sleep(20); row(0).finish();
+  await until(() => startup().sourceProfile !== null);
+  const adopted = startup().sourceProfile;
+  assert.equal(adopted.size, 1024, 'the signed size, not a default body size');
+  assert(adopted.ttfbMs > 0 && adopted.bodyMs > 0);
+  // A wrong hash of the same signed length is rejected and teaches nothing.
+  await until(() => row(1)); const rejected = f.swarm.metrics().warmAhead.rejected;
+  await sleep(20); row(1).finish(sdkBody(1, 7));
+  await until(() => f.swarm.metrics().warmAhead.rejected === rejected + 1);
+  assert.deepEqual(startup().sourceProfile, adopted, 'a wrong-hash body leaves the profile unchanged');
+  // A body shorter than its signed size is rejected and teaches nothing.
+  await until(() => row(2));
+  await sleep(20); row(2).finish(sdkBody(2, 0, sdkSizes[2] - 1));
+  await until(() => f.swarm.metrics().warmAhead.rejected === rejected + 2);
+  assert.deepEqual(startup().sourceProfile, adopted, 'a wrong-length body leaves the profile unchanged');
+  assert.equal(first.calls.success, 0); assert.equal(startup().state, 'buffering');
+});
+
+test('size-aware startup drops the profile when signed authority is not current at verification', async t => {
+  // The captured signed commitment expires between the request and its
+  // verification (Date.now is skewed only until the next authorisation).
+  let skew = 0; const realNow = Date.now.bind(Date);
+  t.mock.method(Date, 'now', () => realNow() + skew);
+  let target = 1.3;
+  const f = await fixture(t, { enabled: false, startupTarget: () => target, held: [0, 1, 2, 3], firstByteMs: 5,
+    bodies: sn => sdkBody(sn), beforeCommitment: context => { if (context.frag.sn >= 2) skew = 0; } });
+  const row = sn => f.requests.find(item => item.context.frag.sn === sn), startup = () => f.swarm.metrics().startupBuffer;
+  const first = f.load(0);
+  await until(() => row(0)); await sleep(20); row(0).finish();
+  await until(() => startup().sourceProfile !== null);
+  assert.equal(startup().sourceProfile.size, 1024);
+  await until(() => row(1));
+  // The room target moves into SN1, so its verified coverage stays below the
+  // recovery requirement and no final authority check can end startup here.
+  target = 2.5; skew = 10 * 60 * 1000;
+  await sleep(20); row(1).finish();
+  await until(() => f.swarm.metrics().warmAhead.verified >= 2);
+  skew = 0;
+  assert.equal(startup().sourceProfile, null, 'a verified future without current authority retires the older profile');
+  assert.equal(startup().state, 'buffering'); assert.equal(first.calls.success, 0);
+  assert.equal(f.swarm.metrics().warmAhead.rejected, 0, 'the body itself verified');
+});
+
+// Logical-clock manager fixture with an active 4-byte source profile. The owner
+// (SN0, [0,2]) starts at logical time 0 and finishes after 100 ms with a 1 ms
+// first byte, so its profile is { size: 4, ttfbMs: 1, bodyMs: 99 } and every
+// 4-byte candidate projects 100 ms of service. The default room target (2.5 s)
+// is past the owner, so only the size-aware skip rule governs SN1 and later.
+// The owner is verified and the first admission pass has run when this returns.
+const profiledStartup = async (t, tick, { target = 2.5, recovery = 2000, parentMs = 20000, beforeOwner, onNext, ...options } = {}) => {
+  const f = startupFixture(t, { timedStats: true, onNext: ctx => onNext?.(ctx, f), ...options });
+  f.state.target = target; f.state.recovery = recovery;
+  const first = f.load(0, parentMs); await flushStartup();
+  assert.equal(f.requests.length, 1, 'only the genuine source is admitted before its first verification');
+  beforeOwner?.(f, first);
+  tick(100); f.requests[0].finish(); await flushStartup();
+  assert(f.engine.snapshot().verified >= 1, 'the actual original body verifies');
+  return { f, first };
+};
+
+for (const phase of ['pre-authority', 'post-authority']) {
+  for (const mutation of ['url', 'sn', 'start', 'mutate-throw', 'clear', 'stop']) {
+    test(`size-aware startup projection cancels before any load when next mutates the candidate: ${phase} ${mutation}`, async t => {
+      const tick = startupLogicalClock(t), nth = phase === 'pre-authority' ? 1 : 2;
+      let seen = 0, at = null;
+      const { f, first } = await profiledStartup(t, tick, { recovery: 2000, onNext: (ctx, engine) => {
+        if (ctx.frag.sn !== 1 || ++seen !== nth) return;
+        at = { auth: engine.state.authCalls, reservations: engine.state.reservations.length, requests: engine.requests.length,
+          profile: engine.engine.startupSnapshot().sourceProfile };
+        if (mutation === 'clear' || mutation === 'stop') engine.engine[mutation]();
+        else if (mutation === 'sn') ctx.frag.sn = 999;
+        else if (mutation === 'start') ctx.frag.start += 0.5;
+        else {
+          ctx.url = ctx.frag.url = 'https://origin.example/media/changed.m4s';
+          if (mutation === 'mutate-throw') throw new Error('test callback changed metadata');
+        }
+      } });
+      await flushStartup();
+      assert(at, 'the candidate callback was reached');
+      assert.deepEqual(at.profile, { size: 4, ttfbMs: 1, bodyMs: 99 }, 'a size-aware profile is active when the candidate is checked');
+      assert.equal(at.auth, phase === 'pre-authority' ? 1 : 2,
+        'the pre-authority check precedes the candidate permit; the projection follows it');
+      const startup = f.engine.startupSnapshot();
+      assert.equal(startup.state, 'cancelled');
+      if (mutation !== 'clear' && mutation !== 'stop') assert.equal(startup.reason, 'context-changed');
+      assert.equal(first.calls.success, 0);
+      assert.equal(first.calls.abort, mutation === 'stop' ? 0 : 1, 'engine stop is quiet; every other cancellation notifies the caller');
+      assert.equal(f.requests.length, at.requests, 'no source load starts for the mutated candidate');
+      assert.equal(f.state.reservations.length, at.reservations, 'no reservation is attempted for the mutated candidate');
+      assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().active, 0);
+      assert.equal(startup.sourceProfile, null);
+      tick(20000); await flushStartup();
+      assert.equal(f.state.authCalls, at.auth, 'authority is not requested again after cancellation');
+      assert.equal(f.requests.length, at.requests); assert.equal(first.calls.success, 0);
+      assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().trackedObjects, 0);
+    });
+  }
+}
+
+test('size-aware startup survives permit.current calling stop or clear during adoption', async t => {
+  const tick = startupLogicalClock(t);
+  for (const action of ['stop', 'clear']) {
+    let engine, fired = 0;
+    const { f } = await profiledStartup(t, tick, {
+      permit: ctx => ({ key: ctx.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)),
+        current: () => { if (ctx.frag.sn === 0 && fired++ === 0) engine[action](); return true; } }),
+      beforeOwner: owner => { engine = owner.engine; } });
+    assert.equal(fired, 1, `${action}: current ran once, after verification`);
+    const startup = f.engine.startupSnapshot();
+    assert.equal(startup.sourceProfile, null, action); assert.equal(startup.state, 'cancelled', action);
+    assert.equal(f.requests.length, 1, `${action}: no further request`);
+    tick(20000); await flushStartup();
+    assert.equal(f.requests.length, 1, action); assert.equal(f.engine.snapshot().reservationBytes, 0, action);
+    assert.equal(f.engine.snapshot().active, 0, action); assert.equal(f.engine.startupSnapshot().sourceProfile, null, action);
+    f.engine.stop();
+  }
+});
+
+test('size-aware startup projection tolerates target or recovery becoming invalid', async t => {
+  const tick = startupLogicalClock(t);
+  for (const invalid of ['target', 'recovery']) {
+    let state, candidateAuth = 0;
+    // The candidate's permit is the only point between the pre-authority check
+    // and the projection, so the host clock or recovery goes bad exactly there.
+    const { f, first } = await profiledStartup(t, tick, {
+      permit: ctx => {
+        if (ctx.frag.sn === 1) { candidateAuth++; if (invalid === 'target') state.target = null; else state.recovery = NaN; }
+        return { key: ctx.url, size: 4, sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true };
+      },
+      beforeOwner: owner => { state = owner.state; } });
+    assert.equal(candidateAuth, 1, `${invalid}: the candidate reached its permit`);
+    const startup = f.engine.startupSnapshot();
+    assert.equal(startup.state, invalid === 'target' ? 'cancelled' : 'failed', invalid);
+    assert.equal(startup.reason, invalid === 'target' ? 'target-unavailable' : 'invalid-recovery', invalid);
+    assert.equal(first.calls.success, 0, invalid);
+    if (invalid === 'target') assert.equal(first.calls.abort, 1);
+    else { assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'invalid-recovery'); }
+    assert.equal(f.requests.length, 1, `${invalid}: no load starts for the candidate`);
+    assert.equal(f.engine.snapshot().reservationBytes, 0, invalid); assert.equal(f.engine.snapshot().active, 0, invalid);
+    assert.equal(startup.sourceProfile, null, invalid);
+    tick(20000); await flushStartup();
+    assert.equal(f.requests.length, 1, invalid); assert.equal(candidateAuth, 1, invalid);
+    f.engine.stop();
+  }
+});
+
+test('size-aware startup never skips or holds a future that a genuine consumer already demands', async t => {
+  const tick = startupLogicalClock(t);
+  // SN1 and SN2 are both inside target + recovery + projected service, so the
+  // projection would skip SN1 and then hold SN2 (hop spent). SN2's permit is
+  // pending when a genuine load of SN2 arrives.
+  const { f, first } = await profiledStartup(t, tick, { recovery: 3500,
+    beforeOwner: owner => { owner.state.holdRecheck = true; owner.state.holdCheckSn = 2; } });
+  assert.equal(typeof f.state.releaseRecheck, 'function', 'SN2 authority is pending');
+  assert.equal(f.requests.length, 1, 'SN1 was skipped without a body');
+  const demand = f.load(2, 20000);
+  f.state.releaseRecheck(); await flushStartup();
+  // MANAGER BEHAVIOUR (not a defect): beginStartup supersedes a buffering
+  // startup when another warm-eligible load arrives, so the genuine SN2 load is
+  // aborted and the pending candidate is retired instead of being coalesced. The
+  // projection therefore never skips or holds a row that a genuine consumer owns.
+  const startup = f.engine.startupSnapshot();
+  assert.equal(startup.state, 'cancelled'); assert.equal(startup.reason, 'superseded');
+  assert.equal(first.calls.abort, 1, 'the startup owner is told it was superseded');
+  assert.equal(demand.calls.abort, 1); assert.equal(demand.calls.success, 0);
+  assert.equal(f.requests.length, 1, 'neither the held candidate nor the genuine load starts a source request');
+  assert.equal(f.engine.snapshot().queued, 0, 'no held metadata survives the cancellation');
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().active, 0);
+  tick(20000); await flushStartup();
+  assert.equal(f.requests.length, 1);
+});
+
+// Counts authority requests per fragment without changing the default 4-byte permit.
+const countingPermit = (counts, sizeOf = () => 4) => ctx => {
+  counts.set(ctx.frag.sn, (counts.get(ctx.frag.sn) ?? 0) + 1);
+  return { key: ctx.url, size: sizeOf(ctx.frag.sn), sha256: sha(Uint8Array.of(2, 4, 6, 8)), current: () => true };
+};
+const requestedSns = f => f.requests.map(row => row.context.frag.sn);
+
+test('size-aware startup hold keeps the original item deadline and never renews it', async t => {
+  const tick = startupLogicalClock(t), auth = new Map();
+  // Recovery 3500 ms puts SN1 and SN2 inside target + recovery + 100 ms: SN1 is
+  // skipped with the poll's only hop, so SN2 is held with its first deadline.
+  const { f } = await profiledStartup(t, tick, { recovery: 3500, permit: countingPermit(auth) });
+  const admittedAt = performance.now(); // the pass that first authorised SN2 and fixed its 8000 ms deadline
+  assert.deepEqual(requestedSns(f), [0], 'SN1 skipped and SN2 held without a body');
+  assert.equal(auth.get(1), 1); assert.equal(auth.get(2), 1);
+  assert.equal(f.engine.snapshot().queued, 2, 'the held SN2 and its successor wait for the next poll');
+  f.state.recovery = 2000; // the held SN2 is now admissible, so the next poll requests it
+  tick(100); await flushStartup();
+  assert.deepEqual(requestedSns(f), [0, 2], 'the held candidate is requested on the next poll');
+  assert.equal(auth.get(2), 2, 'one authority request per poll');
+  assert.equal(auth.get(1), 1, 'the skipped SN1 is not authorised again');
+  const row = f.requests[1]; let abortedAt = null;
+  for (let i = 0; i < 100 && abortedAt === null; i++) {
+    tick(100); await flushStartup();
+    if (row.aborted) abortedAt = performance.now() - admittedAt;
+  }
+  assert.equal(abortedAt, 8000, 'the held item expires at its first deadline, not eight seconds after re-admission');
+  assert.equal(f.engine.startupSnapshot().limits.deadlineMs, 12000);
+});
+
+test('size-aware startup respects a short parent deadline during projection', async t => {
+  const tick = startupLogicalClock(t);
+  // Recovery 8000 ms with a static 2.5 s target: SN1 to SN4 end inside target +
+  // recovery + 100 ms (10.6 s), so only the reachable-future rule can admit them.
+  // Its horizon is the remaining startup lifetime: 5 s here, 12 s in the control.
+  const sequences = {};
+  for (const parentMs of [5000, 20000]) {
+    const entry = performance.now();
+    const { f, first } = await profiledStartup(t, tick, { recovery: 8000, parentMs });
+    for (let i = 0; i < 30 && f.requests.length < 2; i++) { tick(100); await flushStartup(); }
+    sequences[parentMs] = requestedSns(f);
+    assert.equal(f.engine.startupSnapshot().limits.deadlineMs, 12000, 'the reported startup limit is the unchanged ceiling');
+    if (parentMs === 5000) {
+      let failedAt = null;
+      for (let i = 0; i < 100 && failedAt === null; i++) {
+        if (first.calls.error) failedAt = performance.now() - entry;
+        else { tick(100); await flushStartup(); }
+      }
+      assert.equal(failedAt, 5000, 'the failure arrives at the parent deadline');
+      assert.equal(f.engine.startupSnapshot().reason, 'deadline');
+      assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+      assert.equal(first.calls.success, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+    }
+    f.engine.stop();
+  }
+  assert.deepEqual(sequences[5000], [0, 3], 'with 5 s left, SN3 is the last future reachable at room-clock speed');
+  assert.deepEqual(sequences[20000], [0, 5], 'the same candidates are skipped further with the full 12 s lifetime');
+});
+
+test('size-aware startup absolute deadline during a hold fails once and releases nothing late', async t => {
+  const tick = startupLogicalClock(t), auth = new Map();
+  // The programme starts after a room target of 0.5 s that the owner does not cover,
+  // and a 250 ms parent leaves too little time for any future to be reachable, so
+  // every pass skips one candidate and holds the next. The deadline lands mid-hold.
+  const starts = Array.from({ length: 20 }, (_, i) => 10 + 2 * i);
+  const { f, first } = await profiledStartup(t, tick, { target: 0.5, recovery: 20000, parentMs: 250, starts, permit: countingPermit(auth) });
+  assert.deepEqual(requestedSns(f), [0]); assert.equal(auth.get(1), 1); assert.equal(auth.get(2), 1, 'SN2 is held at the first pass');
+  tick(100); await flushStartup(); // second pass: SN2 skipped, SN3 held
+  assert.equal(auth.get(2), 2); assert.equal(auth.get(3), 1);
+  assert.equal(f.engine.snapshot().queued, 2, 'a held candidate is queued when the deadline arrives');
+  tick(50); await flushStartup();
+  assert.equal(f.engine.startupSnapshot().state, 'failed'); assert.equal(f.engine.startupSnapshot().reason, 'deadline');
+  assert.equal(first.calls.error, 1); assert.equal(first.calls.args[0].startupBufferReason, 'deadline');
+  assert.equal(f.engine.snapshot().reservationBytes, 0); assert.equal(f.engine.snapshot().queued, 0);
+  const authAtDeadline = f.state.authCalls;
+  for (const row of f.requests) row.finish(true);
+  await flushStartup(); tick(20000); await flushStartup();
+  assert.equal(first.calls.success, 0, 'a late body cannot release the failed startup');
+  assert.equal(first.calls.error, 1, 'the failure is delivered once');
+  assert.equal(f.state.authCalls, authAtDeadline); assert.equal(requestedSns(f).length, 1);
+  assert.equal(f.engine.snapshot().cacheObjects, 0); assert.equal(f.engine.snapshot().reservationBytes, 0);
+});
+
+test('size-aware startup reservation refusal after projection leaves no waiting or hop state behind', async t => {
+  const tick = startupLogicalClock(t), auth = new Map(); let refused = 0;
+  // SN1 is admitted by the projection and then refused by the shared reservation.
+  // SN2 is signed at 400 bytes, so its projected service (about 9.9 s) puts it
+  // inside target + recovery and the projection skips it. SN3 is admitted again.
+  const { f } = await profiledStartup(t, tick, { target: 2.5, recovery: 1000,
+    permit: countingPermit(auth, sn => sn === 2 ? 400 : 4),
+    reserve: size => { if (!refused && size === 8) { refused++; return false; } return true; } });
+  assert.equal(refused, 1, 'the admitted SN1 reached the reservation guard');
+  assert.equal(f.engine.snapshot().rejected, 1);
+  assert.deepEqual(requestedSns(f), [0, 3],
+    'with no poll in between, the skip still had its hop and the successor was admitted: no waiting state remained');
+  assert.equal(auth.get(1), 1); assert.equal(auth.get(2), 1); assert.equal(auth.get(3), 1);
+  assert.equal(f.engine.snapshot().active, 1);
+  assert.equal(f.engine.snapshot().reservationBytes, 8, 'only the original and the admitted SN3 are reserved');
+  tick(100); await flushStartup();
+  assert.deepEqual(requestedSns(f), [0, 3]); assert.equal(auth.get(1), 1, 'the refused SN1 is not retried');
+  f.requests[1].finish(); await flushStartup();
+  assert.equal(f.engine.snapshot().rejected, 1);
+  f.engine.stop();
+  assert.equal(f.engine.snapshot().reservationBytes, 0);
+});
+
+test('size-aware startup skip leaves the same plan, cursor and queue as a scalar hop', async t => {
+  const tick = startupLogicalClock(t), runs = {};
+  // SN0 owner, SN1 admitted as a contiguous extension and verified after 100 ms
+  // of service. The room target then jumps to 4.5 s with 3500 ms recovery, so
+  // SN2 (4 bytes, projected service 100 ms in the profile run and a 100 ms scalar
+  // sample in the legacy run) is skipped; SN3 is inside the window too.
+  for (const mode of ['scalar', 'profile']) {
+    const f = startupFixture(t, { timedStats: true, firstByteMs: mode === 'scalar' ? null : undefined });
+    f.state.recovery = 3500;
+    const first = f.load(0, 20000); await flushStartup();
+    tick(100); f.requests[0].finish(); await flushStartup();
+    assert.deepEqual(requestedSns(f), [0, 1], `${mode}: SN1 is admitted as a contiguous extension`);
+    tick(100); f.state.target = 4.5; f.requests[1].finish(); await flushStartup();
+    const startup = f.engine.startupSnapshot();
+    assert.equal(startup.planningServiceMs, 100, mode);
+    assert.deepEqual(startup.sourceProfile, mode === 'scalar' ? null : { size: 4, ttfbMs: 1, bodyMs: 99 }, mode);
+    const { sourceProfile, planningServiceMs, ...rest } = startup, warm = f.engine.snapshot();
+    runs[mode] = { startup: rest, requests: requestedSns(f), queued: warm.queued, cacheObjects: warm.cacheObjects,
+      trackedObjects: warm.trackedObjects, active: warm.active, reservationBytes: warm.reservationBytes };
+    let polls = 0;
+    while (requestedSns(f).length < 3 && polls < 20) { tick(100); polls++; await flushStartup(); }
+    runs[mode].next = { requests: requestedSns(f), polls };
+    assert.equal(first.calls.success, 0, mode);
+    f.engine.stop();
+  }
+  const { next: scalarNext, ...scalar } = runs.scalar, { next: profileNext, ...profile } = runs.profile;
+  console.log(JSON.stringify({ fixture: 'size-aware-startup-skip-parity', scalar: runs.scalar, profile: runs.profile }));
+  assert.deepEqual(profile, scalar, 'after the SN2 skip both paths hold the same startup state, queue, cache and reservation');
+  assert.equal(scalarNext.requests.at(-1), profileNext.requests.at(-1), 'both paths request the same successor next');
+  assert(profileNext.polls <= scalarNext.polls,
+    'the profile path may request that successor in the same poll as the skip; the scalar path waits for the next poll');
+});
+
+const profileModes = ['valid', 'missing-first', 'first-equals-start', 'first-equals-end', 'aborted', 'wrong-loaded',
+  'cross-origin-url', 'non-200', 'peer-bytes', 'mutated-after-callback'];
+const expectedProfile = (bodyMs) => ({ size: 4, ttfbMs: 1, bodyMs });
+
+test('size-aware startup forms no profile from invalid timing, peer bytes or mutated stats', async t => {
+  const tick = startupLogicalClock(t);
+  for (const subject of ['owner', 'future']) for (const mode of profileModes) {
+    const label = `${subject}/${mode}`, badSn = subject === 'owner' ? 0 : 1;
+    let f;
+    f = startupFixture(t, { timedStats: true,
+      beforeSuccess: (ctx, stats) => {
+        if (ctx.frag.sn !== badSn) return;
+        const row = f.requests.find(item => item.context === ctx);
+        if (mode === 'missing-first') delete stats.loading.first; // a loader that reports no first byte
+        if (mode === 'first-equals-start') stats.loading.first = stats.loading.start;
+        if (mode === 'first-equals-end') stats.loading.first = stats.loading.end;
+        if (mode === 'aborted') stats.aborted = true;
+        if (mode === 'wrong-loaded') stats.loaded -= 1;
+        if (mode === 'cross-origin-url') row.response.url = `https://cdn.example/media/s${ctx.frag.sn}.m4s`;
+        if (mode === 'non-200') row.response.code = 206;
+        if (mode === 'peer-bytes') ctx[STARTUP_MARKER].peerBytes = 1;
+      } });
+    f.state.recovery = 3500; // a 1.3 s target never has enough verified headroom, so startup stays buffering
+    const first = f.load(0, 20000); await flushStartup();
+    tick(100);
+    f.requests[0].finish();
+    if (subject === 'owner' && mode === 'mutated-after-callback') Object.assign(f.requests[0].stats, { loaded: 0, aborted: true, loading: { start: -1, first: -1, end: -1 } });
+    await flushStartup();
+    const afterOwner = f.engine.startupSnapshot();
+    if (subject === 'owner') {
+      assert.deepEqual(afterOwner.sourceProfile, ['valid', 'mutated-after-callback'].includes(mode) ? expectedProfile(99) : null, label);
+      assert.equal(afterOwner.planningServiceMs, null, `${label}: an owner sample never sets the scalar`);
+    } else assert.deepEqual(afterOwner.sourceProfile, expectedProfile(99), `${label}: a valid owner profile precedes the future`);
+    assert.deepEqual(requestedSns(f), [0, 1], label);
+    tick(50);
+    f.requests[1].finish();
+    if (subject === 'future' && mode === 'mutated-after-callback')
+      Object.assign(f.requests[1].stats, { loaded: 0, aborted: true, loading: { start: -1, first: -1, end: -1 } });
+    await flushStartup();
+    const startup = f.engine.startupSnapshot();
+    // The future sample is 50 ms with a 1 ms first byte, unless the mode invalidates it.
+    const futureValid = subject === 'owner' || ['valid', 'mutated-after-callback'].includes(mode);
+    assert.deepEqual(startup.sourceProfile, futureValid ? expectedProfile(49) : null, label);
+    // The scalar service sample has its own, older validity rules.
+    const scalarForbidden = subject === 'future' && ['aborted', 'wrong-loaded'].includes(mode);
+    assert.equal(startup.planningServiceMs, scalarForbidden ? null : 50, `${label}: the scalar planning sample follows its own rules`);
+    assert.equal(first.calls.success, 0, label); assert.equal(startup.state, 'buffering', label);
+    f.engine.stop();
+  }
 });
 
 test('startup horizon planner survives the captured serial peer cadence without renewing the eight-second deadline', async t => {

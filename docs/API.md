@@ -286,6 +286,22 @@ sample, or `null` when unavailable. Failed, cancelled, stale and partial loads
 do not train it; ending startup clears it. A new sample cannot move an already
 selected future window while the actual target remains before that window.
 
+When a verified same-origin source body also carries strictly ordered
+first-byte and completion times, startup keeps one frozen service profile
+(`metrics().startupBuffer.sourceProfile`: `size`, `ttfbMs`, `bodyMs`, or `null`).
+The original response supplies the first profile after its own verification;
+each later verified future replaces it, and a verified future without valid
+same-origin timing clears it. Peer-delivered bytes, cached same-instant replies,
+partial, aborted, non-200 or different-origin responses never form one. With a
+profile for a candidate's origin, the skip decision waits for that candidate's
+fresh signed size and projects `ttfbMs + bodyMs * size / profile.size` in place
+of the last scalar sample; parsed identity is still checked before authority,
+and frozen windows, verified contiguous extensions, the one-hop-per-poll
+budget, reservations, release headroom and the original deadline are unchanged.
+A candidate held because the poll's hop is spent returns to the queue as
+metadata with its original deadline. This projection is a scheduling estimate
+from one measured transfer, not a throughput guarantee.
+
 The optional `startupBufferCommit` function defaults to `null` and requires
 `startupBufferTarget`. It runs once after the encoded reservoir passes the
 readiness checks, before held callbacks or consumed-media credit reach HLS.

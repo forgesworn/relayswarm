@@ -10,6 +10,35 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased size-aware startup admission (30 October 2026)
+
+The private 4K failure below followed a request order of SN1, SN4, SN6 and
+SN7 under an advancing room target. The scalar planning lead treated every
+candidate as costing the last whole-load time, so the planner skipped two
+smaller reachable fragments, admitted the largest one, and its longer service
+raised the measured recovery requirement beyond what the remaining lifetime
+could cover. Startup now keeps one frozen same-origin service profile (first
+byte and body time of a verified complete source body, reported as
+`startupBuffer.sourceProfile`) and, when a candidate's origin has one, defers
+the skip decision until that candidate's own signed size is freshly authorised,
+projecting its service from the measured profile. Peer-delivered, cached
+same-instant, partial, aborted, non-200 or different-origin responses form no
+profile, and a later verified future without valid timing clears it, returning
+admission to the previous scalar rule. Parsed identity is still checked before
+authority; frozen windows, contiguous extensions, the one-hop-per-poll budget,
+reservations, release headroom and the original deadline are unchanged.
+
+An offline replay of the retained viewer-1 capture, using its catalogue sizes
+and measured SN1 timing, now requests SN1, SN5 and SN6 and releases before the
+deadline under the named conditional service rates; the scalar seed's earlier
+adverse scenario stays green, the slowest observed rate remains an honest
+failure, and the invalid-timing, peer, cache, mutation and other-origin
+controls preserve the previous policy. Unobserved fragment service costs are
+still assumptions. This is a logical scheduling change with synthetic bodies and
+always-current permits; it is not field throughput, decoded playback,
+contribution or device evidence, and fresh CI plus a new private field run
+remain required.
+
 ## Unreleased refresh after whole-object capacity rejection (30 October 2026)
 
 A measured peer rate can fit one signed piece while remaining too slow for a
