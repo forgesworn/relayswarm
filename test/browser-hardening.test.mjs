@@ -10133,7 +10133,7 @@ test('warm setup proof rejects the immutable incomplete897 failure without recon
   assert.equal(warmSetupDeclineProof(input), null, 'old RED lacks independent evidence; later controls cannot rescore it');
 });
 
-async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logical = false, realAdmission = false, holdSetup = false, holdNewAllocation = false } = {}) {
+async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logical = false, realAdmission = false, holdSetup = false, holdNewAllocation = false, holdNewUntilBody = false } = {}) {
   const size = 6 * 1024 * 1024, bytes = Uint8Array.from({ length: size }, (_, i) => (i * 131 + 17) % 251);
   const secret = generateSecretKey(), seconds = Math.floor(Date.now() / 1000);
   const streamEvent = finalizeEvent({ kind: 30311, created_at: seconds, tags: [['d', 'contrast'], ['relayswarm', 'redistribute', '1']], content: '' }, secret);
@@ -10152,7 +10152,7 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
     }
   }
   for (const warming of ownedWarm ? [true] : [true, false]) {
-    let f, received, declined = false, declineProof = null, heldAllocationObserved = false;
+    let f, received, declined = false, declineProof = null, declineObservation = null, heldAllocationObserved = false;
     const timers = realAdmission && !logical ? realTimerInvocationContext() : null;
     if (timers) t.after(() => timers.restore());
     const clock = logical ? warmFunctionalClock(t, () => {
@@ -10252,7 +10252,7 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
               assert(pendingNew.sentAtMs <= targetOrigin.invocationProbe.firedAtMs &&
                 targetOrigin.invokedAtMs >= targetOrigin.invocationProbe.firedAtMs);
               assert.equal(targetOrigin.complete, false, 'the live proof is observed before its whole HTTP body completes');
-              bridge.workers[0].holdNew = false; bridge.workers[0].releaseNew();
+              if (!holdNewUntilBody) { bridge.workers[0].holdNew = false; bridge.workers[0].releaseNew(); }
             }
             const fullTrace = f.swarm.trace(), now = f.swarm.metrics();
             const wants = f.channels.flatMap(channel => channel.wants);
@@ -10271,24 +10271,12 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
                 coreTransfersDelta: now.core.multiHolder.transfers - before.core.multiHolder.transfers,
                 rpcDropped: bridge?.workers.reduce((sum, value) => sum + (value.rpcDropped ?? 0), 0) ?? 0,
                 rpcOmitted: Math.max(0, rpcObserved - rpc.length), rowsOmitted: 0 } };
-            declineProof = warmSetupDeclineProof(proofInput);
-            assert(declineProof, JSON.stringify({ message: 'real warm fallback requires complete same-load setup proof', proofInput }));
-            if (holdNewAllocation) {
-              assert.equal(declineProof.stage, 'warm-pending-new-cleanup-after-origin');
-              assert.equal(proofInput.expected.coreTransfersDelta, 0);
-              assert(!rpc.some(row => row.op === 'start' && row.sentAtMs >= proofInput.expected.enteredAtMs));
-              console.log(JSON.stringify({ fixture: 'actual-warm-held-new-cleanup-proof',
-                controllerClock: 'logical-functional', timerClockDomain: 'logical-performance', proofInput, proof: declineProof }));
-            }
-            if (holdSetup) {
-              assert.equal(declineProof.stage, 'warm-observed-pending-rpc-timer');
-              assert.equal(proofInput.timer.firedAtMs, proofInput.expected.enteredAtMs + 25,
-                'functional control expires the original setup timer at exactly25ms');
-              warmDeclineMutationControls(proofInput);
-              console.log(JSON.stringify({ fixture: 'actual-warm-held-rpc-proof',
-                controllerClock: 'logical-functional', timerClockDomain: 'logical-performance',
-                proofInput, proof: declineProof }));
-            }
+            // Preserve the original load/timer/source scalars independently of
+            // the live completed-reply ledger. Cancelling NEW can finish its
+            // local promise before the actual Worker acknowledgement arrives.
+            declineObservation = structuredClone(proofInput);
+            if (holdNewUntilBody) assert.equal(warmSetupDeclineProof(declineObservation), null,
+              'an incomplete early reply capture must still reject');
           } else assert(targetOrigin.range, JSON.stringify({ message: 'eligible owned warm work starts origin206 before any whole GET', worker,
             load: load ?? null, traceDropped: trace.dropped, rows: diagnosticRows.slice(-64), rowsOmitted: Math.max(0, diagnosticRows.length - 64),
             rpc, rpcOmitted: Math.max(0, rpcObserved - rpc.length), pendingRpc: pending.slice(-32), pendingRpcOmitted: Math.max(0, pending.length - 32),
@@ -10385,6 +10373,63 @@ async function realCoreWarmContrast(t, { ownedWarm = false, worker = false, logi
         assert.equal(after.core.transferWorker.state, worker ? 'ready' : 'off');
         const again = invoke(target); sameBytes(await settle(again.response), bytes);
         assert.equal(again.calls.success, 1); assert.equal(f.swarm.metrics().bytes.peerFirst, after.bytes.peerFirst, 'repeated consumption cannot double-credit the same warm object');
+        if (declineObservation) {
+          if (holdNewUntilBody) {
+            assert.equal(client[0].complete, true); assert.equal(client[0].bytes, size);
+            assert.deepEqual(again.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
+            const pending = bridge.workers[0].rpcSent;
+            const allocation = [...pending.values()].find(row => row.op === 'new' && row.sentAtMs >= declineObservation.expected.enteredAtMs);
+            assert(allocation, 'actual NEW acknowledgement remains held through source, genuine and repeat completion');
+            assert(!rpc.some(row => row.id === allocation.id));
+            assert.equal(warmSetupDeclineProof(declineObservation), null);
+            bridge.workers[0].holdNew = false; bridge.workers[0].releaseNew();
+            await wait(() => rpc.some(row => row.id === allocation.id));
+          }
+          // Ordinary native cases gain no wait: classify only after their
+          // existing body/consumer/reuse outcomes. Keep all later I/O visible
+          // against the original pre-warm baseline; missing evidence fails.
+          const current = f.swarm.metrics(), pending = bridge?.workers.flatMap(value => [...(value.rpcSent?.values() ?? [])]) ?? [];
+          const proofInput = { trace: f.swarm.trace(), timer: declineObservation.timer, rpc: structuredClone(rpc),
+            expected: { ...declineObservation.expected,
+              originRangeAttempts: current.core.multiHolder.originRanges - before.core.multiHolder.originRanges,
+              physicalRangeGets: requests.slice(beforeRequests).filter(row => row.path === '/media/seg.ts' && row.range).length,
+              clientRangeLoads: received.slice(beforeReceived).filter(row => row.path === '/media/seg.ts' && row.range).length,
+              peerRequests: f.channels.reduce((sum, channel) => sum + channel.wants.length, 0) - beforePeerRequests,
+              acceptedPeerBytes: current.bytes.peerFirst - before.bytes.peerFirst,
+              verifiedWarmPeerBytes: current.warmAhead.verifiedPeerBytes - before.warmAhead.verifiedPeerBytes,
+              coreTransfersDelta: current.core.multiHolder.transfers - before.core.multiHolder.transfers,
+              rpcDropped: bridge?.workers.reduce((sum, value) => sum + (value.rpcDropped ?? 0), 0) ?? 0,
+              rpcOmitted: Math.max(0, rpcObserved - rpc.length) } };
+          declineProof = warmSetupDeclineProof(proofInput);
+          assert(declineProof && pending.length === 0, JSON.stringify({
+            message: 'real warm fallback requires complete same-load setup proof after existing media outcomes', proofInput,
+            pendingRpc: pending.slice(0, 32), pendingRpcOmitted: Math.max(0, pending.length - 32),
+            worker: current.core.transferWorker }));
+          if (holdNewAllocation) {
+            assert.equal(declineProof.stage, 'warm-pending-new-cleanup-after-origin');
+            assert.equal(proofInput.expected.coreTransfersDelta, 0);
+            assert(!rpc.some(row => row.op === 'start' && row.sentAtMs >= proofInput.expected.enteredAtMs));
+            console.log(JSON.stringify({ fixture: 'actual-warm-held-new-cleanup-proof',
+              controllerClock: 'logical-functional', timerClockDomain: 'logical-performance', proofInput, proof: declineProof }));
+          }
+          if (holdNewUntilBody) {
+            assert.equal(warmSetupDeclineProof(declineObservation), null,
+              'the later reply cannot backfill the immutable rejected early capture');
+            console.log(JSON.stringify({ fixture: 'actual-warm-late-new-observation', controllerClock: 'logical-functional',
+              earlyCapture: declineObservation, earlyProof: null, finalCapture: proofInput, finalProof: declineProof,
+              sourceBodyBytes: client[0].bytes, sourceCompleteBeforeAcknowledgement: client[0].complete,
+              genuineCallbacks: demand.calls, repeatCallbacks: again.calls }));
+          }
+          if (holdSetup) {
+            assert.equal(declineProof.stage, 'warm-observed-pending-rpc-timer');
+            assert.equal(proofInput.timer.firedAtMs, proofInput.expected.enteredAtMs + 25,
+              'functional control expires the original setup timer at exactly25ms');
+            warmDeclineMutationControls(proofInput);
+            console.log(JSON.stringify({ fixture: 'actual-warm-held-rpc-proof',
+              controllerClock: 'logical-functional', timerClockDomain: 'logical-performance',
+              proofInput, proof: declineProof }));
+          }
+        }
       }
       if (holdNewAllocation) {
         await wait(() => { const snapshot = f.swarm.metrics().core.transferWorker;
@@ -10426,6 +10471,10 @@ test('owned steady warm held Worker reply proves setup-only whole fallback (logi
 // hash/callbacks and reduced source budgets remain mandatory; no elapsed claim.
 test('owned steady warm held NEW reply proves cleanup after independent source and complete fallback (logical controller)', { timeout: 20000 },
   t => realCoreWarmContrast(t, { ownedWarm: true, worker: true, logical: true, realAdmission: true, holdNewAllocation: true }));
+
+test('owned steady warm late NEW observation preserves source completion before strict proof (logical controller)', { timeout: 20000 },
+  t => realCoreWarmContrast(t, { ownedWarm: true, worker: true, logical: true, realAdmission: true,
+    holdNewAllocation: true, holdNewUntilBody: true }));
 
 
 async function bufferedMixedFixture(t, clock, options = {}) {
