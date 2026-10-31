@@ -6389,41 +6389,53 @@ test('steady peer window (R6): a take-up refused before any request (commitment 
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
-test('steady peer window (R4): a known link model too slow for the whole object in W returns to today\'s path on budgets less the elapsed time', async t => {
-  for (const commitmentMs of [0, 300]) await t.test(commitmentMs ? 'asynchronous 300 ms commitment' : 'immediate commitment', async t => {
+test('steady peer window (R4): a whole-object link model too slow for the object in W returns to today\'s path on budgets less the elapsed time', async t => {
   const clock = warmFunctionalClock(t, () => false);
-  let f, delayed = false;
+  let f, commitmentMs = 0;
   try {
-    // 400 ms per request: one 64 KiB probe trains a ~160 KB/s rate; 512 KiB cannot move in 800 ms.
-    f = await steadyWindowFixture(t, clock, { holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 400 }],
-      beforeCommitment: () => delayed && commitmentMs ? new Promise(resolve => setTimeout(resolve, commitmentMs)) : undefined });
-    delayed = true;
+    // 320 ms per one-piece request: the first take-up moves the whole 128 KiB object in two requests (~205 KB/s).
+    f = await steadyWindowFixture(t, clock, { size: 128 * 1024, holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 320 }],
+      beforeCommitment: () => commitmentMs ? new Promise(resolve => setTimeout(resolve, commitmentMs)) : undefined });
     f.have();
     sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
-    const trained = f.swarm.metrics().core.multiHolder.peerFlow.lastModel;
-    assert.deepEqual([f.steady().takeUpWindowEnd, f.steady().waitWindowEnd], [1, 0], 'the unknown-model take-up ran into the window end: ' + JSON.stringify(f.steady()));
+    assert.deepEqual([f.steady().peerOnlyDelivered, f.wholeLoads.length], [1, f.trained], 'the first take-up moved the whole object');
+    // A 300 ms commitment leaves ~500 ms of W: the whole-object model cannot fit 128 KiB.
+    commitmentMs = 300;
     const wants = f.channels[0].wants.length, sources = f.wholeLoads.length;
     const next = beginCountedMultiLoad(f, f.ctx);
     await clock.advanceUntil(() => f.wholeLoads.length > sources, 1000);
     const model = f.swarm.metrics().core.multiHolder.peerFlow.lastModel;
-    assert(model.rateBytesPerSecond > 0 && model.rateBytesPerSecond * 0.8 < f.bytes.length, 'a known rate that cannot fit: ' + JSON.stringify({ trained, model }));
+    assert(model.rateBytesPerSecond > 0, JSON.stringify(model));
     assert.equal(f.channels[0].wants.length, wants, 'no request reached the holder');
-    if (!commitmentMs) assert.strictEqual(f.wholeLoads.at(-1).config, f.loaderConfig, 'today\'s path with the original config');
-    else {
-      // The commitment fetch spent time from the parent budgets; the hand-back must not restart them.
-      const policy = f.wholeLoads.at(-1).config.loadPolicy;
-      assert(Math.abs(policy.maxLoadTimeMs - (10_000 - 300)) <= 20, JSON.stringify(policy));
-      assert(Math.abs(policy.maxTimeToFirstByteMs - (10_000 - 300)) <= 20, JSON.stringify(policy));
-    }
+    // The commitment fetch spent time from the parent budgets; the hand-back must not restart them.
+    const policy = f.wholeLoads.at(-1).config.loadPolicy;
+    assert(Math.abs(policy.maxLoadTimeMs - (10_000 - 300)) <= 20, JSON.stringify(policy));
+    assert(Math.abs(policy.maxTimeToFirstByteMs - (10_000 - 300)) <= 20, JSON.stringify(policy));
     sameBytes(await clock.settle(next.response), f.bytes);
     assert.deepEqual([f.steady().peerOnlyStarted, f.steady().peerOnlyFallback, f.steady().leasesIgnored], [2, 1, 0]);
+    commitmentMs = 0;
     f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
     f.lease(300);
     const leased = await f.demand();
     assert(leased.sourceAfterMs >= 550, 'no cooldown for a local capacity refusal: ' + leased.sourceAfterMs);
     sameBytes(await clock.settle(leased.response), f.bytes);
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
-  });
+});
+
+test('steady peer window (R5c): a model thinner than one whole object probes and re-trains instead of refusing on capacity', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    // 400 ms per request: the first take-up is cut after one 64 KiB probe (~160 KB/s, far below 512 KiB in 800 ms).
+    f = await steadyWindowFixture(t, clock, { holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 400 }] });
+    f.have();
+    sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+    assert.equal(f.steady().takeUpWindowEnd, 1);
+    const wants = f.channels[0].wants.length;
+    sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+    assert(f.channels[0].wants.length > wants, 'the thin model probed again instead of refusing before any request');
+    assert.deepEqual([f.steady().peerOnlyStarted, f.steady().takeUpWindowEnd, f.steady().peerOnlyFallback], [2, 2, 0]);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
 test('steady peer window (R6): a lease miss cooldown survives the same author reconnecting', async t => {

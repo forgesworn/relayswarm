@@ -3245,6 +3245,12 @@ class HlsSwarm {
       this.peerFlow.lastNoModel = { candidateCount: candidates.length, model: { ...this.peerFlow.lastModel } };
       this.counters.peerNoFit += 1; traceFinish('no-models'); return null;
     }
+    // R5c: for a steady take-up only, a model that has not yet moved one whole
+    // object of verified flow counts as unknown, so the Core's one-piece probe
+    // runs and the model re-trains; only a whole-object model refuses on capacity.
+    if (plan.steadyWindow) for (const [link, model] of models) if (Number.isFinite(model.rate) &&
+        model.state.flows.reduce((bytes, row) => bytes + row.value * row.flowMs, 0) + 1 < commitment.size)
+      models.set(link, { ...model, firstByteMs: null, rate: null });
     // This fresh transfer has no verified pieces and no origin lane. A piece
     // fitting is not enough: even optimistically sharing the whole object
     // across the measured holders must fit the same absolute peer deadline.
