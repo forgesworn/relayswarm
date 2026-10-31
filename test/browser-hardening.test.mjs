@@ -6038,6 +6038,102 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
   }
 });
 
+// --- steady peer window (opt-in steadyPeerWindow) ------------------------------
+
+test('steady peer window requires a boolean and peer-first serving multi-holder loading', () => {
+  const signed = signedFixture({ v: 3 });
+  const peerFirst = { mode: 'peer-first', streamEvent: signed.options.streamEvent, getCommitment: () => signed.event };
+  for (const [options, reason] of [[{ steadyPeerWindow: 1 }, 'invalid-steady-peer-window-option'],
+    [{ steadyPeerWindow: 'true' }, 'invalid-steady-peer-window-option'],
+    [{ steadyPeerWindow: true }, 'invalid-steady-peer-window-option'],
+    [{ ...peerFirst, steadyPeerWindow: true, multiHolder: true }, 'invalid-steady-peer-window-option'],
+    [{ ...peerFirst, steadyPeerWindow: true, serve: true }, 'invalid-steady-peer-window-option'],
+    [{ ...peerFirst, steadyPeerWindow: true, serve: true, multiHolder: true }, null]]) {
+    const swarm = createHlsSwarm({ ...base, relays: ['wss://relay.example'], ...options });
+    assert.equal(swarm.metrics().disabledReason, reason, JSON.stringify(options));
+    assert.equal('steadyPeerWindow' in swarm.metrics(), options.steadyPeerWindow === true);
+    if (reason === null) assert.deepEqual(swarm.metrics().steadyPeerWindow, { opened: 0, closedHeadroom: 0, leaseWaits: 0, waitHave: 0,
+      waitLapsed: 0, waitWindowEnd: 0, leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, fetchRenewalsSent: 0 });
+    swarm.stop();
+  }
+  const off = createHlsSwarm({ ...base, relays: ['wss://relay.example'] });
+  assert.equal('steadyPeerWindow' in off.metrics(), false, 'flag off adds no metrics field');
+  off.stop();
+});
+
+// Logical send times of the FETCH and HAVE frames a holder channel receives.
+function timedControlFrames(channel) {
+  const frames = [], send = channel.send.bind(channel);
+  channel.send = data => {
+    if (typeof data === 'string') {
+      const frame = JSON.parse(data);
+      if (frame.t === 'fetching' || frame.t === 'have') frames.push({ ...frame, at: performance.now() });
+    }
+    return send(data);
+  };
+  return frames;
+}
+
+test('steady peer window (a): FETCH renewal keeps a 3,500 ms origin fetch leased and withdraws only after HAVE', async t => {
+  for (const flag of [true, false]) await t.test(flag ? 'renewed' : 'flag off: one lease per claim', async t => {
+    const clock = warmFunctionalClock(t, () => false);
+    let f;
+    try {
+      f = await clock.settle(multiFixture(t, { holders: [{ silent: true }], wholeOriginDelayMs: 3500,
+        swarmOptions: { serve: true, ...(flag ? { steadyPeerWindow: true } : {}) } }));
+      f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+      const frames = timedControlFrames(f.channels[0]);
+      const started = performance.now();
+      sameBytes(await clock.settle(f.load()), f.bytes);
+      const done = performance.now(), leases = frames.filter(row => row.t === 'fetching' && row.k === f.key);
+      const grants = leases.filter(row => row.ms > 0), withdrawn = leases.findIndex(row => row.ms === 0);
+      const advertised = frames.findIndex(row => row.t === 'have' && (row.add ?? row.keys ?? []).includes(f.key));
+      assert.equal(f.wholeLoads.length, 1);
+      assert(done - started >= 3500, 'the origin fetch outlasts one 2,000 ms lease');
+      assert(advertised >= 0 && withdrawn >= 0, JSON.stringify(frames));
+      assert(frames.indexOf(leases[withdrawn]) > advertised, 'ms: 0 follows the retained HAVE');
+      if (!flag) {
+        assert.equal(grants.length, 1, 'flag off keeps today\'s single FETCH per claim');
+        assert.equal('steadyPeerWindow' in f.swarm.metrics(), false);
+        return;
+      }
+      assert(grants.length >= 4, JSON.stringify(grants));
+      grants.forEach((row, index) => { if (index) assert(row.at - grants[index - 1].at <= 1000 + 10, 'renewed every 1,000 ms'); });
+      for (let at = started; at < done; at += 10) assert(grants.some(row => row.at <= at && at < row.at + row.ms), 'lease live at ' + (at - started));
+      assert.equal(f.swarm.metrics().steadyPeerWindow.fetchRenewalsSent, grants.length - 1);
+      await clock.advance(2000);
+      assert.equal(frames.filter(row => row.t === 'fetching' && row.ms > 0).length, grants.length, 'no renewal after release');
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+test('steady peer window (a): the mixed origin lane withdraws its FETCH only after the delivered object\'s HAVE', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    lateRaceKeyClock(t);
+    f = await clock.settle(multiFixture(t, { size: 1024 * 1024, holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 350 }],
+      originDelayMs: 100, wholeOriginDelayMs: 500, swarmOptions: { bufferedMixedRanges: true, zeroBudgetPeerRace: true,
+        sustainablePeerWait: true, maxPeerWaitMs: 2500, serve: true, steadyPeerWindow: true } }));
+    f.ctx = { ...multiContext, frag: { ...multiContext.frag, start: 10, duration: .1 } };
+    f.hls.media = { currentTime: 10, paused: false, ended: false, seeking: false, readyState: 4, playbackRate: 1, buffered: { length: 0 } };
+    // Calibrate origin timing on another object, so the measured key is not already held.
+    const train = { ...f.ctx, url: 'https://origin.example/media/train.ts', frag: { ...f.ctx.frag, url: 'https://origin.example/media/train.ts' } };
+    sameBytes(await clock.settle(f.load(train)), f.bytes);
+    for (const pc of f.connections) pc.connectionState = 'connected';
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+    assert.equal(f.swarm.metrics().bytes.held, f.bytes.length, 'only the calibration object is held');
+    const frames = timedControlFrames(f.channels[0]);
+    sameBytes(await clock.settle(f.load(f.ctx)), f.bytes);
+    const metrics = f.swarm.metrics();
+    assert(f.ranges.length > 0 && metrics.core.multiHolder.delivered >= 1, 'the mixed transfer used its origin lane');
+    const leases = frames.filter(row => row.t === 'fetching' && row.k === f.key);
+    const advertised = frames.findIndex(row => row.t === 'have' && (row.add ?? row.keys ?? []).includes(f.key));
+    const withdrawn = frames.findIndex(row => row.t === 'fetching' && row.k === f.key && row.ms === 0);
+    assert(leases.some(row => row.ms > 0) && advertised >= 0 && withdrawn > advertised, JSON.stringify(frames));
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
 test('verified piece flow waits for real worker verification and rejects invalidated replies', async t => {
   for (const invalidation of ['none', 'closed-link', 'media-replaced', 'deadline']) await t.test(invalidation, async t => {
     const { WorkerImpl, workers } = transferWorkerFixture(t, { holdFinal: true });

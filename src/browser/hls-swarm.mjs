@@ -132,6 +132,10 @@ const DEFAULTS = Object.freeze({
   // the exact cached object later, within the same original peer window.
   lateHaveRace: false,
   latePeerRace: false,
+  // Opt-in, peer-first with serve and multiHolder: renew FETCH for the life of
+  // an origin fetch and, inside a buffer-funded window, honour a live exact-key
+  // lease and take a held object through a peer-only transfer.
+  steadyPeerWindow: false,
   // Provisional (CORE-SPEC open question 6): not yet set from a field trace.
   maxHoldersPerObject: 3,
   // Rows kept for trace(): every load, eligibility decision, peer and origin
@@ -502,6 +506,13 @@ class HlsSwarm {
     this.rendition = null;
     this.renditions = new Map();
     this.originFetches = new Map();
+    // steadyPeerWindow only: per claimed key, the FETCH renewal timer and any
+    // withdrawal deferred until the HAVE for a successful body; per link, the
+    // time until which its leases are ignored after a miss. Counts only.
+    this.steadyFetches = new Map();
+    this.steadyLeaseCooldowns = new WeakMap();
+    this.steadyCounts = { opened: 0, closedHeadroom: 0, leaseWaits: 0, waitHave: 0, waitLapsed: 0, waitWindowEnd: 0,
+      leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, fetchRenewalsSent: 0 };
     this.uploadQuotaBytes = 0;
     this.uploadTokens = this.options.maxUploadBytesPerSecond;
     this.uploadRefilledAt = now();
@@ -628,6 +639,8 @@ class HlsSwarm {
     if (typeof this.options.lateHaveRace !== "boolean") return "invalid-late-have-race-option";
     if (typeof this.options.latePeerRace !== 'boolean' || this.options.latePeerRace && (mode !== 'peer-first' || !this.options.zeroBudgetPeerRace)) return 'invalid-late-peer-race-option';
     if (typeof this.options.sustainablePeerWait !== "boolean") return "invalid-sustainable-wait-option";
+    if (typeof this.options.steadyPeerWindow !== 'boolean' || this.options.steadyPeerWindow && (mode !== 'peer-first' ||
+        this.options.serve !== true || this.options.multiHolder !== true)) return 'invalid-steady-peer-window-option';
     if (typeof this.options.warmAhead !== "boolean" || this.options.warmAhead && (mode !== "peer-first" || this.options.serve !== true)) return "invalid-warm-ahead-option";
     if (this.options.startupBufferTarget !== null && (typeof this.options.startupBufferTarget !== 'function' ||
         mode !== 'peer-first' || this.options.serve !== true)) return 'invalid-startup-buffer-target';
@@ -978,6 +991,7 @@ class HlsSwarm {
       stopped: this.stopped,
       warmAhead: this.warmAhead?.snapshot() ?? null,
       startupBuffer: this.warmAhead?.startupSnapshot() ?? null,
+      ...(this.options.steadyPeerWindow === true ? { steadyPeerWindow: { ...this.steadyCounts } } : {}),
       peerAdmission: { ...this.peerAdmission, claimedLinks: this.peerLeases.size, waiting: this.peerLeaseWaiters.size },
       uploadPacing: this.uploadPacer?.snapshot() ?? null,
       latePeerRace: { enabled: this.options.latePeerRace, ...this.latePeerCounts, pending: this.latePeerOwners.size,
@@ -1584,9 +1598,9 @@ class HlsSwarm {
         keyPromise.then((key) => {
           if (!completed && !swarm.stopped) { originKey = key; this.releaseFetch = swarm.#claimOrigin(key); }
         }).catch(() => {});
-        const finishOrigin = () => {
+        const finishOrigin = (announce = false) => {
           if (completed) return false;
-          completed = true; this.releaseFetch?.(); this.releaseFetch = null; return true;
+          completed = true; this.releaseFetch?.(announce); this.releaseFetch = null; return true;
         };
         const cancelPeer = this.cancel;
         this.cancel = () => { finishOrigin(); return cancelPeer(); };
@@ -1607,7 +1621,7 @@ class HlsSwarm {
             // Publish retained source bytes before Hls synchronously disposes
             // the loader and withdraws its already-advertised FETCH claim.
             if (originKey && copy) swarm.#hold(originKey, new Uint8Array(copy));
-            if (!finishOrigin()) return;
+            if (!finishOrigin(true)) return;
             this.pendingCallbacks = null;
             originTrace?.terminal("payload", size || null, stats, originTrace !== this.originTrace);
             pushSample(swarm.originLatencySamples, now() - originStarted);
@@ -1681,7 +1695,7 @@ class HlsSwarm {
           originPending = false; this.active = null; this.pendingCallbacks = null;
           clearTimeout(originTimer);
           stopPeer(proof);
-          this.releaseFetch?.(); this.releaseFetch = null;
+          this.releaseFetch?.(winner === true); this.releaseFetch = null;
           return true;
         };
         expireOrigin = () => {
@@ -1758,7 +1772,7 @@ class HlsSwarm {
           originPending = false; this.active = null; this.pendingCallbacks = null;
           clearTimeout(originTimer);
           stopPeer();
-          this.releaseFetch?.(); this.releaseFetch = null;
+          this.releaseFetch?.(true); this.releaseFetch = null;
           // The losing HTTP arm must never surface its abort/error callback.
           originTrace?.abortRequest("peer-won");
           try { this.inner.abort(); } catch {}
@@ -1786,7 +1800,7 @@ class HlsSwarm {
           if (reason === 'origin-success' && positiveBody) try { proof = partial.prepare?.(); } catch {}
           if (!originPending || this.active !== token) { if (proof) proof.entries.length = 0; return false; }
           originPending = false; this.active = null; this.pendingCallbacks = null;
-          watch?.close(reason, 'retired', proof); partial.dispose(); this.releaseFetch?.(); this.releaseFetch = null;
+          watch?.close(reason, 'retired', proof); partial.dispose(); this.releaseFetch?.(reason === 'origin-success' && positiveBody); this.releaseFetch = null;
           return true;
         };
         this.cancel = () => {
@@ -1805,7 +1819,7 @@ class HlsSwarm {
               if (!result || !current() || controller.signal.aborted || now() >= plan.limit || !watch.valid() ||
                   typeof plan.revalidateAuthority !== 'function' || !plan.revalidateAuthority()) return false;
               originPending = false; this.active = null; this.pendingCallbacks = null;
-              watch.close('peer-won', 'won'); this.releaseFetch?.(); this.releaseFetch = null;
+              watch.close('peer-won', 'won'); this.releaseFetch?.(true); this.releaseFetch = null;
               originTrace?.abortRequest("peer-won");
               try { this.inner.abort(); } catch {}
               swarm.counters.zeroBudgetPeerRaceWins++;
@@ -2221,17 +2235,59 @@ class HlsSwarm {
     const count = this.originFetches.get(key) || 0;
     this.originFetches.set(key, count + 1);
     for (const link of this.links.values()) link.sendFetching(key, 2000);
+    if (this.options.steadyPeerWindow) this.#renewFetch(key);
     let released = false;
-    return () => {
+    // `announce`: a successful body whose HAVE may follow (steadyPeerWindow only).
+    return (announce = false) => {
       if (released) return;
       released = true;
       const remaining = (this.originFetches.get(key) || 1) - 1;
       if (remaining > 0) this.originFetches.set(key, remaining);
       else {
         this.originFetches.delete(key);
+        if (this.options.steadyPeerWindow) return this.#withdrawFetch(key, announce === true);
         for (const link of this.links.values()) link.sendFetching(key, 0);
       }
     };
+  }
+
+  // Receivers cap each FETCH grant at 2,000 ms and overwrite a held key's
+  // expiry, so renewal every 1,000 ms is the only way to cover a longer fetch.
+  #renewFetch(key) {
+    let row = this.steadyFetches.get(key);
+    if (!row) this.steadyFetches.set(key, row = { renew: null, withdraw: null });
+    // A new claim supersedes a withdrawal still waiting for its HAVE.
+    if (row.withdraw !== null) { clearTimeout(row.withdraw); this.timers.delete(row.withdraw); row.withdraw = null; }
+    if (row.renew !== null) return;
+    const renew = () => {
+      row.renew = null;
+      if (this.steadyFetches.get(key) !== row || !this.originFetches.has(key)) return;
+      for (const link of this.links.values()) link.sendFetching(key, 2000);
+      this.steadyCounts.fetchRenewalsSent = increment(this.steadyCounts.fetchRenewalsSent);
+      row.renew = this.#after(1000, renew);
+    };
+    row.renew = this.#after(1000, renew);
+  }
+
+  // The withdrawal for a successful body must not overtake its HAVE. It waits
+  // for #hold of the key (or for #hold to refuse it), bounded by one renewal
+  // interval, inside the lease already granted.
+  #withdrawFetch(key, announce) {
+    const row = this.steadyFetches.get(key);
+    if (!row) return;
+    if (row.renew !== null) { clearTimeout(row.renew); this.timers.delete(row.renew); row.renew = null; }
+    if (announce && !this.held.has(key) && row.withdraw === null) {
+      row.withdraw = this.#after(1000, () => { row.withdraw = null; this.#flushFetchWithdrawal(key, row); });
+      if (row.withdraw !== null) return;
+    }
+    this.#flushFetchWithdrawal(key, row);
+  }
+
+  #flushFetchWithdrawal(key, row = this.steadyFetches.get(key)) {
+    if (!row || this.steadyFetches.get(key) !== row || row.renew !== null) return;
+    if (row.withdraw !== null) { clearTimeout(row.withdraw); this.timers.delete(row.withdraw); row.withdraw = null; }
+    this.steadyFetches.delete(key);
+    if (!this.originFetches.has(key)) for (const link of this.links.values()) link.sendFetching(key, 0);
   }
 
   #peerBudget(context, geometry) {
@@ -3120,7 +3176,7 @@ class HlsSwarm {
         tickTimer = clear(tickTimer); backstop = clear(backstop);
         // Only a hopeless holder counts as abandoned; leftovers are plain aborts.
         for (const controller of [...requests.values(), ...originRequests]) controller.abort();
-        releaseOrigin?.();
+        releaseOrigin?.(Boolean(result));
         plan.onDeadline = null;
         signal.removeEventListener("abort", onAbort);
         transfer.free();
@@ -3683,12 +3739,14 @@ class HlsSwarm {
   // --- held segments and upload --------------------------------------------
 
   #hold(key, bytes) {
-    if (!this.#servingAllowed() || this.held.has(key) || bytes.byteLength > this.options.maxSegmentBytes) return;
+    // A FETCH withdrawal deferred for this key follows its HAVE, or the refusal.
+    if (!this.#servingAllowed() || this.held.has(key) || bytes.byteLength > this.options.maxSegmentBytes) return this.#flushFetchWithdrawal(key);
     this.held.set(key, bytes);
     this.heldBytes += bytes.byteLength;
     const evicted = this.#trimHeld(this.options.maxHeldBytes - (this.warmAhead?.snapshot().reservationBytes ?? 0), false);
-    if (!this.#servingAllowed()) return;
+    if (!this.#servingAllowed()) return this.#flushFetchWithdrawal(key);
     for (const link of this.links.values()) link.sendHaveChange(this.held.has(key) ? [key] : [], evicted);
+    this.#flushFetchWithdrawal(key);
   }
 
   #dropHeld(key) {
