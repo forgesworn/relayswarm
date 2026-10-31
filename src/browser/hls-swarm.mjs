@@ -1317,14 +1317,17 @@ class HlsSwarm {
           const window = swarm.#steadyWindow(context, budgetGeometry, config, this.hlsConfig.progressive);
           if (window) return this.loadSteadyWindow(context, config, callbacks, budgetGeometry, window);
         }
-        // R5: a reconsidered warm future takes an exact HAVE peer-only inside
-        // its unchanged speculative deadline, with no source lane of its own.
+        // R5, R5d: a reconsidered warm future takes an exact HAVE peer-only, with
+        // no source lane of its own, inside its speculative deadline and the
+        // window this viewer's measured buffer funds (a genuine demand may join
+        // the row and wait on it). Unfunded, today's buffered mixed path runs.
         if (swarm.options.steadyPeerWindow && !steadyBypass && warmOwner?.reconsidered && Number.isFinite(warmOwner.deadline) &&
             !this.hlsConfig.progressive && swarm.#rangesEnabled() &&
             (swarm.options.transferWorkerUrl === undefined || swarm.transferWorkerState === 'ready')) {
           const limits = [config?.loadPolicy?.maxLoadTimeMs, config?.timeout].filter(value => Number.isFinite(value) && value > 0);
-          const windowMs = warmOwner.deadline - now();
-          if (limits.length && windowMs > 0 && warmOwner.current()) return this.loadSteadyWindow(context, config, callbacks, mixedGeometry,
+          const fundedMs = swarm.#steadyFunding(context, { ...mixedGeometry, source: mixedSource }).windowMs;
+          const windowMs = Math.min(warmOwner.deadline - now(), fundedMs);
+          if (limits.length && fundedMs >= STEADY_MIN_WINDOW_MS && windowMs > 0 && warmOwner.current()) return this.loadSteadyWindow(context, config, callbacks, mixedGeometry,
             { windowMs, parentMs: Math.min(...limits), firstMs: Math.min(...limits) }, warmOwner);
         }
         if (swarm.options.bufferedMixedRanges && budgetMs === 0 && (!context[WARM_AHEAD] || warmOwner) && !this.hlsConfig.progressive && warmContext(context) &&

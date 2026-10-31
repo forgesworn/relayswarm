@@ -6554,6 +6554,41 @@ test('steady peer window: stop during a lease wait and during a deferred withdra
   });
 });
 
+test('steady peer window (R5d): a reconsidered take-up joined by genuine demand is bounded by the funded window', async t => {
+  for (const variant of ['deep, slow holder', 'shallow, slow holder', 'deep, fast holder']) await t.test(variant, async t => {
+    const clock = warmFunctionalClock(t, () => false), slow = variant.includes('slow');
+    let f;
+    try {
+      // Deep: 18 s of buffer, W = 800 ms. Shallow: 6 s, which funds no window.
+      f = await steadyWindowFixture(t, clock, { holders: [slow ? { Channel: PhasedFlowChannel, firstByteMs: 5000, flowMs: 100 } : {}],
+        bufferedEnd: variant.startsWith('deep') ? 28 : 16,
+        swarmOptions: { warmAhead: true, bufferedMixedRanges: true, zeroBudgetPeerRace: true } });
+      if (!variant.startsWith('deep')) f.ctx.frag.start = 16;
+      f.have();
+      // A reconsidered optional row with its full eight seconds left, which a genuine demand has joined.
+      const enteredAt = performance.now(), deadline = enteredAt + 8000, signal = new AbortController(), context = { ...f.ctx };
+      const genuine = { at: enteredAt, context };
+      context[WARM_AHEAD] = { peerBytes: 0, abandon: () => false, work: () => performance.now() < deadline || genuine
+        ? { context, enteredAt, deadline, signal: signal.signal, genuine, reconsidered: true } : null };
+      const sources = f.wholeLoads.length + f.ranges.length, calls = { success: 0, other: 0 };
+      new f.hls.config.fLoader(f.hlsConfig).load(context, f.loaderConfig, { onSuccess: () => calls.success++,
+        onError: () => calls.other++, onAbort: () => calls.other++, onTimeout: () => calls.other++ });
+      await clock.advanceUntil(() => f.wholeLoads.length + f.ranges.length > sources || calls.success + calls.other > 0, 9000);
+      const elapsed = performance.now() - enteredAt, steady = f.steady();
+      if (variant === 'deep, fast holder') {
+        assert.deepEqual([calls.success, steady.peerOnlyStarted, steady.peerOnlyDelivered], [1, 1, 1], JSON.stringify(steady));
+        assert.equal(f.wholeLoads.length + f.ranges.length, sources, 'taken up with no source lane');
+      } else if (variant === 'deep, slow holder') {
+        assert(elapsed >= 800 && elapsed <= 850, 'the joined demand\'s source starts at the funded bound, not the row deadline: ' + elapsed);
+        assert.deepEqual([steady.peerOnlyStarted, steady.takeUpWindowEnd], [1, 1]);
+      } else {
+        assert(elapsed <= 30, 'an unfunded row skips the take-up and starts source at once: ' + elapsed);
+        assert.equal(steady.peerOnlyStarted, 0);
+      }
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
 /** A holder that refuses every request ("none": not held or not serving now). */
 class EmptyAnswerChannel extends RangedChannel {
   send(data) {
