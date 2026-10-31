@@ -3860,6 +3860,22 @@ test('startup buffer real SDK peer notification can stop only after matching byt
   assert.equal(f.swarm.metrics().startupBuffer.released, 1);
 });
 
+test('steady peer window (R1): a warm source body withdraws its FETCH only after the HAVE from warm verification', async t => {
+  for (const steady of [true, false]) await t.test(steady ? 'steady' : 'flag off: today\'s order', async t => {
+    const f = await fixture(t, { rangePeer: true, latePeerRace: false, held: [1], ...(steady ? { steadyPeerWindow: true } : {}) });
+    const peer = await f.addPeer(), key = sha(`warm-ahead-fixture\n/media/s1.m4s`);
+    assert.deepEqual(await f.load(0).result, f.bytes);
+    await until(() => peer.sent.some(frame => frame?.t === 'fetching' && frame.k === key && frame.ms > 0));
+    f.requests.find(row => row.context.frag.sn === 1).finish();
+    await until(() => f.swarm.metrics().warmAhead.verified >= 1 && peer.sent.some(frame => frame?.t === 'fetching' && frame.k === key && frame.ms === 0));
+    const advertised = peer.sent.findIndex(frame => frame?.t === 'have' && (frame.add ?? frame.keys ?? []).includes(key));
+    const withdrawn = peer.sent.findIndex(frame => frame?.t === 'fetching' && frame.k === key && frame.ms === 0);
+    assert(advertised >= 0, 'the verified warm body is advertised');
+    if (steady) assert(withdrawn > advertised, 'ms: 0 follows the HAVE');
+    else assert(withdrawn < advertised, 'without the option the warm withdrawal precedes its HAVE (unchanged)');
+  });
+});
+
 test('steady peer window (h): a live lease on the startup terminal waits for nothing and the reservoir releases once', async t => {
   let commits = 0;
   const f = await fixture(t, { enabled: false, startupTarget: () => 1.3, held: [0], rangePeer: true, steadyPeerWindow: true,

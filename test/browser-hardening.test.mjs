@@ -6472,6 +6472,66 @@ test('steady peer window (R1): a renewed lease dates the holder wait from its fi
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
+// A source load whose body this SDK does not retain (an unhandled warm marker):
+// its withdrawal waits for a HAVE that never comes from this load.
+const unretainedWarmLoad = f => {
+  const context = { ...multiContext, [WARM_AHEAD]: { peerBytes: 0 } };
+  return new Promise((resolve, reject) => new f.hls.config.fLoader(f.hlsConfig).load(context, f.loaderConfig,
+    { onSuccess: resolve, onError: reject, onTimeout: reject, onAbort: reject }));
+};
+
+test('steady peer window (R1): a new claim supersedes a deferred withdrawal; one ms: 0 follows the final HAVE', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    lateRaceKeyClock(t);
+    f = await clock.settle(multiFixture(t, { holders: [{ silent: true }], wholeOriginDelayMs: 300, swarmOptions: { serve: true, steadyPeerWindow: true } }));
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    const frames = timedControlFrames(f.channels[0]), started = performance.now();
+    await clock.settle(unretainedWarmLoad(f));
+    const firstDone = performance.now() - started;
+    assert.equal(frames.some(row => row.t === 'fetching' && row.ms === 0), false, 'the unretained body\'s withdrawal is deferred');
+    await clock.advance(50);
+    sameBytes(await clock.settle(f.load()), f.bytes); // a second claim of the same key while the withdrawal waits
+    await clock.advance(2000);
+    const withdrawals = frames.filter(row => row.t === 'fetching' && row.k === f.key && row.ms === 0);
+    const advertised = frames.findIndex(row => row.t === 'have' && (row.add ?? row.keys ?? []).includes(f.key));
+    assert.equal(withdrawals.length, 1, JSON.stringify(frames));
+    assert(withdrawals[0].at - started >= firstDone + 50 + 300, 'no ms: 0 while the second claim fetched');
+    assert(advertised >= 0 && frames.indexOf(withdrawals[0]) > advertised);
+    assert.equal(f.swarm.metrics().errors.total, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window: stop during a lease wait and during a deferred withdrawal settles once and sends nothing after', async t => {
+  for (const phase of ['window', 'deferral']) await t.test(phase, async t => {
+    const clock = warmFunctionalClock(t, () => false);
+    let f;
+    try {
+      f = phase === 'window' ? await steadyWindowFixture(t, clock)
+        : (lateRaceKeyClock(t), await clock.settle(multiFixture(t, { holders: [{ silent: true }], wholeOriginDelayMs: 300,
+          swarmOptions: { serve: true, steadyPeerWindow: true } })));
+      const frames = timedControlFrames(f.channels[0]);
+      let load;
+      if (phase === 'window') {
+        f.lease(2000);
+        load = beginCountedMultiLoad(f, f.ctx);
+        await clock.advance(200);
+        assert.equal(f.steady().leaseWaits, 1);
+      } else {
+        await clock.settle(unretainedWarmLoad(f));
+        assert.equal(frames.some(row => row.t === 'fetching' && row.ms === 0), false);
+      }
+      const sent = frames.length;
+      f.swarm.stop();
+      await clock.advance(3000);
+      assert.equal(frames.length, sent, 'nothing is sent after stop: ' + JSON.stringify(frames.slice(sent)));
+      if (load) assert.equal(load.calls.success.length + load.calls.abort.length + load.calls.error.length, 1, 'one terminal');
+      assert.equal(f.swarm.metrics().errors.total, 0, JSON.stringify(f.swarm.metrics().errors));
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
 /** A holder that refuses every request ("none": not held or not serving now). */
 class EmptyAnswerChannel extends RangedChannel {
   send(data) {
