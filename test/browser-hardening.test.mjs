@@ -5930,6 +5930,15 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
       }
     }
     assert.equal(paths.length, 2, 'actual peer identities yield opposite deterministic future owners');
+    // (e) steadyPeerWindow is off here: these source rows and counters are main's, with no steady machinery.
+    const flagOff = () => {
+      for (const f of actors) assert.equal('steadyPeerWindow' in f.swarm.metrics(), false);
+      for (const channel of pair.channels) {
+        const grants = channel.sent.filter(row => row?.t === 'fetching' && row.ms > 0), withdrawals = channel.sent.filter(row => row?.t === 'fetching' && row.ms === 0);
+        for (const key of new Set(grants.map(row => row.k))) assert(grants.filter(row => row.k === key).length <= withdrawals.filter(row => row.k === key).length + 1,
+          'flag off: no FETCH renewal');
+      }
+    };
     objects.set('/media/lead.ts', new Uint8Array(32768).fill(9));
     paths.forEach((path, index) => objects.set(path, Uint8Array.from({ length: size }, (_, i) => (i * 131 + index * 17) % 251)));
     const playlist = '#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nlead.ts\n' +
@@ -5961,7 +5970,7 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
         sameBytes(await demand.response, objects.get(paths[0]));
         assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
       })));
-      diagnosticPhase = 'done'; return;
+      flagOff(); diagnosticPhase = 'done'; return;
     }
     console.log(JSON.stringify({ fixture: 'reciprocal-warm-source-policy', controllerClock: 'logical-functional', simulatedSourceAndRtc: true,
       excludedNativeKeyDigestScheduling: true,
@@ -5986,7 +5995,7 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
       sameBytes(await settle(demand.response), objects.get(paths[0]));
       assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
       assert.equal(actors[1].swarm.metrics().bytes.peerFirst, 0);
-      diagnosticPhase = 'done'; return;
+      flagOff(); diagnosticPhase = 'done'; return;
     }
     if (playlistState === 'live') for (const [actor, f] of actors.entries()) {
       // A real live reload replaces Fragment objects. Routing must use the
@@ -6029,6 +6038,7 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
       assert.equal(f.swarm.metrics().bytes.peerFirst, credit, 'reusing the same future cannot credit it twice');
       assert.equal(source.length, before);
     }
+    flagOff();
     assert(keyWork.operations > 0, 'the fixed metadata digest phase actually ran');
     assert.equal(keyWork.pending, 0, 'all observed native key digests settled');
     diagnosticPhase = 'done';
@@ -6395,6 +6405,44 @@ test('steady peer window (R6): a take-up that fails puts the holder\'s leases in
       assert(performance.now() - started < 10_000);
     } finally { if (f) await clock.settle(f.close()); clock.restore(); }
   });
+});
+
+test('steady peer window (j): three real actors; a waiter beyond the owner\'s upload peers falls back to source', { timeout: 20000 }, async t => {
+  // Real sessions, signatures, Core links and ordered channels between three
+  // swarms. A holds the object and serves at most one upload peer; B takes it
+  // peer-only; C, the third viewer, is refused by A and falls back.
+  const pair = await framingPairFixture(t, { pairedState: true }), actors = [];
+  const clock = warmFunctionalClock(t, () => false);
+  try {
+    const player = () => ({ levels: [{ details: { live: true } }], media: Object.assign(new EventTarget(), { currentTime: 0, paused: false,
+      ended: false, seeking: false, readyState: 4, playbackRate: 1, buffered: { length: 0 } }) });
+    const common = { steadyPeerWindow: true, sustainablePeerWait: true, maxPeers: 2 };
+    for (const swarmOptions of [{ ...common, maxUploadPeers: 1 }, { ...common, maxUploadBytesPerSession: 0 }, common])
+      actors.push(await clock.settle(pair.make({ delay: 1600, player: player(), swarmOptions })));
+    const [a, b, c] = actors;
+    await clock.advanceUntil(() => a.swarm.metrics().peers.connected === 2 && c.swarm.metrics().peers.connected >= 1);
+    // Origin timing for each viewer from another object (1.6 s: zero sustainable budget for 2 s fragments).
+    const train = actor => new Promise((resolve, reject) => {
+      const frag = M3U8Parser.parseLevelPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:7\n#EXTINF:2,\ntrain.ts\n',
+        'https://origin.example/media/index.m3u8', 0, 'main', 0, null).fragments[0];
+      const loader = new actor.hls.config.fLoader({}); frag.stats = loader.stats;
+      loader.load({ url: frag.url, frag, part: null }, { timeout: 4000 }, { onSuccess: resolve, onError: reject, onTimeout: reject });
+    });
+    for (const actor of [b, c]) await clock.settle(train(actor));
+    sameBytes(await clock.settle(a.load()), pair.bytes); // the owner fetches and retains the object
+    await clock.advanceUntil(() => pair.channels.some(channel => channel.sent.some(frame => frame?.t === 'have' && (frame.keys ?? frame.add ?? []).includes(pair.key))));
+    for (const actor of [b, c]) actor.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+    const http = actors.map(actor => actor.http);
+    sameBytes(await clock.settle(b.load()), pair.bytes);
+    assert.equal(b.http, http[1], 'B took the held object peer-only');
+    assert.deepEqual([b.swarm.metrics().steadyPeerWindow.peerOnlyDelivered, b.swarm.metrics().bytes.peerFirst], [1, pair.bytes.length]);
+    sameBytes(await clock.settle(c.load()), pair.bytes);
+    assert.equal(c.http, http[2] + 1, 'C fell back to one whole source GET');
+    assert.deepEqual([c.swarm.metrics().steadyPeerWindow.peerOnlyStarted, c.swarm.metrics().steadyPeerWindow.peerOnlyFallback,
+      c.swarm.metrics().bytes.peerFirst], [1, 1, 0]);
+    assert.equal(a.swarm.metrics().uploadRefusalDiagnostics.counters['peer-limit'], 1, 'A refused the upload peer beyond its limit');
+    assert.equal(a.http, http[0], 'the owner fetched once');
+  } finally { clock.restore(); pair.close(); }
 });
 
 test('verified piece flow waits for real worker verification and rejects invalidated replies', async t => {

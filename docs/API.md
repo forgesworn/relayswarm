@@ -212,6 +212,58 @@ normal source recovery within the captured parent deadline. A genuine load
 reentered by an abort callback cannot join the retired row and uses its own
 ordinary loading path. Other warm work and startup behaviour are unchanged.
 
+The unreleased experimental `steadyPeerWindow: true` option requires
+peer-first, `serve: true` and `multiHolder`; it defaults to `false`, and with
+it off loading and wire traffic are unchanged. While a viewer's origin claim
+for a key is held, its 2,000 ms FETCH lease is re-sent every 1,000 ms, so a
+fetch longer than one lease stays announced; receivers keep capping each grant
+and overwriting the expiry of a held key. A successful body withdraws its
+claim (`ms: 0`) only after its HAVE, or after the held cache refuses it, and
+at most 1,000 ms later. This applies to whole source loads, warm bodies and the
+multi-holder origin lane.
+
+A genuine, not yet running main-fragment demand at zero exclusive peer budget
+may then open a buffer-funded window when playback is healthy at normal speed,
+the main playlist's `details.live` is boolean, the startup reservoir is off or
+released, the range Core (and any configured worker) is ready and measured
+origin recovery exists: `W = min(maxPeerWaitMs, uncapped buffer - recovery -
+2 x originReserveMs)`, where recovery is the origin p90 with its 25% and 100 ms
+margin and the uncapped buffer already excludes one recovery. Below 500 ms the
+window stays closed and today's path runs. Inside the window the demand waits
+for the exact HAVE only while a current serving candidate (the same connected,
+admitted, framing 2 links the XOR election ranks) holds a live FETCH lease for
+that exact key; XOR rank alone never causes this wait. With no such lease and no
+exact HAVE, today's path starts at once with its original budgets. An exact
+HAVE, at entry or after the wait, starts the existing peer-only Core transfer on
+the holders of that moment, bounded by the window end, with no source lane; an
+unknown link model begins with the Core's one-piece probe and four-piece
+refills. Delivery hands over the verified object as other peer loads do. A null
+result, failure, ban, lapse or window end starts ordinary whole-source loading
+on the captured parent and first-byte budgets less the elapsed time; no peer
+message extends a parent deadline. A lease that lapses (expiry or `ms: 0`)
+without HAVE within 250 ms, or a take-up that fails before the window ends,
+makes that link's leases ignored for 10 s; its exact HAVE stays usable. A window
+that ends while the lease is live carries no penalty. This bounded wait on a
+FETCH claim is the option's exception to the election rule above that no peer
+claim creates a wait for genuine demand.
+
+With `warmAhead` and `bufferedMixedRanges` as well, this option changes two
+rules above. A live exact-key lease from a current candidate makes a
+not-yet-started optional future yield (counted as `sourceYielded`), whatever
+the XOR rank. A reconsidered future with an exact HAVE uses the same peer-only
+take-up within its unchanged eight-second deadline instead of mixed loading;
+on failure the optional row ends, and only a genuine waiter that joined it
+continues on today's path.
+
+`metrics().steadyPeerWindow`, present only with the option, holds counts with
+no identities: `opened`, `closedHeadroom`, `leaseWaits`, `waitHave`,
+`waitLapsed`, `waitWindowEnd`, `leasesIgnored` (window entries at which a
+live lease was ignored for its link's miss cooldown), `peerOnlyStarted`,
+`peerOnlyDelivered`, `peerOnlyFallback` and `fetchRenewalsSent` (one per claimed
+key per renewal, to all links). Controlled fixtures exercise these rules; field
+sharing, continuity and savings are not qualified. See the
+[loading contract](../INTEGRATION.md#options).
+
 The separate unreleased `startupBufferTarget` option defaults to `null`. A host
 may supply a synchronous function returning its fresh raw HLS target time in
 seconds. Return `null` when the player, room epoch or playback intent is no
