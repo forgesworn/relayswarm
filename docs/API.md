@@ -268,8 +268,12 @@ element up to that future's start, would fund a window for it by the same
 headroom arithmetic (W of at least 500 ms with measured recovery). With a
 shallower buffer the future starts its own origin fetch as before, so a viewer
 short of buffer keeps building its lead. A reconsidered future with an exact
-HAVE uses the same peer-only take-up within its unchanged eight-second
-deadline instead of mixed loading. If that take-up sends no request (a
+HAVE uses the same peer-only take-up instead of mixed loading, bounded by the
+smaller of its eight-second speculative deadline and the window this viewer's
+measured buffer funds (the same arithmetic, so at most `maxPeerWaitMs`); a
+genuine demand that joins the row therefore waits no longer than a genuine
+window would. With less than 500 ms funded there is no take-up and mixed
+loading runs as before. If that take-up sends no request (a
 commitment, model or capacity refusal, or no free candidate) the row
 continues as an ordinary warm origin fetch inside the same deadline; only a
 take-up that sent a request and failed ends the row, and only a genuine
