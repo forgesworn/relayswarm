@@ -6416,6 +6416,31 @@ test('steady peer window (R4): a known link model too slow for the whole object 
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
+test('steady peer window (R6): a lease miss cooldown survives the same author reconnecting', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    f = await steadyWindowFixture(t, clock);
+    f.lease(300);
+    sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+    assert.equal(f.steady().waitLapsed, 1);
+    // Same author, new native connection and channel.
+    const channel = new RangedChannel(f.bytes), accepted = f.swarm.metrics().peers.offersAccepted;
+    f.channels[0].close();
+    f.peers[0].sendSignal(f.swarm.metrics().pubkey, { type: 'offer', transport: 'webrtc', requestId: 'steady-redial', payload: { sdp: 'fixture-offer' } });
+    await clock.advanceUntil(() => f.connections.length === 2 && f.swarm.metrics().peers.offersAccepted > accepted, 1000);
+    const event = new Event('datachannel'); event.channel = channel; f.connections[1].dispatchEvent(event);
+    await clock.advanceUntil(() => f.swarm.metrics().peers.connected === 1, 1000);
+    f.connections[1].connectionState = 'connected';
+    channel.receive(JSON.stringify({ t: 'contribution', serving: true, rendition: STEADY_RENDITION }));
+    f.lease(2000, channel);
+    const next = await f.demand();
+    assert(next.sourceAfterMs <= 10, 'the redialled author\'s lease is still ignored: ' + next.sourceAfterMs);
+    assert.deepEqual([f.steady().leaseWaits, f.steady().leasesIgnored], [1, 1]);
+    sameBytes(await clock.settle(next.response), f.bytes);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
 /** A holder that refuses every request ("none": not held or not serving now). */
 class EmptyAnswerChannel extends RangedChannel {
   send(data) {

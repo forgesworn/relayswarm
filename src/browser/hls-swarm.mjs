@@ -516,10 +516,11 @@ class HlsSwarm {
     this.renditions = new Map();
     this.originFetches = new Map();
     // steadyPeerWindow only: per claimed key, the FETCH renewal timer and any
-    // withdrawal deferred until the HAVE for a successful body; per link, the
-    // time until which its leases are ignored after a miss. Counts only.
+    // withdrawal deferred until the HAVE for a successful body; per peer
+    // public key (so a redial keeps it), the time until which its leases are
+    // ignored after a miss. Counts only.
     this.steadyFetches = new Map();
-    this.steadyLeaseCooldowns = new WeakMap();
+    this.steadyLeaseCooldowns = new Map();
     this.steadyCounts = { opened: 0, closedHeadroom: 0, leaseWaits: 0, waitHave: 0, waitLapsed: 0, waitWindowEnd: 0,
       leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, fetchRenewalsSent: 0 };
     this.uploadQuotaBytes = 0;
@@ -875,6 +876,7 @@ class HlsSwarm {
     this.held.clear();
     this.heldBytes = 0;
     this.originFetches.clear();
+    this.steadyLeaseCooldowns.clear();
     this.renditions.clear();
     this.playerHints = [];
     this.hintSizes.clear();
@@ -2368,7 +2370,7 @@ class HlsSwarm {
     const leases = () => {
       const at = now(), wall = Date.now();
       const live = this.#warmCandidates(context).filter(link => (link.fetching.get(key) || 0) > wall);
-      return { live, honoured: live.filter(link => !((this.steadyLeaseCooldowns.get(link) ?? -Infinity) > at)) };
+      return { live, honoured: live.filter(link => !((this.steadyLeaseCooldowns.get(link.pubkey) ?? -Infinity) > at)) };
     };
     let holders = exact();
     if (holders.length) return { next: 'held', key, holders, waited: false };
@@ -2402,12 +2404,18 @@ class HlsSwarm {
   }
 
   #coolSteadyLeases(links) {
-    const until = now() + LINK_REFRESH_MS;
-    for (const link of links) this.steadyLeaseCooldowns.set(link, until);
+    const at = now(), until = at + LINK_REFRESH_MS;
+    for (const [pubkey, expires] of this.steadyLeaseCooldowns) if (expires <= at) this.steadyLeaseCooldowns.delete(pubkey);
+    for (const link of links) {
+      this.steadyLeaseCooldowns.delete(link.pubkey);
+      // Bounded like the other per-peer maps: the oldest entry gives way.
+      if (this.steadyLeaseCooldowns.size >= 64) this.steadyLeaseCooldowns.delete(this.steadyLeaseCooldowns.keys().next().value);
+      this.steadyLeaseCooldowns.set(link.pubkey, until);
+    }
   }
 
   #steadyLeaseLive(link, key) {
-    return (link.fetching.get(key) || 0) > Date.now() && !((this.steadyLeaseCooldowns.get(link) ?? -Infinity) > now());
+    return (link.fetching.get(key) || 0) > Date.now() && !((this.steadyLeaseCooldowns.get(link.pubkey) ?? -Infinity) > now());
   }
 
   #shouldWaitForOrigin(key, rendition, context) {
