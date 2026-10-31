@@ -1233,7 +1233,7 @@ test("broadcast availability: captured and unresolved origin keys are emitted be
       .replace(/^import[^\n]+\n/u, "").replace("export class PeerLink", "class PeerLink");
     const knownStart = swarm.indexOf("            // Publish retained source bytes before Hls synchronously disposes");
     const unknownStart = swarm.indexOf("                const key = await keyPromise;");
-    const snippets = [swarm.slice(knownStart, swarm.indexOf("            if (!finishOrigin()) return;", knownStart)),
+    const snippets = [swarm.slice(knownStart, swarm.indexOf("            if (!finishOrigin(true)) return;", knownStart)),
       swarm.slice(unknownStart, swarm.indexOf("\n              }\n            });", unknownStart))];
     for (const known of [true, false]) for (const retain of [true, false]) {
       let tick = 0, sends = 0;
