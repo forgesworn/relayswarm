@@ -6441,6 +6441,37 @@ test('steady peer window (R6): a lease miss cooldown survives the same author re
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
+test('steady peer window (R1): a renewed lease dates the holder wait from its first grant at a receiver without the option', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    lateRaceKeyClock(t);
+    // Receiver without steadyPeerWindow, positive budget, typical origin time 3,000 ms.
+    f = await clock.settle(multiFixture(t, { holders: [{}], wholeOriginDelayMs: 3000, originFallbackMs: 1500,
+      swarmOptions: { maxPeerWaitMs: 1500 } }));
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    f.hls.media = { currentTime: 10, buffered: { length: 0 } };
+    const train = { ...multiContext, url: 'https://origin.example/media/train.ts', frag: { ...multiContext.frag, url: 'https://origin.example/media/train.ts' } };
+    sameBytes(await clock.settle(f.load(train)), f.bytes);
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 30 };
+    f.channels[0].receive(JSON.stringify({ t: 'contribution', serving: true, rendition: STEADY_RENDITION }));
+    // A renewing owner: grants at 0, 1,000 and 2,000 ms of its fetch.
+    for (let grant = 0; grant < 3; grant++) {
+      if (grant) await clock.advance(1000);
+      f.channels[0].receive(JSON.stringify({ t: 'fetching', k: f.key, ms: 2000 }));
+    }
+    await clock.advance(500);
+    // 2,500 ms into a 3,000 ms typical fetch: 500 ms to wait, which fits the 1,500 ms limit.
+    // Dating the fetch from the latest grant would project 2,500 ms and go to origin at once.
+    const load = beginCountedMultiLoad(f, multiContext);
+    sameBytes(await clock.settle(load.response), f.bytes);
+    const counters = f.swarm.metrics().peerEligibilityDiagnostics.counters;
+    assert.equal(counters['projected-late'], 0, JSON.stringify(counters));
+    assert.equal(counters['no-have-wait'], 1, JSON.stringify(counters));
+    assert.equal('steadyPeerWindow' in f.swarm.metrics(), false);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
 /** A holder that refuses every request ("none": not held or not serving now). */
 class EmptyAnswerChannel extends RangedChannel {
   send(data) {

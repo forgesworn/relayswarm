@@ -26,8 +26,10 @@ taken through the existing peer-only Core transfer with no concurrent source
 lane, re-learning an unknown link model from real flow. Every miss falls back
 to whole source on the remaining parent budgets; lapsed leases and failed
 take-ups cool the link for 10 s. No wire, Core or WASM change; hash
-verification, startup reservoir rules and warm caps are unchanged; with the
-option off, loading and wire traffic are unchanged. Controlled fixtures with the
+verification, startup reservoir rules and warm caps are unchanged. A viewer
+with the option off sends what it sent before; in a mixed room, renewed leases
+it receives keep its budget-positive coordinated wait live for the whole
+announced fetch, within its own peer deadline. Controlled fixtures with the
 real Core and logical clocks cover renewal and withdrawal order, the window
 arithmetic, lease waits, lapses, window ends, cooldowns, peer-only delivery,
 integrity bans, the startup terminal, optional-future yield and

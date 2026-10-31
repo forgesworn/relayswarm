@@ -213,14 +213,19 @@ reentered by an abort callback cannot join the retired row and uses its own
 ordinary loading path. Other warm work and startup behaviour are unchanged.
 
 The unreleased experimental `steadyPeerWindow: true` option requires
-peer-first, `serve: true` and `multiHolder`; it defaults to `false`, and with
-it off loading and wire traffic are unchanged. While a viewer's origin claim
+peer-first, `serve: true` and `multiHolder`; it defaults to `false`. A viewer
+with it off sends what it sent before. While a viewer's origin claim
 for a key is held, its 2,000 ms FETCH lease is re-sent every 1,000 ms, so a
 fetch longer than one lease stays announced; receivers keep capping each grant
 and overwriting the expiry of a held key. A successful body withdraws its
 claim (`ms: 0`) only after its HAVE, or after the held cache refuses it, and
 at most 1,000 ms later. This applies to whole source loads, warm bodies and the
-multi-holder origin lane.
+multi-holder origin lane. In a room that mixes viewers with and without the
+option, a viewer without it that receives renewed leases sees each lease live
+for the whole announced fetch: its budget-positive coordinated wait can last
+until its own peer deadline instead of lapsing after 2 s, and its holder-wait
+projection dates the fetch from the first grant (an unrenewed lease gives the
+same projection as before). Zero-budget loading is unaffected.
 
 A genuine, not yet running main-fragment demand at zero exclusive peer budget
 may then open a buffer-funded window when playback is healthy at normal speed,

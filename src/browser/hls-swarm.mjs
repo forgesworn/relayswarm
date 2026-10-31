@@ -521,6 +521,9 @@ class HlsSwarm {
     // ignored after a miss. Counts only.
     this.steadyFetches = new Map();
     this.steadyLeaseCooldowns = new Map();
+    // Per link, when each live FETCH lease was first granted, so a renewed
+    // lease still dates its fetch from the first grant. Local bookkeeping.
+    this.leaseStarts = new WeakMap();
     this.steadyCounts = { opened: 0, closedHeadroom: 0, leaseWaits: 0, waitHave: 0, waitLapsed: 0, waitWindowEnd: 0,
       leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, fetchRenewalsSent: 0 };
     this.uploadQuotaBytes = 0;
@@ -2772,11 +2775,28 @@ class HlsSwarm {
     if (typical === null) return null;
     let started = null;
     for (const peer of this.links.values()) {
-      const expires = peer.fetching.get(key) || 0;
-      // Leases are announced for 2000 ms when an origin fetch starts.
-      if (expires > Date.now()) started = Math.min(started ?? Infinity, expires - 2_000);
+      const expires = peer.fetching.get(key) || 0, first = this.leaseStarts.get(peer)?.get(key);
+      // Leases are announced for 2000 ms when an origin fetch starts. A renewed
+      // lease (steadyPeerWindow) dates the fetch from its first grant; an
+      // unrenewed one gives exactly the earlier inference.
+      if (expires > Date.now()) started = Math.min(started ?? Infinity, expires - 2_000, first?.until === expires ? first.since : Infinity);
     }
     return Math.max(0, typical - (started === null ? 0 : Date.now() - started));
+  }
+
+  #noteLeaseStarts(link) {
+    let starts = this.leaseStarts.get(link);
+    if (!starts) this.leaseStarts.set(link, starts = new Map());
+    const at = Date.now();
+    for (const key of starts.keys()) if (!((link.fetching.get(key) || 0) > at)) starts.delete(key);
+    for (const [key, expires] of link.fetching) {
+      if (!(expires > at)) continue;
+      const entry = starts.get(key);
+      // Still live when renewed: keep the first grant. New, or renewed after
+      // it lapsed: a fresh fetch from this grant.
+      if (entry && entry.until > at) entry.until = expires;
+      else starts.set(key, { since: Math.min(at, expires - 2_000), until: expires });
+    }
   }
 
   // How long a delivery may wait, from its projection (holder wait plus
@@ -5056,7 +5076,8 @@ class HlsSwarm {
         for (const waiter of [...this.haveWaiters]) waiter(added);
         this.#checkLatePeers();
       },
-      onScheduleChange: () => {
+      onScheduleChange: (changed) => {
+        if (changed) this.#noteLeaseStarts(changed);
         for (const waiter of [...this.haveWaiters]) waiter();
         for (const waiter of [...this.peerLeaseWaiters]) waiter();
         this.#checkLatePeers();
