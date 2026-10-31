@@ -3930,40 +3930,42 @@ test('steady peer window (R5, R5a, R5b): a live lease makes an owned optional fu
     // Deep: 2(d+1) s of buffer ahead of the future. Shallow: 3 s, which cannot fund a window.
     if (variant.includes('shallow')) f.media.currentTime = 2 * (d + 1) - 3;
     if (leased) for (const sn of [d + 1, d + 2]) frame({ t: 'fetching', k: key(sn), ms: 2000 });
-    const demand = f.load(d);
-    await until(() => f.requests.some(row => row.context.frag.sn === d));
+    // With measured recovery the genuine demand may coordinate on XOR rank (budget-positive path);
+    // the warm engine admits its futures meanwhile, which is what this test observes.
+    f.load(d);
     const futures = () => f.requests.filter(row => row.context.frag.sn > d);
     const warm = () => f.swarm.metrics().warmAhead;
+    const wait = (predicate, label) => until(predicate).catch(error => { throw new Error(label + ' ' + JSON.stringify({ d,
+      requests: f.requests.map(row => [row.context.frag.sn, row.completed, row.aborted]), warm: warm(), steady: f.swarm.metrics().steadyPeerWindow,
+      media: { currentTime: f.media.currentTime } })); });
     if (!leased || !steady || variant.includes('shallow')) {
-      await until(() => futures().length === 1);
+      await wait(() => futures().length === 1, 'one future');
       assert.equal(futures()[0].context.frag.sn, d + 1, 'the rank owner starts its warm origin fetch');
       assert.equal(warm().sourceYielded, 0, 'no yield');
       return;
     }
-    await until(() => warm().sourceYielded === 2);
+    await wait(() => warm().sourceYielded === 2, 'two yields');
     assert.deepEqual(futures(), [], 'both leased futures yield to the fetching candidate');
     if (variant.includes('refused')) takeUpCalls = 0;
     peer.have(d + 1);
     if (variant.includes('refused')) {
       // R5b: no request reached the holder, so the row keeps warming from origin inside its deadline.
-      await until(() => futures().length === 1);
+      await wait(() => futures().length === 1, 'one future');
       assert.equal(futures()[0].context.frag.sn, d + 1);
       assert.equal(peer.sent.filter(sent => sent?.t === 'want').length, 0);
       const steadyCounts = f.swarm.metrics().steadyPeerWindow;
       assert.deepEqual([steadyCounts.peerOnlyStarted, steadyCounts.peerOnlyDelivered, steadyCounts.peerOnlyFallback], [1, 0, 1]);
       futures()[0].finish();
-      await until(() => warm().verified === 1);
+      await wait(() => warm().verified === 1, 'verified');
       assert.equal(warm().verifiedPeerBytes, 0);
       return;
     }
-    await until(() => f.swarm.metrics().steadyPeerWindow.peerOnlyDelivered === 1);
-    await until(() => warm().verified === 1);
+    await wait(() => f.swarm.metrics().steadyPeerWindow.peerOnlyDelivered === 1, 'delivered');
+    await wait(() => warm().verified === 1, 'verified');
     assert.deepEqual(futures(), [], 'the reconsidered future took no source lane');
     assert.equal(warm().haveReconsidered, 1); assert.equal(warm().verifiedPeerBytes, f.bytes.length);
     assert.equal(f.swarm.metrics().bytes.peerFirst, 0, 'speculation is not consumption');
     assert(peer.sent.some(sent => sent?.t === 'want'));
-    f.requests.find(row => row.context.frag.sn === d).finish();
-    assert.deepEqual(await demand.result, f.bytes);
     assert.deepEqual(await f.load(d + 1).result, f.bytes);
     assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length, 'credit at the genuine consumer');
     assert.deepEqual(futures().filter(row => row.context.frag.sn === d + 1), []);
