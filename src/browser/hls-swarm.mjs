@@ -2321,8 +2321,11 @@ class HlsSwarm {
     if (candidates.some(peer => peer.have.has(key))) return true;
     if (requireExact) return false;
     if (!candidates.length) return true;
-    // R5: a candidate demonstrably fetching this exact key owns it for now.
-    if (this.options.steadyPeerWindow && candidates.some(peer => this.#steadyLeaseLive(peer, key))) return false;
+    // R5: a candidate demonstrably fetching this exact key owns it for now,
+    // but only while this viewer's buffer funds a window for it (R5a); a
+    // shallow buffer keeps its own warm origin fetch.
+    if (this.options.steadyPeerWindow && candidates.some(peer => this.#steadyLeaseLive(peer, key)) &&
+        this.#steadyYieldFunded(context)) return false;
     const target = BigInt('0x' + key), local = target ^ BigInt('0x' + this.session.pubkey);
     return candidates.every(peer => (target ^ BigInt('0x' + peer.pubkey)) >= local);
   }
@@ -2355,9 +2358,7 @@ class HlsSwarm {
     if (!limits.length) return null;
     const parentMs = Math.min(...limits), first = config?.loadPolicy?.maxTimeToFirstByteMs;
     const firstMs = Number.isFinite(first) && first > 0 ? Math.min(first, parentMs) : parentMs;
-    const p90 = percentile(this.#originSamples(context), 0.9), recoveryMs = p90 === null ? null : p90 * 1.25 + 100;
-    const windowMs = recoveryMs === null || !Number.isFinite(geometry.uncappedMs) ? 0
-      : Math.min(this.options.maxPeerWaitMs, geometry.uncappedMs - recoveryMs - 2 * this.options.originReserveMs);
+    const { windowMs, recoveryMs } = this.#steadyFunding(context, geometry);
     // The source fallback must still fit one measured recovery inside the parent budgets.
     if (!(windowMs >= STEADY_MIN_WINDOW_MS) || windowMs + recoveryMs > firstMs) {
       this.steadyCounts.closedHeadroom = increment(this.steadyCounts.closedHeadroom);
@@ -2365,6 +2366,25 @@ class HlsSwarm {
     }
     this.steadyCounts.opened = increment(this.steadyCounts.opened);
     return { windowMs, parentMs, firstMs };
+  }
+
+  // R2's funded headroom from buffer geometry: W, or 0 without measured recovery.
+  #steadyFunding(context, geometry) {
+    const p90 = percentile(this.#originSamples(context), 0.9), recoveryMs = p90 === null ? null : p90 * 1.25 + 100;
+    const windowMs = recoveryMs === null || geometry.source !== 'buffer' || !Number.isFinite(geometry.uncappedMs) ? 0
+      : Math.min(this.options.maxPeerWaitMs, geometry.uncappedMs - recoveryMs - 2 * this.options.originReserveMs);
+    return { windowMs, recoveryMs };
+  }
+
+  // R5a: whether this viewer's own verified buffer would open a window for
+  // the object, read from the media buffer (a warm context has no geometry).
+  #steadyYieldFunded(context) {
+    try {
+      const shadow = { ...context }, geometry = {};
+      delete shadow[WARM_AHEAD];
+      this.#peerBudget(shadow, geometry);
+      return this.#steadyFunding(shadow, geometry).windowMs >= STEADY_MIN_WINDOW_MS;
+    } catch { return false; }
   }
 
   // R3: wait inside the window for the exact HAVE of a demonstrably fetching

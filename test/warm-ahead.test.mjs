@@ -3903,33 +3903,59 @@ test('steady peer window (h): a live lease on the startup terminal waits for not
   assert.equal(peer.sent.filter(frame => frame?.t === 'want').length, 0);
 });
 
-test('steady peer window (R5): a live lease makes an owned optional future yield; its later exact HAVE is taken peer-only', async t => {
-  for (const leased of [false, true]) await t.test(leased ? 'leased' : 'control without a lease', async t => {
-    const f = await fixture(t, { rangePeer: true, bufferedMixedRanges: true, steadyPeerWindow: true, size: 256 * 1024,
-      held: Array.from({ length: 12 }, (_, sn) => sn) });
+test('steady peer window (R5, R5a, R5b): a live lease makes an owned optional future yield only while the buffer funds a window', async t => {
+  const variants = ['control without a lease', 'leased, deep buffer', 'leased, shallow buffer', 'flag off, leased'];
+  for (const variant of variants) await t.test(variant, async t => {
+    const leased = variant.includes('leased'), steady = !variant.startsWith('flag off');
+    let target = null, takeUpCalls = null;
+    const f = await fixture(t, { rangePeer: true, bufferedMixedRanges: true, ...(steady ? { steadyPeerWindow: true } : {}), size: 256 * 1024,
+      held: Array.from({ length: 12 }, (_, sn) => sn),
+      // R5b: refuse only the reconsidered take-up's own commitment, after its authorisation.
+      beforeCommitment: context => {
+        if (takeUpCalls === null || context.frag.sn !== target) return;
+        if (++takeUpCalls === 2) throw new Error('commitment unavailable');
+      } });
     const peer = await f.addPeer();
     for (const pc of f.connections) pc.connectionState = 'connected';
     const frame = data => peer.channel.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(data) }));
     frame({ t: 'contribution', serving: true, rendition: 'main:/media/index.m3u8' });
     const key = sn => sha(`warm-ahead-fixture\n/media/s${sn}.m4s`), self = BigInt('0x' + f.swarm.metrics().pubkey), other = BigInt('0x' + peer.pubkey);
     const owned = sn => { const target = BigInt('0x' + key(sn)); return (target ^ other) >= (target ^ self); };
-    // A demand whose next parsed future this viewer would fetch by XOR rank.
-    const d = Array.from({ length: 10 }, (_, sn) => sn).find(sn => owned(sn + 1));
-    if (d === undefined) return t.skip('no owned future for these random identities (p = 2^-10)');
+    // A demand at least 6 s ahead of the playhead whose next parsed future this viewer would fetch by XOR rank.
+    const d = Array.from({ length: 7 }, (_, n) => n + 3).find(sn => owned(sn + 1));
+    if (d === undefined) return t.skip('no owned future for these random identities (p = 2^-7)');
+    target = d + 1;
+    // Measured origin recovery first (one short source load).
+    const first = f.load(0); f.requests.find(row => row.context.frag.sn === 0).finish(); assert.deepEqual(await first.result, f.bytes);
+    // Deep: 2(d+1) s of buffer ahead of the future. Shallow: 3 s, which cannot fund a window.
+    if (variant.includes('shallow')) f.media.currentTime = 2 * (d + 1) - 3;
     if (leased) for (const sn of [d + 1, d + 2]) frame({ t: 'fetching', k: key(sn), ms: 2000 });
     const demand = f.load(d);
     await until(() => f.requests.some(row => row.context.frag.sn === d));
     const futures = () => f.requests.filter(row => row.context.frag.sn > d);
     const warm = () => f.swarm.metrics().warmAhead;
-    if (!leased) {
+    if (!leased || !steady || variant.includes('shallow')) {
       await until(() => futures().length === 1);
-      assert.equal(futures()[0].context.frag.sn, d + 1, 'the rank owner fetches its optional future');
-      assert.equal(warm().sourceYielded, 0);
+      assert.equal(futures()[0].context.frag.sn, d + 1, 'the rank owner starts its warm origin fetch');
+      assert.equal(warm().sourceYielded, 0, 'no yield');
       return;
     }
     await until(() => warm().sourceYielded === 2);
     assert.deepEqual(futures(), [], 'both leased futures yield to the fetching candidate');
+    if (variant.includes('refused')) takeUpCalls = 0;
     peer.have(d + 1);
+    if (variant.includes('refused')) {
+      // R5b: no request reached the holder, so the row keeps warming from origin inside its deadline.
+      await until(() => futures().length === 1);
+      assert.equal(futures()[0].context.frag.sn, d + 1);
+      assert.equal(peer.sent.filter(sent => sent?.t === 'want').length, 0);
+      const steadyCounts = f.swarm.metrics().steadyPeerWindow;
+      assert.deepEqual([steadyCounts.peerOnlyStarted, steadyCounts.peerOnlyDelivered, steadyCounts.peerOnlyFallback], [1, 0, 1]);
+      futures()[0].finish();
+      await until(() => warm().verified === 1);
+      assert.equal(warm().verifiedPeerBytes, 0);
+      return;
+    }
     await until(() => f.swarm.metrics().steadyPeerWindow.peerOnlyDelivered === 1);
     await until(() => warm().verified === 1);
     assert.deepEqual(futures(), [], 'the reconsidered future took no source lane');
