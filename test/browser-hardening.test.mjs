@@ -6365,6 +6365,30 @@ test('steady peer window (k): a peer-only take-up that bans a bad piece falls ba
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
+test('steady peer window (R6): a take-up refused before any request (commitment unavailable) does not cool the holder', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f, refuse = false;
+  try {
+    f = await steadyWindowFixture(t, clock, { beforeCommitment: () => { if (refuse) throw new Error('commitment unavailable'); } });
+    refuse = true;
+    f.lease(2000);
+    setTimeout(() => f.have(), 100);
+    const first = beginCountedMultiLoad(f, f.ctx);
+    sameBytes(await clock.settle(first.response), f.bytes);
+    assert.deepEqual(f.channels[0].wants, [], 'no request reached the holder');
+    assert.equal(f.wholeLoads.length, f.trained + 1);
+    assert.equal(f.swarm.metrics().segments.commitmentUnavailable, 1);
+    assert.deepEqual([f.steady().waitHave, f.steady().peerOnlyStarted, f.steady().peerOnlyFallback], [1, 1, 1]);
+    refuse = false;
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    f.lease(300);
+    const next = await f.demand();
+    assert(next.sourceAfterMs >= 550, 'the same holder\'s next lease is honoured: ' + next.sourceAfterMs);
+    sameBytes(await clock.settle(next.response), f.bytes);
+    assert.deepEqual([f.steady().leaseWaits, f.steady().leasesIgnored], [2, 0]);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
 /** A holder that refuses every request ("none": not held or not serving now). */
 class EmptyAnswerChannel extends RangedChannel {
   send(data) {

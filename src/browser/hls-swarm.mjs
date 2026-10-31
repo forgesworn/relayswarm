@@ -1473,9 +1473,10 @@ class HlsSwarm {
               return fail();
             }
             swarm.steadyCounts.peerOnlyFallback = increment(swarm.steadyCounts.peerOnlyFallback);
-            // R6: a failed take-up means the owner went away, evicted or lied;
-            // its leases are ignored for a while.
-            swarm.#coolSteadyLeases(holders);
+            // R6: only a Core transfer the holders failed (refused, withdrawn,
+            // closed or banned) is the owner's miss; a commitment, local model
+            // or capacity refusal before any request is not.
+            if (!result && plan.finishReason === 'core-fail-command') swarm.#coolSteadyLeases(holders);
             fail();
           }).catch(error => {
             if (this.active !== token) return;
@@ -3140,6 +3141,7 @@ class HlsSwarm {
   async #multiHolder(context, signal, plan, key, commitment, discoveryContext, traceLoad) {
     const traceStarted = this.options.traceRequests ? now() : null;
     const traceFinish = (reason, delivered = false, verifiedBytes = 0, originBytes = 0) => {
+      plan.finishReason = reason;
       if (!this.options.traceRequests) return;
       try {
         const at = now();
