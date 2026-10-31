@@ -1269,7 +1269,7 @@ class HlsSwarm {
                   Math.abs(demand.context.frag.duration - identity.context.frag.duration) <= 1e-9));
             } catch { return false; }
           };
-          warmOwner = { current, reconsidered: initial?.reconsidered === true,
+          warmOwner = { current, reconsidered: initial?.reconsidered === true, deadline: initial?.deadline,
             abandonOptional: () => {
               try {
                 if (!abandonWarm || !current()) return false;
@@ -1304,6 +1304,16 @@ class HlsSwarm {
         if (swarm.options.steadyPeerWindow && !steadyBypass && budgetMs === 0 && !context[WARM_AHEAD]) {
           const window = swarm.#steadyWindow(context, budgetGeometry, config, this.hlsConfig.progressive);
           if (window) return this.loadSteadyWindow(context, config, callbacks, budgetGeometry, window);
+        }
+        // R5: a reconsidered warm future takes an exact HAVE peer-only inside
+        // its unchanged speculative deadline, with no source lane of its own.
+        if (swarm.options.steadyPeerWindow && !steadyBypass && warmOwner?.reconsidered && Number.isFinite(warmOwner.deadline) &&
+            !this.hlsConfig.progressive && swarm.#rangesEnabled() &&
+            (swarm.options.transferWorkerUrl === undefined || swarm.transferWorkerState === 'ready')) {
+          const limits = [config?.loadPolicy?.maxLoadTimeMs, config?.timeout].filter(value => Number.isFinite(value) && value > 0);
+          const windowMs = warmOwner.deadline - now();
+          if (limits.length && windowMs > 0 && warmOwner.current()) return this.loadSteadyWindow(context, config, callbacks, mixedGeometry,
+            { windowMs, parentMs: Math.min(...limits), firstMs: Math.min(...limits) }, warmOwner);
         }
         if (swarm.options.bufferedMixedRanges && budgetMs === 0 && (!context[WARM_AHEAD] || warmOwner) && !this.hlsConfig.progressive && warmContext(context) &&
             mixedSource === 'buffer' && mixedGeometry.uncappedMs > 25 &&
@@ -1411,8 +1421,8 @@ class HlsSwarm {
       // steadyPeerWindow: a genuine demand inside a buffer-funded window. It
       // spends only already-buffered time; every hand-back keeps the captured
       // parent and first-byte budgets less the elapsed time.
-      loadSteadyWindow(context, config, callbacks, geometry, { windowMs, parentMs, firstMs }) {
-        const token = {}, controller = new AbortController(), enteredAt = now();
+      loadSteadyWindow(context, config, callbacks, geometry, { windowMs, parentMs, firstMs }, warmOwner = null) {
+        const token = {}, controller = new AbortController(), enteredAt = now(), windowEnd = enteredAt + windowMs;
         const traceLoad = swarm.#traceBegin(context, 0, windowMs, geometry);
         let timer;
         this.active = token; this.pendingCallbacks = { callbacks, context };
@@ -1429,16 +1439,54 @@ class HlsSwarm {
           if (whole) this.loadWholeOrigin(context, budget, callbacks, traceLoad);
           else this.load(context, budget, callbacks, true);
         };
+        // A failed optional future ends its row; only a genuine waiter that
+        // joined it (refused abandonment) takes today's path.
+        const fail = () => {
+          if (this.active !== token) return;
+          if (!warmOwner) return handBack(true, true);
+          if (warmOwner.abandonOptional()) return;
+          if (this.active !== token) return;
+          if (warmOwner.current()) return handBack(true, false);
+          this.active = null; this.pendingCallbacks = null; cleanup(); controller.abort();
+          this.inner.stats.aborted = true; callbacks.onAbort?.(this.inner.stats, context, null);
+        };
+        // R4: a peer-only Core transfer from the holders at this moment, no
+        // concurrent source lane, bounded by the window end.
+        const takeUp = ({ key, holders }) => {
+          swarm.steadyCounts.peerOnlyStarted = increment(swarm.steadyCounts.peerOnlyStarted);
+          const plan = { deadline: windowEnd, limit: windowEnd, originReserveMs: 0, expired: false, onDeadline: null,
+            knownKey: key, cachedOnly: new Map(holders.map(link => [link, new Set(link.have)])), lateHaveRace: false,
+            peerOnly: true, steadyWindow: true, extend: () => false,
+            ...(warmOwner ? { currentValid: () => this.active === token && warmOwner.current() } : {}) };
+          swarm.#peerFirst(context, controller.signal, plan, 0, geometry).then(result => {
+            if (this.active !== token) return;
+            if (result && now() < windowEnd && (!warmOwner || warmOwner.current())) {
+              swarm.steadyCounts.peerOnlyDelivered = increment(swarm.steadyCounts.peerOnlyDelivered);
+              this.active = null; this.pendingCallbacks = null; cleanup(); controller.abort();
+              return swarm.#completePeerLoad(this, result, context, callbacks, enteredAt);
+            }
+            swarm.steadyCounts.peerOnlyFallback = increment(swarm.steadyCounts.peerOnlyFallback);
+            // R6: a failed take-up (not the window running out) means the owner
+            // went away, evicted or lied; its leases are ignored for a while.
+            if (controller.signal.reason !== STEADY_WINDOW_END) swarm.#coolSteadyLeases(holders);
+            fail();
+          }).catch(error => {
+            if (this.active !== token) return;
+            swarm.#noteError('steady-window', error);
+            swarm.steadyCounts.peerOnlyFallback = increment(swarm.steadyCounts.peerOnlyFallback);
+            fail();
+          });
+        };
         const onStop = () => handBack(true, true);
         swarm.lifecycle.signal.addEventListener('abort', onStop, { once: true });
         timer = setTimeout(() => controller.abort(STEADY_WINDOW_END), windowMs);
-        swarm.#steadyWait(context, controller.signal, enteredAt + windowMs).then(outcome => {
+        swarm.#steadyWait(context, controller.signal, windowEnd, !warmOwner).then(outcome => {
           if (this.active !== token) return;
           if (outcome.next === 'ordinary') return handBack(false, false);
-          if (outcome.next === 'held') return handBack(outcome.waited, false);
+          if (outcome.next === 'held') return takeUp(outcome);
           handBack(true, true);
         }).catch(error => {
-          if (this.active === token) { swarm.#noteError('steady-window', error); handBack(true, true); }
+          if (this.active === token) { swarm.#noteError('steady-window', error); fail(); }
         });
       }
       loadBufferedMixed(context, config, callbacks, geometry, captured, enteredAt, parentMs, warmOwner = null) {
@@ -2246,6 +2294,8 @@ class HlsSwarm {
     if (candidates.some(peer => peer.have.has(key))) return true;
     if (requireExact) return false;
     if (!candidates.length) return true;
+    // R5: a candidate demonstrably fetching this exact key owns it for now.
+    if (this.options.steadyPeerWindow && candidates.some(peer => this.#steadyLeaseLive(peer, key))) return false;
     const target = BigInt('0x' + key), local = target ^ BigInt('0x' + this.session.pubkey);
     return candidates.every(peer => (target ^ BigInt('0x' + peer.pubkey)) >= local);
   }
@@ -2294,7 +2344,7 @@ class HlsSwarm {
   // owner (a live exact-key FETCH lease), never on XOR rank alone. A lapse
   // without HAVE (expiry or ms: 0, plus a grace) puts that owner's leases in
   // a miss cooldown; a window that ends while the lease is live costs nothing.
-  async #steadyWait(context, signal, windowEnd) {
+  async #steadyWait(context, signal, windowEnd, honourLeases = true) {
     const key = await this.#segmentKey(context);
     if (signal.aborted || this.stopped) return { next: 'source' };
     const exact = () => this.#warmCandidates(context).filter(link => link.have.has(key));
@@ -2305,6 +2355,7 @@ class HlsSwarm {
     };
     let holders = exact();
     if (holders.length) return { next: 'held', key, holders, waited: false };
+    if (!honourLeases) return { next: 'ordinary' };
     const entry = leases();
     if (entry.live.length > entry.honoured.length) this.steadyCounts.leasesIgnored = increment(this.steadyCounts.leasesIgnored);
     if (!entry.honoured.length) return { next: 'ordinary' };
@@ -2322,7 +2373,7 @@ class HlsSwarm {
       if (honoured.length) lapsedAt = null; else lapsedAt ??= at;
       if (lapsedAt !== null && at >= lapsedAt + STEADY_LEASE_GRACE_MS) {
         this.steadyCounts.waitLapsed = increment(this.steadyCounts.waitLapsed);
-        for (const link of owners) this.steadyLeaseCooldowns.set(link, at + LINK_REFRESH_MS);
+        this.#coolSteadyLeases(owners);
         return { next: 'source' };
       }
       const ms = lapsedAt !== null ? lapsedAt + STEADY_LEASE_GRACE_MS - at
@@ -2331,6 +2382,15 @@ class HlsSwarm {
     }
     if (signal.reason === STEADY_WINDOW_END) this.steadyCounts.waitWindowEnd = increment(this.steadyCounts.waitWindowEnd);
     return { next: 'source' };
+  }
+
+  #coolSteadyLeases(links) {
+    const until = now() + LINK_REFRESH_MS;
+    for (const link of links) this.steadyLeaseCooldowns.set(link, until);
+  }
+
+  #steadyLeaseLive(link, key) {
+    return (link.fetching.get(key) || 0) > Date.now() && !((this.steadyLeaseCooldowns.get(link) ?? -Infinity) > now());
   }
 
   #shouldWaitForOrigin(key, rendition, context) {
@@ -2804,7 +2864,7 @@ class HlsSwarm {
         this.#peerEligibility(context, budgetMs, "cached-ranges-unavailable", true, budgetGeometry, cachedEntry, undefined, false, traceLoad);
         return null;
       }
-      if (!plan.bufferedMixed) this.counters.zeroBudgetPeerRaces += 1;
+      if (!plan.bufferedMixed && !plan.steadyWindow) this.counters.zeroBudgetPeerRaces += 1;
     }
     const rendition = this.#renditionContext(context);
     const holderContext = discoveryContext?.rendition === rendition && this.discovery.contexts.get(discoveryContext.mediaType) === discoveryContext

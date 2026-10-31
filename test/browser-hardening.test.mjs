@@ -6284,6 +6284,119 @@ test('steady peer window (g): a spoofed lease that never becomes HAVE costs one 
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
+test('steady peer window (b): a lease wait then a peer-only take-up delivers with zero source bytes', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    f = await steadyWindowFixture(t, clock);
+    f.lease(2000);
+    setTimeout(() => f.have(), 300);
+    const load = beginCountedMultiLoad(f, f.ctx), started = performance.now();
+    sameBytes(await clock.settle(load.response), f.bytes);
+    const elapsed = performance.now() - started, metrics = f.swarm.metrics();
+    assert(elapsed >= 300 && elapsed < 800, String(elapsed));
+    assert.equal(f.wholeLoads.length, f.trained, 'no whole source GET'); assert.deepEqual(f.ranges, [], 'no source range');
+    assert.equal(metrics.bytes.peerFirst, f.bytes.length); assert.equal(metrics.core.multiHolder.originBytes, 0);
+    assert.deepEqual(load.calls.abort.length + load.calls.error.length, 0);
+    assert(f.channels[0].wants.length > 0 && f.channels[0].wants.every(range => Array.isArray(range)));
+    assert(f.swarm.trace().rows.some(row => row.k === 'xfer' && row.op === 'start' && row.peerOnly === true &&
+      row.out.c.every(command => command.t !== 'origin')), 'a peer-only Core plan with no origin command');
+    assert.equal(metrics.segments.zeroBudgetPeerRaces, 0, 'a steady take-up is not a cached race');
+    const steady = f.steady();
+    assert.deepEqual([steady.opened, steady.leaseWaits, steady.waitHave, steady.peerOnlyStarted, steady.peerOnlyDelivered, steady.peerOnlyFallback],
+      [1, 1, 1, 1, 1, 0]);
+    // Settled: the next demand finds the exact HAVE at entry and takes it without waiting.
+    const next = beginCountedMultiLoad(f, f.ctx), at = performance.now();
+    sameBytes(await clock.settle(next.response), f.bytes);
+    assert(performance.now() - at < 300); assert.equal(f.wholeLoads.length, f.trained);
+    assert.deepEqual([f.steady().leaseWaits, f.steady().peerOnlyDelivered], [1, 2]);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (i): an unknown-model peer-only take-up re-learns the link and the next evaluation fits', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    // Each request flows for 100 ms, below the 300 ms floor; the whole
+    // eight-piece object spans more than 300 ms across the Core's batches.
+    f = await steadyWindowFixture(t, clock, { holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 100 }] });
+    f.have();
+    const before = f.swarm.metrics().core.multiHolder.peerFlow;
+    assert.equal(before.verifiedShortBatches, 0); assert.equal(before.lastModel, null, 'no model before the take-up');
+    sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+    let flow = f.swarm.metrics().core.multiHolder.peerFlow;
+    assert.equal(flow.lastModel.rateBytesPerSecond, null, 'the take-up began on an unknown model');
+    assert.equal(flow.verifiedShortBatches, 1, 'exactly one qualifying short-flow sample: ' + JSON.stringify(flow));
+    assert.equal(f.wholeLoads.length, f.trained); assert.deepEqual(f.ranges, []);
+    sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+    flow = f.swarm.metrics().core.multiHolder.peerFlow;
+    assert.equal(flow.lastModel.decision, 'fit', JSON.stringify(flow.lastModel));
+    assert(flow.lastModel.rateBytesPerSecond > 0);
+    assert.deepEqual([f.steady().peerOnlyDelivered, f.steady().peerOnlyFallback], [2, 0]);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (k): a peer-only take-up that bans a bad piece falls back to source with no credit for rejected bytes', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    f = await steadyWindowFixture(t, clock, { holders: [{ corrupt: true }] });
+    f.lease(2000);
+    setTimeout(() => f.have(), 100);
+    const load = beginCountedMultiLoad(f, f.ctx);
+    sameBytes(await clock.settle(load.response), f.bytes);
+    const metrics = f.swarm.metrics();
+    assert.equal(f.wholeLoads.length, f.trained + 1, 'one whole source fallback');
+    assert(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs < 10_000, 'on budgets reduced by the elapsed time');
+    assert.equal(metrics.peers.banned, 1); assert.equal(metrics.core.multiHolder.bans, 1);
+    assert.equal(metrics.bytes.peerFirst, 0); assert.equal(metrics.bytes.fromPeers, 0); assert.equal(metrics.core.multiHolder.peerBytes, 0);
+    assert.deepEqual([f.steady().peerOnlyStarted, f.steady().peerOnlyDelivered, f.steady().peerOnlyFallback], [1, 0, 1]);
+    assert.equal(load.calls.success.length, 1);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+/** A holder that refuses every request ("none": not held or not serving now). */
+class EmptyAnswerChannel extends RangedChannel {
+  send(data) {
+    if (typeof data !== 'string' || JSON.parse(data).t !== 'want') return super.send(data);
+    RecordedChannel.prototype.send.call(this, data);
+    const frame = JSON.parse(data); this.wants.push(frame.p ?? null);
+    setTimeout(() => { if (this.readyState === 'open') this.receive(JSON.stringify({ t: 'none', id: frame.id })); }, 5);
+  }
+}
+
+test('steady peer window (R6): a take-up that fails puts the holder\'s leases in cooldown; one cut by the window end does not', async t => {
+  for (const kind of ['failed', 'window-end']) await t.test(kind, async t => {
+    const clock = warmFunctionalClock(t, () => false);
+    let f;
+    try {
+      // window-end: a holder whose first byte comes after the window, and which answers the cancel.
+      f = await steadyWindowFixture(t, clock, { holders: [kind === 'failed' ? { Channel: EmptyAnswerChannel }
+        : { Channel: PhasedFlowChannel, firstByteMs: 2000, flowMs: 100 }] });
+      f.have();
+      const first = beginCountedMultiLoad(f, f.ctx), started = performance.now();
+      sameBytes(await clock.settle(first.response), f.bytes);
+      assert.equal(f.wholeLoads.length, f.trained + 1, 'whole source fallback');
+      assert.deepEqual([f.steady().peerOnlyStarted, f.steady().peerOnlyDelivered, f.steady().peerOnlyFallback], [1, 0, 1]);
+      if (kind === 'window-end') assert(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs <= 10_000 - 800 + 10);
+      // The holder withdraws its HAVE and announces a fresh lease.
+      f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+      f.lease(2000);
+      const next = await f.demand();
+      if (kind === 'failed') {
+        assert(next.sourceAfterMs <= 10, 'the failed holder\'s lease is ignored: ' + next.sourceAfterMs);
+        assert.deepEqual([f.steady().leaseWaits, f.steady().leasesIgnored], [0, 1]);
+      } else {
+        assert(next.sourceAfterMs >= 800, 'a window-end miss carries no cooldown: ' + next.sourceAfterMs);
+        assert.deepEqual([f.steady().leaseWaits, f.steady().leasesIgnored, f.steady().waitWindowEnd], [1, 0, 1]);
+      }
+      sameBytes(await clock.settle(next.response), f.bytes);
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+      assert(performance.now() - started < 10_000);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
 test('verified piece flow waits for real worker verification and rejects invalidated replies', async t => {
   for (const invalidation of ['none', 'closed-link', 'media-replaced', 'deadline']) await t.test(invalidation, async t => {
     const { WorkerImpl, workers } = transferWorkerFixture(t, { holdFinal: true });

@@ -158,7 +158,7 @@ async function fixture(t, options = {}) {
       peer.announcePresence({ role: 'viewer', open: true, transports: [{ type: 'webrtc', publicKey: peer.pubkey, obj: 2 }], ...(options.gated ? { ticket: 'fixture-peer' } : {}) });
       await until(() => swarm.metrics().peers.openPeersKnown === 1);
     }
-    return { sent, channel, have(sn) { channel.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ t: 'have', keys: [sha(`${swarmId}\n/media/s${sn}.m4s`)] }) })); }, want(sn) { channel.dispatchEvent(new MessageEvent('message', {
+    return { sent, channel, pubkey: peer.pubkey, have(sn) { channel.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ t: 'have', keys: [sha(`${swarmId}\n/media/s${sn}.m4s`)] }) })); }, want(sn) { channel.dispatchEvent(new MessageEvent('message', {
       data: JSON.stringify({ t: 'want', id: sn + 1, k: sha(`${swarmId}\n/media/s${sn}.m4s`) }),
     })); } };
   };
@@ -3885,6 +3885,47 @@ test('steady peer window (h): a live lease on the startup terminal waits for not
   assert.deepEqual(first.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
   assert.deepEqual(steady(), zero, 'no steady wait or peer-only take-up before release');
   assert.equal(peer.sent.filter(frame => frame?.t === 'want').length, 0);
+});
+
+test('steady peer window (R5): a live lease makes an owned optional future yield; its later exact HAVE is taken peer-only', async t => {
+  for (const leased of [false, true]) await t.test(leased ? 'leased' : 'control without a lease', async t => {
+    const f = await fixture(t, { rangePeer: true, bufferedMixedRanges: true, steadyPeerWindow: true, size: 256 * 1024,
+      held: Array.from({ length: 12 }, (_, sn) => sn) });
+    const peer = await f.addPeer();
+    for (const pc of f.connections) pc.connectionState = 'connected';
+    const frame = data => peer.channel.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(data) }));
+    frame({ t: 'contribution', serving: true, rendition: 'main:/media/index.m3u8' });
+    const key = sn => sha(`warm-ahead-fixture\n/media/s${sn}.m4s`), self = BigInt('0x' + f.swarm.metrics().pubkey), other = BigInt('0x' + peer.pubkey);
+    const owned = sn => { const target = BigInt('0x' + key(sn)); return (target ^ other) >= (target ^ self); };
+    // A demand whose next parsed future this viewer would fetch by XOR rank.
+    const d = Array.from({ length: 10 }, (_, sn) => sn).find(sn => owned(sn + 1));
+    if (d === undefined) return t.skip('no owned future for these random identities (p = 2^-10)');
+    if (leased) for (const sn of [d + 1, d + 2]) frame({ t: 'fetching', k: key(sn), ms: 2000 });
+    const demand = f.load(d);
+    await until(() => f.requests.some(row => row.context.frag.sn === d));
+    const futures = () => f.requests.filter(row => row.context.frag.sn > d);
+    const warm = () => f.swarm.metrics().warmAhead;
+    if (!leased) {
+      await until(() => futures().length === 1);
+      assert.equal(futures()[0].context.frag.sn, d + 1, 'the rank owner fetches its optional future');
+      assert.equal(warm().sourceYielded, 0);
+      return;
+    }
+    await until(() => warm().sourceYielded === 2);
+    assert.deepEqual(futures(), [], 'both leased futures yield to the fetching candidate');
+    peer.have(d + 1);
+    await until(() => f.swarm.metrics().steadyPeerWindow.peerOnlyDelivered === 1);
+    await until(() => warm().verified === 1);
+    assert.deepEqual(futures(), [], 'the reconsidered future took no source lane');
+    assert.equal(warm().haveReconsidered, 1); assert.equal(warm().verifiedPeerBytes, f.bytes.length);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0, 'speculation is not consumption');
+    assert(peer.sent.some(sent => sent?.t === 'want'));
+    f.requests.find(row => row.context.frag.sn === d).finish();
+    assert.deepEqual(await demand.result, f.bytes);
+    assert.deepEqual(await f.load(d + 1).result, f.bytes);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length, 'credit at the genuine consumer');
+    assert.deepEqual(futures().filter(row => row.context.frag.sn === d + 1), []);
+  });
 });
 
 test('startup buffer required future can adopt late exact HAVE without pretending Hls already consumed it', async t => {
