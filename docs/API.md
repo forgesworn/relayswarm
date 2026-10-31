@@ -263,11 +263,12 @@ continues on today's path.
 
 `metrics().steadyPeerWindow`, present only with the option, holds counts with
 no identities: `opened`, `closedHeadroom`, `leaseWaits`, `waitHave`,
-`waitLapsed`, `waitWindowEnd` (lease waits and peer-only take-ups that the
-window end cut), `leasesIgnored` (window entries at which a live lease was
+`waitLapsed`, `waitWindowEnd` (lease waits only, cut by the window end while
+the lease was live), `leasesIgnored` (window entries at which a live lease was
 ignored for its peer's miss cooldown), `peerOnlyStarted`, `peerOnlyDelivered`,
-`peerOnlyFallback` (take-ups that ended undelivered before the window end) and
-`fetchRenewalsSent` (one per claimed key per renewal, to all links). Only a
+`peerOnlyFallback` (take-ups that ended undelivered before the window end),
+`takeUpWindowEnd` (peer-only take-ups cut by the window end, whether or not a
+lease wait preceded them) and `fetchRenewalsSent` (one per claimed key per renewal, to all links). Only a
 Core transfer the holders failed (refused, withdrew, closed or banned) cools
 them; a take-up refused before any request (commitment, local model or
 whole-object capacity) returns a genuine demand to today's path instead. The

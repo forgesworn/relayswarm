@@ -528,7 +528,7 @@ class HlsSwarm {
     // lease still dates its fetch from the first grant. Local bookkeeping.
     this.leaseStarts = new WeakMap();
     this.steadyCounts = { opened: 0, closedHeadroom: 0, leaseWaits: 0, waitHave: 0, waitLapsed: 0, waitWindowEnd: 0,
-      leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, fetchRenewalsSent: 0 };
+      leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, fetchRenewalsSent: 0 };
     this.uploadQuotaBytes = 0;
     this.uploadTokens = this.options.maxUploadBytesPerSecond;
     this.uploadRefilledAt = now();
@@ -1483,7 +1483,7 @@ class HlsSwarm {
             // fail or the reply guard can settle before the window timer runs:
             // either is the window running out, never the owner's miss (R6).
             if (controller.signal.reason === STEADY_WINDOW_END || now() >= Math.floor(windowEnd)) {
-              swarm.steadyCounts.waitWindowEnd = increment(swarm.steadyCounts.waitWindowEnd);
+              swarm.steadyCounts.takeUpWindowEnd = increment(swarm.steadyCounts.takeUpWindowEnd);
               return fail();
             }
             swarm.steadyCounts.peerOnlyFallback = increment(swarm.steadyCounts.peerOnlyFallback);
