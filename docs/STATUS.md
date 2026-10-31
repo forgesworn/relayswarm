@@ -10,6 +10,36 @@ the [installation guide](GETTING-STARTED.md) describes JavaScript/WASM and
 native downloads and checksum verification. The npm registry is unpublished.
 Earlier release and pilot evidence below retains its date and source.
 
+## Unreleased steady peer window (31 October 2026)
+
+The opt-in `steadyPeerWindow` option is implemented and unit-tested; it is not
+field-qualified and no field measurement accompanies it. It targets the two
+mechanisms that capped steady-state sharing in the private two-viewer runs:
+both viewers fetching the same object at once (the second demand had a zero
+peer budget, and the 2,000 ms FETCH lease was neither renewed nor consulted),
+and a held object yielding only a one-piece probe plus a short source-held tail
+because the link model had expired. With the option, an origin claim's lease
+is renewed every 1,000 ms and withdrawn only after its HAVE; a genuine
+zero-budget demand with buffer headroom waits, inside a buffer-funded window,
+only on a live exact-key lease from a serving candidate; and an exact HAVE is
+taken through the existing peer-only Core transfer with no concurrent source
+lane, re-learning an unknown link model from real flow. Every miss falls back
+to whole source on the remaining parent budgets; lapsed leases and failed
+take-ups cool the link for 10 s. No wire, Core or WASM change; hash
+verification, startup reservoir rules and warm caps are unchanged. A viewer
+with the option off sends what it sent before; in a mixed room, renewed leases
+it receives keep its budget-positive coordinated wait live for the whole
+announced fetch, within its own peer deadline. Controlled fixtures with the
+real Core and logical clocks cover renewal and withdrawal order, the window
+arithmetic, lease waits, lapses, window ends, cooldowns, peer-only delivery,
+integrity bans, the startup terminal, optional-future yield and
+reconsideration, and an owner refusing a third viewer. An amendment the same day
+makes the optional-future yield depend on the viewer's own funded buffer, keeps
+a reconsidered row warming from origin when its take-up sends no request, and
+lets a link model thinner than one whole object probe instead of refusing. The
+option remains implemented and unit-tested, not field-qualified. Field sharing,
+continuity and source savings remain unmeasured.
+
 ## Unreleased startup reservoir release at capacity and in the late window (30 October 2026)
 
 A smoke run on a deployed public page, with two viewers prepared and only the

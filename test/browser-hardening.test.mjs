@@ -5930,6 +5930,15 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
       }
     }
     assert.equal(paths.length, 2, 'actual peer identities yield opposite deterministic future owners');
+    // (e) steadyPeerWindow is off here: these source rows and counters are main's, with no steady machinery.
+    const flagOff = () => {
+      for (const f of actors) assert.equal('steadyPeerWindow' in f.swarm.metrics(), false);
+      for (const channel of pair.channels) {
+        const grants = channel.sent.filter(row => row?.t === 'fetching' && row.ms > 0), withdrawals = channel.sent.filter(row => row?.t === 'fetching' && row.ms === 0);
+        for (const key of new Set(grants.map(row => row.k))) assert(grants.filter(row => row.k === key).length <= withdrawals.filter(row => row.k === key).length + 1,
+          'flag off: no FETCH renewal');
+      }
+    };
     objects.set('/media/lead.ts', new Uint8Array(32768).fill(9));
     paths.forEach((path, index) => objects.set(path, Uint8Array.from({ length: size }, (_, i) => (i * 131 + index * 17) % 251)));
     const playlist = '#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nlead.ts\n' +
@@ -5961,7 +5970,7 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
         sameBytes(await demand.response, objects.get(paths[0]));
         assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
       })));
-      diagnosticPhase = 'done'; return;
+      flagOff(); diagnosticPhase = 'done'; return;
     }
     console.log(JSON.stringify({ fixture: 'reciprocal-warm-source-policy', controllerClock: 'logical-functional', simulatedSourceAndRtc: true,
       excludedNativeKeyDigestScheduling: true,
@@ -5986,7 +5995,7 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
       sameBytes(await settle(demand.response), objects.get(paths[0]));
       assert.deepEqual(demand.calls, { success: 1, error: 0, abort: 0, timeout: 0 });
       assert.equal(actors[1].swarm.metrics().bytes.peerFirst, 0);
-      diagnosticPhase = 'done'; return;
+      flagOff(); diagnosticPhase = 'done'; return;
     }
     if (playlistState === 'live') for (const [actor, f] of actors.entries()) {
       // A real live reload replaces Fragment objects. Routing must use the
@@ -6029,6 +6038,7 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
       assert.equal(f.swarm.metrics().bytes.peerFirst, credit, 'reusing the same future cannot credit it twice');
       assert.equal(source.length, before);
     }
+    flagOff();
     assert(keyWork.operations > 0, 'the fixed metadata digest phase actually ran');
     assert.equal(keyWork.pending, 0, 'all observed native key digests settled');
     diagnosticPhase = 'done';
@@ -6036,6 +6046,635 @@ for (const playlistState of ['vod', 'live', 'unknown', 'live-demand-before-have'
     if (diagnosticPhase !== 'done') diagnostic('finally');
     keyWork.restore(); clock?.restore(); pair.close(); for (const loader of [...loaders]) loader.destroy();
   }
+});
+
+// --- steady peer window (opt-in steadyPeerWindow) ------------------------------
+
+test('steady peer window requires a boolean and peer-first serving multi-holder loading', () => {
+  const signed = signedFixture({ v: 3 });
+  const peerFirst = { mode: 'peer-first', streamEvent: signed.options.streamEvent, getCommitment: () => signed.event };
+  for (const [options, reason] of [[{ steadyPeerWindow: 1 }, 'invalid-steady-peer-window-option'],
+    [{ steadyPeerWindow: 'true' }, 'invalid-steady-peer-window-option'],
+    [{ steadyPeerWindow: true }, 'invalid-steady-peer-window-option'],
+    [{ ...peerFirst, steadyPeerWindow: true, multiHolder: true }, 'invalid-steady-peer-window-option'],
+    [{ ...peerFirst, steadyPeerWindow: true, serve: true }, 'invalid-steady-peer-window-option'],
+    [{ ...peerFirst, steadyPeerWindow: true, serve: true, multiHolder: true }, null]]) {
+    const swarm = createHlsSwarm({ ...base, relays: ['wss://relay.example'], ...options });
+    assert.equal(swarm.metrics().disabledReason, reason, JSON.stringify(options));
+    assert.equal('steadyPeerWindow' in swarm.metrics(), options.steadyPeerWindow === true);
+    if (reason === null) assert.deepEqual(swarm.metrics().steadyPeerWindow, { opened: 0, closedHeadroom: 0, leaseWaits: 0, waitHave: 0,
+      waitLapsed: 0, waitWindowEnd: 0, leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, fetchRenewalsSent: 0 });
+    swarm.stop();
+  }
+  const off = createHlsSwarm({ ...base, relays: ['wss://relay.example'] });
+  assert.equal('steadyPeerWindow' in off.metrics(), false, 'flag off adds no metrics field');
+  off.stop();
+});
+
+// Logical send times of the FETCH and HAVE frames a holder channel receives.
+function timedControlFrames(channel) {
+  const frames = [], send = channel.send.bind(channel);
+  channel.send = data => {
+    if (typeof data === 'string') {
+      const frame = JSON.parse(data);
+      if (frame.t === 'fetching' || frame.t === 'have') frames.push({ ...frame, at: performance.now() });
+    }
+    return send(data);
+  };
+  return frames;
+}
+
+test('steady peer window (a): FETCH renewal keeps a 3,500 ms origin fetch leased and withdraws only after HAVE', async t => {
+  for (const flag of [true, false]) await t.test(flag ? 'renewed' : 'flag off: one lease per claim', async t => {
+    const clock = warmFunctionalClock(t, () => false);
+    let f;
+    try {
+      f = await clock.settle(multiFixture(t, { holders: [{ silent: true }], wholeOriginDelayMs: 3500,
+        swarmOptions: { serve: true, ...(flag ? { steadyPeerWindow: true } : {}) } }));
+      f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+      const frames = timedControlFrames(f.channels[0]);
+      const started = performance.now();
+      sameBytes(await clock.settle(f.load()), f.bytes);
+      const done = performance.now(), leases = frames.filter(row => row.t === 'fetching' && row.k === f.key);
+      const grants = leases.filter(row => row.ms > 0), withdrawn = leases.findIndex(row => row.ms === 0);
+      const advertised = frames.findIndex(row => row.t === 'have' && (row.add ?? row.keys ?? []).includes(f.key));
+      assert.equal(f.wholeLoads.length, 1);
+      assert(done - started >= 3500, 'the origin fetch outlasts one 2,000 ms lease');
+      assert(advertised >= 0 && withdrawn >= 0, JSON.stringify(frames));
+      assert(frames.indexOf(leases[withdrawn]) > advertised, 'ms: 0 follows the retained HAVE');
+      if (!flag) {
+        assert.equal(grants.length, 1, 'flag off keeps today\'s single FETCH per claim');
+        assert.equal('steadyPeerWindow' in f.swarm.metrics(), false);
+        return;
+      }
+      assert(grants.length >= 4, JSON.stringify(grants));
+      grants.forEach((row, index) => { if (index) assert(row.at - grants[index - 1].at <= 1000 + 10, 'renewed every 1,000 ms'); });
+      for (let at = started; at < done; at += 10) assert(grants.some(row => row.at <= at && at < row.at + row.ms), 'lease live at ' + (at - started));
+      assert.equal(f.swarm.metrics().steadyPeerWindow.fetchRenewalsSent, grants.length - 1);
+      await clock.advance(2000);
+      assert.equal(frames.filter(row => row.t === 'fetching' && row.ms > 0).length, grants.length, 'no renewal after release');
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+test('steady peer window (a): the mixed origin lane withdraws its FETCH only after the delivered object\'s HAVE', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    lateRaceKeyClock(t);
+    f = await clock.settle(multiFixture(t, { size: 1024 * 1024, holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 350 }],
+      originDelayMs: 100, wholeOriginDelayMs: 500, swarmOptions: { bufferedMixedRanges: true, zeroBudgetPeerRace: true,
+        sustainablePeerWait: true, maxPeerWaitMs: 2500, serve: true, steadyPeerWindow: true } }));
+    f.ctx = { ...multiContext, frag: { ...multiContext.frag, start: 10, duration: .1 } };
+    f.hls.media = { currentTime: 10, paused: false, ended: false, seeking: false, readyState: 4, playbackRate: 1, buffered: { length: 0 } };
+    // Calibrate origin timing on another object, so the measured key is not already held.
+    const train = { ...f.ctx, url: 'https://origin.example/media/train.ts', frag: { ...f.ctx.frag, url: 'https://origin.example/media/train.ts' } };
+    sameBytes(await clock.settle(f.load(train)), f.bytes);
+    for (const pc of f.connections) pc.connectionState = 'connected';
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+    assert.equal(f.swarm.metrics().bytes.held, f.bytes.length, 'only the calibration object is held');
+    const frames = timedControlFrames(f.channels[0]);
+    sameBytes(await clock.settle(f.load(f.ctx)), f.bytes);
+    const metrics = f.swarm.metrics();
+    assert(f.ranges.length > 0 && metrics.core.multiHolder.delivered >= 1, 'the mixed transfer used its origin lane');
+    const leases = frames.filter(row => row.t === 'fetching' && row.k === f.key);
+    const advertised = frames.findIndex(row => row.t === 'have' && (row.add ?? row.keys ?? []).includes(f.key));
+    const withdrawn = frames.findIndex(row => row.t === 'fetching' && row.k === f.key && row.ms === 0);
+    assert(leases.some(row => row.ms > 0) && advertised >= 0 && withdrawn > advertised, JSON.stringify(frames));
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+const STEADY_RENDITION = 'main:/media/index.m3u8';
+// A non-owner viewer with 18 s of buffer ahead of the demanded fragment, at
+// zero peer budget (sustainablePeerWait with an origin p90 above the fragment
+// duration), and serving links whose HAVE and FETCH frames each test controls.
+// Origin timing comes from an actual source load of another object; no link
+// model, HAVE or lease is seeded. W = min(maxPeerWaitMs 800, ...) = 800 ms.
+async function steadyWindowFixture(t, clock, { holders = [{}], swarmOptions = {}, bufferedEnd = 28, ...options } = {}) {
+  lateRaceKeyClock(t);
+  const f = await clock.settle(multiFixture(t, { size: 512 * 1024, holders, wholeOriginDelayMs: 500, originDelayMs: 50, traceRequests: 4096, ...options,
+    swarmOptions: { serve: true, steadyPeerWindow: true, sustainablePeerWait: true, maxPeerWaitMs: 800, ...swarmOptions } }));
+  for (const channel of f.channels) channel.receive(JSON.stringify({ t: 'have', keys: [] }));
+  f.ctx = { ...multiContext, frag: { ...multiContext.frag, start: 28, duration: .5 } };
+  f.hls.levels = [{ details: { live: true } }];
+  f.hls.media = { currentTime: 10, paused: false, ended: false, seeking: false, readyState: 4, playbackRate: 1, buffered: { length: 0 } };
+  const train = { ...f.ctx, url: 'https://origin.example/media/train.ts', frag: { ...f.ctx.frag, url: 'https://origin.example/media/train.ts' } };
+  sameBytes(await clock.settle(f.load(train)), f.bytes);
+  for (const pc of f.connections) pc.connectionState = 'connected';
+  for (const channel of f.channels) channel.receive(JSON.stringify({ t: 'contribution', serving: true, rendition: STEADY_RENDITION }));
+  f.hls.media.buffered = { length: 1, start: () => 0, end: () => bufferedEnd };
+  f.lease = (ms, channel = f.channels[0]) => channel.receive(JSON.stringify({ t: 'fetching', k: f.key, ms }));
+  f.have = (channel = f.channels[0]) => channel.receive(JSON.stringify({ t: 'have', keys: [f.key] }));
+  f.trained = f.wholeLoads.length;
+  f.steady = () => f.swarm.metrics().steadyPeerWindow;
+  // Starts a genuine demand; resolves with the logical ms until its first source invocation.
+  f.demand = async (limitMs = 3000) => {
+    const before = f.wholeLoads.length + f.ranges.length, started = performance.now(), load = beginCountedMultiLoad(f, f.ctx);
+    await clock.advanceUntil(() => f.wholeLoads.length + f.ranges.length > before || load.calls.success.length, limitMs);
+    return { ...load, sourceAfterMs: performance.now() - started };
+  };
+  return f;
+}
+
+test('steady peer window: with no lease and no HAVE today\'s path starts at once with its own budgets', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    f = await steadyWindowFixture(t, clock);
+    const demand = await f.demand();
+    assert(demand.sourceAfterMs <= 10, 'no wait without a live lease'); // one 10 ms logical step for the key digest
+    assert.equal(f.wholeLoads.length, f.trained + 1);
+    assert.strictEqual(f.wholeLoads.at(-1).config, f.loaderConfig, 'today\'s path keeps the original config');
+    sameBytes(await clock.settle(demand.response), f.bytes);
+    assert.deepEqual({ ...f.steady(), fetchRenewalsSent: 0 }, { opened: 1, closedHeadroom: 0, leaseWaits: 0, waitHave: 0, waitLapsed: 0,
+      waitWindowEnd: 0, leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, fetchRenewalsSent: 0 });
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (c): a lease that lapses without HAVE falls back within lapse plus grace on reduced budgets', async t => {
+  for (const ending of ['expiry', 'withdrawn']) await t.test(ending, async t => {
+    const clock = warmFunctionalClock(t, () => false);
+    let f;
+    try {
+      f = await steadyWindowFixture(t, clock);
+      f.lease(ending === 'expiry' ? 300 : 2000);
+      if (ending === 'withdrawn') setTimeout(() => f.lease(0), 200);
+      const demand = await f.demand();
+      const lapse = ending === 'expiry' ? 300 : 200;
+      assert(demand.sourceAfterMs >= lapse + 250 && demand.sourceAfterMs <= lapse + 250 + 20, String(demand.sourceAfterMs));
+      const row = f.wholeLoads.at(-1);
+      assert.equal(f.wholeLoads.length, f.trained + 1); assert.deepEqual(f.ranges, []);
+      assert(Math.abs(row.config.loadPolicy.maxLoadTimeMs - (10_000 - demand.sourceAfterMs)) <= 10, 'parent budget less the elapsed time only');
+      assert(Math.abs(row.config.loadPolicy.maxTimeToFirstByteMs - (10_000 - demand.sourceAfterMs)) <= 10);
+      assert.equal(row.config.maxRetry, 0);
+      sameBytes(await clock.settle(demand.response), f.bytes);
+      assert.deepEqual([f.steady().opened, f.steady().leaseWaits, f.steady().waitLapsed, f.steady().waitHave, f.steady().waitWindowEnd], [1, 1, 1, 0, 0]);
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+      // The miss cooldown: the same link's next lease is ignored, today's path runs at once.
+      f.lease(2000);
+      const next = await f.demand();
+      assert(next.sourceAfterMs <= 10); // one 10 ms logical step for the key digest
+      assert.equal(f.steady().leaseWaits, 1); assert.equal(f.steady().leasesIgnored, 1);
+      sameBytes(await clock.settle(next.response), f.bytes);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+test('steady peer window (R6): a window that ends while the lease is live falls back with no cooldown', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    f = await steadyWindowFixture(t, clock);
+    for (const round of [1, 2]) {
+      f.lease(2000);
+      const demand = await f.demand();
+      assert(demand.sourceAfterMs >= 800 && demand.sourceAfterMs <= 810, String(demand.sourceAfterMs));
+      sameBytes(await clock.settle(demand.response), f.bytes);
+      assert.deepEqual([f.steady().leaseWaits, f.steady().waitWindowEnd, f.steady().waitLapsed, f.steady().leasesIgnored], [round, round, 0, 0]);
+    }
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (d): a window closed by headroom runs today\'s path with no wait', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    // 6 s of buffer: 4,000 ms less one recovery and two reserves leaves under 500 ms.
+    f = await steadyWindowFixture(t, clock, { bufferedEnd: 16 });
+    f.ctx.frag.start = 16;
+    f.lease(2000);
+    const demand = await f.demand();
+    assert(demand.sourceAfterMs <= 10); // one 10 ms logical step for the key digest
+    assert.strictEqual(f.wholeLoads.at(-1).config, f.loaderConfig);
+    sameBytes(await clock.settle(demand.response), f.bytes);
+    assert.deepEqual([f.steady().opened, f.steady().closedHeadroom, f.steady().leaseWaits], [0, 1, 0]);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (f): an old peer\'s single unrenewed lease ends the wait at its lapse and degrades to today\'s source', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    f = await steadyWindowFixture(t, clock);
+    f.lease(400); // one FETCH, never renewed; its HAVE comes after lapse plus grace
+    setTimeout(() => f.have(), 700);
+    const demand = await f.demand();
+    assert(demand.sourceAfterMs >= 650 && demand.sourceAfterMs <= 670, String(demand.sourceAfterMs));
+    sameBytes(await clock.settle(demand.response), f.bytes);
+    assert.equal(f.wholeLoads.length, f.trained + 1); assert.deepEqual(f.ranges, []); assert.deepEqual(f.channels[0].wants, []);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+    assert.deepEqual([f.steady().leaseWaits, f.steady().waitLapsed, f.steady().waitHave], [1, 1, 0]);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (g): a spoofed lease that never becomes HAVE costs one bounded wait, then is ignored for 10 s', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    f = await steadyWindowFixture(t, clock);
+    f.lease(300);
+    const first = await f.demand();
+    assert(first.sourceAfterMs <= 300 + 250 + 20, String(first.sourceAfterMs));
+    sameBytes(await clock.settle(first.response), f.bytes);
+    const cooled = performance.now();
+    for (let n = 0; n < 3; n++) {
+      f.lease(2000);
+      const again = await f.demand();
+      assert(again.sourceAfterMs <= 10, 'ignored inside the cooldown'); // one 10 ms logical step for the key digest
+      sameBytes(await clock.settle(again.response), f.bytes);
+    }
+    assert.deepEqual([f.steady().leaseWaits, f.steady().leasesIgnored], [1, 3]);
+    await clock.advance(Math.max(0, 10_000 - (performance.now() - cooled)) + 10);
+    f.lease(300);
+    const later = await f.demand();
+    assert(later.sourceAfterMs >= 550, 'honoured again after the cooldown');
+    sameBytes(await clock.settle(later.response), f.bytes);
+    assert.deepEqual([f.steady().leaseWaits, f.steady().waitLapsed], [2, 2]);
+    assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (b): a lease wait then a peer-only take-up delivers with zero source bytes', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    f = await steadyWindowFixture(t, clock);
+    f.lease(2000);
+    setTimeout(() => f.have(), 300);
+    const load = beginCountedMultiLoad(f, f.ctx), started = performance.now();
+    sameBytes(await clock.settle(load.response), f.bytes);
+    const elapsed = performance.now() - started, metrics = f.swarm.metrics();
+    assert(elapsed >= 300 && elapsed < 800, String(elapsed));
+    assert.equal(f.wholeLoads.length, f.trained, 'no whole source GET'); assert.deepEqual(f.ranges, [], 'no source range');
+    assert.equal(metrics.bytes.peerFirst, f.bytes.length); assert.equal(metrics.core.multiHolder.originBytes, 0);
+    assert.deepEqual(load.calls.abort.length + load.calls.error.length, 0);
+    assert(f.channels[0].wants.length > 0 && f.channels[0].wants.every(range => Array.isArray(range)));
+    assert(f.swarm.trace().rows.some(row => row.k === 'xfer' && row.op === 'start' && row.peerOnly === true &&
+      row.out.c.every(command => command.t !== 'origin')), 'a peer-only Core plan with no origin command');
+    assert.equal(metrics.segments.zeroBudgetPeerRaces, 0, 'a steady take-up is not a cached race');
+    const steady = f.steady();
+    assert.deepEqual([steady.opened, steady.leaseWaits, steady.waitHave, steady.peerOnlyStarted, steady.peerOnlyDelivered, steady.peerOnlyFallback],
+      [1, 1, 1, 1, 1, 0]);
+    // Settled: the next demand finds the exact HAVE at entry and takes it without waiting.
+    const next = beginCountedMultiLoad(f, f.ctx), at = performance.now();
+    sameBytes(await clock.settle(next.response), f.bytes);
+    assert(performance.now() - at < 300); assert.equal(f.wholeLoads.length, f.trained);
+    assert.deepEqual([f.steady().leaseWaits, f.steady().peerOnlyDelivered], [1, 2]);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (i): an unknown-model peer-only take-up re-learns the link and the next evaluation fits', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    // Each request flows for 100 ms, below the 300 ms floor; the whole
+    // eight-piece object spans more than 300 ms across the Core's batches.
+    f = await steadyWindowFixture(t, clock, { holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 100 }] });
+    f.have();
+    const before = f.swarm.metrics().core.multiHolder.peerFlow;
+    assert.equal(before.verifiedShortBatches, 0); assert.equal(before.lastModel, null, 'no model before the take-up');
+    sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+    let flow = f.swarm.metrics().core.multiHolder.peerFlow;
+    assert.equal(flow.lastModel.rateBytesPerSecond, null, 'the take-up began on an unknown model');
+    assert.equal(flow.verifiedShortBatches, 1, 'exactly one qualifying short-flow sample: ' + JSON.stringify(flow));
+    assert.equal(f.wholeLoads.length, f.trained); assert.deepEqual(f.ranges, []);
+    sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+    flow = f.swarm.metrics().core.multiHolder.peerFlow;
+    assert.equal(flow.lastModel.decision, 'fit', JSON.stringify(flow.lastModel));
+    assert(flow.lastModel.rateBytesPerSecond > 0);
+    assert.deepEqual([f.steady().peerOnlyDelivered, f.steady().peerOnlyFallback], [2, 0]);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (k): a peer-only take-up that bans a bad piece falls back to source with no credit for rejected bytes', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    f = await steadyWindowFixture(t, clock, { holders: [{ corrupt: true }] });
+    f.lease(2000);
+    setTimeout(() => f.have(), 100);
+    const load = beginCountedMultiLoad(f, f.ctx);
+    sameBytes(await clock.settle(load.response), f.bytes);
+    const metrics = f.swarm.metrics();
+    assert.equal(f.wholeLoads.length, f.trained + 1, 'one whole source fallback');
+    assert(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs < 10_000, 'on budgets reduced by the elapsed time');
+    assert.equal(metrics.peers.banned, 1); assert.equal(metrics.core.multiHolder.bans, 1);
+    assert.equal(metrics.bytes.peerFirst, 0); assert.equal(metrics.bytes.fromPeers, 0); assert.equal(metrics.core.multiHolder.peerBytes, 0);
+    assert.deepEqual([f.steady().peerOnlyStarted, f.steady().peerOnlyDelivered, f.steady().peerOnlyFallback], [1, 0, 1]);
+    assert.equal(load.calls.success.length, 1);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (R6): a take-up refused before any request (commitment unavailable) does not cool the holder', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f, refuse = false;
+  try {
+    f = await steadyWindowFixture(t, clock, { beforeCommitment: () => { if (refuse) throw new Error('commitment unavailable'); } });
+    refuse = true;
+    f.lease(2000);
+    setTimeout(() => f.have(), 100);
+    const first = beginCountedMultiLoad(f, f.ctx);
+    sameBytes(await clock.settle(first.response), f.bytes);
+    assert.deepEqual(f.channels[0].wants, [], 'no request reached the holder');
+    assert.equal(f.wholeLoads.length, f.trained + 1);
+    assert.equal(f.swarm.metrics().segments.commitmentUnavailable, 1);
+    assert.deepEqual([f.steady().waitHave, f.steady().peerOnlyStarted, f.steady().peerOnlyFallback], [1, 1, 1]);
+    refuse = false;
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    f.lease(300);
+    const next = await f.demand();
+    assert(next.sourceAfterMs >= 550, 'the same holder\'s next lease is honoured: ' + next.sourceAfterMs);
+    sameBytes(await clock.settle(next.response), f.bytes);
+    assert.deepEqual([f.steady().leaseWaits, f.steady().leasesIgnored], [2, 0]);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (R4): a whole-object link model too slow for the object in W returns to today\'s path on budgets less the elapsed time', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f, commitmentMs = 0;
+  try {
+    // 320 ms per one-piece request: the first take-up moves the whole 128 KiB object in two requests (~205 KB/s).
+    f = await steadyWindowFixture(t, clock, { size: 128 * 1024, holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 320 }],
+      beforeCommitment: () => commitmentMs ? new Promise(resolve => setTimeout(resolve, commitmentMs)) : undefined });
+    f.have();
+    sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+    assert.deepEqual([f.steady().peerOnlyDelivered, f.wholeLoads.length], [1, f.trained], 'the first take-up moved the whole object');
+    // A 300 ms commitment leaves ~500 ms of W: the whole-object model cannot fit 128 KiB.
+    commitmentMs = 300;
+    const wants = f.channels[0].wants.length, sources = f.wholeLoads.length;
+    const next = beginCountedMultiLoad(f, f.ctx);
+    await clock.advanceUntil(() => f.wholeLoads.length > sources, 1000);
+    const model = f.swarm.metrics().core.multiHolder.peerFlow.lastModel;
+    assert(model.rateBytesPerSecond > 0, JSON.stringify(model));
+    assert.equal(f.channels[0].wants.length, wants, 'no request reached the holder');
+    // The commitment fetch spent time from the parent budgets; the hand-back must not restart them.
+    const policy = f.wholeLoads.at(-1).config.loadPolicy;
+    assert(Math.abs(policy.maxLoadTimeMs - (10_000 - 300)) <= 20, JSON.stringify(policy));
+    assert(Math.abs(policy.maxTimeToFirstByteMs - (10_000 - 300)) <= 20, JSON.stringify(policy));
+    sameBytes(await clock.settle(next.response), f.bytes);
+    assert.deepEqual([f.steady().peerOnlyStarted, f.steady().peerOnlyFallback, f.steady().leasesIgnored], [2, 1, 0]);
+    commitmentMs = 0;
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    f.lease(300);
+    const leased = await f.demand();
+    assert(leased.sourceAfterMs >= 550, 'no cooldown for a local capacity refusal: ' + leased.sourceAfterMs);
+    sameBytes(await clock.settle(leased.response), f.bytes);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (R5c): a model thinner than one whole object probes and re-trains instead of refusing on capacity', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    // 400 ms per request: the first take-up is cut after one 64 KiB probe (~160 KB/s, far below 512 KiB in 800 ms).
+    f = await steadyWindowFixture(t, clock, { holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 400 }] });
+    f.have();
+    sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+    assert.equal(f.steady().takeUpWindowEnd, 1);
+    const wants = f.channels[0].wants.length;
+    sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+    assert(f.channels[0].wants.length > wants, 'the thin model probed again instead of refusing before any request');
+    assert.deepEqual([f.steady().peerOnlyStarted, f.steady().takeUpWindowEnd, f.steady().peerOnlyFallback], [2, 2, 0]);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (R6): a lease miss cooldown survives the same author reconnecting', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    f = await steadyWindowFixture(t, clock);
+    f.lease(300);
+    sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+    assert.equal(f.steady().waitLapsed, 1);
+    // Same author, new native connection and channel.
+    const channel = new RangedChannel(f.bytes), accepted = f.swarm.metrics().peers.offersAccepted;
+    f.channels[0].close();
+    f.peers[0].sendSignal(f.swarm.metrics().pubkey, { type: 'offer', transport: 'webrtc', requestId: 'steady-redial', payload: { sdp: 'fixture-offer' } });
+    await clock.advanceUntil(() => f.connections.length === 2 && f.swarm.metrics().peers.offersAccepted > accepted, 1000);
+    const event = new Event('datachannel'); event.channel = channel; f.connections[1].dispatchEvent(event);
+    await clock.advanceUntil(() => f.swarm.metrics().peers.connected === 1, 1000);
+    f.connections[1].connectionState = 'connected';
+    channel.receive(JSON.stringify({ t: 'contribution', serving: true, rendition: STEADY_RENDITION }));
+    f.lease(2000, channel);
+    const next = await f.demand();
+    assert(next.sourceAfterMs <= 10, 'the redialled author\'s lease is still ignored: ' + next.sourceAfterMs);
+    assert.deepEqual([f.steady().leaseWaits, f.steady().leasesIgnored], [1, 1]);
+    sameBytes(await clock.settle(next.response), f.bytes);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window (R1): a renewed lease dates the holder wait from its first grant at a receiver without the option', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    lateRaceKeyClock(t);
+    // Receiver without steadyPeerWindow, positive budget, typical origin time 3,000 ms.
+    f = await clock.settle(multiFixture(t, { holders: [{}], wholeOriginDelayMs: 3000, originFallbackMs: 1500,
+      swarmOptions: { maxPeerWaitMs: 1500 } }));
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    f.hls.media = { currentTime: 10, buffered: { length: 0 } };
+    const train = { ...multiContext, url: 'https://origin.example/media/train.ts', frag: { ...multiContext.frag, url: 'https://origin.example/media/train.ts' } };
+    sameBytes(await clock.settle(f.load(train)), f.bytes);
+    f.hls.media.buffered = { length: 1, start: () => 0, end: () => 30 };
+    f.channels[0].receive(JSON.stringify({ t: 'contribution', serving: true, rendition: STEADY_RENDITION }));
+    // A renewing owner: grants at 0, 1,000 and 2,000 ms of its fetch.
+    for (let grant = 0; grant < 3; grant++) {
+      if (grant) await clock.advance(1000);
+      f.channels[0].receive(JSON.stringify({ t: 'fetching', k: f.key, ms: 2000 }));
+    }
+    await clock.advance(500);
+    // 2,500 ms into a 3,000 ms typical fetch: 500 ms to wait, which fits the 1,500 ms limit.
+    // Dating the fetch from the latest grant would project 2,500 ms and go to origin at once.
+    const load = beginCountedMultiLoad(f, multiContext);
+    sameBytes(await clock.settle(load.response), f.bytes);
+    const counters = f.swarm.metrics().peerEligibilityDiagnostics.counters;
+    assert.equal(counters['projected-late'], 0, JSON.stringify(counters));
+    assert.equal(counters['no-have-wait'], 1, JSON.stringify(counters));
+    assert.equal('steadyPeerWindow' in f.swarm.metrics(), false);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+// A source load whose body this SDK does not retain (an unhandled warm marker):
+// its withdrawal waits for a HAVE that never comes from this load.
+const unretainedWarmLoad = f => {
+  const context = { ...multiContext, [WARM_AHEAD]: { peerBytes: 0 } };
+  return new Promise((resolve, reject) => new f.hls.config.fLoader(f.hlsConfig).load(context, f.loaderConfig,
+    { onSuccess: resolve, onError: reject, onTimeout: reject, onAbort: reject }));
+};
+
+test('steady peer window (R1): a new claim supersedes a deferred withdrawal; one ms: 0 follows the final HAVE', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    lateRaceKeyClock(t);
+    f = await clock.settle(multiFixture(t, { holders: [{ silent: true }], wholeOriginDelayMs: 300, swarmOptions: { serve: true, steadyPeerWindow: true } }));
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    const frames = timedControlFrames(f.channels[0]), started = performance.now();
+    await clock.settle(unretainedWarmLoad(f));
+    const firstDone = performance.now() - started;
+    assert.equal(frames.some(row => row.t === 'fetching' && row.ms === 0), false, 'the unretained body\'s withdrawal is deferred');
+    await clock.advance(50);
+    sameBytes(await clock.settle(f.load()), f.bytes); // a second claim of the same key while the withdrawal waits
+    await clock.advance(2000);
+    const withdrawals = frames.filter(row => row.t === 'fetching' && row.k === f.key && row.ms === 0);
+    const advertised = frames.findIndex(row => row.t === 'have' && (row.add ?? row.keys ?? []).includes(f.key));
+    assert.equal(withdrawals.length, 1, JSON.stringify(frames));
+    assert(withdrawals[0].at - started >= firstDone + 50 + 300, 'no ms: 0 while the second claim fetched');
+    assert(advertised >= 0 && frames.indexOf(withdrawals[0]) > advertised);
+    assert.equal(f.swarm.metrics().errors.total, 0);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
+test('steady peer window: stop during a lease wait and during a deferred withdrawal settles once and sends nothing after', async t => {
+  for (const phase of ['window', 'deferral']) await t.test(phase, async t => {
+    const clock = warmFunctionalClock(t, () => false);
+    let f;
+    try {
+      f = phase === 'window' ? await steadyWindowFixture(t, clock)
+        : (lateRaceKeyClock(t), await clock.settle(multiFixture(t, { holders: [{ silent: true }], wholeOriginDelayMs: 300,
+          swarmOptions: { serve: true, steadyPeerWindow: true } })));
+      const frames = timedControlFrames(f.channels[0]);
+      let load;
+      if (phase === 'window') {
+        f.lease(2000);
+        load = beginCountedMultiLoad(f, f.ctx);
+        await clock.advance(200);
+        assert.equal(f.steady().leaseWaits, 1);
+      } else {
+        await clock.settle(unretainedWarmLoad(f));
+        assert.equal(frames.some(row => row.t === 'fetching' && row.ms === 0), false);
+      }
+      const sent = frames.length;
+      f.swarm.stop();
+      await clock.advance(3000);
+      assert.equal(frames.length, sent, 'nothing is sent after stop: ' + JSON.stringify(frames.slice(sent)));
+      if (load) assert.equal(load.calls.success.length + load.calls.abort.length + load.calls.error.length, 1, 'one terminal');
+      assert.equal(f.swarm.metrics().errors.total, 0, JSON.stringify(f.swarm.metrics().errors));
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+test('steady peer window (R5d): a reconsidered take-up joined by genuine demand is bounded by the funded window', async t => {
+  for (const variant of ['deep, slow holder', 'shallow, slow holder', 'deep, fast holder']) await t.test(variant, async t => {
+    const clock = warmFunctionalClock(t, () => false), slow = variant.includes('slow');
+    let f;
+    try {
+      // Deep: 18 s of buffer, W = 800 ms. Shallow: 6 s, which funds no window.
+      f = await steadyWindowFixture(t, clock, { holders: [slow ? { Channel: PhasedFlowChannel, firstByteMs: 5000, flowMs: 100 } : {}],
+        bufferedEnd: variant.startsWith('deep') ? 28 : 16,
+        swarmOptions: { warmAhead: true, bufferedMixedRanges: true, zeroBudgetPeerRace: true } });
+      if (!variant.startsWith('deep')) f.ctx.frag.start = 16;
+      f.have();
+      // A reconsidered optional row with its full eight seconds left, which a genuine demand has joined.
+      const enteredAt = performance.now(), deadline = enteredAt + 8000, signal = new AbortController(), context = { ...f.ctx };
+      const genuine = { at: enteredAt, context };
+      context[WARM_AHEAD] = { peerBytes: 0, abandon: () => false, work: () => performance.now() < deadline || genuine
+        ? { context, enteredAt, deadline, signal: signal.signal, genuine, reconsidered: true } : null };
+      const sources = f.wholeLoads.length + f.ranges.length, calls = { success: 0, other: 0 };
+      new f.hls.config.fLoader(f.hlsConfig).load(context, f.loaderConfig, { onSuccess: () => calls.success++,
+        onError: () => calls.other++, onAbort: () => calls.other++, onTimeout: () => calls.other++ });
+      await clock.advanceUntil(() => f.wholeLoads.length + f.ranges.length > sources || calls.success + calls.other > 0, 9000);
+      const elapsed = performance.now() - enteredAt, steady = f.steady();
+      if (variant === 'deep, fast holder') {
+        assert.deepEqual([calls.success, steady.peerOnlyStarted, steady.peerOnlyDelivered], [1, 1, 1], JSON.stringify(steady));
+        assert.equal(f.wholeLoads.length + f.ranges.length, sources, 'taken up with no source lane');
+      } else if (variant === 'deep, slow holder') {
+        assert(elapsed >= 800 && elapsed <= 850, 'the joined demand\'s source starts at the funded bound, not the row deadline: ' + elapsed);
+        assert.deepEqual([steady.peerOnlyStarted, steady.takeUpWindowEnd], [1, 1]);
+      } else {
+        assert(elapsed <= 30, 'an unfunded row skips the take-up and starts source at once: ' + elapsed);
+        assert.equal(steady.peerOnlyStarted, 0);
+      }
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+/** A holder that refuses every request ("none": not held or not serving now). */
+class EmptyAnswerChannel extends RangedChannel {
+  send(data) {
+    if (typeof data !== 'string' || JSON.parse(data).t !== 'want') return super.send(data);
+    RecordedChannel.prototype.send.call(this, data);
+    const frame = JSON.parse(data); this.wants.push(frame.p ?? null);
+    setTimeout(() => { if (this.readyState === 'open') this.receive(JSON.stringify({ t: 'none', id: frame.id })); }, 5);
+  }
+}
+
+test('steady peer window (R6): a take-up that fails puts the holder\'s leases in cooldown; one cut by the window end does not', async t => {
+  for (const kind of ['failed', 'window-end', 'window-end-fractional']) await t.test(kind, async t => {
+    const clock = warmFunctionalClock(t, () => false), windowEnd = kind.startsWith('window-end');
+    let f;
+    try {
+      // window-end: a holder whose first byte comes after the window, and which answers the cancel.
+      f = await steadyWindowFixture(t, clock, { holders: [kind === 'failed' ? { Channel: EmptyAnswerChannel }
+        : { Channel: PhasedFlowChannel, firstByteMs: 2000, flowMs: 100 }] });
+      f.have();
+      // A browser's clock is fractional: the Core's peer-only floor (the window
+      // end rounded down) then settles the transfer before the window timer.
+      if (kind === 'window-end-fractional') await clock.advance(0.5);
+      const first = beginCountedMultiLoad(f, f.ctx), started = performance.now();
+      if (kind === 'window-end-fractional') {
+        await clock.advance(799.5);
+        assert.equal(performance.now() - started, 799.5, 'stepped to the Core floor, before the window timer');
+      }
+      sameBytes(await clock.settle(first.response), f.bytes);
+      assert.equal(f.wholeLoads.length, f.trained + 1, 'whole source fallback');
+      assert.deepEqual([f.steady().peerOnlyStarted, f.steady().peerOnlyDelivered, f.steady().peerOnlyFallback, f.steady().takeUpWindowEnd,
+        f.steady().waitWindowEnd], windowEnd ? [1, 0, 0, 1, 0] : [1, 0, 1, 0, 0], 'a take-up cut by the window end never waited on a lease');
+      if (windowEnd) assert(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs <= 10_000 - 799 + 10);
+      // The holder withdraws its HAVE and announces a fresh lease.
+      f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+      f.lease(2000);
+      const next = await f.demand();
+      if (kind === 'failed') {
+        assert(next.sourceAfterMs <= 10, 'the failed holder\'s lease is ignored: ' + next.sourceAfterMs);
+        assert.deepEqual([f.steady().leaseWaits, f.steady().leasesIgnored], [0, 1]);
+      } else {
+        assert(next.sourceAfterMs >= 800, 'a window-end miss carries no cooldown: ' + next.sourceAfterMs);
+        assert.deepEqual([f.steady().leaseWaits, f.steady().leasesIgnored, f.steady().waitWindowEnd, f.steady().takeUpWindowEnd], [1, 0, 1, 1]);
+      }
+      sameBytes(await clock.settle(next.response), f.bytes);
+      assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
+      assert(performance.now() - started < 10_000);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+test('steady peer window (j): three real actors; a waiter beyond the owner\'s upload peers falls back to source', { timeout: 20000 }, async t => {
+  // Real sessions, signatures, Core links and ordered channels between three
+  // swarms. A holds the object and serves at most one upload peer; B takes it
+  // peer-only; C, the third viewer, is refused by A and falls back.
+  const pair = await framingPairFixture(t, { pairedState: true }), actors = [];
+  const clock = warmFunctionalClock(t, () => false);
+  try {
+    const player = () => ({ levels: [{ details: { live: true } }], media: Object.assign(new EventTarget(), { currentTime: 0, paused: false,
+      ended: false, seeking: false, readyState: 4, playbackRate: 1, buffered: { length: 0 } }) });
+    const common = { steadyPeerWindow: true, sustainablePeerWait: true, maxPeers: 2 };
+    for (const swarmOptions of [{ ...common, maxUploadPeers: 1 }, { ...common, maxUploadBytesPerSession: 0 }, common])
+      actors.push(await clock.settle(pair.make({ delay: 1600, player: player(), swarmOptions })));
+    const [a, b, c] = actors;
+    await clock.advanceUntil(() => a.swarm.metrics().peers.connected === 2 && c.swarm.metrics().peers.connected >= 1);
+    // Origin timing for each viewer from another object (1.6 s: zero sustainable budget for 2 s fragments).
+    const train = actor => new Promise((resolve, reject) => {
+      const frag = M3U8Parser.parseLevelPlaylist('#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:7\n#EXTINF:2,\ntrain.ts\n',
+        'https://origin.example/media/index.m3u8', 0, 'main', 0, null).fragments[0];
+      const loader = new actor.hls.config.fLoader({}); frag.stats = loader.stats;
+      loader.load({ url: frag.url, frag, part: null }, { timeout: 4000 }, { onSuccess: resolve, onError: reject, onTimeout: reject });
+    });
+    for (const actor of [b, c]) await clock.settle(train(actor));
+    sameBytes(await clock.settle(a.load()), pair.bytes); // the owner fetches and retains the object
+    await clock.advanceUntil(() => pair.channels.some(channel => channel.sent.some(frame => frame?.t === 'have' && (frame.keys ?? frame.add ?? []).includes(pair.key))));
+    for (const actor of [b, c]) actor.hls.media.buffered = { length: 1, start: () => 0, end: () => 20 };
+    const http = actors.map(actor => actor.http);
+    sameBytes(await clock.settle(b.load()), pair.bytes);
+    assert.equal(b.http, http[1], 'B took the held object peer-only');
+    assert.deepEqual([b.swarm.metrics().steadyPeerWindow.peerOnlyDelivered, b.swarm.metrics().bytes.peerFirst], [1, pair.bytes.length]);
+    sameBytes(await clock.settle(c.load()), pair.bytes);
+    assert.equal(c.http, http[2] + 1, 'C fell back to one whole source GET');
+    assert.deepEqual([c.swarm.metrics().steadyPeerWindow.peerOnlyStarted, c.swarm.metrics().steadyPeerWindow.peerOnlyFallback,
+      c.swarm.metrics().bytes.peerFirst], [1, 1, 0]);
+    assert.equal(a.swarm.metrics().uploadRefusalDiagnostics.counters['peer-limit'], 1, 'A refused the upload peer beyond its limit');
+    assert.equal(a.http, http[0], 'the owner fetched once');
+  } finally { clock.restore(); pair.close(); }
 });
 
 test('verified piece flow waits for real worker verification and rejects invalidated replies', async t => {

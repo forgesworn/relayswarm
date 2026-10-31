@@ -74,6 +74,15 @@ key and announces HAVE before withdrawing FETCH, including synchronous hls.js
 disposal. Actual hls.js regressions cover ordinary, cached-race and late-race
 ordering. No lease extension, new receiver trust or measured traffic saving is
 claimed.
+Unreleased steadyPeerWindow is off by default (peer-first, serve and
+multiHolder): FETCH leases are renewed every second for the life of an origin
+claim and withdrawn only after the HAVE; a genuine zero-budget demand with
+buffer headroom waits, inside a window of at most maxPeerWaitMs, only on a
+live exact-key lease from a serving candidate, then takes the held object
+through a peer-only Core transfer, falling back to whole source on the
+remaining parent budgets. Lapsed leases and failed take-ups cool a link for
+10 s. metrics().steadyPeerWindow reports counts only. Unit-tested, not
+field-qualified.
 Unreleased warmAhead is disabled by default: bounded future main-fragment
 loads share the existing held cache and coalesce with genuine player demand.
 Current signed authority and content hashes gate cache reuse; local reuse,
