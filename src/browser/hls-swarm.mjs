@@ -1493,9 +1493,12 @@ class HlsSwarm {
             if (!result && plan.finishReason === 'core-fail-command') swarm.#coolSteadyLeases(holders);
             // Nothing reached a holder (for example a known model too slow for
             // the whole object in W): today's path, which may still use the
-            // held object's probe and tail, on the budgets left.
-            if (!result && !warmOwner && (plan.finishReason === undefined || STEADY_BEFORE_REQUEST.has(plan.finishReason)))
-              return handBack(waited, false);
+            // held object's probe and tail, on the budgets left. An optional
+            // row keeps warming from origin inside its own deadline (R5b).
+            if (!result && (plan.finishReason === undefined || STEADY_BEFORE_REQUEST.has(plan.finishReason))) {
+              if (!warmOwner) return handBack(waited, false);
+              if (warmOwner.current()) return handBack(true, true);
+            }
             fail();
           }).catch(error => {
             if (this.active !== token) return;

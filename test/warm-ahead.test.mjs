@@ -3904,7 +3904,7 @@ test('steady peer window (h): a live lease on the startup terminal waits for not
 });
 
 test('steady peer window (R5, R5a, R5b): a live lease makes an owned optional future yield only while the buffer funds a window', async t => {
-  const variants = ['control without a lease', 'leased, deep buffer', 'leased, shallow buffer', 'flag off, leased'];
+  const variants = ['control without a lease', 'leased, deep buffer', 'leased, shallow buffer', 'flag off, leased', 'leased, refused take-up'];
   for (const variant of variants) await t.test(variant, async t => {
     const leased = variant.includes('leased'), steady = !variant.startsWith('flag off');
     let target = null, takeUpCalls = null;
