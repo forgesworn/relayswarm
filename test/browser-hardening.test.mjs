@@ -6376,19 +6376,27 @@ class EmptyAnswerChannel extends RangedChannel {
 }
 
 test('steady peer window (R6): a take-up that fails puts the holder\'s leases in cooldown; one cut by the window end does not', async t => {
-  for (const kind of ['failed', 'window-end']) await t.test(kind, async t => {
-    const clock = warmFunctionalClock(t, () => false);
+  for (const kind of ['failed', 'window-end', 'window-end-fractional']) await t.test(kind, async t => {
+    const clock = warmFunctionalClock(t, () => false), windowEnd = kind.startsWith('window-end');
     let f;
     try {
       // window-end: a holder whose first byte comes after the window, and which answers the cancel.
       f = await steadyWindowFixture(t, clock, { holders: [kind === 'failed' ? { Channel: EmptyAnswerChannel }
         : { Channel: PhasedFlowChannel, firstByteMs: 2000, flowMs: 100 }] });
       f.have();
+      // A browser's clock is fractional: the Core's peer-only floor (the window
+      // end rounded down) then settles the transfer before the window timer.
+      if (kind === 'window-end-fractional') await clock.advance(0.5);
       const first = beginCountedMultiLoad(f, f.ctx), started = performance.now();
+      if (kind === 'window-end-fractional') {
+        await clock.advance(799.5);
+        assert.equal(performance.now() - started, 799.5, 'stepped to the Core floor, before the window timer');
+      }
       sameBytes(await clock.settle(first.response), f.bytes);
       assert.equal(f.wholeLoads.length, f.trained + 1, 'whole source fallback');
-      assert.deepEqual([f.steady().peerOnlyStarted, f.steady().peerOnlyDelivered, f.steady().peerOnlyFallback], [1, 0, 1]);
-      if (kind === 'window-end') assert(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs <= 10_000 - 800 + 10);
+      assert.deepEqual([f.steady().peerOnlyStarted, f.steady().peerOnlyDelivered, f.steady().peerOnlyFallback, f.steady().waitWindowEnd],
+        windowEnd ? [1, 0, 0, 1] : [1, 0, 1, 0]);
+      if (windowEnd) assert(f.wholeLoads.at(-1).config.loadPolicy.maxLoadTimeMs <= 10_000 - 799 + 10);
       // The holder withdraws its HAVE and announces a fresh lease.
       f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
       f.lease(2000);
@@ -6398,7 +6406,7 @@ test('steady peer window (R6): a take-up that fails puts the holder\'s leases in
         assert.deepEqual([f.steady().leaseWaits, f.steady().leasesIgnored], [0, 1]);
       } else {
         assert(next.sourceAfterMs >= 800, 'a window-end miss carries no cooldown: ' + next.sourceAfterMs);
-        assert.deepEqual([f.steady().leaseWaits, f.steady().leasesIgnored, f.steady().waitWindowEnd], [1, 0, 1]);
+        assert.deepEqual([f.steady().leaseWaits, f.steady().leasesIgnored, f.steady().waitWindowEnd], [1, 0, 2]);
       }
       sameBytes(await clock.settle(next.response), f.bytes);
       assert.equal(f.swarm.metrics().bytes.peerFirst, 0);

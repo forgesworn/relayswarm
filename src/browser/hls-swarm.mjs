@@ -1428,7 +1428,7 @@ class HlsSwarm {
         this.active = token; this.pendingCallbacks = { callbacks, context };
         Object.assign(this.inner.stats, { aborted: false, loaded: 0, total: 0, chunkCount: 0, bwEstimate: 0,
           loading: { start: enteredAt, first: 0, end: 0 }, parsing: { start: 0, end: 0 }, buffering: { start: 0, first: 0, end: 0 } });
-        const cleanup = () => { clearTimeout(timer); swarm.lifecycle.signal.removeEventListener('abort', onStop); };
+        const cleanup = () => { clearTimeout(timer); swarm.timers.delete(timer); swarm.lifecycle.signal.removeEventListener('abort', onStop); };
         this.cancel = () => { const pending = this.active === token; this.active = null; cleanup(); controller.abort(); return pending; };
         // `reduced` false: nothing was spent, so today's path runs unchanged.
         const handBack = (reduced, whole) => {
@@ -1465,10 +1465,17 @@ class HlsSwarm {
               this.active = null; this.pendingCallbacks = null; cleanup(); controller.abort();
               return swarm.#completePeerLoad(this, result, context, callbacks, enteredAt);
             }
+            // The Core's peer-only floor is the window end rounded down, and its
+            // fail or the reply guard can settle before the window timer runs:
+            // either is the window running out, never the owner's miss (R6).
+            if (controller.signal.reason === STEADY_WINDOW_END || now() >= Math.floor(windowEnd)) {
+              swarm.steadyCounts.waitWindowEnd = increment(swarm.steadyCounts.waitWindowEnd);
+              return fail();
+            }
             swarm.steadyCounts.peerOnlyFallback = increment(swarm.steadyCounts.peerOnlyFallback);
-            // R6: a failed take-up (not the window running out) means the owner
-            // went away, evicted or lied; its leases are ignored for a while.
-            if (controller.signal.reason !== STEADY_WINDOW_END) swarm.#coolSteadyLeases(holders);
+            // R6: a failed take-up means the owner went away, evicted or lied;
+            // its leases are ignored for a while.
+            swarm.#coolSteadyLeases(holders);
             fail();
           }).catch(error => {
             if (this.active !== token) return;
@@ -1479,7 +1486,7 @@ class HlsSwarm {
         };
         const onStop = () => handBack(true, true);
         swarm.lifecycle.signal.addEventListener('abort', onStop, { once: true });
-        timer = setTimeout(() => controller.abort(STEADY_WINDOW_END), windowMs);
+        timer = swarm.#after(windowMs, () => controller.abort(STEADY_WINDOW_END));
         swarm.#steadyWait(context, controller.signal, windowEnd, !warmOwner).then(outcome => {
           if (this.active !== token) return;
           if (outcome.next === 'ordinary') return handBack(false, false);
