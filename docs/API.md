@@ -263,10 +263,20 @@ claim creates a wait for genuine demand.
 With `warmAhead` and `bufferedMixedRanges` as well, this option changes two
 rules above. A live exact-key lease from a current candidate makes a
 not-yet-started optional future yield (counted as `sourceYielded`), whatever
-the XOR rank. A reconsidered future with an exact HAVE uses the same peer-only
-take-up within its unchanged eight-second deadline instead of mixed loading;
-on failure the optional row ends, and only a genuine waiter that joined it
-continues on today's path.
+the XOR rank, but only while this viewer's own buffer, read from the media
+element up to that future's start, would fund a window for it by the same
+headroom arithmetic (W of at least 500 ms with measured recovery). With a
+shallower buffer the future starts its own origin fetch as before, so a viewer
+short of buffer keeps building its lead. A reconsidered future with an exact
+HAVE uses the same peer-only take-up within its unchanged eight-second
+deadline instead of mixed loading. If that take-up sends no request (a
+commitment, model or capacity refusal, or no free candidate) the row
+continues as an ordinary warm origin fetch inside the same deadline; only a
+take-up that sent a request and failed ends the row, and only a genuine
+waiter that joined it continues on today's path. For any steady take-up, a
+link model whose verified flow has not yet covered one whole object counts
+as unknown, so the Core's one-piece probe runs and the model re-trains; only
+a model that has moved a whole object refuses on capacity.
 
 `metrics().steadyPeerWindow`, present only with the option, holds counts with
 no identities: `opened`, `closedHeadroom`, `leaseWaits`, `waitHave`,

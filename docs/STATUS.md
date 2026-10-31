@@ -33,7 +33,11 @@ announced fetch, within its own peer deadline. Controlled fixtures with the
 real Core and logical clocks cover renewal and withdrawal order, the window
 arithmetic, lease waits, lapses, window ends, cooldowns, peer-only delivery,
 integrity bans, the startup terminal, optional-future yield and
-reconsideration, and an owner refusing a third viewer. Field sharing,
+reconsideration, and an owner refusing a third viewer. An amendment the same day
+makes the optional-future yield depend on the viewer's own funded buffer, keeps
+a reconsidered row warming from origin when its take-up sends no request, and
+lets a link model thinner than one whole object probe instead of refusing. The
+option remains implemented and unit-tested, not field-qualified. Field sharing,
 continuity and source savings remain unmeasured.
 
 ## Unreleased startup reservoir release at capacity and in the late window (30 October 2026)
