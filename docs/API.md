@@ -233,8 +233,9 @@ the main playlist's `details.live` is boolean, the startup reservoir is off or
 released, the range Core (and any configured worker) is ready and measured
 origin recovery exists: `W = min(maxPeerWaitMs, uncapped buffer - recovery -
 2 x originReserveMs)`, where recovery is the origin p90 with its 25% and 100 ms
-margin and the uncapped buffer already excludes one recovery. Below 500 ms the
-window stays closed and today's path runs. Inside the window the demand waits
+margin and the uncapped buffer already excludes one recovery. Below 500 ms, or
+when W plus one recovery would not fit the load's first-byte or parent budget,
+the window stays closed and today's path runs. Inside the window the demand waits
 for the exact HAVE only while a current serving candidate (the same connected,
 admitted, framing 2 links the XOR election ranks) holds a live FETCH lease for
 that exact key; XOR rank alone never causes this wait. With no such lease and no
@@ -262,10 +263,15 @@ continues on today's path.
 
 `metrics().steadyPeerWindow`, present only with the option, holds counts with
 no identities: `opened`, `closedHeadroom`, `leaseWaits`, `waitHave`,
-`waitLapsed`, `waitWindowEnd`, `leasesIgnored` (window entries at which a
-live lease was ignored for its link's miss cooldown), `peerOnlyStarted`,
-`peerOnlyDelivered`, `peerOnlyFallback` and `fetchRenewalsSent` (one per claimed
-key per renewal, to all links). Controlled fixtures exercise these rules; field
+`waitLapsed`, `waitWindowEnd` (lease waits and peer-only take-ups that the
+window end cut), `leasesIgnored` (window entries at which a live lease was
+ignored for its peer's miss cooldown), `peerOnlyStarted`, `peerOnlyDelivered`,
+`peerOnlyFallback` (take-ups that ended undelivered before the window end) and
+`fetchRenewalsSent` (one per claimed key per renewal, to all links). Only a
+Core transfer the holders failed (refused, withdrew, closed or banned) cools
+them; a take-up refused before any request (commitment, local model or
+whole-object capacity) returns a genuine demand to today's path instead. The
+cooldown is keyed by peer public key, so it survives a reconnect. Controlled fixtures exercise these rules; field
 sharing, continuity and savings are not qualified. See the
 [loading contract](../INTEGRATION.md#options).
 

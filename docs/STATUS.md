@@ -33,7 +33,7 @@ announced fetch, within its own peer deadline. Controlled fixtures with the
 real Core and logical clocks cover renewal and withdrawal order, the window
 arithmetic, lease waits, lapses, window ends, cooldowns, peer-only delivery,
 integrity bans, the startup terminal, optional-future yield and
-reconsideration, and an owner refusing a third viewer. Field sharing shares,
+reconsideration, and an owner refusing a third viewer. Field sharing,
 continuity and source savings remain unmeasured.
 
 ## Unreleased startup reservoir release at capacity and in the late window (30 October 2026)
