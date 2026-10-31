@@ -6389,6 +6389,33 @@ test('steady peer window (R6): a take-up refused before any request (commitment 
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
+test('steady peer window (R4): a known link model too slow for the whole object in W returns to today\'s path with its own budgets', async t => {
+  const clock = warmFunctionalClock(t, () => false);
+  let f;
+  try {
+    // 400 ms per request: one 64 KiB probe trains a ~160 KB/s rate; 512 KiB cannot move in 800 ms.
+    f = await steadyWindowFixture(t, clock, { holders: [{ Channel: PhasedFlowChannel, firstByteMs: 10, flowMs: 400 }] });
+    f.have();
+    sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+    const trained = f.swarm.metrics().core.multiHolder.peerFlow.lastModel;
+    assert.equal(f.steady().waitWindowEnd, 1, 'the unknown-model take-up ran into the window end: ' + JSON.stringify(f.steady()));
+    const wants = f.channels[0].wants.length, sources = f.wholeLoads.length;
+    const next = beginCountedMultiLoad(f, f.ctx);
+    await clock.advanceUntil(() => f.wholeLoads.length > sources, 1000);
+    const model = f.swarm.metrics().core.multiHolder.peerFlow.lastModel;
+    assert(model.rateBytesPerSecond > 0 && model.rateBytesPerSecond * 0.8 < f.bytes.length, 'a known rate that cannot fit: ' + JSON.stringify({ trained, model }));
+    assert.equal(f.channels[0].wants.length, wants, 'no request reached the holder');
+    assert.strictEqual(f.wholeLoads.at(-1).config, f.loaderConfig, 'today\'s path with the original config');
+    sameBytes(await clock.settle(next.response), f.bytes);
+    assert.deepEqual([f.steady().peerOnlyStarted, f.steady().peerOnlyFallback, f.steady().leasesIgnored], [2, 1, 0]);
+    f.channels[0].receive(JSON.stringify({ t: 'have', keys: [] }));
+    f.lease(300);
+    const leased = await f.demand();
+    assert(leased.sourceAfterMs >= 550, 'no cooldown for a local capacity refusal: ' + leased.sourceAfterMs);
+    sameBytes(await clock.settle(leased.response), f.bytes);
+  } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+});
+
 /** A holder that refuses every request ("none": not held or not serving now). */
 class EmptyAnswerChannel extends RangedChannel {
   send(data) {

@@ -55,6 +55,10 @@ const MIN_LINK_FLOW_BYTES = 32 * 1024;
 const STEADY_MIN_WINDOW_MS = 500;
 const STEADY_LEASE_GRACE_MS = 250;
 const STEADY_WINDOW_END = Symbol("steady-window-end");
+// #multiHolder finish reasons reached before any Core request was sent.
+const STEADY_BEFORE_REQUEST = new Set(["entry-current-invalid", "worker-unavailable", "ranges-unavailable", "origin-without-ranges",
+  "entry-state-deadline-authority", "no-candidates", "no-models", "whole-peer-capacity", "allocation-error",
+  "allocation-state-deadline-authority-holder", "allocation-empty"]);
 const DEFAULTS = Object.freeze({
   mode: "shadow",
   originFallbackMs: 1_500,
@@ -1452,7 +1456,7 @@ class HlsSwarm {
         };
         // R4: a peer-only Core transfer from the holders at this moment, no
         // concurrent source lane, bounded by the window end.
-        const takeUp = ({ key, holders }) => {
+        const takeUp = ({ key, holders, waited }) => {
           swarm.steadyCounts.peerOnlyStarted = increment(swarm.steadyCounts.peerOnlyStarted);
           const plan = { deadline: windowEnd, limit: windowEnd, originReserveMs: 0, expired: false, onDeadline: null,
             knownKey: key, cachedOnly: new Map(holders.map(link => [link, new Set(link.have)])), lateHaveRace: false,
@@ -1477,6 +1481,11 @@ class HlsSwarm {
             // closed or banned) is the owner's miss; a commitment, local model
             // or capacity refusal before any request is not.
             if (!result && plan.finishReason === 'core-fail-command') swarm.#coolSteadyLeases(holders);
+            // Nothing reached a holder (for example a known model too slow for
+            // the whole object in W): today's path, which may still use the
+            // held object's probe and tail, on the budgets left.
+            if (!result && !warmOwner && (plan.finishReason === undefined || STEADY_BEFORE_REQUEST.has(plan.finishReason)))
+              return handBack(waited, false);
             fail();
           }).catch(error => {
             if (this.active !== token) return;
