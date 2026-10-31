@@ -225,7 +225,10 @@ option, a viewer without it that receives renewed leases sees each lease live
 for the whole announced fetch: its budget-positive coordinated wait can last
 until its own peer deadline instead of lapsing after 2 s, and its holder-wait
 projection dates the fetch from the first grant (an unrenewed lease gives the
-same projection as before). Zero-budget loading is unaffected.
+same projection as before). With or without the option, a FETCH re-sent for a
+key whose lease is still live (for example a second concurrent claim of the
+same key) is now also dated from its first grant: a shorter, more accurate
+holder wait than the latest grant implied. Zero-budget loading is unaffected.
 
 A genuine, not yet running main-fragment demand at zero exclusive peer budget
 may then open a buffer-funded window when playback is healthy at normal speed,
@@ -243,12 +246,16 @@ exact HAVE, today's path starts at once with its original budgets. An exact
 HAVE, at entry or after the wait, starts the existing peer-only Core transfer on
 the holders of that moment, bounded by the window end, with no source lane; an
 unknown link model begins with the Core's one-piece probe and four-piece
-refills. Delivery hands over the verified object as other peer loads do. A null
-result, failure, ban, lapse or window end starts ordinary whole-source loading
-on the captured parent and first-byte budgets less the elapsed time; no peer
-message extends a parent deadline. A lease that lapses (expiry or `ms: 0`)
-without HAVE within 250 ms, or a take-up that fails before the window ends,
-makes that link's leases ignored for 10 s; its exact HAVE stays usable. A window
+refills. Delivery hands over the verified object as other peer loads do. A
+lapse, a window end or a Core transfer the holders failed (including a ban)
+starts ordinary whole-source loading; a take-up refused before any request
+returns to today's path instead. Past the 25 ms setup bound either uses the
+captured parent and first-byte budgets less the elapsed time; no peer message
+extends a parent deadline. A lease that lapses (expiry or `ms: 0`) without HAVE
+within 250 ms, or a Core transfer the holders failed before the window ends,
+makes that peer's leases ignored for 10 s; its exact HAVE stays usable. A
+`none` answer cannot say why, so an owner's `peer-limit` refusal also counts as
+such a miss and cools that owner for the same 10 s. A window
 that ends while the lease is live carries no penalty. This bounded wait on a
 FETCH claim is the option's exception to the election rule above that no peer
 claim creates a wait for genuine demand.
