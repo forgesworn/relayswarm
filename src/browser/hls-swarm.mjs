@@ -55,6 +55,9 @@ const MIN_LINK_FLOW_BYTES = 32 * 1024;
 const STEADY_MIN_WINDOW_MS = 500;
 const STEADY_LEASE_GRACE_MS = 250;
 const STEADY_WINDOW_END = Symbol("steady-window-end");
+// Beyond this since load entry (the buffered-mixed setup bound), a hand-back to
+// today's path keeps the captured budgets less the elapsed time.
+const STEADY_SETUP_MS = 25;
 // #multiHolder finish reasons reached before any Core request was sent.
 const STEADY_BEFORE_REQUEST = new Set(["entry-current-invalid", "worker-unavailable", "ranges-unavailable", "origin-without-ranges",
   "entry-state-deadline-authority", "no-candidates", "no-models", "whole-peer-capacity", "allocation-error",
@@ -1440,9 +1443,11 @@ class HlsSwarm {
         const cleanup = () => { clearTimeout(timer); swarm.timers.delete(timer); swarm.lifecycle.signal.removeEventListener('abort', onStop); };
         this.cancel = () => { const pending = this.active === token; this.active = null; cleanup(); controller.abort(); return pending; };
         // `reduced` false: nothing was spent, so today's path runs unchanged.
+        // Any time past the setup bound (a commitment fetch, say) still counts.
         const handBack = (reduced, whole) => {
           if (this.active !== token) return;
           this.active = null; this.pendingCallbacks = null; cleanup(); controller.abort();
+          reduced ||= now() - enteredAt > STEADY_SETUP_MS;
           const budget = reduced ? remainingOriginConfig(config, enteredAt + parentMs, enteredAt + firstMs) : config;
           if (!budget) return callbacks.onTimeout?.(this.inner.stats, context, null);
           if (whole) this.loadWholeOrigin(context, budget, callbacks, traceLoad);
