@@ -50,6 +50,11 @@ const LINK_TIMING_TTL_MS = 30_000;
 const LINK_REFRESH_MS = 10_000;
 const MIN_LINK_FLOW_MS = 300;
 const MIN_LINK_FLOW_BYTES = 32 * 1024;
+// steadyPeerWindow: the shortest funded window worth opening, the grace for a
+// HAVE overtaken by its owner's lease withdrawal, and the window-end reason.
+const STEADY_MIN_WINDOW_MS = 500;
+const STEADY_LEASE_GRACE_MS = 250;
+const STEADY_WINDOW_END = Symbol("steady-window-end");
 const DEFAULTS = Object.freeze({
   mode: "shadow",
   originFallbackMs: 1_500,
@@ -1231,7 +1236,8 @@ class HlsSwarm {
       }
       get stats() { return this.peerStats || this.inner.stats; }
       get context() { return this.peerContext || this.inner.context; }
-      load(context, config, callbacks) {
+      // `steadyBypass`: the steady window handing a load back to today's path.
+      load(context, config, callbacks, steadyBypass = false) {
         const enteredAt = swarm.options.bufferedMixedRanges ? now() : null;
         this.abort();
         this.releaseFetch = null;
@@ -1294,6 +1300,10 @@ class HlsSwarm {
           || (!swarm.options.serveOnCellular && onCellular())) {
           if (abandonBeforeMixed()) return;
           return this.inner.load(context, config, callbacks);
+        }
+        if (swarm.options.steadyPeerWindow && !steadyBypass && budgetMs === 0 && !context[WARM_AHEAD]) {
+          const window = swarm.#steadyWindow(context, budgetGeometry, config, this.hlsConfig.progressive);
+          if (window) return this.loadSteadyWindow(context, config, callbacks, budgetGeometry, window);
         }
         if (swarm.options.bufferedMixedRanges && budgetMs === 0 && (!context[WARM_AHEAD] || warmOwner) && !this.hlsConfig.progressive && warmContext(context) &&
             mixedSource === 'buffer' && mixedGeometry.uncappedMs > 25 &&
@@ -1396,6 +1406,39 @@ class HlsSwarm {
             swarm.#noteError("peer-first", error);
             fallback();
           }
+        });
+      }
+      // steadyPeerWindow: a genuine demand inside a buffer-funded window. It
+      // spends only already-buffered time; every hand-back keeps the captured
+      // parent and first-byte budgets less the elapsed time.
+      loadSteadyWindow(context, config, callbacks, geometry, { windowMs, parentMs, firstMs }) {
+        const token = {}, controller = new AbortController(), enteredAt = now();
+        const traceLoad = swarm.#traceBegin(context, 0, windowMs, geometry);
+        let timer;
+        this.active = token; this.pendingCallbacks = { callbacks, context };
+        Object.assign(this.inner.stats, { aborted: false, loaded: 0, total: 0, chunkCount: 0, bwEstimate: 0,
+          loading: { start: enteredAt, first: 0, end: 0 }, parsing: { start: 0, end: 0 }, buffering: { start: 0, first: 0, end: 0 } });
+        const cleanup = () => { clearTimeout(timer); swarm.lifecycle.signal.removeEventListener('abort', onStop); };
+        this.cancel = () => { const pending = this.active === token; this.active = null; cleanup(); controller.abort(); return pending; };
+        // `reduced` false: nothing was spent, so today's path runs unchanged.
+        const handBack = (reduced, whole) => {
+          if (this.active !== token) return;
+          this.active = null; this.pendingCallbacks = null; cleanup(); controller.abort();
+          const budget = reduced ? remainingOriginConfig(config, enteredAt + parentMs, enteredAt + firstMs) : config;
+          if (!budget) return callbacks.onTimeout?.(this.inner.stats, context, null);
+          if (whole) this.loadWholeOrigin(context, budget, callbacks, traceLoad);
+          else this.load(context, budget, callbacks, true);
+        };
+        const onStop = () => handBack(true, true);
+        swarm.lifecycle.signal.addEventListener('abort', onStop, { once: true });
+        timer = setTimeout(() => controller.abort(STEADY_WINDOW_END), windowMs);
+        swarm.#steadyWait(context, controller.signal, enteredAt + windowMs).then(outcome => {
+          if (this.active !== token) return;
+          if (outcome.next === 'ordinary') return handBack(false, false);
+          if (outcome.next === 'held') return handBack(outcome.waited, false);
+          handBack(true, true);
+        }).catch(error => {
+          if (this.active === token) { swarm.#noteError('steady-window', error); handBack(true, true); }
         });
       }
       loadBufferedMixed(context, config, callbacks, geometry, captured, enteredAt, parentMs, warmOwner = null) {
@@ -2195,12 +2238,7 @@ class HlsSwarm {
         this.options.transferWorkerUrl !== undefined && this.transferWorkerState !== 'ready' || frag?.type !== 'main' ||
         !Number.isInteger(frag.level) || frag.level < 0 || typeof this.hls?.levels?.[frag.level]?.details?.live !== 'boolean' ||
         !/^[0-9a-f]{64}$/.test(key) || !/^[0-9a-f]{64}$/.test(this.session?.pubkey)) return !requireExact;
-    const rendition = this.#renditionContext(context), discovery = this.discovery.contexts.get('main');
-    const candidates = [...this.links.values()].filter(peer => !peer.closed && /^[0-9a-f]{64}$/.test(peer.pubkey) && !this.banned.has(peer.pubkey) &&
-      peer.pc?.connectionState === 'connected' && peer.channel?.readyState === 'open' && peer.supportsRanges &&
-      (this.remoteFraming.get(peer.pubkey) ?? 1) >= 2 && this.#servesRendition(peer, rendition) &&
-      (!this.options.admit || validTicket(this.admitted.get(peer.pubkey)?.ticket)) &&
-      !(discovery?.rendition === rendition && this.discovery.stale(discovery, peer.pubkey)));
+    const candidates = this.#warmCandidates(context);
     // A held exact object can already feed the ordinary mixed path. Otherwise
     // avoid duplicating a future whole GET with a current contributor. Both
     // parsed live and VOD windows can supply optional futures. Unknown playlist
@@ -2210,6 +2248,89 @@ class HlsSwarm {
     if (!candidates.length) return true;
     const target = BigInt('0x' + key), local = target ^ BigInt('0x' + this.session.pubkey);
     return candidates.every(peer => (target ^ BigInt('0x' + peer.pubkey)) >= local);
+  }
+
+  // Open, admitted framing 2 links currently serving this main rendition and
+  // not stale for it: the candidates of the warm election and the steady window.
+  #warmCandidates(context) {
+    const rendition = this.#renditionContext(context), discovery = this.discovery.contexts.get('main');
+    return [...this.links.values()].filter(peer => !peer.closed && /^[0-9a-f]{64}$/.test(peer.pubkey) && !this.banned.has(peer.pubkey) &&
+      peer.pc?.connectionState === 'connected' && peer.channel?.readyState === 'open' && peer.supportsRanges &&
+      (this.remoteFraming.get(peer.pubkey) ?? 1) >= 2 && this.#servesRendition(peer, rendition) &&
+      (!this.options.admit || validTicket(this.admitted.get(peer.pubkey)?.ticket)) &&
+      !(discovery?.rendition === rendition && this.discovery.stale(discovery, peer.pubkey)));
+  }
+
+  // R2: the buffer-funded window for a genuine, unstarted main-fragment demand
+  // at zero budget, or null for today's path. Two measured origin recoveries
+  // and two reserves stay behind it; unknown recovery keeps it closed.
+  #steadyWindow(context, geometry, config, progressive) {
+    try {
+      const media = this.hls?.media, frag = context.frag;
+      if (progressive || context.part || !warmContext(context) || geometry.source !== 'buffer' || !this.#rangesEnabled() ||
+          this.options.transferWorkerUrl !== undefined && this.transferWorkerState !== 'ready' ||
+          typeof this.hls?.levels?.[frag.level]?.details?.live !== 'boolean' ||
+          !['off', 'ready'].includes(this.warmAhead?.startupSnapshot().state ?? 'off') ||
+          media?.paused !== false || media.ended !== false || media.seeking !== false || !(media.readyState >= 3) ||
+          media.playbackRate !== 1) return null;
+    } catch { return null; }
+    const limits = [config?.loadPolicy?.maxLoadTimeMs, config?.timeout].filter(value => Number.isFinite(value) && value > 0);
+    if (!limits.length) return null;
+    const parentMs = Math.min(...limits), first = config?.loadPolicy?.maxTimeToFirstByteMs;
+    const firstMs = Number.isFinite(first) && first > 0 ? Math.min(first, parentMs) : parentMs;
+    const p90 = percentile(this.#originSamples(context), 0.9), recoveryMs = p90 === null ? null : p90 * 1.25 + 100;
+    const windowMs = recoveryMs === null || !Number.isFinite(geometry.uncappedMs) ? 0
+      : Math.min(this.options.maxPeerWaitMs, geometry.uncappedMs - recoveryMs - 2 * this.options.originReserveMs);
+    // The source fallback must still fit one measured recovery inside the parent budgets.
+    if (!(windowMs >= STEADY_MIN_WINDOW_MS) || windowMs + recoveryMs > firstMs) {
+      this.steadyCounts.closedHeadroom = increment(this.steadyCounts.closedHeadroom);
+      return null;
+    }
+    this.steadyCounts.opened = increment(this.steadyCounts.opened);
+    return { windowMs, parentMs, firstMs };
+  }
+
+  // R3: wait inside the window for the exact HAVE of a demonstrably fetching
+  // owner (a live exact-key FETCH lease), never on XOR rank alone. A lapse
+  // without HAVE (expiry or ms: 0, plus a grace) puts that owner's leases in
+  // a miss cooldown; a window that ends while the lease is live costs nothing.
+  async #steadyWait(context, signal, windowEnd) {
+    const key = await this.#segmentKey(context);
+    if (signal.aborted || this.stopped) return { next: 'source' };
+    const exact = () => this.#warmCandidates(context).filter(link => link.have.has(key));
+    const leases = () => {
+      const at = now(), wall = Date.now();
+      const live = this.#warmCandidates(context).filter(link => (link.fetching.get(key) || 0) > wall);
+      return { live, honoured: live.filter(link => !((this.steadyLeaseCooldowns.get(link) ?? -Infinity) > at)) };
+    };
+    let holders = exact();
+    if (holders.length) return { next: 'held', key, holders, waited: false };
+    const entry = leases();
+    if (entry.live.length > entry.honoured.length) this.steadyCounts.leasesIgnored = increment(this.steadyCounts.leasesIgnored);
+    if (!entry.honoured.length) return { next: 'ordinary' };
+    this.steadyCounts.leaseWaits = increment(this.steadyCounts.leaseWaits);
+    const owners = new Set(entry.honoured);
+    let lapsedAt = null;
+    for (;;) {
+      if ((holders = exact()).length) {
+        this.steadyCounts.waitHave = increment(this.steadyCounts.waitHave);
+        return { next: 'held', key, holders, waited: true };
+      }
+      if (signal.aborted || this.stopped) break;
+      const at = now(), { honoured } = leases();
+      for (const link of honoured) owners.add(link);
+      if (honoured.length) lapsedAt = null; else lapsedAt ??= at;
+      if (lapsedAt !== null && at >= lapsedAt + STEADY_LEASE_GRACE_MS) {
+        this.steadyCounts.waitLapsed = increment(this.steadyCounts.waitLapsed);
+        for (const link of owners) this.steadyLeaseCooldowns.set(link, at + LINK_REFRESH_MS);
+        return { next: 'source' };
+      }
+      const ms = lapsedAt !== null ? lapsedAt + STEADY_LEASE_GRACE_MS - at
+        : Math.max(...honoured.map(link => link.fetching.get(key))) - Date.now();
+      await this.#waitForHave(key, Math.max(1, Math.min(ms, windowEnd - at)), signal);
+    }
+    if (signal.reason === STEADY_WINDOW_END) this.steadyCounts.waitWindowEnd = increment(this.steadyCounts.waitWindowEnd);
+    return { next: 'source' };
   }
 
   #shouldWaitForOrigin(key, rendition, context) {

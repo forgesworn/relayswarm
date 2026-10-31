@@ -98,6 +98,7 @@ async function fixture(t, options = {}) {
     maxHeldBytes: options.maxHeldBytes ?? 64 * 1024 * 1024, maxHeldSegments: options.maxHeldSegments ?? 12,
     ...(options.onPeerDelivery ? { onPeerDelivery: options.onPeerDelivery } : {}),
     ...(options.startupTarget === undefined ? {} : { startupBufferTarget: options.startupTarget }),
+    ...(options.steadyPeerWindow === undefined ? {} : { steadyPeerWindow: options.steadyPeerWindow }),
     ...(options.startupCommit === undefined ? {} : { startupBufferCommit: options.startupCommit }),
     ...(options.startupMaxBytes === undefined ? {} : { startupBufferMaxBytes: options.startupMaxBytes }),
     ...(options.allowance === undefined ? {} : { maxUploadBytesPerSession: options.allowance }) });
@@ -3857,6 +3858,33 @@ test('startup buffer real SDK peer notification can stop only after matching byt
   assert.ok(warm.consumedPeerBytes <= warm.verifiedPeerBytes);
   assert.deepEqual(first.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
   assert.equal(f.swarm.metrics().startupBuffer.released, 1);
+});
+
+test('steady peer window (h): a live lease on the startup terminal waits for nothing and the reservoir releases once', async t => {
+  let commits = 0;
+  const f = await fixture(t, { enabled: false, startupTarget: () => 1.3, held: [0], rangePeer: true, steadyPeerWindow: true,
+    startupCommit: () => { commits++; } });
+  // Every other window condition holds: playing at rate 1, buffer ahead, a
+  // live parsed playlist, zero peer budget (no origin timing yet).
+  Object.assign(f.media, { ended: false, seeking: false, readyState: 4, playbackRate: 1 });
+  const peer = await f.addPeer();
+  for (const pc of f.connections) pc.connectionState = 'connected';
+  peer.channel.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ t: 'contribution', serving: true, rendition: 'main:/media/index.m3u8' }) }));
+  peer.channel.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ t: 'fetching', k: sha(`warm-ahead-fixture\n/media/s0.m4s`), ms: 2000 }) }));
+  const first = f.load(0);
+  assert.equal(f.requests.filter(row => row.context.frag.sn === 0).length, 1, 'the startup terminal starts source at once');
+  assert.equal(f.swarm.metrics().startupBuffer.state, 'buffering');
+  const zero = { opened: 0, closedHeadroom: 0, leaseWaits: 0, waitHave: 0, waitLapsed: 0, waitWindowEnd: 0, leasesIgnored: 0,
+    peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0 };
+  const steady = () => { const { fetchRenewalsSent, ...counts } = f.swarm.metrics().steadyPeerWindow; return counts; };
+  assert.deepEqual(steady(), zero, 'the window is not evaluated while the reservoir buffers');
+  f.requests.find(row => row.context.frag.sn === 0).finish();
+  assert.deepEqual(await first.result, f.bytes);
+  await until(() => f.swarm.metrics().startupBuffer.state === 'ready');
+  assert.equal(f.swarm.metrics().startupBuffer.released, 1); assert.equal(commits, 1, 'the one-shot hook ran once');
+  assert.deepEqual(first.calls, { success: 1, abort: 0, error: 0, timeout: 0 });
+  assert.deepEqual(steady(), zero, 'no steady wait or peer-only take-up before release');
+  assert.equal(peer.sent.filter(frame => frame?.t === 'want').length, 0);
 });
 
 test('startup buffer required future can adopt late exact HAVE without pretending Hls already consumed it', async t => {
