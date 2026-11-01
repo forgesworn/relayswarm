@@ -6650,8 +6650,9 @@ class SlowingFlowChannel extends PhasedFlowChannel {
 }
 
 test('steady peer window (R6a): a take-up cut by its window end keeps the link model, so a closed-window zero-budget demand still asks the holder', async t => {
-  for (const kind of ['verified pieces before the cut', 'nothing verified before the cut']) await t.test(kind, async t => {
-    const clock = warmFunctionalClock(t, () => false), verifiedFirst = kind.startsWith('verified');
+  for (const kind of ['verified pieces before the cut', 'nothing verified before the cut', 'settled at the Core floor before the window timer'])
+    await t.test(kind, async t => {
+    const clock = warmFunctionalClock(t, () => false), verifiedFirst = !kind.startsWith('nothing'), floorFirst = kind.startsWith('settled');
     let f;
     try {
       // 128 KiB, two 64 KiB pieces. Each request's flow (50 ms) is under the
@@ -6659,6 +6660,10 @@ test('steady peer window (R6a): a take-up cut by its window end keeps the link m
       f = await steadyWindowFixture(t, clock, { size: 128 * 1024, holders: [{ Channel: SlowingFlowChannel, firstByteMs: 10, flowMs: 50 }],
         swarmOptions: { zeroBudgetPeerRace: true } });
       const flow = () => f.swarm.metrics().core.multiHolder.peerFlow, holder = f.channels[0];
+      // A browser's clock is fractional: entering at x.5 ms puts the Core's
+      // peer-only floor (the window end rounded down) 0.5 ms before the window
+      // timer, so only the time clause can mark the cut as a window end.
+      if (floorFirst) await clock.advance(0.5);
       if (verifiedFirst) {
         // A lease wait, then the HAVE 450 ms in: the take-up has 350 ms. Its
         // probe verifies one piece; the holder then slows and the next
@@ -6674,7 +6679,16 @@ test('steady peer window (R6a): a take-up cut by its window end keeps the link m
         assert.deepEqual([f.steady().peerOnlyDelivered, f.wholeLoads.length], [1, f.trained]);
         holder.slowFrom = holder.wants.length;
       }
-      sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+      const cut = beginCountedMultiLoad(f, f.ctx), entered = performance.now();
+      if (floorFirst) {
+        await clock.advance(799.5);
+        for (let turn = 0; turn < 20; turn++) await new Promise(resolve => setImmediate(resolve));
+        assert.equal(performance.now() - entered, 799.5, 'at the Core floor, before the window timer');
+        assert.equal(f.steady().takeUpWindowEnd, 1, 'settled as a window end before the timer');
+        const finished = f.swarm.trace().rows.findLast(row => row.k === 'xferFinish');
+        assert(finished && !finished.delivered && finished.reason !== 'signal-abort', 'the Core settled, not the window timer: ' + JSON.stringify(finished));
+      }
+      sameBytes(await clock.settle(cut.response), f.bytes);
       const cutAt = performance.now();
       assert.equal(f.steady().takeUpWindowEnd, 1, 'the take-up was cut by its window end');
       assert.equal(f.wholeLoads.length, f.trained + 1, 'whole source fallback');
