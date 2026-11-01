@@ -3904,9 +3904,10 @@ test('steady peer window (h): a live lease on the startup terminal waits for not
 });
 
 test('steady peer window (R5, R5a, R5b): a live lease makes an owned optional future yield only while the buffer funds a window', async t => {
-  const variants = ['control without a lease', 'leased, deep buffer', 'leased, shallow buffer', 'flag off, leased', 'leased, refused take-up'];
+  const variants = ['control without a lease', 'leased, deep buffer', 'leased, shallow buffer', 'flag off, leased', 'leased, refused take-up',
+    'XOR-election yield without a lease'];
   for (const variant of variants) await t.test(variant, async t => {
-    const leased = variant.includes('leased'), steady = !variant.startsWith('flag off');
+    const leased = variant.includes('leased'), steady = !variant.startsWith('flag off'), xor = variant.startsWith('XOR');
     let target = null, takeUpCalls = null;
     const f = await fixture(t, { rangePeer: true, bufferedMixedRanges: true, ...(steady ? { steadyPeerWindow: true } : {}), size: 256 * 1024,
       held: Array.from({ length: 12 }, (_, sn) => sn),
@@ -3921,9 +3922,10 @@ test('steady peer window (R5, R5a, R5b): a live lease makes an owned optional fu
     frame({ t: 'contribution', serving: true, rendition: 'main:/media/index.m3u8' });
     const key = sn => sha(`warm-ahead-fixture\n/media/s${sn}.m4s`), self = BigInt('0x' + f.swarm.metrics().pubkey), other = BigInt('0x' + peer.pubkey);
     const owned = sn => { const target = BigInt('0x' + key(sn)); return (target ^ other) >= (target ^ self); };
-    // A demand at least 6 s ahead of the playhead whose next parsed future this viewer would fetch by XOR rank.
-    const d = Array.from({ length: 7 }, (_, n) => n + 3).find(sn => owned(sn + 1));
-    if (d === undefined) return t.skip('no owned future for these random identities (p = 2^-7)');
+    // A demand at least 6 s ahead of the playhead whose next parsed future this viewer would fetch by XOR rank
+    // (XOR variant: whose next future the peer owns by rank).
+    const d = Array.from({ length: 7 }, (_, n) => n + 3).find(sn => owned(sn + 1) !== xor);
+    if (d === undefined) return t.skip('no suitable future for these random identities (p = 2^-7)');
     target = d + 1;
     // Measured origin recovery first (one short source load).
     const first = f.load(0); f.requests.find(row => row.context.frag.sn === 0).finish(); assert.deepEqual(await first.result, f.bytes);
@@ -3935,17 +3937,33 @@ test('steady peer window (R5, R5a, R5b): a live lease makes an owned optional fu
     f.load(d);
     const futures = () => f.requests.filter(row => row.context.frag.sn > d);
     const warm = () => f.swarm.metrics().warmAhead;
+    const leaseCounts = () => { const { leaseYields, leaseYieldsLapsed } = f.swarm.metrics().steadyPeerWindow; return [leaseYields, leaseYieldsLapsed]; };
+    // Steps the engine's clock past every declined row's eight-second deadline.
+    const pastDeadlines = () => { const real = performance.now.bind(performance); t.mock.method(performance, 'now', () => real() + 8_100); };
     const wait = (predicate, label) => until(predicate).catch(error => { throw new Error(label + ' ' + JSON.stringify({ d,
       requests: f.requests.map(row => [row.context.frag.sn, row.completed, row.aborted]), warm: warm(), steady: f.swarm.metrics().steadyPeerWindow,
       media: { currentTime: f.media.currentTime } })); });
+    if (xor) {
+      // The pre-existing election yield is a sourceYielded but not a lease
+      // yield, and its declined row lapsing is not a lapsed lease yield.
+      await wait(() => warm().sourceYielded >= 1, 'an XOR yield');
+      assert.deepEqual(leaseCounts(), [0, 0]);
+      assert(warm().declinedSourceObjects >= 1);
+      pastDeadlines();
+      assert.equal(warm().declinedSourceObjects, 0, 'the declined row expired');
+      assert.deepEqual(leaseCounts(), [0, 0]);
+      return;
+    }
     if (!leased || !steady || variant.includes('shallow')) {
       await wait(() => futures().length === 1, 'one future');
       assert.equal(futures()[0].context.frag.sn, d + 1, 'the rank owner starts its warm origin fetch');
       assert.equal(warm().sourceYielded, 0, 'no yield');
+      if (steady) assert.deepEqual(leaseCounts(), [0, 0]);
       return;
     }
     await wait(() => warm().sourceYielded === 2, 'two yields');
     assert.deepEqual(futures(), [], 'both leased futures yield to the fetching candidate');
+    assert.deepEqual(leaseCounts(), [2, 0], 'both are R5a lease yields');
     if (variant.includes('refused')) takeUpCalls = 0;
     peer.have(d + 1);
     if (variant.includes('refused')) {
@@ -3958,6 +3976,12 @@ test('steady peer window (R5, R5a, R5b): a live lease makes an owned optional fu
       futures()[0].finish();
       await wait(() => warm().verified === 1, 'verified');
       assert.equal(warm().verifiedPeerBytes, 0);
+      // The row the HAVE answered was consumed; the other expires without its HAVE.
+      assert.equal(warm().declinedSourceObjects, 1);
+      assert.deepEqual(leaseCounts(), [2, 0]);
+      pastDeadlines();
+      assert.equal(warm().declinedSourceObjects, 0);
+      assert.deepEqual(leaseCounts(), [2, 1], 'one lapsed lease yield');
       return;
     }
     await wait(() => f.swarm.metrics().steadyPeerWindow.peerOnlyDelivered === 1, 'delivered');
@@ -3969,6 +3993,10 @@ test('steady peer window (R5, R5a, R5b): a live lease makes an owned optional fu
     assert.deepEqual(await f.load(d + 1).result, f.bytes);
     assert.equal(f.swarm.metrics().bytes.peerFirst, f.bytes.length, 'credit at the genuine consumer');
     assert.deepEqual(futures().filter(row => row.context.frag.sn === d + 1), []);
+    // The genuine demand re-plans its futures: the remaining declined row is
+    // cleared before its deadline, which is not a lapse (a re-planned future
+    // may yield again).
+    assert(leaseCounts()[0] >= 2); assert.equal(leaseCounts()[1], 0);
   });
 });
 
