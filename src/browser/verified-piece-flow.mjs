@@ -25,4 +25,13 @@ export class VerifiedPieceFlow {
     this.discard(endAt);
     return sample;
   }
+  // A transfer cut at its own window end: the verified bytes still pending,
+  // over the interval up to the cut, under the same floors. Ends the batch.
+  flush(endAt) {
+    const bytes = this.#bytes, startAt = this.#startAt;
+    this.discard(endAt);
+    if (!bytes || startAt === null || !Number.isFinite(endAt) || endAt < startAt) return null;
+    const flowMs = endAt - startAt;
+    return flowMs < MIN_MS || bytes < MIN_BYTES ? null : { bytes, flowMs };
+  }
 }

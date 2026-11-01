@@ -528,7 +528,8 @@ class HlsSwarm {
     // lease still dates its fetch from the first grant. Local bookkeeping.
     this.leaseStarts = new WeakMap();
     this.steadyCounts = { opened: 0, closedHeadroom: 0, leaseWaits: 0, waitHave: 0, waitLapsed: 0, waitWindowEnd: 0,
-      leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, fetchRenewalsSent: 0 };
+      leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, leaseYields: 0,
+      leaseYieldsLapsed: 0, fetchRenewalsSent: 0 };
     this.uploadQuotaBytes = 0;
     this.uploadTokens = this.options.maxUploadBytesPerSecond;
     this.uploadRefilledAt = now();
@@ -697,6 +698,12 @@ class HlsSwarm {
             (percentile(this.#originSamples(context), 0.9) || 0) * 1.25 + 100),
           allowed: () => this.#servingAllowed() && hls.media?.paused !== true && !onCellular(),
           prefetch: (context, permit, reconsidered) => this.#ownsWarmSource(context, permit.key, reconsidered),
+          // R5a lease yields, apart from warm-ahead's sourceYielded (which also
+          // counts XOR-election yields), and declined rows that lapsed unanswered.
+          onLeaseYield: kind => {
+            if (kind === 'yielded') this.steadyCounts.leaseYields = increment(this.steadyCounts.leaseYields);
+            else if (kind === 'lapsed') this.steadyCounts.leaseYieldsLapsed = increment(this.steadyCounts.leaseYieldsLapsed);
+          },
           next: context => {
             const fragments = hls.levels?.[context.frag?.level]?.details?.fragments;
             if (!Array.isArray(fragments)) return [];
@@ -2329,9 +2336,10 @@ class HlsSwarm {
     if (!candidates.length) return true;
     // R5: a candidate demonstrably fetching this exact key owns it for now,
     // but only while this viewer's buffer funds a window for it (R5a); a
-    // shallow buffer keeps its own warm origin fetch.
+    // shallow buffer keeps its own warm origin fetch. 'lease' is a yield that
+    // warm-ahead counts apart from an XOR-election yield (false).
     if (this.options.steadyPeerWindow && candidates.some(peer => this.#steadyLeaseLive(peer, key)) &&
-        this.#steadyYieldFunded(context)) return false;
+        this.#steadyYieldFunded(context)) return 'lease';
     const target = BigInt('0x' + key), local = target ^ BigInt('0x' + this.session.pubkey);
     return candidates.every(peer => (target ^ BigInt('0x' + peer.pubkey)) >= local);
   }
@@ -3390,6 +3398,22 @@ class HlsSwarm {
         const batch = shortFlows.get(link);
         batch?.flow.discard(now());
       };
+      // R6a: a steady take-up cut by its own window end (the window timer's
+      // reason, or anything settling at the Core's floor of it) is not an
+      // unproductive probe. Its links keep their usefulness, and the verified
+      // flow still pending for a link, up to the cut, is one flow sample under
+      // the usual floors, so the next evaluation reads real data.
+      const windowCut = () => plan.steadyWindow === true && (signal.reason === STEADY_WINDOW_END || now() >= deadline);
+      const recordCutFlow = link => {
+        const batch = shortFlows.get(link);
+        if (!batch || !windowCut() || this.stopped || link.closed || this.links.get(link.pubkey) !== link ||
+            this.banned.has(link.pubkey) || link.pc !== batch.connection || link.channel !== batch.channel) return;
+        const at = now(), sample = batch.flow.flush(at);
+        if (!sample) return;
+        const timing = this.#linkTimingState(link);
+        timing.flows.push({ value: Math.min(1_000_000, sample.bytes / sample.flowMs), flowMs: sample.flowMs, at });
+        if (timing.flows.length > LINK_TIMING_SAMPLES) timing.flows.shift();
+      };
       const observeVerifiedShortFlow = (link, controller, startedAt, report, fresh) => {
         const batch = shortFlows.get(link), at = now(), first = report?.firstByteMs, elapsed = report?.elapsedMs;
         const flowMs = elapsed - first;
@@ -3434,6 +3458,7 @@ class HlsSwarm {
       const finish = (result, reason) => {
         if (finished) return;
         traceFinish(reason, Boolean(result), verified, originShare);
+        if (!result) for (const link of shortFlows.keys()) recordCutFlow(link);
         finished = true; shortFlows.clear(); freshAt.clear();
         if (partialSlot?.prepare === preparePartial) partialSlot.prepare = null;
         if (partialSlot && partialSlot.revalidate === authority) partialSlot.revalidate = null;
@@ -3487,9 +3512,10 @@ class HlsSwarm {
           };
           link.request(key, remainingMs, { signal: controller.signal, expectedSize: to - from, onProgress,
             range: { start: command.range.start, end: command.range.end, objectSize: commitment.size },
-            onResult: (result) => { report = result; if (result.outcome !== 'payload') { discardShortFlow(link); freshAt.delete(link); }
+            onResult: (result) => { report = result; if (result.outcome !== 'payload') { recordCutFlow(link); discardShortFlow(link); freshAt.delete(link); }
               this.#peerRequestResult(context, link, remainingMs, result, command.range, traceLoad,
-                result.outcome === 'abort' && protectedAborts.has(controller)); } }).then((bytes) => {
+                result.outcome === 'abort' && protectedAborts.has(controller) ||
+                ['abort', 'timeout', 'abandoned'].includes(result.outcome) && windowCut()); } }).then((bytes) => {
             if (requests.get(command.peer) === controller) requests.delete(command.peer);
             slowestMs = Math.max(slowestMs, now() - startedAt);
             const peerCompletedAt = now();
@@ -3582,7 +3608,7 @@ class HlsSwarm {
             });
           });
         } else if (command.t === "cancel" || command.t === "abandon") {
-          discardShortFlow(ids.get(command.peer)); freshAt.delete(ids.get(command.peer));
+          recordCutFlow(ids.get(command.peer)); discardShortFlow(ids.get(command.peer)); freshAt.delete(ids.get(command.peer));
           const controller = requests.get(command.peer);
           if (command.t === "abandon") {
             this.multiHolder.abandoned += 1;

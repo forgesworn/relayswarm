@@ -81,7 +81,9 @@ buffer headroom waits, inside a window of at most maxPeerWaitMs, only on a
 live exact-key lease from a serving candidate, then takes the held object
 through a peer-only Core transfer, falling back to whole source on the
 remaining parent budgets. Lapsed leases and failed take-ups cool a link for
-10 s. metrics().steadyPeerWindow reports counts only. Unit-tested, not
+10 s; a take-up cut by its window end keeps the link's timing model and
+records the verified flow it moved. metrics().steadyPeerWindow reports counts
+only, including leaseYields and leaseYieldsLapsed. Unit-tested, not
 field-qualified.
 Unreleased warmAhead is disabled by default: bounded future main-fragment
 loads share the existing held cache and coalesce with genuine player demand.

@@ -6063,7 +6063,7 @@ test('steady peer window requires a boolean and peer-first serving multi-holder 
     assert.equal(swarm.metrics().disabledReason, reason, JSON.stringify(options));
     assert.equal('steadyPeerWindow' in swarm.metrics(), options.steadyPeerWindow === true);
     if (reason === null) assert.deepEqual(swarm.metrics().steadyPeerWindow, { opened: 0, closedHeadroom: 0, leaseWaits: 0, waitHave: 0,
-      waitLapsed: 0, waitWindowEnd: 0, leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, fetchRenewalsSent: 0 });
+      waitLapsed: 0, waitWindowEnd: 0, leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, leaseYields: 0, leaseYieldsLapsed: 0, fetchRenewalsSent: 0 });
     swarm.stop();
   }
   const off = createHlsSwarm({ ...base, relays: ['wss://relay.example'] });
@@ -6187,7 +6187,7 @@ test('steady peer window: with no lease and no HAVE today\'s path starts at once
     assert.strictEqual(f.wholeLoads.at(-1).config, f.loaderConfig, 'today\'s path keeps the original config');
     sameBytes(await clock.settle(demand.response), f.bytes);
     assert.deepEqual({ ...f.steady(), fetchRenewalsSent: 0 }, { opened: 1, closedHeadroom: 0, leaseWaits: 0, waitHave: 0, waitLapsed: 0,
-      waitWindowEnd: 0, leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, fetchRenewalsSent: 0 });
+      waitWindowEnd: 0, leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, leaseYields: 0, leaseYieldsLapsed: 0, fetchRenewalsSent: 0 });
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 
@@ -6635,6 +6635,88 @@ test('steady peer window (R6): a take-up that fails puts the holder\'s leases in
       sameBytes(await clock.settle(next.response), f.bytes);
       assert.equal(f.swarm.metrics().bytes.peerFirst, 0);
       assert(performance.now() - started < 10_000);
+    } finally { if (f) await clock.settle(f.close()); clock.restore(); }
+  });
+});
+
+// A holder whose requests from want number `slowFrom` on flow for
+// `slowFlowMs`: a later request is still in flight when a window ends.
+class SlowingFlowChannel extends PhasedFlowChannel {
+  constructor(bytes, options = {}) { super(bytes, options); this.slowFrom = options.slowFrom ?? Infinity; this.slowFlowMs = options.slowFlowMs ?? 5000; }
+  send(data) {
+    if (typeof data === 'string' && JSON.parse(data).t === 'want' && this.wants.length >= this.slowFrom) this.flowMs = this.slowFlowMs;
+    return super.send(data);
+  }
+}
+
+test('steady peer window (R6a): a take-up cut by its window end keeps the link model, so a closed-window zero-budget demand still asks the holder', async t => {
+  for (const kind of ['verified pieces before the cut', 'nothing verified before the cut', 'settled at the Core floor before the window timer'])
+    await t.test(kind, async t => {
+    const clock = warmFunctionalClock(t, () => false), verifiedFirst = !kind.startsWith('nothing'), floorFirst = kind.startsWith('settled');
+    let f;
+    try {
+      // 128 KiB, two 64 KiB pieces. Each request's flow (50 ms) is under the
+      // 300 ms floor, so no request makes a flow sample on its own.
+      f = await steadyWindowFixture(t, clock, { size: 128 * 1024, holders: [{ Channel: SlowingFlowChannel, firstByteMs: 10, flowMs: 50 }],
+        swarmOptions: { zeroBudgetPeerRace: true } });
+      const flow = () => f.swarm.metrics().core.multiHolder.peerFlow, holder = f.channels[0];
+      // A browser's clock is fractional: entering at x.5 ms puts the Core's
+      // peer-only floor (the window end rounded down) 0.5 ms before the window
+      // timer, so only the time clause can mark the cut as a window end.
+      if (floorFirst) await clock.advance(0.5);
+      if (verifiedFirst) {
+        // A lease wait, then the HAVE 450 ms in: the take-up has 350 ms. Its
+        // probe verifies one piece; the holder then slows and the next
+        // request is in flight at the window end.
+        holder.slowFrom = 1;
+        f.lease(2000);
+        setTimeout(() => f.have(), 450);
+      } else {
+        // A first take-up delivers the object (the link is useful, with no
+        // flow sample); the next one is cut before any piece verifies.
+        f.have();
+        sameBytes(await clock.settle(beginCountedMultiLoad(f, f.ctx).response), f.bytes);
+        assert.deepEqual([f.steady().peerOnlyDelivered, f.wholeLoads.length], [1, f.trained]);
+        holder.slowFrom = holder.wants.length;
+      }
+      const cut = beginCountedMultiLoad(f, f.ctx), entered = performance.now();
+      if (floorFirst) {
+        await clock.advance(799.5);
+        for (let turn = 0; turn < 20; turn++) await new Promise(resolve => setImmediate(resolve));
+        assert.equal(performance.now() - entered, 799.5, 'at the Core floor, before the window timer');
+        assert.equal(f.steady().takeUpWindowEnd, 1, 'settled as a window end before the timer');
+        const finished = f.swarm.trace().rows.findLast(row => row.k === 'xferFinish');
+        assert(finished && !finished.delivered && finished.reason !== 'signal-abort', 'the Core settled, not the window timer: ' + JSON.stringify(finished));
+      }
+      sameBytes(await clock.settle(cut.response), f.bytes);
+      const cutAt = performance.now();
+      assert.equal(f.steady().takeUpWindowEnd, 1, 'the take-up was cut by its window end');
+      assert.equal(f.wholeLoads.length, f.trained + 1, 'whole source fallback');
+      assert.equal(flow().verifiedShortBatches, 0, 'no request or verified batch made a flow sample before the cut');
+      assert.equal(flow().modelEvaluations['cooldown-blocked'], 0);
+      if (!verifiedFirst) assert.equal(flow().lastModel.decision, 'useful-unknown', 'the cut take-up began on a useful link with no flow sample');
+      // Within 10 s: a genuine demand at zero budget with the exact HAVE and a window closed by headroom.
+      f.hls.media.buffered = { length: 1, start: () => 0, end: () => 16 };
+      f.ctx.frag.start = 16;
+      const before = { ...flow().modelEvaluations }, wants = holder.wants.length, closed = f.steady().closedHeadroom;
+      const next = beginCountedMultiLoad(f, f.ctx);
+      await clock.advanceUntil(() => holder.wants.length > wants || flow().modelEvaluations['cooldown-blocked'] > 0, 1000);
+      const evaluations = flow().modelEvaluations, model = flow().lastModel;
+      assert(performance.now() - cutAt < 10_000);
+      assert.equal(f.steady().closedHeadroom, closed + 1, 'the window was closed');
+      assert.equal(evaluations['cooldown-blocked'], 0, 'never cooldown-blocked: ' + JSON.stringify(model));
+      assert(holder.wants.length > wants, 'the holder receives a request: ' + JSON.stringify(model));
+      assert.equal(f.swarm.metrics().segments.zeroBudgetPeerRaces, 1, 'the zero-budget race\'s peer arm');
+      if (verifiedFirst) {
+        assert.equal(evaluations.fit + evaluations['known-slow'], before.fit + before['known-slow'] + 1, JSON.stringify(evaluations));
+        // The cut flow is the link's only flow sample: one 64 KiB piece over
+        // the 300 to 400 ms from its first byte to the cut.
+        assert(model.rateBytesPerSecond >= 65_536 / 400 * 1000 && model.rateBytesPerSecond <= 65_536 / 300 * 1000, JSON.stringify(model));
+      } else {
+        assert.equal(evaluations['useful-unknown'], before['useful-unknown'] + 1, JSON.stringify(evaluations));
+        assert.equal(model.rateBytesPerSecond, null, 'nothing verified, so no flow sample');
+      }
+      sameBytes(await clock.settle(next.response), f.bytes);
     } finally { if (f) await clock.settle(f.close()); clock.restore(); }
   });
 });

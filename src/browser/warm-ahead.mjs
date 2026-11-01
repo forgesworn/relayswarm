@@ -60,14 +60,22 @@ export function warmContext(context) {
 }
 
 export function createWarmAhead({ Loader, next, authorise, verify, reserve = () => true, onVerified, onReuse,
-  reuseBudget = () => 0, allowed = () => true, prefetch = () => true, steady = true, startupTarget = null, startupCommit = null, startupMaxBytes = MAX_BYTES, startupRecovery = () => 2_000 }) {
+  reuseBudget = () => 0, allowed = () => true, prefetch = () => true, onLeaseYield = null, steady = true, startupTarget = null, startupCommit = null, startupMaxBytes = MAX_BYTES, startupRecovery = () => 2_000 }) {
   if (!Number.isSafeInteger(startupMaxBytes) || startupMaxBytes < MAX_BYTES || startupMaxBytes > 32 * 1024 * 1024 ||
       startupMaxBytes !== MAX_BYTES && typeof startupTarget !== 'function') throw new RangeError('Invalid startup byte budget');
   let closed = false, generation = 0, active = null, scope = null, queued = [], config, loaderConfig, latestDemand = null, loadId = 0;
   const cache = new Map(), demand = new Set(), jobs = new Map(), promoted = new Set(), reuseWaiters = new Set(), pins = new Map();
   // Payload-free routes for at most the current parsed next two futures.
   const declined = new Map();
-  const expireDeclined = () => { for (const [key, row] of declined) if (performance.now() >= row.deadline) declined.delete(key); };
+  // prefetch() answers true (proceed), false (yield) or 'lease' (yield to a
+  // live lease; the host counts it, and its declined row if that lapses).
+  const noteLeaseYield = kind => { try { onLeaseYield?.(kind); } catch {} };
+  const expireDeclined = () => {
+    for (const [key, row] of declined) if (performance.now() >= row.deadline) {
+      declined.delete(key);
+      if (row.lease) noteLeaseYield('lapsed');
+    }
+  };
   const startup = { enabled: typeof startupTarget === 'function', state: startupTarget ? 'idle' : 'off', reason: null,
     owner: null, terminal: null, own: null, permit: null, response: null, verified: false, reserved: 0,
     controller: null, timer: null, poll: null, plan: [], cursor: null, frozenStart: null, hopAvailable: true, checking: false, targetTime: null, verifiedStart: null, verifiedEnd: null,
@@ -111,7 +119,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
   const clear = () => {
     if (startup.state === 'idle' || startup.state === 'buffering') endStartup('cancelled', 'cleared', !closed);
     startup.planningServiceMs = null; clearSourceProfile();
-    generation++; queued = []; latestDemand = null; declined.clear();
+    generation++; queued = []; latestDemand = null; expireDeclined(); declined.clear();
     for (const row of [...jobs.values()]) cancelJob(row);
     for (const key of cache.keys()) drop(key);
     for (const resume of [...reuseWaiters]) resume(true);
@@ -243,11 +251,15 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
         // coverage and a genuine demand promoted during authorisation retain
         // their existing source path, without a wait or a renewed deadline.
         if ((startup.state === 'off' || startup.state === 'ready') && !row.genuine()) {
-          let proceed = false, yielded = false;
-          try { const decision = prefetch(item.context, permit, item.reconsidered === true); proceed = decision === true; yielded = decision === false; } catch {}
+          let proceed = false, yielded = false, lease = false;
+          try {
+            const decision = prefetch(item.context, permit, item.reconsidered === true);
+            proceed = decision === true; lease = decision === 'lease'; yielded = decision === false || lease;
+          } catch {}
           if (controller.signal.aborted || closed || revision !== generation || !live(row) || !allowed() || !reconsiderCurrent()) return null;
           if (!row.genuine() && !proceed) {
             if (yielded) counters.sourceYielded++;
+            if (yielded && lease) noteLeaseYield('yielded');
             // A reconsideration is one-shot, including a fresh supply refusal.
             if (yielded && !item.reconsidered && typeof permit.key === 'string' && permit.key.length > 0 && permit.key.length <= 512 &&
                 performance.now() < deadline && latestDemand?.upcoming.some(future => samePosition(future, workIdentity))) {
@@ -256,7 +268,7 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
                 const metadata = metadataOnly(item);
                 if (!closed && revision === generation && live(row) && !controller.signal.aborted &&
                     performance.now() < deadline && samePosition(metadata, workIdentity))
-                  declined.set(item.key, { item: metadata, objectKey: permit.key, deadline });
+                  declined.set(item.key, { item: metadata, objectKey: permit.key, deadline, lease });
               }
             }
             return null;
@@ -350,7 +362,8 @@ export function createWarmAhead({ Loader, next, authorise, verify, reserve = () 
     })().then(result => finishJob(row, result));
   };
   const noteDemand = (context, cfg, policy, owner) => {
-    latestDemand = null; declined.clear();
+    // A row already past its deadline lapsed; one cleared earlier is re-planned.
+    latestDemand = null; expireDeclined(); declined.clear();
     const own = warmContext(context);
     if (!own || closed) return null;
     if (scope !== own.scope) { if (scope !== null) clear(); scope = own.scope; }
