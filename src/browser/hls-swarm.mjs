@@ -3390,6 +3390,22 @@ class HlsSwarm {
         const batch = shortFlows.get(link);
         batch?.flow.discard(now());
       };
+      // R6a: a steady take-up cut by its own window end (the window timer's
+      // reason, or anything settling at the Core's floor of it) is not an
+      // unproductive probe. Its links keep their usefulness, and the verified
+      // flow still pending for a link, up to the cut, is one flow sample under
+      // the usual floors, so the next evaluation reads real data.
+      const windowCut = () => plan.steadyWindow === true && (signal.reason === STEADY_WINDOW_END || now() >= deadline);
+      const recordCutFlow = link => {
+        const batch = shortFlows.get(link);
+        if (!batch || !windowCut() || this.stopped || link.closed || this.links.get(link.pubkey) !== link ||
+            this.banned.has(link.pubkey) || link.pc !== batch.connection || link.channel !== batch.channel) return;
+        const at = now(), sample = batch.flow.flush(at);
+        if (!sample) return;
+        const timing = this.#linkTimingState(link);
+        timing.flows.push({ value: Math.min(1_000_000, sample.bytes / sample.flowMs), flowMs: sample.flowMs, at });
+        if (timing.flows.length > LINK_TIMING_SAMPLES) timing.flows.shift();
+      };
       const observeVerifiedShortFlow = (link, controller, startedAt, report, fresh) => {
         const batch = shortFlows.get(link), at = now(), first = report?.firstByteMs, elapsed = report?.elapsedMs;
         const flowMs = elapsed - first;
@@ -3434,6 +3450,7 @@ class HlsSwarm {
       const finish = (result, reason) => {
         if (finished) return;
         traceFinish(reason, Boolean(result), verified, originShare);
+        if (!result) for (const link of shortFlows.keys()) recordCutFlow(link);
         finished = true; shortFlows.clear(); freshAt.clear();
         if (partialSlot?.prepare === preparePartial) partialSlot.prepare = null;
         if (partialSlot && partialSlot.revalidate === authority) partialSlot.revalidate = null;
@@ -3487,9 +3504,10 @@ class HlsSwarm {
           };
           link.request(key, remainingMs, { signal: controller.signal, expectedSize: to - from, onProgress,
             range: { start: command.range.start, end: command.range.end, objectSize: commitment.size },
-            onResult: (result) => { report = result; if (result.outcome !== 'payload') { discardShortFlow(link); freshAt.delete(link); }
+            onResult: (result) => { report = result; if (result.outcome !== 'payload') { recordCutFlow(link); discardShortFlow(link); freshAt.delete(link); }
               this.#peerRequestResult(context, link, remainingMs, result, command.range, traceLoad,
-                result.outcome === 'abort' && protectedAborts.has(controller)); } }).then((bytes) => {
+                result.outcome === 'abort' && protectedAborts.has(controller) ||
+                ['abort', 'timeout', 'abandoned'].includes(result.outcome) && windowCut()); } }).then((bytes) => {
             if (requests.get(command.peer) === controller) requests.delete(command.peer);
             slowestMs = Math.max(slowestMs, now() - startedAt);
             const peerCompletedAt = now();
@@ -3582,7 +3600,7 @@ class HlsSwarm {
             });
           });
         } else if (command.t === "cancel" || command.t === "abandon") {
-          discardShortFlow(ids.get(command.peer)); freshAt.delete(ids.get(command.peer));
+          recordCutFlow(ids.get(command.peer)); discardShortFlow(ids.get(command.peer)); freshAt.delete(ids.get(command.peer));
           const controller = requests.get(command.peer);
           if (command.t === "abandon") {
             this.multiHolder.abandoned += 1;
