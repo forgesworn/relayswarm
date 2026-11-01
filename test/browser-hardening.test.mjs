@@ -6063,7 +6063,7 @@ test('steady peer window requires a boolean and peer-first serving multi-holder 
     assert.equal(swarm.metrics().disabledReason, reason, JSON.stringify(options));
     assert.equal('steadyPeerWindow' in swarm.metrics(), options.steadyPeerWindow === true);
     if (reason === null) assert.deepEqual(swarm.metrics().steadyPeerWindow, { opened: 0, closedHeadroom: 0, leaseWaits: 0, waitHave: 0,
-      waitLapsed: 0, waitWindowEnd: 0, leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, fetchRenewalsSent: 0 });
+      waitLapsed: 0, waitWindowEnd: 0, leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, leaseYields: 0, leaseYieldsLapsed: 0, fetchRenewalsSent: 0 });
     swarm.stop();
   }
   const off = createHlsSwarm({ ...base, relays: ['wss://relay.example'] });
@@ -6187,7 +6187,7 @@ test('steady peer window: with no lease and no HAVE today\'s path starts at once
     assert.strictEqual(f.wholeLoads.at(-1).config, f.loaderConfig, 'today\'s path keeps the original config');
     sameBytes(await clock.settle(demand.response), f.bytes);
     assert.deepEqual({ ...f.steady(), fetchRenewalsSent: 0 }, { opened: 1, closedHeadroom: 0, leaseWaits: 0, waitHave: 0, waitLapsed: 0,
-      waitWindowEnd: 0, leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, fetchRenewalsSent: 0 });
+      waitWindowEnd: 0, leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, leaseYields: 0, leaseYieldsLapsed: 0, fetchRenewalsSent: 0 });
   } finally { if (f) await clock.settle(f.close()); clock.restore(); }
 });
 

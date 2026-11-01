@@ -528,7 +528,8 @@ class HlsSwarm {
     // lease still dates its fetch from the first grant. Local bookkeeping.
     this.leaseStarts = new WeakMap();
     this.steadyCounts = { opened: 0, closedHeadroom: 0, leaseWaits: 0, waitHave: 0, waitLapsed: 0, waitWindowEnd: 0,
-      leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, fetchRenewalsSent: 0 };
+      leasesIgnored: 0, peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, leaseYields: 0,
+      leaseYieldsLapsed: 0, fetchRenewalsSent: 0 };
     this.uploadQuotaBytes = 0;
     this.uploadTokens = this.options.maxUploadBytesPerSecond;
     this.uploadRefilledAt = now();
@@ -697,6 +698,12 @@ class HlsSwarm {
             (percentile(this.#originSamples(context), 0.9) || 0) * 1.25 + 100),
           allowed: () => this.#servingAllowed() && hls.media?.paused !== true && !onCellular(),
           prefetch: (context, permit, reconsidered) => this.#ownsWarmSource(context, permit.key, reconsidered),
+          // R5a lease yields, apart from warm-ahead's sourceYielded (which also
+          // counts XOR-election yields), and declined rows that lapsed unanswered.
+          onLeaseYield: kind => {
+            if (kind === 'yielded') this.steadyCounts.leaseYields = increment(this.steadyCounts.leaseYields);
+            else if (kind === 'lapsed') this.steadyCounts.leaseYieldsLapsed = increment(this.steadyCounts.leaseYieldsLapsed);
+          },
           next: context => {
             const fragments = hls.levels?.[context.frag?.level]?.details?.fragments;
             if (!Array.isArray(fragments)) return [];
@@ -2329,9 +2336,10 @@ class HlsSwarm {
     if (!candidates.length) return true;
     // R5: a candidate demonstrably fetching this exact key owns it for now,
     // but only while this viewer's buffer funds a window for it (R5a); a
-    // shallow buffer keeps its own warm origin fetch.
+    // shallow buffer keeps its own warm origin fetch. 'lease' is a yield that
+    // warm-ahead counts apart from an XOR-election yield (false).
     if (this.options.steadyPeerWindow && candidates.some(peer => this.#steadyLeaseLive(peer, key)) &&
-        this.#steadyYieldFunded(context)) return false;
+        this.#steadyYieldFunded(context)) return 'lease';
     const target = BigInt('0x' + key), local = target ^ BigInt('0x' + this.session.pubkey);
     return candidates.every(peer => (target ^ BigInt('0x' + peer.pubkey)) >= local);
   }

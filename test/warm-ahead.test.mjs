@@ -3891,7 +3891,7 @@ test('steady peer window (h): a live lease on the startup terminal waits for not
   assert.equal(f.requests.filter(row => row.context.frag.sn === 0).length, 1, 'the startup terminal starts source at once');
   assert.equal(f.swarm.metrics().startupBuffer.state, 'buffering');
   const zero = { opened: 0, closedHeadroom: 0, leaseWaits: 0, waitHave: 0, waitLapsed: 0, waitWindowEnd: 0, leasesIgnored: 0,
-    peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0 };
+    peerOnlyStarted: 0, peerOnlyDelivered: 0, peerOnlyFallback: 0, takeUpWindowEnd: 0, leaseYields: 0, leaseYieldsLapsed: 0 };
   const steady = () => { const { fetchRenewalsSent, ...counts } = f.swarm.metrics().steadyPeerWindow; return counts; };
   assert.deepEqual(steady(), zero, 'the window is not evaluated while the reservoir buffers');
   f.requests.find(row => row.context.frag.sn === 0).finish();
