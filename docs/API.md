@@ -256,13 +256,20 @@ within 250 ms, or a Core transfer the holders failed before the window ends,
 makes that peer's leases ignored for 10 s; its exact HAVE stays usable. A
 `none` answer cannot say why, so an owner's `peer-limit` refusal also counts as
 such a miss and cools that owner for the same 10 s. A window
-that ends while the lease is live carries no penalty. This bounded wait on a
+that ends while the lease is live carries no penalty. Nor does a take-up cut
+by the window end (the window timer, or the transfer settling at the window end
+rounded down): its links keep their usefulness, and the verified flow each
+moved up to the cut, if it meets the usual 300 ms and 32 KiB floors, is
+recorded as a link flow sample, so the next evaluation of that link is
+`known-slow` or `fit` rather than `cooldown-blocked`. A cut that verified less
+records no sample; a link that was useful before it stays useful. This bounded wait on a
 FETCH claim is the option's exception to the election rule above that no peer
 claim creates a wait for genuine demand.
 
 With `warmAhead` and `bufferedMixedRanges` as well, this option changes two
 rules above. A live exact-key lease from a current candidate makes a
-not-yet-started optional future yield (counted as `sourceYielded`), whatever
+not-yet-started optional future yield (counted as `sourceYielded` and as
+`leaseYields`), whatever
 the XOR rank, but only while this viewer's own buffer, read from the media
 element up to that future's start, would fund a window for it by the same
 headroom arithmetic (W of at least 500 ms with measured recovery). With a
@@ -289,7 +296,15 @@ the lease was live), `leasesIgnored` (window entries at which a live lease was
 ignored for its peer's miss cooldown), `peerOnlyStarted`, `peerOnlyDelivered`,
 `peerOnlyFallback` (take-ups that ended undelivered before the window end),
 `takeUpWindowEnd` (peer-only take-ups cut by the window end, whether or not a
-lease wait preceded them) and `fetchRenewalsSent` (one per claimed key per renewal, to all links). Only a
+lease wait preceded them), `leaseYields` (optional futures that yielded to a
+live lease under the funded rule; `sourceYielded` also counts the XOR-election
+yields; a future re-planned by a later genuine demand may yield and count
+again), `leaseYieldsLapsed` (declined rows from those yields whose
+eight-second deadline passed before the HAVE they yielded to arrived, counted
+when the warm engine next examines its declined rows, at the latest on
+`metrics()`; a row cleared earlier by a genuine demand's re-planning is not
+counted) and
+`fetchRenewalsSent` (one per claimed key per renewal, to all links). Only a
 Core transfer the holders failed (refused, withdrew, closed or banned) cools
 them; a take-up refused before any request (commitment, local model or
 whole-object capacity) returns a genuine demand to today's path instead. The
