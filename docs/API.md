@@ -258,11 +258,15 @@ makes that peer's leases ignored for 10 s; its exact HAVE stays usable. A
 such a miss and cools that owner for the same 10 s. A window
 that ends while the lease is live carries no penalty. Nor does a take-up cut
 by the window end (the window timer, or the transfer settling at the window end
-rounded down): its links keep their usefulness, and the verified flow each
-moved up to the cut, if it meets the usual 300 ms and 32 KiB floors, is
-recorded as a link flow sample, so the next evaluation of that link is
-`known-slow` or `fit` rather than `cooldown-blocked`. A cut that verified less
-records no sample; a link that was useful before it stays useful. This bounded wait on a
+rounded down): its links keep their usefulness, and each link's verified flow
+not already sampled (its pending short-flow batch), measured up to the cut, is
+recorded as a link flow sample if it meets the usual 300 ms and 32 KiB floors.
+With such a sample the next evaluation of that link is `known-slow` or `fit`;
+a link that was useful within the last 30 s stays useful (`useful-unknown`).
+The cut still restarts the link's 10 s refresh clock, so a link that was never
+useful and verified nothing meeting those floors before the cut can read
+`cooldown-blocked` for the rest of that interval, as after any unproductive
+probe. This bounded wait on a
 FETCH claim is the option's exception to the election rule above that no peer
 claim creates a wait for genuine demand.
 

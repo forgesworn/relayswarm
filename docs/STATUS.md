@@ -40,7 +40,10 @@ lets a link model thinner than one whole object probe instead of refusing. A
 further amendment (1 November) stops a take-up cut by its window end from
 blanking the link's timing model: the link keeps its usefulness and the
 verified flow moved up to the cut becomes a flow sample, so a later
-zero-budget demand can still ask that holder. It also adds two counters,
+zero-budget demand can still ask that holder, unless the link was never
+useful and verified nothing meeting the 300 ms and 32 KiB floors before the
+cut: that link still restarts its refresh clock and can read
+`cooldown-blocked` for the rest of that interval. It also adds two counters,
 `leaseYields` and `leaseYieldsLapsed`, that separate lease yields from
 election yields. The option remains implemented and unit-tested, not
 field-qualified. Field sharing,
