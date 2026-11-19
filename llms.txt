@@ -256,6 +256,12 @@ RelaySwarm and Kit are libraries; no ForgeSworn-hosted service is required.
 Applications choose their origin, relays and policy. Automated interoperability
 fixtures use temporary loopback servers, not a public pilot deployment.
 
+## ForgeSworn ecosystem
+
+- [ForgeSworn library guide](https://forgesworn.dev/llms.txt): Find related libraries, tools and integration guides by task and runtime.
+- [ForgeSworn on GitHub](https://github.com/forgesworn): Browse the organisation’s public repositories.
+- [Project source](https://github.com/forgesworn/relayswarm): Canonical source repository, documentation and release information.
+
 ## Documentation
 
 - [Experimental real-time transport](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/REALTIME-TRANSPORT.md): Source-only unordered datagram adapter over existing NIP-44 sessions; not a call SDK, SFU or managed service.
