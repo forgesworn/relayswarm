@@ -16,7 +16,7 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.4.4 is the prepared experimental prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4).
+The [v0.4.4 experimental prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4) is available from GitHub.
 Cached schema-3 media can combine a bounded peer fraction with origin pieces
 even when a whole-object peer estimate is late. Waiting for unavailable
 known-VOD main media requires a live same-key fetch lease from a contributor;
@@ -83,21 +83,23 @@ native fallback. See [broadcasting](https://raw.githubusercontent.com/forgesworn
 
 The release supplies an installable tarball, a standalone browser ESM bundle,
 the optional WASM module and SHA-256 checksums. Apple and Android core assets
-are described in the [packaging guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-PACKAGING.md):
+are described in the [packaging guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/CORE-PACKAGING.md).
+
+Install RelaySwarm and hls.js in your browser app.
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.3.0/relayswarm-0.3.0.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/relayswarm-0.4.4.tgz hls.js
 ```
 
 ```js
+import Hls from 'hls.js';
 import { createHlsSwarm } from 'relayswarm/hls-swarm';
-import { createHlsPublisher } from 'relayswarm/hls-publisher'; // Node only
 ```
 
-The host supplies hls.js. Install it separately for a host-page integration;
-the source demo includes it as a runtime dependency. The release
-bundle includes the browser loader's runtime dependencies. Pinned Git
-installation and bundle usage are in [Getting started](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md).
+Use the [hls.js integration guide](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md) to attach the loader to
+your player. The [publisher helper](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) is available as
+`createHlsPublisher` from `relayswarm/hls-publisher` in Node. Pinned Git
+installation and standalone bundle usage are in [Getting started](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/GETTING-STARTED.md).
 
 ## What it does
 
@@ -1936,18 +1938,13 @@ Source: [docs/GETTING-STARTED.md](https://raw.githubusercontent.com/forgesworn/r
 
 [Documentation](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/README.md) · [API](https://raw.githubusercontent.com/forgesworn/relayswarm/main/docs/API.md) · [hls.js integration](https://raw.githubusercontent.com/forgesworn/relayswarm/main/INTEGRATION.md)
 
-These installation instructions target the prepared experimental
-[v0.4.4 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4).
-Confirm that tag and its checksum-listed assets have been published before
-using these pinned commands; a prepared version is not a verified download.
-Node 22.13+ is required; CI runs Node 24. `npm install relayswarm` is not the
-documented distribution path: the npm registry is unpublished.
+Install from the experimental [v0.4.4 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4).
+Use Node 22.13 or newer. CI runs Node 24.
 
 ## Install for a host application
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/relayswarm-0.4.4.tgz
-npm install hls.js
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/relayswarm-0.4.4.tgz hls.js
 ```
 
 ```js

@@ -2,18 +2,13 @@
 
 [Documentation](README.md) · [API](API.md) · [hls.js integration](../INTEGRATION.md)
 
-These installation instructions target the prepared experimental
-[v0.4.4 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4).
-Confirm that tag and its checksum-listed assets have been published before
-using these pinned commands; a prepared version is not a verified download.
-Node 22.13+ is required; CI runs Node 24. `npm install relayswarm` is not the
-documented distribution path: the npm registry is unpublished.
+Install from the experimental [v0.4.4 GitHub prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4).
+Use Node 22.13 or newer. CI runs Node 24.
 
 ## Install for a host application
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/relayswarm-0.4.4.tgz
-npm install hls.js
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/relayswarm-0.4.4.tgz hls.js
 ```
 
 ```js
