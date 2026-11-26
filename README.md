@@ -4,7 +4,7 @@ Experimental peer-assisted HLS video delivery using WebRTC data channels and
 Nostr relays for peer discovery and signalling. A separate native proof of
 concept uses HyperDHT and Noise for installed Node applications.
 
-**Status:** [v0.4.4 is the prepared experimental prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4).
+The [v0.4.4 experimental prerelease](https://github.com/forgesworn/relayswarm/releases/tag/v0.4.4) is available from GitHub.
 Cached schema-3 media can combine a bounded peer fraction with origin pieces
 even when a whole-object peer estimate is late. Waiting for unavailable
 known-VOD main media requires a live same-key fetch lease from a contributor;
@@ -71,21 +71,23 @@ native fallback. See [broadcasting](docs/BROADCASTING.md),
 
 The release supplies an installable tarball, a standalone browser ESM bundle,
 the optional WASM module and SHA-256 checksums. Apple and Android core assets
-are described in the [packaging guide](docs/CORE-PACKAGING.md):
+are described in the [packaging guide](docs/CORE-PACKAGING.md).
+
+Install RelaySwarm and hls.js in your browser app.
 
 ```sh
-npm install https://github.com/forgesworn/relayswarm/releases/download/v0.3.0/relayswarm-0.3.0.tgz
+npm install https://github.com/forgesworn/relayswarm/releases/download/v0.4.4/relayswarm-0.4.4.tgz hls.js
 ```
 
 ```js
+import Hls from 'hls.js';
 import { createHlsSwarm } from 'relayswarm/hls-swarm';
-import { createHlsPublisher } from 'relayswarm/hls-publisher'; // Node only
 ```
 
-The host supplies hls.js. Install it separately for a host-page integration;
-the source demo includes it as a runtime dependency. The release
-bundle includes the browser loader's runtime dependencies. Pinned Git
-installation and bundle usage are in [Getting started](docs/GETTING-STARTED.md).
+Use the [hls.js integration guide](INTEGRATION.md) to attach the loader to
+your player. The [publisher helper](docs/API.md) is available as
+`createHlsPublisher` from `relayswarm/hls-publisher` in Node. Pinned Git
+installation and standalone bundle usage are in [Getting started](docs/GETTING-STARTED.md).
 
 ## What it does
 

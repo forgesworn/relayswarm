@@ -3,7 +3,7 @@
 > Experimental peer-assisted HLS video delivery with WebRTC data channels,
 > Nostr relay rendezvous, author-signed segment commitments and an hls.js
 > loader. A separate native Node path uses HyperDHT and Noise. MIT licensed;
-> v0.4.4 is the prepared experimental prerelease; production acceptance remains open.
+> v0.4.4 is available as an experimental GitHub prerelease. Production acceptance remains open.
 
 The canonical repository is https://github.com/forgesworn/relayswarm. Node 22.13+
 is required; CI uses Node 24. Public distribution includes an installable
